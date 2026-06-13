@@ -1,0 +1,27 @@
+# macOS
+.DS_Store
+**/.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+
+# Editors / IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS artefacts
+Thumbs.db
+desktop.ini
+
+# Logs (local development artefacts)
+*.log
+
+# Claude Code – machine-/user-local permission allowlist
+# (settings.json stays versioned for project-wide defaults)
+.claude/settings.local.json
