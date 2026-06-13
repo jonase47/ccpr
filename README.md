@@ -14,6 +14,30 @@ Projects start with `/track-decision` which chooses based on Knockouts (DSGVO, B
 
 Spec: [`Manual/LEAN_TRACK.md`](Manual/LEAN_TRACK.md) in this repo.
 
+## See it in action
+
+<!-- A recorded demo lives here. To (re)create it: `asciinema rec demo.cast`,
+     run the flow below, upload to asciinema.org and embed the player link —
+     or convert to a GIF and reference it as ![demo](docs/demo.gif). -->
+> _Demo recording coming soon._
+
+A first run, end to end — in a fresh project directory:
+
+```text
+> /track-decision   # picks Lean vs Full from knockout + indicator questions
+> /project-init     # scaffolds docs/, HANDOVER.md, a project-specific CLAUDE.md
+> /p0-problem       # P0 Discovery: problem & target audience      (lead: konzeptor)
+> /gate-p0          # quality gate — must pass before P1
+> /p1-features      # P1 Conception: feature set & MVP boundary
+> …                 # P2–P8, each phase held behind its own gate
+> /guide            # anytime: status snapshot + the recommended next step
+```
+
+Each phase is led by a specialised agent, writes its result under `docs/`, and is
+held by a **gate** that checks the work (and the project Constitution) before the
+next phase may start. Try it without committing to anything: `./install.sh --dry-run`,
+then run `/track-decision` and `/guide` in any project.
+
 ## Installation
 
 > **Versioning.** CCPR follows [SemVer](https://semver.org/). Releases are tagged `vMAJOR.MINOR.PATCH`. Read [`CHANGELOG.md`](CHANGELOG.md) before upgrading — pre-1.0, MAJOR-on-MINOR bumps (`0.x.0`) can carry surface changes. Versioning rules: [`docs/adr/ADR-0001-versioning-and-distribution.md`](docs/adr/ADR-0001-versioning-and-distribution.md).
