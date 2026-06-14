@@ -1,18 +1,35 @@
 # CCPR — Claude Code Project Runner
 
-CCPR is a tool for shaping software projects with Claude Code: 15 agents (13 domain agents + `project-guide` + `wingman`),
-115 slash commands, a phase system (P0-P8) with quality gates plus an optional Lean-Track for prototypes/PoCs, and automation scripts.
+*Software-engineering discipline for Claude Code — from first idea to production.*
+
+CCPR is a framework for teams and individuals for whom "just vibe-code it" isn't enough. It brings structure, quality gates, and a repeatable process to Claude Code: 15 specialised subagents cover the whole arc of a project — discovery, conception, architecture, implementation, QA, launch, and operations. Between phases sit **quality gates** that check the work (and the project's own **Constitution**) before the next phase may start.
+
+**Who it's for:** Product Owners and tech leads who want a traceable process, solo developers who want a quality bar, small teams, and projects with DSGVO (GDPR) or other compliance requirements. CCPR is opinionated by design — it fits structured work well, and there's a learning curve. That's a deliberate trade-off.
+
+**Two tracks:** Full-Track (P0–P8) for production projects; Lean-Track (4 skills, no gates) for quick prototypes and internal experiments.
 
 > **Status: public beta (`v0.1.0-beta`).** CCPR is usable end-to-end but pre-1.0 — expect rough edges (see [`BETA.md`](BETA.md) for known limitations). Feedback is exactly what's wanted right now: [open an issue](https://github.com/jonase47/ccpr/issues), the bar is low.
 
-## Two Tracks: Lean & Full
+---
 
-Projects start with `/track-decision` which chooses based on Knockouts (DSGVO, BFSG, regulatory, stakeholders, launch-imminent) and Indicators (lifespan, team-growth, complexity):
+## Table of Contents
 
-- **Lean-Track** (4 skills, no gates, *transient — sunset at CCPR v1.0*) — fast-test shortcut for CCPR itself and a bridge into Full. `/track-decision → /lean-frame → build → /lean-learn → /lean-promote` promotes to Full-Track when ready. Mandant/team projects default to Full from the start; Lean is for internal experimentation and bridging only.
-- **Full-Track** (P0–P8, full pipeline) — production-grade software with regulatory, A11y, security, and operational readiness. `/project-init` calls `/constitution` to ratify the project's non-negotiable rules; gates verify against the Constitution Inviolables.
+- [See it in action](#see-it-in-action)
+- [How it works](#how-it-works)
+  - [Two Tracks: Lean & Full](#two-tracks-lean--full)
+  - [Phase System](#phase-system)
+  - [Agent Team](#agent-team)
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Updating](#updating)
+- [Repository / install layout](#structure)
+- [Under the hood](#under-the-hood)
+- [Documentation](#documentation)
+- [Notes](#notes)
+- [Feedback & questions](#feedback--questions)
+- [License](#license)
 
-Spec: [`Manual/LEAN_TRACK.md`](Manual/LEAN_TRACK.md) in this repo.
+---
 
 ## See it in action
 
@@ -37,6 +54,78 @@ Each phase is led by a specialised agent, writes its result under `docs/`, and i
 held by a **gate** that checks the work (and the project Constitution) before the
 next phase may start. Try it without committing to anything: `./install.sh --dry-run`,
 then run `/track-decision` and `/guide` in any project.
+
+---
+
+## How it works
+
+### Two Tracks: Lean & Full
+
+Projects start with `/track-decision` which chooses based on Knockouts (DSGVO, BFSG, regulatory, stakeholders, launch-imminent) and Indicators (lifespan, team-growth, complexity):
+
+- **Lean-Track** (4 skills, no gates, *transient — sunset at CCPR v1.0*) — fast-test shortcut for CCPR itself and a bridge into Full. `/track-decision → /lean-frame → build → /lean-learn → /lean-promote` promotes to Full-Track when ready. Mandant/team projects default to Full from the start; Lean is for internal experimentation and bridging only.
+- **Full-Track** (P0–P8, full pipeline) — production-grade software with regulatory, A11y, security, and operational readiness. `/project-init` calls `/constitution` to ratify the project's non-negotiable rules; gates verify against the Constitution Inviolables.
+
+Spec: [`Manual/LEAN_TRACK.md`](Manual/LEAN_TRACK.md) in this repo.
+
+### Phase System
+
+Each project goes through up to 9 phases. Between phases are quality gates
+that must be passed before proceeding.
+
+| Phase | Focus | Lead Agent |
+|---|---|---|
+| P0 | Discovery – "Is it worth it?" | konzeptor |
+| P1 | Conception – "What are we building?" | konzeptor |
+| P2 | Validation – "Are the assumptions correct?" | konzeptor |
+| P3 | Architecture & Design – "How do we build it?" | system-architekt |
+| P4 | Planning – "When do we build what?" | project-planner |
+| P5 | Implementation – "Let's build!" | senior-developer |
+| P6 | Quality Assurance – "Is it stable?" | qa-tester |
+| P7 | Launch & Deployment – "Ship it!" | devops |
+| P8 | Operations & Evolution – "Is it running?" | devops + business-analyst |
+
+- Check gates: `/gate-p0` through `/gate-p7`
+- After Gate-P7: `/release-baseline` for the baseline cut (archives HANDOVER, splits docs into frozen/active)
+- In P8: `/p8-iteration` starts the next feature cycle
+
+### Agent Team
+
+15 agents: 13 domain subagents + `project-guide` + `wingman`. Claude automatically selects
+the appropriate agents per command (max. 3-4 simultaneously).
+`project-guide` is the entry door for status snapshots and skill/agent disambiguation;
+`wingman` consolidates results after parallel agent runs.
+
+| Agent | Focus |
+|---|---|
+| **project-guide** | Entry door: status snapshot, skill/agent recommendation, disambiguation, hand-off with context bundle (via `/guide`) |
+| **konzeptor** | Product idea, target audience, features, MVP, value proposition |
+| **business-analyst** | Business model, financial planning, pricing, market analysis |
+| **system-architekt** | Tech stack, data model, APIs, ADRs |
+| **project-planner** | Milestones, sprints, backlog, prioritization |
+| **ux-designer** | UI concepts, user flows, accessibility, dark mode |
+| **senior-developer** | Implementation (TDD), clean code, feature development |
+| **code-reviewer** | Code review, quality, best practices (read-only access) |
+| **qa-tester** | Test strategy, test cases, exploratory tests |
+| **debugger** | Error analysis, root cause, troubleshooting |
+| **devops** | CI/CD, deployment, hosting, monitoring |
+| **security-master** | Security strategy, DSGVO (GDPR), threat modeling |
+| **pentester** | Offensive security, finding vulnerabilities |
+| **tech-writer** | Documentation, README, API docs, changelogs |
+| **wingman** | Result consolidation of parallel agent outputs |
+
+---
+
+## Requirements
+
+CCPR runs on top of **[Claude Code](https://docs.anthropic.com/en/docs/claude-code)** (the CLI). You need Claude Code installed and authenticated before CCPR does anything useful.
+
+The helper scripts (`*.sh`, `*.py`) require a **bash/Python environment**:
+
+- **Linux / macOS** — works out of the box.
+- **Windows** — use **WSL** (recommended) or **Git Bash**. See the Windows note in the [Installation](#installation) section below. Native PowerShell/cmd cannot run the scripts.
+
+---
 
 ## Installation
 
@@ -203,56 +292,6 @@ Your `memory/` and `scripts/local-llm/` are out of scope and never touched.
 
 The human-facing **`Manual/`** folder lives in this repo and is **not** installed —
 it holds the "how to drive CCPR" guides (see [Documentation](#documentation)).
-
----
-
-## Phase System
-
-Each project goes through up to 9 phases. Between phases are quality gates
-that must be passed before proceeding.
-
-| Phase | Focus | Lead Agent |
-|---|---|---|
-| P0 | Discovery – "Is it worth it?" | konzeptor |
-| P1 | Conception – "What are we building?" | konzeptor |
-| P2 | Validation – "Are the assumptions correct?" | konzeptor |
-| P3 | Architecture & Design – "How do we build it?" | system-architekt |
-| P4 | Planning – "When do we build what?" | project-planner |
-| P5 | Implementation – "Let's build!" | senior-developer |
-| P6 | Quality Assurance – "Is it stable?" | qa-tester |
-| P7 | Launch & Deployment – "Ship it!" | devops |
-| P8 | Operations & Evolution – "Is it running?" | devops + business-analyst |
-
-- Check gates: `/gate-p0` through `/gate-p7`
-- After Gate-P7: `/release-baseline` for the baseline cut (archives HANDOVER, splits docs into frozen/active)
-- In P8: `/p8-iteration` starts the next feature cycle
-
----
-
-## Agent Team
-
-15 agents: 13 domain subagents + `project-guide` + `wingman`. Claude automatically selects
-the appropriate agents per command (max. 3-4 simultaneously).
-`project-guide` is the entry door for status snapshots and skill/agent disambiguation;
-`wingman` consolidates results after parallel agent runs.
-
-| Agent | Focus |
-|---|---|
-| **project-guide** | Entry door: status snapshot, skill/agent recommendation, disambiguation, hand-off with context bundle (via `/guide`) |
-| **konzeptor** | Product idea, target audience, features, MVP, value proposition |
-| **business-analyst** | Business model, financial planning, pricing, market analysis |
-| **system-architekt** | Tech stack, data model, APIs, ADRs |
-| **project-planner** | Milestones, sprints, backlog, prioritization |
-| **ux-designer** | UI concepts, user flows, accessibility, dark mode |
-| **senior-developer** | Implementation (TDD), clean code, feature development |
-| **code-reviewer** | Code review, quality, best practices (read-only access) |
-| **qa-tester** | Test strategy, test cases, exploratory tests |
-| **debugger** | Error analysis, root cause, troubleshooting |
-| **devops** | CI/CD, deployment, hosting, monitoring |
-| **security-master** | Security strategy, DSGVO (GDPR), threat modeling |
-| **pentester** | Offensive security, finding vulnerabilities |
-| **tech-writer** | Documentation, README, API docs, changelogs |
-| **wingman** | Result consolidation of parallel agent outputs |
 
 ---
 
