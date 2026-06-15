@@ -4,8 +4,8 @@ CCPR is maintained by "The CCPR Authors". The copyright line in LICENSE is kept
 generic on purpose, so additional contributors can be listed here without
 touching per-file headers.
 
-- Jonas (@jonase47) — original author and maintainer
-- Olli (@OlArtTro) — co-maintainer
+- Jonas Eisenhut (@jonase47) — original author and maintainer
+- Oliver Trossen (@OlArtTro) — co-maintainer
 
 To be added as a contributor, open a pull request that appends your name (and
 optional handle) to this list.
