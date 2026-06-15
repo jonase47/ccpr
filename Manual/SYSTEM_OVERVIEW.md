@@ -64,6 +64,25 @@ Last updated: 12.05.2026
 +--------+ +---------------+ +------------------+
 ```
 
+GitHub-rendered view of the same mechanics:
+
+```mermaid
+flowchart TD
+    User["User · terminal, aliases, local scripts, Ollama"] --> CC
+    subgraph CC["Claude Code (head)"]
+        Rules["CLAUDE.md · rules"]
+        Inst["instincts · learning"]
+        Hand["HANDOVER · context"]
+        Skills["Skills · commands"]
+    end
+    CC --> Agents["15 agents + wingman · max 3-4 parallel"]
+    Agents --> Wing["wingman · result consolidation"]
+    CC --> Hooks["hooks · agent-monitor.py"]
+    CC --> Scripts["local scripts · shell/python"]
+    CC --> Ollama["Ollama (local)"]
+    CC --> Docs["docs/ · phase outputs, memory"]
+```
+
 ### Control Layers
 
 | Layer | File(s) | Purpose |
