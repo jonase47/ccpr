@@ -41,19 +41,21 @@ The Full-Track flow — every phase led by a specialist, each arrow a gate that 
 ```mermaid
 flowchart LR
     Start([/track-decision]) --> Init[/project-init/]
-    Init --> P0["P0 Discovery<br/>konzeptor"]
-    P0 -->|gate-p0| P1["P1 Conception<br/>konzeptor"]
-    P1 -->|gate-p1| P2["P2 Validation<br/>konzeptor"]
-    P2 -->|gate-p2| P3["P3 Architecture &amp; Design<br/>system-architekt"]
-    P3 -->|gate-p3| P4["P4 Planning<br/>project-planner"]
-    P4 -->|gate-p4| P5["P5 Implementation<br/>senior-developer"]
-    P5 -->|gate-p5| P6["P6 QA<br/>qa-tester"]
-    P6 -->|gate-p6| P7["P7 Launch<br/>devops"]
-    P7 -->|gate-p7| P8["P8 Operations<br/>devops + business-analyst"]
+    Init --> P0[P0 Discovery]
+    P0 -->|gate-p0| P1[P1 Conception]
+    P1 -->|gate-p1| P2[P2 Validation]
+    P2 -->|gate-p2| P3[P3 Architecture]
+    P3 -->|gate-p3| P4[P4 Planning]
+    P4 -->|gate-p4| P5[P5 Implementation]
+    P5 -->|gate-p5| P6[P6 QA]
+    P6 -->|gate-p6| P7[P7 Launch]
+    P7 -->|gate-p7| P8[P8 Operations]
 
     Start -. "Lean · no gates" .-> Lean["/lean-frame → build → /lean-learn"]
     Lean -. /lean-promote .-> Init
 ```
+
+**Lead agents:** P0–P2 konzeptor · P3 system-architekt · P4 project-planner · P5 senior-developer · P6 qa-tester · P7 devops · P8 devops + business-analyst
 
 <!-- A recorded demo lives here. To (re)create it: `asciinema rec demo.cast`,
      run the flow below, upload to asciinema.org and embed the player link —
