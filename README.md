@@ -2,7 +2,9 @@
 
 *Software-engineering discipline for Claude Code — from first idea to production.*
 
-CCPR is a framework for teams and individuals for whom "just vibe-code it" isn't enough. It brings structure, quality gates, and a repeatable process to Claude Code: 15 specialised subagents cover the whole arc of a project — discovery, conception, architecture, implementation, QA, launch, and operations. Between phases sit **quality gates** that check the work (and the project's own **Constitution**) before the next phase may start.
+Vibe-coding with Claude Code doesn't scale across sessions: context gets lost between runs, the thread through a project frays, and nothing stops a phase from being skipped or a decision from being silently overwritten. CCPR lays a traceable process on top — phases, quality gates, and a project-specific Constitution — and gets smarter with every project, because it learns from its own sessions.
+
+Concretely: 15 specialised subagents cover the whole arc of a project — discovery, conception, architecture, implementation, QA, launch, and operations — each phase led by the right specialist and held behind a gate that checks the work before the next phase may start.
 
 **Who it's for:** Product Owners and tech leads who want a traceable process, solo developers who want a quality bar, small teams, and projects with DSGVO (GDPR) or other compliance requirements. CCPR is opinionated by design — it fits structured work well, and there's a learning curve. That's a deliberate trade-off.
 
@@ -15,6 +17,7 @@ CCPR is a framework for teams and individuals for whom "just vibe-code it" isn't
 ## Table of Contents
 
 - [See it in action](#see-it-in-action)
+- [What makes CCPR different](#what-makes-ccpr-different)
 - [How it works](#how-it-works)
   - [Two Tracks: Lean & Full](#two-tracks-lean--full)
   - [Phase System](#phase-system)
@@ -32,6 +35,33 @@ CCPR is a framework for teams and individuals for whom "just vibe-code it" isn't
 ---
 
 ## See it in action
+
+The Full-Track flow — every phase led by a specialist, each step a gate that must pass before the next phase starts:
+
+```text
+  /track-decision  →  /project-init
+   │
+   ▼
+  P0  Discovery               konzeptor
+   │  gate-p0
+  P1  Conception              konzeptor
+   │  gate-p1
+  P2  Validation              konzeptor
+   │  gate-p2
+  P3  Architecture & Design   system-architekt
+   │  gate-p3
+  P4  Planning                project-planner
+   │  gate-p4
+  P5  Implementation          senior-developer
+   │  gate-p5
+  P6  QA                      qa-tester
+   │  gate-p6
+  P7  Launch                  devops
+   │  gate-p7
+  P8  Operations              devops + business-analyst
+
+  Lean-Track (no gates):  /lean-frame → build → /lean-learn → /lean-promote → back to Full
+```
 
 <!-- A recorded demo lives here. To (re)create it: `asciinema rec demo.cast`,
      run the flow below, upload to asciinema.org and embed the player link —
@@ -54,6 +84,15 @@ Each phase is led by a specialised agent, writes its result under `docs/`, and i
 held by a **gate** that checks the work (and the project Constitution) before the
 next phase may start. Try it without committing to anything: `./install.sh --dry-run`,
 then run `/track-decision` and `/guide` in any project.
+
+---
+
+## What makes CCPR different
+
+- **Learning instincts** — confidence-scored rules (0.3–0.9) that mature out of your own sessions via `/postmortem`; the framework gets smarter with every project instead of staying static.
+- **Quality gates as hard transitions** — between phases the work is checked before the next one may start; gates are binding, not an after-the-fact suggestion.
+- **A project-specific Constitution** — Inviolables ratified at `/project-init` that the gates actually check against.
+- **Cross-project & customizable** — global vs. project-specific layers, Lean and Full tracks, adaptable to your stack and compliance needs (DSGVO/BFSG).
 
 ---
 
@@ -136,7 +175,7 @@ The helper scripts (`*.sh`, `*.py`) require a **bash/Python environment**:
 ### 1. Pick a version
 
 ```bash
-git clone git@github.com:jonase47/ccpr.git
+git clone https://github.com/jonase47/ccpr.git
 cd ccpr
 git checkout v0.1.0-beta   # latest tag; run `git tag -l` to see all available tags
 ```
@@ -199,15 +238,23 @@ Check if the allowed commands match your setup:
 ```json
 "permissions": {
   "allow": [
-    "Bash(curl:*)",
-    "Bash(npm run:*)",
-    "Bash(node:*)",
-    "Bash(pkill:*)",
-    "Bash(~/.claude/scripts/bootstrap.sh:*)",
-    "Bash(bash:*)"
+    "Bash(~/.claude/scripts/*.sh:*)",
+    "Bash(~/.claude/scripts/local-llm/*.sh:*)",
+    "Bash(python3:*)",
+    "Bash(npx:*)",
+    "Bash(npm test:*)",
+    "Bash(npm audit:*)",
+    "Bash(git:*)",
+    "Bash(curl:*localhost*)"
   ]
 }
 ```
+
+A few of these are deliberately broad — review them against your own security needs:
+
+- `python3:*` is intentionally broad: the entire CCPR machinery (hooks, gate preflights, lint and test runs) runs on it, as do your project's own tests in the working directory.
+- `git:*` lets CCPR make automatic commits and install the optional commit-msg hook. If you'd rather confirm every commit by hand, drop this entry.
+- `curl` is restricted to `localhost` and is only used for an optional local Ollama. Without a local-LLM setup you can remove it entirely.
 
 ### 5. Test Hooks
 

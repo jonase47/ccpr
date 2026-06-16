@@ -3,12 +3,14 @@
   "includeCoAuthoredBy": false,
   "permissions": {
     "allow": [
-      "Bash(curl:*)",
-      "Bash(npm run:*)",
-      "Bash(node:*)",
-      "Bash(pkill:*)",
-      "Bash(~/.claude/scripts/bootstrap.sh:*)",
-      "Bash(bash:*)"
+      "Bash(~/.claude/scripts/*.sh:*)",
+      "Bash(~/.claude/scripts/local-llm/*.sh:*)",
+      "Bash(python3:*)",
+      "Bash(npx:*)",
+      "Bash(npm test:*)",
+      "Bash(npm audit:*)",
+      "Bash(git:*)",
+      "Bash(curl:*localhost*)"
     ],
     "defaultMode": "plan"
   },
