@@ -36,30 +36,22 @@ Concretely: 15 specialised subagents cover the whole arc of a project — discov
 
 ## See it in action
 
-The Full-Track flow — every phase led by a specialist and held behind its own gate:
+The Full-Track flow — every phase led by a specialist, each arrow a gate that must pass before the next phase starts:
 
 ```mermaid
-flowchart TD
-    Start([/track-decision]) --> Init[/project-init + /constitution/]
-    Init --> P0["P0 Discovery · konzeptor"]
-    P0 --> G0{gate-p0}
-    G0 --> P1["P1 Conception · konzeptor"]
-    P1 --> G1{gate-p1}
-    G1 --> P2["P2 Validation · konzeptor"]
-    P2 --> G2{gate-p2}
-    G2 --> P3["P3 Architecture &amp; Design · system-architekt"]
-    P3 --> G3{gate-p3}
-    G3 --> P4["P4 Planning · project-planner"]
-    P4 --> G4{gate-p4}
-    G4 --> P5["P5 Implementation · senior-developer"]
-    P5 --> G5{gate-p5}
-    G5 --> P6["P6 QA · qa-tester"]
-    P6 --> G6{gate-p6}
-    G6 --> P7["P7 Launch · devops"]
-    P7 --> G7{gate-p7}
-    G7 --> P8["P8 Operations · devops + business-analyst"]
+flowchart LR
+    Start([/track-decision]) --> Init[/project-init/]
+    Init --> P0["P0 Discovery<br/>konzeptor"]
+    P0 -->|gate-p0| P1["P1 Conception<br/>konzeptor"]
+    P1 -->|gate-p1| P2["P2 Validation<br/>konzeptor"]
+    P2 -->|gate-p2| P3["P3 Architecture &amp; Design<br/>system-architekt"]
+    P3 -->|gate-p3| P4["P4 Planning<br/>project-planner"]
+    P4 -->|gate-p4| P5["P5 Implementation<br/>senior-developer"]
+    P5 -->|gate-p5| P6["P6 QA<br/>qa-tester"]
+    P6 -->|gate-p6| P7["P7 Launch<br/>devops"]
+    P7 -->|gate-p7| P8["P8 Operations<br/>devops + business-analyst"]
 
-    Start -. "Lean-Track · no gates" .-> Lean[/lean-frame → build → /lean-learn/]
+    Start -. "Lean · no gates" .-> Lean["/lean-frame → build → /lean-learn"]
     Lean -. /lean-promote .-> Init
 ```
 
