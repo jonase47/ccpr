@@ -36,26 +36,32 @@ Concretely: 15 specialised subagents cover the whole arc of a project — discov
 
 ## See it in action
 
-The Full-Track flow — every phase led by a specialist, each arrow a gate that must pass before the next phase starts:
+The Full-Track flow — every phase led by a specialist, each step a gate that must pass before the next phase starts:
 
-```mermaid
-flowchart LR
-    Start([/track-decision]) --> Init[/project-init/]
-    Init --> P0[P0 Discovery]
-    P0 -->|gate-p0| P1[P1 Conception]
-    P1 -->|gate-p1| P2[P2 Validation]
-    P2 -->|gate-p2| P3[P3 Architecture]
-    P3 -->|gate-p3| P4[P4 Planning]
-    P4 -->|gate-p4| P5[P5 Implementation]
-    P5 -->|gate-p5| P6[P6 QA]
-    P6 -->|gate-p6| P7[P7 Launch]
-    P7 -->|gate-p7| P8[P8 Operations]
+```text
+  /track-decision  →  /project-init
+   │
+   ▼
+  P0  Discovery               konzeptor
+   │  gate-p0
+  P1  Conception              konzeptor
+   │  gate-p1
+  P2  Validation              konzeptor
+   │  gate-p2
+  P3  Architecture & Design   system-architekt
+   │  gate-p3
+  P4  Planning                project-planner
+   │  gate-p4
+  P5  Implementation          senior-developer
+   │  gate-p5
+  P6  QA                      qa-tester
+   │  gate-p6
+  P7  Launch                  devops
+   │  gate-p7
+  P8  Operations              devops + business-analyst
 
-    Start -. "Lean · no gates" .-> Lean["/lean-frame → build → /lean-learn"]
-    Lean -. /lean-promote .-> Init
+  Lean-Track (no gates):  /lean-frame → build → /lean-learn → /lean-promote → back to Full
 ```
-
-**Lead agents:** P0–P2 konzeptor · P3 system-architekt · P4 project-planner · P5 senior-developer · P6 qa-tester · P7 devops · P8 devops + business-analyst
 
 <!-- A recorded demo lives here. To (re)create it: `asciinema rec demo.cast`,
      run the flow below, upload to asciinema.org and embed the player link —
