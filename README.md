@@ -65,11 +65,6 @@ The Full-Track flow — every phase led by a specialist, each step a gate that m
   Lean-Track (no gates):  /lean-frame → build → /lean-learn → /lean-promote → back to Full
 ```
 
-<!-- A recorded demo lives here. To (re)create it: `asciinema rec demo.cast`,
-     run the flow below, upload to asciinema.org and embed the player link —
-     or convert to a GIF and reference it as ![demo](docs/demo.gif). -->
-> _Demo recording coming soon._
-
 A first run, in a fresh project directory:
 
 ```text
