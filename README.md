@@ -2,6 +2,8 @@
 
 *Software-engineering discipline for Claude Code — from first idea to production.*
 
+**Quick links:** [Getting Started](Manual/GETTING_STARTED.md) · [Workflow Cheatsheet](Manual/WORKFLOW_CHEATSHEET.md) · [System Overview](Manual/SYSTEM_OVERVIEW.md)
+
 Vibe-coding with Claude Code doesn't scale across sessions: context gets lost between runs, the thread through a project frays, and nothing stops a phase from being skipped or a decision from being silently overwritten. CCPR lays a traceable process on top — phases, quality gates, and a project-specific Constitution — and gets smarter with every project, because it learns from its own sessions.
 
 Concretely: 15 specialised subagents cover the whole arc of a project — discovery, conception, architecture, implementation, QA, launch, and operations — each phase led by the right specialist and held behind a gate that checks the work before the next phase may start.
@@ -63,27 +65,17 @@ The Full-Track flow — every phase led by a specialist, each step a gate that m
   Lean-Track (no gates):  /lean-frame → build → /lean-learn → /lean-promote → back to Full
 ```
 
-<!-- A recorded demo lives here. To (re)create it: `asciinema rec demo.cast`,
-     run the flow below, upload to asciinema.org and embed the player link —
-     or convert to a GIF and reference it as ![demo](docs/demo.gif). -->
-> _Demo recording coming soon._
-
-A first run, end to end — in a fresh project directory:
+A first run, in a fresh project directory:
 
 ```text
 > /track-decision   # picks Lean vs Full from knockout + indicator questions
 > /project-init     # scaffolds docs/, HANDOVER.md, a project-specific CLAUDE.md
-> /p0-problem       # P0 Discovery: problem & target audience      (lead: konzeptor)
-> /gate-p0          # quality gate — must pass before P1
-> /p1-features      # P1 Conception: feature set & MVP boundary
-> …                 # P2–P8, each phase held behind its own gate
+> /p0-problem       # the first phase — each phase is held behind its own gate
 > /guide            # anytime: status snapshot + the recommended next step
 ```
 
-Each phase is led by a specialised agent, writes its result under `docs/`, and is
-held by a **gate** that checks the work (and the project Constitution) before the
-next phase may start. Try it without committing to anything: `./install.sh --dry-run`,
-then run `/track-decision` and `/guide` in any project.
+Try it without committing to anything: `./install.sh --dry-run`, then run
+`/track-decision` and `/guide` in any project.
 
 ---
 
@@ -112,6 +104,11 @@ Spec: [`Manual/LEAN_TRACK.md`](Manual/LEAN_TRACK.md) in this repo.
 Each project goes through up to 9 phases. Between phases are quality gates
 that must be passed before proceeding.
 
+<!-- Maintainer note: phase + lead agent are also shown in the "See it in action" flow.
+     The "Focus" column (the per-phase leading question) is the only content unique to
+     this table. Once a phase diagram carries phase + lead agent + leading question,
+     this table can shrink to the three bullets below it. Kept in full for now. -->
+
 | Phase | Focus | Lead Agent |
 |---|---|---|
 | P0 | Discovery – "Is it worth it?" | konzeptor |
@@ -135,6 +132,11 @@ the appropriate agents per command (max. 3-4 simultaneously).
 `project-guide` is the entry door for status snapshots and skill/agent disambiguation;
 `wingman` consolidates results after parallel agent runs.
 
+The full roster with specializations lives in [`Manual/SYSTEM_OVERVIEW.md`](Manual/SYSTEM_OVERVIEW.md#2-agent-team), or expand it here:
+
+<details>
+<summary>Full agent roster</summary>
+
 | Agent | Focus |
 |---|---|
 | **project-guide** | Entry door: status snapshot, skill/agent recommendation, disambiguation, hand-off with context bundle (via `/guide`) |
@@ -152,6 +154,7 @@ the appropriate agents per command (max. 3-4 simultaneously).
 | **pentester** | Offensive security, finding vulnerabilities |
 | **tech-writer** | Documentation, README, API docs, changelogs |
 | **wingman** | Result consolidation of parallel agent outputs |
+</details>
 
 ---
 
@@ -168,9 +171,17 @@ The helper scripts (`*.sh`, `*.py`) require a **bash/Python environment**:
 
 ## Installation
 
-> **Versioning.** CCPR follows [SemVer](https://semver.org/). Releases are tagged `vMAJOR.MINOR.PATCH`. Read [`CHANGELOG.md`](CHANGELOG.md) before upgrading — pre-1.0, MAJOR-on-MINOR bumps (`0.x.0`) can carry surface changes. Versioning rules: [`docs/adr/ADR-0001-versioning-and-distribution.md`](docs/adr/ADR-0001-versioning-and-distribution.md).
+<details>
+<summary>Versioning & changelog</summary>
 
-> **Windows.** `install.sh` is a bash script, so run it from a **bash environment**: **WSL** (recommended — the bash/Python helper scripts then run exactly as on Linux) or **Git Bash**. Native PowerShell/cmd cannot run the installer. If you have neither, the *Manual install on Windows (PowerShell)* fallback below places the files, but note the shipped `*.sh` helper scripts still need WSL or Git Bash to run. In WSL, run Claude Code inside WSL too, so it and `~/.claude` share the same home.
+CCPR follows [SemVer](https://semver.org/). Releases are tagged `vMAJOR.MINOR.PATCH`. Read [`CHANGELOG.md`](CHANGELOG.md) before upgrading — pre-1.0, MAJOR-on-MINOR bumps (`0.x.0`) can carry surface changes. Versioning rules: [`docs/adr/ADR-0001-versioning-and-distribution.md`](docs/adr/ADR-0001-versioning-and-distribution.md).
+</details>
+
+<details>
+<summary>Windows (WSL / Git Bash)</summary>
+
+`install.sh` is a bash script, so run it from a **bash environment**: **WSL** (recommended — the bash/Python helper scripts then run exactly as on Linux) or **Git Bash**. Native PowerShell/cmd cannot run the installer. If you have neither, the *Manual install on Windows (PowerShell)* fallback below places the files, but note the shipped `*.sh` helper scripts still need WSL or Git Bash to run. In WSL, run Claude Code inside WSL too, so it and `~/.claude` share the same home.
+</details>
 
 ### 1. Pick a version
 
@@ -219,7 +230,11 @@ Copy-Item ccpr\instincts.md,ccpr\settings.json,ccpr\CLAUDE.md "$HOME\.claude\" -
 ```
 </details>
 
-> Pre-1.0 the install is a shallow file copy: shipped artefacts replace same-named files under `~/.claude/`. `install.sh` makes that copy *safe* (backup + confirmation) but does **not** yet merge in-place customisations of shipped files — if you edited a shipped file, re-apply your change from the backup. A customisation-preserving installer is on the v1.0 roadmap (see Constitution Aspirational).
+<details>
+<summary>Pre-1.0: the install is a file copy, not a merge</summary>
+
+Pre-1.0 the install is a shallow file copy: shipped artefacts replace same-named files under `~/.claude/`. `install.sh` makes that copy *safe* (backup + confirmation) but does **not** yet merge in-place customisations of shipped files — if you edited a shipped file, re-apply your change from the backup. A customisation-preserving installer is on the v1.0 roadmap (see Constitution Aspirational).
+</details>
 
 ### 3. Customize CLAUDE.md
 
@@ -304,10 +319,7 @@ templates) and **deliberately leaves your local files as they are**:
 A timestamped backup of `~/.claude/` is still taken before anything is written.
 Your `memory/` and `scripts/local-llm/` are out of scope and never touched.
 
-> Pre-1.0 there is no migration of local *state* — `--update` is a safe file
-> refresh, not a merge. If you edited a *shipped framework* file in place (e.g. a
-> command), `--update` overwrites it; re-apply your change from the backup. A full
-> customisation-preserving installer is the v1.0 goal (Constitution, Aspirational).
+> Pre-1.0: `--update` is a safe file refresh, not a merge — if you edited a shipped framework file in place, it gets overwritten; re-apply from the backup. See the [pre-1.0 note under Installation](#installation).
 
 ---
 
