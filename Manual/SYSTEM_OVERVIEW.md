@@ -45,7 +45,7 @@ Last updated: 12.05.2026
 |                        |                                      |
 |               +--------+--------+                             |
 |               v        v        v                             |
-|         +------+ +------+ +------+   15 agents +             |
+|         +------+ +------+ +------+   14 agents +             |
 |         |Agent | |Agent | |Agent |   1 wingman               |
 |         |  A   | |  B   | |  C   |   (max 3-4 parallel)     |
 |         +--+---+ +--+---+ +--+---+                           |
@@ -75,7 +75,7 @@ flowchart TD
         Hand["HANDOVER · context"]
         Skills["Skills · commands"]
     end
-    CC --> Agents["15 agents + wingman · max 3-4 parallel"]
+    CC --> Agents["14 agents + wingman · max 3-4 parallel"]
     Agents --> Wing["wingman · result consolidation"]
     CC --> Hooks["hooks · agent-monitor.py"]
     CC --> Scripts["local scripts · shell/python"]
@@ -100,12 +100,13 @@ flowchart TD
 
 ## 2. Agent Team
 
-15 specialized subagents + 1 wingman. Max. 3-4 active per command.
+13 domain subagents + `project-guide` + `wingman` = 15 agents. Max. 3-4 active per command.
 
 ### Agent Overview
 
 | Agent | Specialization | Access |
 |---|---|---|
+| **project-guide** | Entry door: status snapshot, skill/agent recommendation, disambiguation, hand-off with context bundle (via `/guide`); does no domain work itself | Read + Edit |
 | **konzeptor** | Product idea, target audience, features, MVP, value proposition | Read + Write |
 | **business-analyst** | Business model, financial planning, pricing, market analysis, KPIs | Read + Write |
 | **system-architekt** | Tech stack, data model, APIs, ADRs | Read + Write |
@@ -119,7 +120,6 @@ flowchart TD
 | **security-master** | Security strategy, DSGVO (GDPR), threat modeling, audits | Read + Write |
 | **pentester** | Offensive security, finding vulnerabilities, PoCs | Read + Write |
 | **tech-writer** | Documentation, README, API docs, changelogs | Read + Write |
-| **researcher** | Web research with source-citation and PII protection (no Bash) | Read + Write + WebFetch + WebSearch |
 | **wingman** | Result consolidation: summarize agent outputs | Read |
 
 ### Agent Definitions
@@ -821,7 +821,7 @@ Claude follows instincts proportional to their confidence score.
 +-- settings.json                # Hooks, permissions
 +-- instincts.md                 # Global instincts
 |
-+-- agents/                      # 15 agents + 1 wingman
++-- agents/                      # 13 domain + project-guide + wingman = 15
 |   +-- konzeptor.md
 |   +-- business-analyst.md
 |   +-- system-architekt.md
@@ -835,6 +835,7 @@ Claude follows instincts proportional to their confidence score.
 |   +-- security-master.md
 |   +-- pentester.md
 |   +-- tech-writer.md
+|   +-- project-guide.md
 |   +-- wingman.md
 |
 +-- docs/                        # Runtime reference docs (read by Claude during work)
