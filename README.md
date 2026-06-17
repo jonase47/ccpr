@@ -16,26 +16,6 @@ Concretely: 15 specialised subagents cover the whole arc of a project — discov
 
 ---
 
-## Table of Contents
-
-- [See it in action](#see-it-in-action)
-- [What makes CCPR different](#what-makes-ccpr-different)
-- [How it works](#how-it-works)
-  - [Two Tracks: Lean & Full](#two-tracks-lean--full)
-  - [Phase System](#phase-system)
-  - [Agent Team](#agent-team)
-- [Requirements](#requirements)
-- [Installation](#installation)
-- [Updating](#updating)
-- [Repository / install layout](#structure)
-- [Under the hood](#under-the-hood)
-- [Documentation](#documentation)
-- [Notes](#notes)
-- [Feedback & questions](#feedback--questions)
-- [License](#license)
-
----
-
 ## See it in action
 
 The Full-Track flow — every phase led by a specialist, each step a gate that must pass before the next phase starts:
@@ -109,6 +89,9 @@ that must be passed before proceeding.
      this table. Once a phase diagram carries phase + lead agent + leading question,
      this table can shrink to the three bullets below it. Kept in full for now. -->
 
+<details>
+<summary>All nine phases &amp; gate commands</summary>
+
 | Phase | Focus | Lead Agent |
 |---|---|---|
 | P0 | Discovery – "Is it worth it?" | konzeptor |
@@ -124,6 +107,7 @@ that must be passed before proceeding.
 - Check gates: `/gate-p0` through `/gate-p7`
 - After Gate-P7: `/release-baseline` for the baseline cut (archives HANDOVER, splits docs into frozen/active)
 - In P8: `/p8-iteration` starts the next feature cycle
+</details>
 
 ### Agent Team
 
@@ -271,6 +255,9 @@ A few of these are deliberately broad — review them against your own security 
 - `git:*` lets CCPR make automatic commits and install the optional commit-msg hook. If you'd rather confirm every commit by hand, drop this entry.
 - `curl` is restricted to `localhost` and is only used for an optional local Ollama. Without a local-LLM setup you can remove it entirely.
 
+<details>
+<summary>Post-install checks (steps 5–7: hooks, chmod, first run)</summary>
+
 ### 5. Test Hooks
 
 ```bash
@@ -294,6 +281,7 @@ Start Claude Code in a new project directory and run:
 ```
 
 This initializes the project structure with HANDOVER.md, phase tracking, etc.
+</details>
 
 ---
 
@@ -325,6 +313,9 @@ Your `memory/` and `scripts/local-llm/` are out of scope and never touched.
 
 ## Structure
 
+<details>
+<summary>Full install layout (~/.claude/)</summary>
+
 ```
 ~/.claude/
 +-- CLAUDE.md              # Global instructions (customize!)
@@ -348,6 +339,7 @@ Your `memory/` and `scripts/local-llm/` are out of scope and never touched.
 |   +-- constitution-bootstraps/    # Domain seeds for /constitution (b2b-tool, b2c-marketplace, mobile-b2c, on-device-privacy, saas-b2c)
 +-- hooks/                 # Agent monitor hook (monitoring + token tracking)
 ```
+</details>
 
 The human-facing **`Manual/`** folder lives in this repo and is **not** installed —
 it holds the "how to drive CCPR" guides (see [Documentation](#documentation)).
