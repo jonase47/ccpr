@@ -1,3 +1,11 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/logo/ccpr-wordmark-dark.png">
+    <source media="(prefers-color-scheme: light)" srcset="docs/logo/ccpr-wordmark-light.png">
+    <img alt="CCPR — Claude Code Project Runner" src="docs/logo/ccpr-wordmark-light.png" width="440">
+  </picture>
+</p>
+
 # CCPR — Claude Code Project Runner
 
 *Software-engineering discipline for Claude Code — from first idea to production.*

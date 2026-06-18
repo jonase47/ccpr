@@ -1,0 +1,6 @@
+<svg width="256" height="256" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="CCPR icon">
+  <rect width="256" height="256" rx="48" fill="#f6f8fa"/>
+  <rect width="256" height="256" rx="48" fill="none" stroke="#d0d7de" stroke-width="2"/>
+  <path d="M88 88 L128 128 L88 168" fill="none" stroke="#1a7f37" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="146" y="152" width="44" height="16" rx="8" fill="#1a7f37"/>
+</svg>
