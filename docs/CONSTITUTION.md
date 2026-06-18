@@ -9,7 +9,7 @@ related:
   - Manual/LEAN_TRACK.md
 ---
 
-# Constitution – CCPR (Claude Code Pipeline Repo)
+# Constitution – CCPR (Claude Code Project Runner)
 
 > **Scope.** This constitution binds CCPR itself — the worker repository that
 > ships skills, agents, scripts, templates and docs to `~/.claude/`. It is
