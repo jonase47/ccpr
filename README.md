@@ -1,4 +1,4 @@
-<p align="center">
+<p align="left">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/logo/ccpr-wordmark-dark.png">
     <source media="(prefers-color-scheme: light)" srcset="docs/logo/ccpr-wordmark-light.png">
@@ -6,7 +6,7 @@
   </picture>
 </p>
 
-# CCPR — Claude Code Project Runner
+
 
 *Software-engineering discipline for Claude Code — from first idea to production.*
 
