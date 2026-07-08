@@ -74,6 +74,17 @@ def _parse_scalar(value):
 
 
 def _strip_inline_comment(value):
+    """Strip a trailing `# comment`, but never split on a `#` inside a quoted value."""
+    value = value.strip()
+    if value and value[0] in ("'", '"'):
+        quote = value[0]
+        closing = value.find(quote, 1)
+        if closing != -1:
+            remainder = value[closing + 1:]
+            if "#" in remainder:
+                remainder = remainder.split("#", 1)[0]
+            return (value[:closing + 1] + remainder).strip()
+        return value  # no closing quote found; treat literally rather than guess
     if "#" in value:
         value = value.split("#", 1)[0]
     return value.strip()
@@ -88,4 +99,9 @@ def _unquote(value):
 def _format_value(value):
     if isinstance(value, list):
         return "[" + ", ".join(value) + "]"
-    return str(value)
+    text = str(value)
+    if "#" in text:
+        # Quote so a later parse doesn't mistake the `#` for a comment marker.
+        quote = "'" if '"' in text else '"'
+        return f"{quote}{text}{quote}"
+    return text
