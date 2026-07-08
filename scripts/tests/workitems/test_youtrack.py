@@ -379,6 +379,29 @@ class YouTrackClaimingTest(unittest.TestCase):
         self.assertEqual(resumed["status"], "In Progress")
         self.assertEqual(resumed["runner"], "agent-2")
 
+    def test_claim_refuses_a_done_item(self):
+        item = self.backend.create(title="New feature")
+        self.backend.set_status(item["id"], "Done")
+
+        with self.assertRaises(WorkItemError):
+            self.backend.claim(item["id"], runner="agent-1")
+
+    def test_claim_refuses_a_cancelled_item(self):
+        item = self.backend.create(title="New feature")
+        self.backend.set_status(item["id"], "Cancelled")
+
+        with self.assertRaises(WorkItemError):
+            self.backend.claim(item["id"], runner="agent-1")
+
+    def test_claim_allows_a_waiting_for_approval_item(self):
+        item = self.backend.create(title="New feature")
+        self.backend.set_status(item["id"], "Waiting for Approval")
+
+        claimed = self.backend.claim(item["id"], runner="agent-1")
+
+        self.assertEqual(claimed["status"], "In Progress")
+        self.assertEqual(claimed["runner"], "agent-1")
+
 
 class YouTrackSweepIntegrationTest(unittest.TestCase):
     """sweep() was tested in isolation (test_sweep.py) against a minimal fake

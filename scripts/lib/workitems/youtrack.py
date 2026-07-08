@@ -168,6 +168,14 @@ class YouTrackBackend:
 
         if runner:
             current = self.get(item_id)
+            # Terminal states are not resumable -- claiming one would silently
+            # resurrect finished/abandoned work back to In Progress. Reopening is an
+            # explicit, deliberate action (set-status), not a side effect of claim().
+            if current.get("status") in ("Done", "Cancelled"):
+                raise WorkItemError(
+                    f"{item_id} is {current['status']}; reopen it explicitly "
+                    "(set-status) before claiming."
+                )
             current_runner = current.get("runner")
             # The live-takeover check only applies while the item is In Progress --
             # once it's Parked (whether by sweep() or manually), ADR-0005 says ANY
