@@ -314,6 +314,36 @@ class YouTrackClaimingTest(unittest.TestCase):
         self.assertEqual(claimed["runner"], "agent-1")
         self.assertEqual(claimed["heartbeat"], self.clock().isoformat())
 
+    def test_heartbeat_refreshes_the_timestamp(self):
+        item = self.backend.create(title="New feature")
+        self.backend.claim(item["id"], runner="agent-1")
+
+        self.clock.advance(600)
+        result = self.backend.heartbeat(item["id"], runner="agent-1")
+
+        self.assertEqual(result["heartbeat"], self.clock().isoformat())
+        self.assertEqual(result["runner"], "agent-1")
+        fetched = self.backend.get(item["id"])
+        self.assertEqual(fetched["heartbeat"], self.clock().isoformat())
+
+    def test_heartbeat_refuses_for_a_different_runner(self):
+        item = self.backend.create(title="New feature")
+        self.backend.claim(item["id"], runner="agent-1")
+
+        with self.assertRaises(WorkItemError):
+            self.backend.heartbeat(item["id"], runner="agent-2")
+
+    def test_resume_a_parked_item(self):
+        item = self.backend.create(title="New feature")
+        self.backend.claim(item["id"], runner="agent-1")
+        self.backend.set_status(item["id"], "Parked")
+
+        self.clock.advance(600)
+        resumed = self.backend.claim(item["id"], runner="agent-2")
+
+        self.assertEqual(resumed["status"], "In Progress")
+        self.assertEqual(resumed["runner"], "agent-2")
+
 
 class YouTrackCreateFactoryTest(unittest.TestCase):
     """create(config) — the factory the CLI dispatcher calls — validates its own

@@ -166,7 +166,17 @@ class YouTrackBackend:
         if runner:
             current = self.get(item_id)
             current_runner = current.get("runner")
-            if current_runner and current_runner != runner and self._is_heartbeat_live(current.get("heartbeat")):
+            # The live-takeover check only applies while the item is In Progress --
+            # once it's Parked (whether by sweep() or manually), ADR-0005 says ANY
+            # runner may resume it unconditionally ("no live runner, resumable"); a
+            # stale-but-not-yet-swept heartbeat left over from the abandoned claim
+            # must not block that resume.
+            if (
+                current.get("status") == "In Progress"
+                and current_runner
+                and current_runner != runner
+                and self._is_heartbeat_live(current.get("heartbeat"))
+            ):
                 raise WorkItemError(
                     f"{item_id} is already claimed by runner {current_runner!r} "
                     "with a live heartbeat; refusing to steal the claim. Wait for it "
