@@ -9,6 +9,7 @@ is a parameter, not hardcoded — see test_local.py for the `local` wiring; a fu
 project instead of a temp directory.
 """
 
+import os
 import shutil
 import tempfile
 from pathlib import Path
@@ -186,3 +187,35 @@ class WorkItemsContractTestCase:
         item = self.backend.append_result("WI-0001", "https://example.org/pr/1")
 
         self.assertEqual(item["description"], "Original description.")
+
+    # --- id validation / path traversal ---
+    #
+    # Ids may end up in filesystem paths (local) today and in `ticket/<id>` branch
+    # names (ADR-0005) tomorrow — every backend must reject anything that is not a
+    # bare identifier, not just `local`.
+
+    def test_rejects_ids_with_path_separators_or_dots(self):
+        for malicious_id in ("../../x", "/etc/x", "a/b", "a.md"):
+            with self.subTest(malicious_id=malicious_id):
+                with self.assertRaises(Exception):
+                    self.backend.get(malicious_id)
+                with self.assertRaises(Exception):
+                    self.backend.set_status(malicious_id, "Done")
+                with self.assertRaises(Exception):
+                    self.backend.append_result(malicious_id, "ref")
+
+    def test_path_traversal_id_cannot_read_or_write_outside_workitems_dir(self):
+        canary_dir = tempfile.mkdtemp(prefix="ccpr-workitems-canary-")
+        self.addCleanup(shutil.rmtree, canary_dir, ignore_errors=True)
+        canary_path = Path(canary_dir) / "canary.md"
+        canary_path.write_text("original", encoding="utf-8")
+
+        # A relative id that walks out of the workitems dir into the canary dir.
+        relative_id = f"{os.path.relpath(canary_dir, self.tmp_dir)}/canary"
+
+        with self.assertRaises(Exception):
+            self.backend.get(relative_id)
+        with self.assertRaises(Exception):
+            self.backend.append_result(relative_id, "https://example.org/pwned")
+
+        self.assertEqual(canary_path.read_text(encoding="utf-8"), "original")

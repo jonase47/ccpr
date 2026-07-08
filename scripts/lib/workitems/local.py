@@ -5,9 +5,10 @@ test fixture (see scripts/tests/workitems/contract.py). No server, no token: rea
 writes one Markdown file per item.
 """
 
+import os
 from pathlib import Path
 
-from workitems import STATUS_VALUES, WorkItemError, frontmatter
+from workitems import STATUS_VALUES, WorkItemError, frontmatter, validate_item_id
 
 RESULT_HEADING = "## Result"
 
@@ -64,7 +65,18 @@ class LocalBackend:
         return self._item_from_data(data, new_body)
 
     def _path_for(self, item_id):
+        validate_item_id(item_id)  # primary defense: reject anything but a bare id
+
         path = self.workitems_dir / f"{item_id}.md"
+
+        # Defense-in-depth: even a validated id must resolve inside workitems_dir.
+        # Not relying on Path.is_relative_to (3.9+, uncertain repo-wide baseline) —
+        # os.path.commonpath works on any Python 3.
+        base = str(self.workitems_dir.resolve())
+        resolved = str(path.resolve())
+        if os.path.commonpath([base, resolved]) != base:
+            raise WorkItemError(f"Invalid work-item id: {item_id!r}")
+
         if not path.is_file():
             raise WorkItemError(f"Unknown work item: {item_id}")
         return path
