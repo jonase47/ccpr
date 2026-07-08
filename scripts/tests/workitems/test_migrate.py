@@ -145,6 +145,41 @@ class MigrateLocalToYouTrackTest(unittest.TestCase):
 
         self.assertIn("Type feat", self.transport.commands_received)
 
+    def test_aborts_archiving_if_new_source_items_appeared_since_the_snapshot(self):
+        # Wraps the real source backend: the FIRST list() call (migrate()'s initial
+        # snapshot) behaves normally, but as a side effect creates one more item
+        # directly in the source dir -- so a SECOND list() call (the pre-archive
+        # re-check) sees an extra id that was never processed by this run at all.
+        class _SourceThatGrowsAfterFirstList:
+            def __init__(self, backend):
+                self._backend = backend
+                self._list_calls = 0
+
+            def list(self, status=None, owner=None):
+                items = self._backend.list(status=status, owner=owner)
+                self._list_calls += 1
+                if self._list_calls == 1:
+                    self._backend.create(title="Snuck in after the snapshot")
+                return items
+
+            def __getattr__(self, name):
+                return getattr(self._backend, name)
+
+        wrapped_source = _SourceThatGrowsAfterFirstList(self.source_backend)
+
+        report = migrate.migrate(
+            wrapped_source, self.target_backend, str(self.idmap_path),
+            source_workitems_dir=str(self.source_dir), clock=FIXED_CLOCK,
+        )
+
+        self.assertFalse(report["archived"])
+        self.assertTrue(self.source_dir.is_dir())
+        self.assertIn("archive_skipped_new_items_appeared", report)
+        self.assertEqual(len(report["archive_skipped_new_items_appeared"]), 1)
+        # The two ORIGINAL items still migrated normally -- only archiving is
+        # aborted, not the whole run.
+        self.assertEqual(len(report["migrated"]), 2)
+
     def test_report_exposes_fully_migrated_decoupled_from_archived(self):
         # source_workitems_dir=None simulates a non-local source: there is nothing to
         # archive, but every item still made it across -- these are two DIFFERENT

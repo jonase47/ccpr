@@ -126,15 +126,24 @@ def migrate(source_backend, target_backend, idmap_path, source_workitems_dir=Non
     fully_migrated = all(item["id"] in idmap for item in source_items)
     report["fully_migrated"] = fully_migrated
     if fully_migrated and source_workitems_dir is not None and os.path.isdir(source_workitems_dir):
-        archive_path = _archive(source_workitems_dir, archive_root, clock)
-        report["archived"] = True
-        report["archive_path"] = archive_path
-        # The rollback path (ADR-0004): archiving moves the directory, it never
-        # deletes it, but nothing moves it back automatically. Spell out the exact
-        # command rather than leaving that to memory -- move it back, then set
-        # workitems.provider back to the source (the CLI adds that second half,
-        # which needs the provider NAME, not just backend instances).
-        report["restore_command"] = f"mv {archive_path} {source_workitems_dir}"
+        # Re-check immediately before archiving: an item created in the source
+        # between the initial list() snapshot (above) and this point would
+        # otherwise be swept into the archive unmigrated and silently lost.
+        original_ids = {item["id"] for item in source_items}
+        current_ids = {item["id"] for item in source_backend.list()}
+        new_ids = sorted(current_ids - original_ids)
+        if new_ids:
+            report["archive_skipped_new_items_appeared"] = new_ids
+        else:
+            archive_path = _archive(source_workitems_dir, archive_root, clock)
+            report["archived"] = True
+            report["archive_path"] = archive_path
+            # The rollback path (ADR-0004): archiving moves the directory, it never
+            # deletes it, but nothing moves it back automatically. Spell out the
+            # exact command rather than leaving that to memory -- move it back,
+            # then set workitems.provider back to the source (the CLI adds that
+            # second half, which needs the provider NAME, not just instances).
+            report["restore_command"] = f"mv {archive_path} {source_workitems_dir}"
 
     return report
 
