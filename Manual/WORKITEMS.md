@@ -163,10 +163,41 @@ exists to prevent (a register that reads "open" while the code is done, or vice-
 
 ## 8. How commands adopt the contract
 
-The ~50 commands that read `BACKLOG.md` / `SPRINT.md` / `HANDOVER.md` today migrate to the contract
-**incrementally** — old and new models coexist during the transition. A command stops reading the files
-and instead calls `workitems list/get/set-status/…`. Priority order: the commands that *write* work
-state first (so the source of truth is single), then the read-only consumers.
+The commands that read `BACKLOG.md` / `SPRINT.md` today migrate to the contract **incrementally** —
+old and new models coexist during the transition. A command stops reading/writing those files for item
+state and instead calls `workitems …`. Priority order: the commands that *write* work state first (so
+the source of truth is single), then the read-only consumers. (`HANDOVER.md` is a session snapshot, not
+item state — it stays prose; see §10.)
+
+### The adoption guard (feature-detect — every wired command opens with this)
+
+A project may not have adopted the structured store yet (no `docs/workitems/`, still prose
+`BACKLOG.md`). A wired command must degrade gracefully — **never fork the store, never hard-fail**:
+
+> Run `python3 ~/.claude/scripts/workitems.py list`.
+> - **Non-empty array** → the project uses the structured store. Use the CLI for **all** item state below.
+> - **`[]` and no `docs/workitems/` directory** → the project is still on prose. Fall back to the
+>   existing `SPRINT.md`/`BACKLOG.md` editing behaviour, and emit one line: *"Tip: run `lift` to adopt
+>   the structured work-item store."*
+
+Rationale: **dual-write** re-creates two writable registers (the §7 drift). **Requiring `lift`** breaks
+every project on upgrade. Feature-detect honours "old and new coexist" and the empty-list case is
+already safe.
+
+### Status-verb mapping (the prose loop → the vocabulary)
+
+| Prose phrase today | CLI call |
+|---|---|
+| "mark story In Review" | `set-status <id> "Waiting for Approval"` |
+| "Approved" / merged / "Fixed" | `set-status <id> "Done"` |
+| "back to Dev" / "In Dev" | `set-status <id> "In Progress"` |
+| start work on a story | `claim <id> --owner <who>` then `set-status <id> "In Progress"` |
+| "add new item to BACKLOG" | `create --title … --type … --description …` (the backend assigns the id) |
+| record the delivered PR/commit | `append-result <id> <link>` |
+
+**Once wired, item status is NEVER hand-edited in `SPRINT.md`/`BACKLOG.md`** — those become planning
+**views** over the items (a `render` command to regenerate them is future work; during the transition
+the CLI `list` is the live view).
 
 ## 9. Testing
 
