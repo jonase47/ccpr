@@ -9,6 +9,8 @@ from pathlib import Path
 
 from workitems import STATUS_VALUES, WorkItemError, frontmatter
 
+RESULT_HEADING = "## Result"
+
 
 def create(config):
     """Factory used by the CLI dispatcher (scripts/workitems.py)."""
@@ -39,8 +41,7 @@ class LocalBackend:
 
     def claim(self, item_id, owner=None):
         """No-op beyond optionally setting owner (local has nothing to lock; ADR-0002 §6)."""
-        path = self._path_for(item_id)
-        data, body = frontmatter.parse(path.read_text(encoding="utf-8"))
+        path, data, body = self._read(item_id)
         if owner is not None:
             data["owner"] = owner
         self._write(path, data, body)
@@ -51,17 +52,27 @@ class LocalBackend:
             raise WorkItemError(
                 f"Unknown status '{status}'. Valid values: {', '.join(STATUS_VALUES)}"
             )
-        path = self._path_for(item_id)
-        data, body = frontmatter.parse(path.read_text(encoding="utf-8"))
+        path, data, body = self._read(item_id)
         data["status"] = status
         self._write(path, data, body)
         return self._item_from_data(data, body)
+
+    def append_result(self, item_id, ref):
+        path, data, body = self._read(item_id)
+        new_body = _append_to_result_section(body, ref)
+        self._write(path, data, new_body)
+        return self._item_from_data(data, new_body)
 
     def _path_for(self, item_id):
         path = self.workitems_dir / f"{item_id}.md"
         if not path.is_file():
             raise WorkItemError(f"Unknown work item: {item_id}")
         return path
+
+    def _read(self, item_id):
+        path = self._path_for(item_id)
+        data, body = frontmatter.parse(path.read_text(encoding="utf-8"))
+        return path, data, body
 
     def _write(self, path, data, body):
         """Write via a temp file + atomic rename so a failed write never corrupts the item."""
@@ -80,7 +91,7 @@ class LocalBackend:
             "title": data.get("title"),
             "status": data.get("status"),
             "description": _extract_description(body),
-            "result-link": [],
+            "result-link": _extract_result_links(body),
             "owner": data.get("owner") or None,
             "type": data.get("type"),
             "refs": data.get("refs"),
@@ -96,3 +107,57 @@ def _extract_description(body):
             break
         desc_lines.append(line)
     return "\n".join(desc_lines).strip()
+
+
+def _extract_result_links(body):
+    return [_strip_bullet(line) for line in _result_section_lines(body.split("\n"))]
+
+
+def _append_to_result_section(body, ref):
+    lines = body.split("\n")
+    new_line = f"- {ref}"
+    heading_idx = _find_heading(lines, RESULT_HEADING)
+
+    if heading_idx is None:
+        prefix = body.rstrip("\n")
+        if prefix:
+            prefix += "\n\n"
+        return f"{prefix}{RESULT_HEADING}\n{new_line}\n"
+
+    end_idx = _section_end(lines, heading_idx)
+    existing = [_strip_bullet(line) for line in _result_section_lines(lines, heading_idx, end_idx)]
+    new_section = [RESULT_HEADING] + [f"- {link}" for link in existing] + [new_line]
+    return "\n".join(lines[:heading_idx] + new_section + lines[end_idx:])
+
+
+def _find_heading(lines, heading):
+    for i, line in enumerate(lines):
+        if line.strip() == heading:
+            return i
+    return None
+
+
+def _section_end(lines, heading_idx):
+    for i in range(heading_idx + 1, len(lines)):
+        if lines[i].strip().startswith("## "):
+            return i
+    return len(lines)
+
+
+def _result_section_lines(lines, heading_idx=None, end_idx=None):
+    if heading_idx is None:
+        heading_idx = _find_heading(lines, RESULT_HEADING)
+        if heading_idx is None:
+            return []
+        end_idx = _section_end(lines, heading_idx)
+    return [
+        line for line in lines[heading_idx + 1:end_idx]
+        if line.strip() and not line.strip().startswith("<!--")
+    ]
+
+
+def _strip_bullet(line):
+    stripped = line.strip()
+    if stripped.startswith("- "):
+        return stripped[2:].strip()
+    return stripped

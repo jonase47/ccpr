@@ -158,3 +158,31 @@ class WorkItemsContractTestCase:
         ):
             item = self.backend.set_status("WI-0001", status)
             self.assertEqual(item["status"], status)
+
+    # --- append-result ---
+
+    def test_append_result_adds_a_reference(self):
+        self.write_item("WI-0001")
+
+        item = self.backend.append_result("WI-0001", "https://example.org/pr/1")
+
+        self.assertIn("https://example.org/pr/1", item["result-link"])
+        self.assertIn("https://example.org/pr/1", self.backend.get("WI-0001")["result-link"])
+
+    def test_append_result_twice_keeps_both_references_in_order(self):
+        self.write_item("WI-0001")
+
+        self.backend.append_result("WI-0001", "https://example.org/pr/1")
+        item = self.backend.append_result("WI-0001", "https://example.org/pr/2")
+
+        self.assertEqual(
+            item["result-link"],
+            ["https://example.org/pr/1", "https://example.org/pr/2"],
+        )
+
+    def test_append_result_does_not_touch_other_sections(self):
+        self.write_item("WI-0001", description="Original description.")
+
+        item = self.backend.append_result("WI-0001", "https://example.org/pr/1")
+
+        self.assertEqual(item["description"], "Original description.")
