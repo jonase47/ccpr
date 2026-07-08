@@ -19,7 +19,7 @@ CCPR commands never read work-state files directly. They call a helper that expo
 | create | `workitems create --title T [--type X] [--owner O] [--description D]` | create a new item; the backend assigns a stable `id` (JSON) |
 | list | `workitems list [--status S] [--owner O]` | enumerate items (JSON array) |
 | get | `workitems get <id>` | fetch one item (JSON) |
-| claim | `workitems claim <id> [--owner O]` | take ownership / mark active |
+| claim | `workitems claim <id> [--owner O] [--runner R]` | take ownership / mark active |
 | set-status | `workitems set-status <id> <status>` | move an item through its lifecycle |
 | append-result | `workitems append-result <id> <ref>` | attach a result reference (PR/commit link) |
 
@@ -65,6 +65,10 @@ plus **`Blocked`** and **`Cancelled`** crosscutting. Backends map their own stat
     "baseUrl": "https://tracker.example.org",
     "project": "PROJ",
     "tokenEnv": "YOUTRACK_TOKEN"
+  },
+  "claiming": {
+    "staleAfter": "2h",
+    "heartbeatInterval": "5m"
   }
 }
 ```
@@ -72,6 +76,9 @@ plus **`Blocked`** and **`Cancelled`** crosscutting. Backends map their own stat
 - `provider` defaults to `local`. Set it per project.
 - Remote-backend **credentials come only from environment variables** (`tokenEnv` names the variable).
   Never place a secret in `settings.json` or any tracked file.
+- `claiming` (remote backends only): `staleAfter` is how long without a heartbeat before `sweep`
+  moves a claimed item to `Parked`; `heartbeatInterval` is advisory for whatever refreshes a runner's
+  heartbeat. Durations accept `45s` / `5m` / `2h` / `1d` or a bare number of seconds. See §6 and ADR-0005.
 
 ## 4. The `local` backend
 
@@ -130,6 +137,16 @@ Claiming answers "who is working this item right now?" It is **mandatory for rem
 and its runners must not collide) and a **no-op for `local`** (solo with local files has nothing to
 lock). The full protocol — `Parked` state for a branch with commits but no live runner, `ticket/<id>`
 branches, a runner heartbeat — is ADR-0005.
+
+Two supporting commands (remote-only; no-ops on `local`):
+
+| Command | Meaning |
+|---|---|
+| `workitems heartbeat <id> --runner R` | refresh the runner's liveness timestamp |
+| `workitems sweep` | move any `In Progress` item whose heartbeat is older than `staleAfter` **and** whose `ticket/<id>` branch has commits to `Parked` (resumable) |
+
+`claim` refuses to take over an item held by a **live** runner, and refuses a terminal (`Done` /
+`Cancelled`) item; it resumes a `Parked` item or takes over one whose heartbeat has gone stale.
 
 ## 7. The write-loop (how status stays accurate)
 
