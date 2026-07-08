@@ -57,5 +57,42 @@ class LocalBackendWriteFailureTest(unittest.TestCase):
         self.assertEqual(leftover_tmp_files, [])
 
 
+class LocalBackendAppendResultWithoutSectionTest(unittest.TestCase):
+    """Every ITEM_TEMPLATE fixture already has a `## Result` heading, so the
+    create-the-section branch of _append_to_result_section() was never exercised.
+    This fixture deliberately omits it."""
+
+    def setUp(self):
+        self.tmp_dir = tempfile.mkdtemp(prefix="ccpr-workitems-noresult-")
+        self.addCleanup(shutil.rmtree, self.tmp_dir, ignore_errors=True)
+        (Path(self.tmp_dir) / "WI-0001.md").write_text(
+            "---\n"
+            "id: WI-0001\n"
+            "title: No result section yet\n"
+            "status: Backlog\n"
+            "---\n"
+            "\n"
+            "Description without an existing Result heading.\n",
+            encoding="utf-8",
+        )
+        self.backend = local.create({"workitems_dir": self.tmp_dir})
+
+    def test_append_result_creates_missing_section(self):
+        item = self.backend.append_result("WI-0001", "https://example.org/pr/1")
+
+        self.assertEqual(item["result-link"], ["https://example.org/pr/1"])
+        self.assertEqual(item["description"], "Description without an existing Result heading.")
+
+    def test_second_append_result_adds_to_the_newly_created_section(self):
+        self.backend.append_result("WI-0001", "https://example.org/pr/1")
+
+        item = self.backend.append_result("WI-0001", "https://example.org/pr/2")
+
+        self.assertEqual(
+            item["result-link"],
+            ["https://example.org/pr/1", "https://example.org/pr/2"],
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
