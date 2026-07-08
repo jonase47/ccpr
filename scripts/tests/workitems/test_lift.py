@@ -120,6 +120,21 @@ class LiftTest(unittest.TestCase):
             [p["title"] for p in report["proposed"]],
         )
 
+    def test_normalize_folds_trailing_punctuation_so_near_duplicates_merge(self):
+        # Same behaviour, same status, only a trailing period differs -- must merge
+        # into ONE proposed item, not be treated as two different behaviours.
+        other_source = Path(self.tmp_dir) / "notes.md"
+        other_source.write_text("- [ ] Add rate limiting to login endpoint.\n", encoding="utf-8")
+
+        report = lift.lift([str(self.source_path), str(other_source)], self.backend, apply=False)
+
+        matching = [
+            p for p in report["proposed"]
+            if p["title"].startswith("Add rate limiting to login endpoint")
+        ]
+        self.assertEqual(len(matching), 1)
+        self.assertEqual(len(matching[0]["sources"]), 2)
+
     def test_original_source_file_is_never_modified(self):
         original_text = self.source_path.read_text(encoding="utf-8")
 

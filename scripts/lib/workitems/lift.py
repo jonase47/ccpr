@@ -129,7 +129,17 @@ def _classify_line(source_path, line_number, raw_line, compiled_rules, candidate
 
 
 def _normalize(text):
-    return re.sub(r"\s+", " ", text.strip().lower())
+    """Whitespace/case folding + trailing punctuation removal, so "Add X" and
+    "Add X." are recognized as the same behaviour for dedup/contradiction grouping.
+
+    Deliberately shallow: no stemming, no synonym handling, no punctuation
+    normalization mid-string -- it only closes the cheapest, most common mismatch (a
+    trailing period/comma/etc. a human adds inconsistently across sources). Two
+    lines that differ by more than trailing punctuation and whitespace/case are NOT
+    merged; that is out of scope for this scaffold, not a bug.
+    """
+    normalized = re.sub(r"\s+", " ", text.strip().lower())
+    return re.sub(r"[.!?:;,]+$", "", normalized).strip()
 
 
 def _dedup_key(source_path, normalized_text):
