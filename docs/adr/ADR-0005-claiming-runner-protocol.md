@@ -37,7 +37,7 @@ cannot all guarantee anyway.
 
 - **Owner** = the responsible human (the `Assignee`, ADR-0003). Stable.
 - **Runner** = the process actively executing the item *right now* — a machine/agent identity
-  (`runner:<id>`; ids come from the machine register, ADR-0006).
+  (`runner:<id>`; ids come from the machine register, ADR-0007).
 
 They are distinct: an item **owned** by a human is often **executed** by an agent. Conflating them
 would lose the abandonment signal.
@@ -110,4 +110,4 @@ satisfy the contract.
 
 A concrete heartbeat implementation exists as a private tracker-side workflow; it is one mechanism for
 the signals defined here, not part of this generic protocol. Runner identities and the machine
-register are specified in ADR-0006.
+register are specified in ADR-0007.
