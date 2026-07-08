@@ -30,6 +30,7 @@ report for this increment):
    and only surfaces comments carrying that marker as `result-link` entries.
 """
 
+import datetime
 import json
 import os
 import sys
@@ -37,10 +38,32 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from workitems import STATUS_VALUES, WorkItemError, validate_item_id
+from workitems import DEFAULT_STALE_AFTER_SECONDS, STATUS_VALUES, WorkItemError, validate_item_id
 
-_ISSUE_FIELDS = "idReadable,summary,description,customFields(name,value(name,login)),comments(text)"
+_ISSUE_FIELDS = (
+    "idReadable,summary,description,customFields(name,value(name,login)),"
+    "comments(text),tags(name)"
+)
 RESULT_COMMENT_MARKER = "<!-- ccpr:result -->"
+
+# Claiming / branch-runner protocol (ADR-0005). ADR-0003 doesn't specify a concrete
+# mechanism for the runner+heartbeat signals ("a concrete heartbeat implementation
+# exists as a private tracker-side workflow ... not part of this generic protocol"),
+# so this is this implementation's own resolution of that gap, on the same footing
+# as the project-resolution and result-comment gaps already documented above:
+# runner + heartbeat are modeled as ISSUE TAGS, not custom fields. Rationale:
+# - Tags are a single, unambiguous shape (a plain name string) already used
+#   elsewhere in the ADR-0003 Command API example ("...tag chore"); a custom field's
+#   REST shape for a non-bundle, non-user field type is not something this
+#   implementation could verify without a real instance.
+# - A runner tag: "runner:<id>". A heartbeat tag: "heartbeat:<compact-utc-timestamp>"
+#   (colon-free timestamp body, e.g. "20260708T160000Z" — safe inside a tag name).
+# - Refreshing means removing the old runner:/heartbeat: tags and adding new ones
+#   (tags don't have an in-place "value" to update) via two Command API calls
+#   (`remove tag <old>`, `tag <new>`) per changed tag.
+_RUNNER_TAG_PREFIX = "runner:"
+_HEARTBEAT_TAG_PREFIX = "heartbeat:"
+_HEARTBEAT_TAG_FORMAT = "%Y%m%dT%H%M%SZ"
 
 
 def create(config):
@@ -66,11 +89,15 @@ def create(config):
             "come from the environment, never from settings.json"
         )
 
-    return YouTrackBackend(base_url, project, token, state_map=config.get("stateMap"))
+    return YouTrackBackend(
+        base_url, project, token, state_map=config.get("stateMap"),
+        stale_after_seconds=config.get("stale_after_seconds"),
+    )
 
 
 class YouTrackBackend:
-    def __init__(self, base_url, project, token, state_map=None, transport=None):
+    def __init__(self, base_url, project, token, state_map=None, transport=None,
+                 clock=None, stale_after_seconds=None):
         self.base_url = base_url.rstrip("/")
         self.project = project
         self.token = token
@@ -78,6 +105,14 @@ class YouTrackBackend:
         self._reverse_state_map = {v: k for k, v in self.state_map.items()}
         self.transport = transport or _HttpTransport()
         self._project_id = None
+        # Claiming (ADR-0005): clock is injected (zero-arg callable -> datetime),
+        # never a bare datetime.now() buried in claim()/heartbeat() logic, so tests
+        # get a deterministic heartbeat timestamp.
+        self.clock = clock or (lambda: datetime.datetime.now(datetime.timezone.utc))
+        self.stale_after_seconds = (
+            stale_after_seconds if stale_after_seconds is not None
+            else DEFAULT_STALE_AFTER_SECONDS
+        )
 
     def create(self, title, item_type=None, owner=None, description=None):
         if not title:
@@ -119,13 +154,63 @@ class YouTrackBackend:
         issue = self._request("GET", f"/api/issues/{item_id}", fields=_ISSUE_FIELDS)
         return self._item_from_issue(issue)
 
-    def claim(self, item_id, owner=None):
-        """No-op beyond optionally setting Assignee (the mandatory-claiming lock
-        protocol for remote backends is ADR-0005, not part of this increment)."""
+    def claim(self, item_id, owner=None, runner=None):
+        """Claiming is MANDATORY for remote backends (ADR-0002 §6, ADR-0005): when a
+        `runner` is given, records the runner:<id> signal + a heartbeat timestamp and
+        sets status to In Progress. `owner` (Assignee) is independent of `runner` —
+        the responsible human vs. the process executing the item right now."""
         validate_item_id(item_id)
         if owner:
             self._run_command(item_id, f"for {owner}")
+
+        if runner:
+            current = self.get(item_id)
+            current_runner = current.get("runner")
+            if current_runner and current_runner != runner and self._is_heartbeat_live(current.get("heartbeat")):
+                raise WorkItemError(
+                    f"{item_id} is already claimed by runner {current_runner!r} "
+                    "with a live heartbeat; refusing to steal the claim. Wait for it "
+                    "to go stale, or have that runner release it first."
+                )
+            self._refresh_runner_and_heartbeat(item_id, runner)
+            self.set_status(item_id, "In Progress")
+
         return self.get(item_id)
+
+    def heartbeat(self, item_id, runner):
+        """Refresh the liveness signal for `runner` on `item_id`. Refuses if the item
+        is currently claimed by a DIFFERENT runner (a dead runner's own heartbeat
+        call reviving its stale claim would defeat the whole point of staleness)."""
+        validate_item_id(item_id)
+        current = self.get(item_id)
+        current_runner = current.get("runner")
+        if current_runner and current_runner != runner:
+            raise WorkItemError(
+                f"{item_id} is claimed by runner {current_runner!r}, not {runner!r}; "
+                "cannot heartbeat as a different runner."
+            )
+        self._refresh_runner_and_heartbeat(item_id, runner)
+        return self.get(item_id)
+
+    def _is_heartbeat_live(self, heartbeat_iso):
+        if not heartbeat_iso:
+            return False
+        heartbeat_dt = datetime.datetime.fromisoformat(heartbeat_iso)
+        age_seconds = (self.clock() - heartbeat_dt).total_seconds()
+        return age_seconds < self.stale_after_seconds
+
+    def _refresh_runner_and_heartbeat(self, item_id, runner):
+        # Tags have no in-place "value" to update: remove any existing runner:/
+        # heartbeat: tags first, then add the fresh pair.
+        current_tags = self._request("GET", f"/api/issues/{item_id}", fields="tags(name)")
+        for tag in current_tags.get("tags", []):
+            name = tag.get("name") if isinstance(tag, dict) else tag
+            if name and (name.startswith(_RUNNER_TAG_PREFIX) or name.startswith(_HEARTBEAT_TAG_PREFIX)):
+                self._run_command(item_id, f"remove tag {name}")
+
+        heartbeat_str = self.clock().strftime(_HEARTBEAT_TAG_FORMAT)
+        self._run_command(item_id, f"tag {_RUNNER_TAG_PREFIX}{runner}")
+        self._run_command(item_id, f"tag {_HEARTBEAT_TAG_PREFIX}{heartbeat_str}")
 
     def set_status(self, item_id, status):
         validate_item_id(item_id)
@@ -227,6 +312,8 @@ class YouTrackBackend:
             if comment.get("text", "").startswith(RESULT_COMMENT_MARKER)
         ]
 
+        runner, heartbeat = self._runner_and_heartbeat_from_tags(issue.get("tags", []))
+
         return {
             "id": issue.get("idReadable"),
             "title": issue.get("summary"),
@@ -234,7 +321,24 @@ class YouTrackBackend:
             "description": issue.get("description") or "",
             "result-link": result_links,
             "owner": owner,
+            "runner": runner,
+            "heartbeat": heartbeat,
         }
+
+    def _runner_and_heartbeat_from_tags(self, tags):
+        runner = None
+        heartbeat = None
+        for tag in tags:
+            name = tag.get("name") if isinstance(tag, dict) else tag
+            if not name:
+                continue
+            if name.startswith(_RUNNER_TAG_PREFIX):
+                runner = name[len(_RUNNER_TAG_PREFIX):]
+            elif name.startswith(_HEARTBEAT_TAG_PREFIX):
+                compact = name[len(_HEARTBEAT_TAG_PREFIX):]
+                heartbeat_dt = datetime.datetime.strptime(compact, _HEARTBEAT_TAG_FORMAT)
+                heartbeat = heartbeat_dt.replace(tzinfo=datetime.timezone.utc).isoformat()
+        return runner, heartbeat
 
 
 _REQUEST_TIMEOUT_SECONDS = 10

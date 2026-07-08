@@ -85,6 +85,7 @@ class FakeYouTrackTransport:
             "state": None,
             "assignee_login": None,
             "comments": [],
+            "tags": [],
         }
         return {"idReadable": item_id}
 
@@ -105,6 +106,14 @@ class FakeYouTrackTransport:
                 if self.known_users is not None and value not in self.known_users:
                     raise WorkItemError(f"YouTrack command rejected (HTTP 400): user expected: {value}")
                 issue["assignee_login"] = value
+            elif query.startswith("remove tag "):
+                tag_name = query[len("remove tag "):]
+                if tag_name in issue["tags"]:
+                    issue["tags"].remove(tag_name)
+            elif query.startswith("tag "):
+                tag_name = query[len("tag "):]
+                if tag_name not in issue["tags"]:
+                    issue["tags"].append(tag_name)
             # "Type <name>" and other commands are accepted but not modeled: "type"
             # is a backend-specific extension, not part of the core contract model.
         return {}
@@ -121,4 +130,5 @@ class FakeYouTrackTransport:
             "description": issue["description"],
             "customFields": custom_fields,
             "comments": issue["comments"],
+            "tags": [{"name": t} for t in issue["tags"]],
         }

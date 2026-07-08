@@ -11,6 +11,7 @@ directly, per the reviewer's second suggested option).
 """
 
 import contextlib
+import datetime
 import io
 import os
 import sys
@@ -234,6 +235,35 @@ class YouTrackAppendResultTest(unittest.TestCase):
         fetched = self.backend.get(item["id"])
 
         self.assertEqual(fetched["result-link"], [])
+
+
+FIXED_NOW = datetime.datetime(2026, 7, 8, 16, 0, 0, tzinfo=datetime.timezone.utc)
+
+
+class YouTrackClaimingTest(unittest.TestCase):
+    """Claiming is MANDATORY for remote backends (ADR-0002 SS6, ADR-0005): claim()
+    records the runner:<id> signal + a heartbeat timestamp and sets In Progress."""
+
+    def setUp(self):
+        self.transport = FakeYouTrackTransport(project_short_name="TEST")
+        self.backend = youtrack.YouTrackBackend(
+            base_url="https://faketrack.example.org", project="TEST",
+            token="fake-token", transport=self.transport,
+            clock=lambda: FIXED_NOW, stale_after_seconds=3600,
+        )
+
+    def test_claim_with_runner_sets_runner_heartbeat_and_in_progress(self):
+        item = self.backend.create(title="New feature")
+
+        claimed = self.backend.claim(item["id"], runner="agent-1")
+
+        self.assertEqual(claimed["runner"], "agent-1")
+        self.assertEqual(claimed["heartbeat"], FIXED_NOW.isoformat())
+        self.assertEqual(claimed["status"], "In Progress")
+        # Persisted, not just returned in-memory.
+        fetched = self.backend.get(item["id"])
+        self.assertEqual(fetched["runner"], "agent-1")
+        self.assertEqual(fetched["heartbeat"], FIXED_NOW.isoformat())
 
 
 class YouTrackCreateFactoryTest(unittest.TestCase):
