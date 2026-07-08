@@ -93,6 +93,41 @@ class YouTrackPaginationTest(unittest.TestCase):
         self.assertEqual(len(items), 5)
 
 
+class YouTrackInvalidCommandTest(unittest.TestCase):
+    """Verified against a real instance: an unresolvable Command API query (an
+    unknown State/user name) returns HTTP 400 and leaves the issue UNCHANGED
+    (atomic reject, no partial apply) — already surfaced as a WorkItemError by
+    _HttpTransport's existing HTTPError handling. The gap was the FAKE transport,
+    which accepted any string as a valid state/assignee; this makes it faithful."""
+
+    def setUp(self):
+        self.transport = FakeYouTrackTransport(
+            project_short_name="TEST",
+            known_states={"Backlog", "In Progress", "Done"},
+            known_users={"alice"},
+        )
+        self.backend = youtrack.YouTrackBackend(
+            base_url="https://faketrack.example.org", project="TEST",
+            token="fake-token", transport=self.transport,
+        )
+
+    def test_set_status_with_unresolvable_state_raises_and_leaves_issue_unchanged(self):
+        item = self.backend.create(title="New feature")  # create()'s own "Backlog" is known
+
+        with self.assertRaises(WorkItemError):
+            # Valid CCPR vocabulary, but not a state name this project's bundle has.
+            self.backend.set_status(item["id"], "Waiting for Approval")
+
+        fetched = self.backend.get(item["id"])
+        self.assertEqual(fetched["status"], "Backlog")
+
+    def test_claim_with_unresolvable_assignee_raises(self):
+        item = self.backend.create(title="New feature")
+
+        with self.assertRaises(WorkItemError):
+            self.backend.claim(item["id"], owner="mallory")
+
+
 class YouTrackAppendResultTest(unittest.TestCase):
     """append-result adds a comment; get/list must recognise ONLY comments carrying
     the Result: prefix as result-link entries — an ordinary human comment on the

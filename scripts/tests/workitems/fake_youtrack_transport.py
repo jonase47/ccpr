@@ -14,7 +14,8 @@ class FakeYouTrackTransport:
     """Implements the same `.request(method, url, token, body=None)` interface as the
     real `_HttpTransport`, so YouTrackBackend cannot tell the difference."""
 
-    def __init__(self, project_short_name="TEST", page_size_cap=None):
+    def __init__(self, project_short_name="TEST", page_size_cap=None,
+                 known_states=None, known_users=None):
         self.project_short_name = project_short_name
         self.project_internal_id = "0-0"
         self.commands_received = []  # for tests asserting on the exact command string
@@ -25,6 +26,16 @@ class FakeYouTrackTransport:
         # truncated. Used to prove list() actually sends "$top=-1" instead of relying
         # on undocumented server-default behaviour.
         self.page_size_cap = page_size_cap
+        # None = permissive (accept any value) — the default so existing tests that
+        # don't care about this stay unaffected. A test that DOES care constructs the
+        # fake with a specific set, matching a real instance's actual State bundle /
+        # project membership: verified against a real instance, an unresolvable
+        # `State <name>` or `for <user>` command returns HTTP 400 and leaves the issue
+        # unchanged (atomic reject, no partial apply) — the real _HttpTransport
+        # already turns that into a WorkItemError; this fake previously accepted any
+        # string, silently hiding that error path from tests.
+        self.known_states = known_states
+        self.known_users = known_users
 
     def request(self, method, url, token, body=None):
         parsed = urllib.parse.urlparse(url)
@@ -83,9 +94,17 @@ class FakeYouTrackTransport:
         for ref in body["issues"]:
             issue = self._require_issue(ref["idReadable"])
             if query.startswith("State "):
-                issue["state"] = query[len("State "):]
+                value = query[len("State "):]
+                if self.known_states is not None and value not in self.known_states:
+                    # Validate BEFORE mutating: atomic reject, matching the real API
+                    # (a rejected command leaves the issue unchanged, no partial apply).
+                    raise WorkItemError(f"YouTrack command rejected (HTTP 400): State expected: {value}")
+                issue["state"] = value
             elif query.startswith("for "):
-                issue["assignee_login"] = query[len("for "):]
+                value = query[len("for "):]
+                if self.known_users is not None and value not in self.known_users:
+                    raise WorkItemError(f"YouTrack command rejected (HTTP 400): user expected: {value}")
+                issue["assignee_login"] = value
             # "Type <name>" and other commands are accepted but not modeled: "type"
             # is a backend-specific extension, not part of the core contract model.
         return {}
