@@ -23,6 +23,17 @@ class LocalBackendContractTest(WorkItemsContractTestCase, unittest.TestCase):
     def create_backend(self, workitems_dir):
         return local.create({"workitems_dir": workitems_dir})
 
+    def create_item(self, item_id, title="Untitled", status="Backlog", owner="",
+                     description="Description."):
+        path = Path(self.tmp_dir) / f"{item_id}.md"
+        path.write_text(
+            ITEM_TEMPLATE.format(
+                id=item_id, title=title, status=status, owner=owner,
+                description=description,
+            ),
+            encoding="utf-8",
+        )
+
 
 class LocalBackendWriteFailureTest(unittest.TestCase):
     def setUp(self):

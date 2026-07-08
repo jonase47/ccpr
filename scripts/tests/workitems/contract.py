@@ -45,22 +45,24 @@ class WorkItemsContractTestCase:
     (and failing) test case wherever it is imported.
 
     Subclasses must override `create_backend(workitems_dir)` to return a backend
-    instance rooted at the given temp directory.
+    instance rooted at the given temp directory, and `create_item(...)` to seed a
+    fixture item the backend-under-test can read back.
     """
 
     def create_backend(self, workitems_dir):
         raise NotImplementedError("Subclasses must return a backend instance.")
 
-    def write_item(self, item_id, title="Untitled", status="Backlog", owner="",
-                   description="Description."):
-        path = Path(self.tmp_dir) / f"{item_id}.md"
-        path.write_text(
-            ITEM_TEMPLATE.format(
-                id=item_id, title=title, status=status, owner=owner,
-                description=description,
-            ),
-            encoding="utf-8",
-        )
+    def create_item(self, item_id, title="Untitled", status="Backlog", owner="",
+                     description="Description."):
+        """Create a fixture item the backend-under-test can read back.
+
+        No default implementation: for `local` this writes a Markdown file directly
+        into the temp workitems dir (see test_local.py); a future `youtrack` backend
+        would instead create an issue via its API or seed a sandbox project. Raising
+        here — rather than defaulting to a filesystem write — means a new backend
+        can't silently inherit a fixture path the real backend never reads.
+        """
+        raise NotImplementedError("Subclasses must implement create_item().")
 
     def setUp(self):
         self.tmp_dir = tempfile.mkdtemp(prefix="ccpr-workitems-")
@@ -70,8 +72,8 @@ class WorkItemsContractTestCase:
     # --- list ---
 
     def test_list_returns_all_items(self):
-        self.write_item("WI-0001", title="First")
-        self.write_item("WI-0002", title="Second")
+        self.create_item("WI-0001", title="First")
+        self.create_item("WI-0002", title="Second")
 
         items = self.backend.list()
 
@@ -81,16 +83,16 @@ class WorkItemsContractTestCase:
         self.assertEqual(self.backend.list(), [])
 
     def test_list_filters_by_status(self):
-        self.write_item("WI-0001", status="Backlog")
-        self.write_item("WI-0002", status="Done")
+        self.create_item("WI-0001", status="Backlog")
+        self.create_item("WI-0002", status="Done")
 
         items = self.backend.list(status="Done")
 
         self.assertEqual([item["id"] for item in items], ["WI-0002"])
 
     def test_list_filters_by_owner(self):
-        self.write_item("WI-0001", owner="alice")
-        self.write_item("WI-0002", owner="bob")
+        self.create_item("WI-0001", owner="alice")
+        self.create_item("WI-0002", owner="bob")
 
         items = self.backend.list(owner="bob")
 
@@ -99,7 +101,7 @@ class WorkItemsContractTestCase:
     # --- get ---
 
     def test_get_returns_full_item(self):
-        self.write_item(
+        self.create_item(
             "WI-0001", title="Rate limiting", status="In Progress",
             owner="alice", description="Add a limiter.",
         )
@@ -119,7 +121,7 @@ class WorkItemsContractTestCase:
     # --- claim ---
 
     def test_claim_sets_owner(self):
-        self.write_item("WI-0001", owner="")
+        self.create_item("WI-0001", owner="")
 
         item = self.backend.claim("WI-0001", owner="alice")
 
@@ -127,7 +129,7 @@ class WorkItemsContractTestCase:
         self.assertEqual(self.backend.get("WI-0001")["owner"], "alice")
 
     def test_claim_without_owner_leaves_existing_owner_unchanged(self):
-        self.write_item("WI-0001", owner="alice")
+        self.create_item("WI-0001", owner="alice")
 
         item = self.backend.claim("WI-0001")
 
@@ -136,7 +138,7 @@ class WorkItemsContractTestCase:
     # --- set-status ---
 
     def test_set_status_updates_status(self):
-        self.write_item("WI-0001", status="Backlog")
+        self.create_item("WI-0001", status="Backlog")
 
         item = self.backend.set_status("WI-0001", "In Progress")
 
@@ -144,14 +146,14 @@ class WorkItemsContractTestCase:
         self.assertEqual(self.backend.get("WI-0001")["status"], "In Progress")
 
     def test_set_status_rejects_unknown_status(self):
-        self.write_item("WI-0001", status="Backlog")
+        self.create_item("WI-0001", status="Backlog")
 
         with self.assertRaises(Exception):
             self.backend.set_status("WI-0001", "Not-A-Status")
         self.assertEqual(self.backend.get("WI-0001")["status"], "Backlog")
 
     def test_set_status_accepts_every_vocabulary_value(self):
-        self.write_item("WI-0001", status="Backlog")
+        self.create_item("WI-0001", status="Backlog")
 
         for status in (
             "Backlog", "Ready", "In Progress", "Parked",
@@ -163,7 +165,7 @@ class WorkItemsContractTestCase:
     # --- append-result ---
 
     def test_append_result_adds_a_reference(self):
-        self.write_item("WI-0001")
+        self.create_item("WI-0001")
 
         item = self.backend.append_result("WI-0001", "https://example.org/pr/1")
 
@@ -171,7 +173,7 @@ class WorkItemsContractTestCase:
         self.assertIn("https://example.org/pr/1", self.backend.get("WI-0001")["result-link"])
 
     def test_append_result_twice_keeps_both_references_in_order(self):
-        self.write_item("WI-0001")
+        self.create_item("WI-0001")
 
         self.backend.append_result("WI-0001", "https://example.org/pr/1")
         item = self.backend.append_result("WI-0001", "https://example.org/pr/2")
@@ -182,7 +184,7 @@ class WorkItemsContractTestCase:
         )
 
     def test_append_result_does_not_touch_other_sections(self):
-        self.write_item("WI-0001", description="Original description.")
+        self.create_item("WI-0001", description="Original description.")
 
         item = self.backend.append_result("WI-0001", "https://example.org/pr/1")
 
