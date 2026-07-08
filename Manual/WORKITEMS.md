@@ -12,15 +12,20 @@
 
 ## 1. The contract
 
-CCPR commands never read work-state files directly. They call a helper that exposes five operations:
+CCPR commands never read work-state files directly. They call a helper that exposes six operations:
 
 | Operation | CLI | Meaning |
 |---|---|---|
+| create | `workitems create --title T [--type X] [--owner O] [--description D]` | create a new item; the backend assigns a stable `id` (JSON) |
 | list | `workitems list [--status S] [--owner O]` | enumerate items (JSON array) |
 | get | `workitems get <id>` | fetch one item (JSON) |
 | claim | `workitems claim <id> [--owner O]` | take ownership / mark active |
 | set-status | `workitems set-status <id> <status>` | move an item through its lifecycle |
 | append-result | `workitems append-result <id> <ref>` | attach a result reference (PR/commit link) |
+
+`create` assigns the `id` — callers never supply one (the `local` backend hands out the next
+monotonic `WI-NNNN`; a remote backend returns the tracker's id). `lift` (ADR-0004) is bulk creation;
+`create` is the single-item path a planning command uses.
 
 The helper (`scripts/workitems.py`) reads `workitems.provider` from `settings.json` and dispatches to
 the provider implementation under `scripts/lib/workitems/<provider>.py`. `list` and `get` print JSON so
@@ -38,7 +43,7 @@ fields, or the public framework acquires a silent tool-lock-in):
 | `title` | one line |
 | `status` | one of the vocabulary below |
 | `description` | free text (Markdown) |
-| `result-link` | optional; where the delivered work lives (PR/commit URL) |
+| `result-link` | optional; where the delivered work lives — **accumulates** (`append-result` adds refs; an item may hold several PR/commit links) |
 | `owner` | the responsible human; optional while unclaimed |
 
 ### Status vocabulary

@@ -41,18 +41,24 @@ items physically live is the configured backend's concern.
 
 ### The contract
 
-Five operations, nothing tool-specific:
+Six operations, nothing tool-specific:
 
 | Operation | Meaning |
 |---|---|
+| `create(fields)` | create a new item; the **backend assigns** a stable `id` (callers never supply one) |
 | `list` | enumerate work items (optionally filtered by status/owner) |
 | `get(id)` | fetch one item |
 | `claim(id)` | take ownership / mark active (see Claiming) |
 | `set-status(id, status)` | move an item through its lifecycle |
 | `append-result(id, result)` | attach a result reference (e.g. a PR/commit link) |
 
-**Core model (minimal, backend-neutral):** `id, title, status, description, result-link, owner`.
-Every backend must map exactly these. Backends may expose richer fields (milestones, cycles, links),
+`create` is the single-item path (a planning command creating one item); `lift` (ADR-0004) is the
+bulk path. The backend owns id assignment — `local` hands out the next monotonic `WI-NNNN`, a remote
+backend returns the tracker's id.
+
+**Core model (minimal, backend-neutral):** `id, title, status, description, result-link, owner`
+(`result-link` **accumulates** — `append-result` adds refs, so an item can carry several PR/commit
+links). Every backend must map exactly these. Backends may expose richer fields (milestones, cycles, links),
 but **the CCPR core never relies on backend-specific fields** — that is what prevents a tool-lock-in
 from creeping into the public framework.
 
