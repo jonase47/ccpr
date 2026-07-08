@@ -17,6 +17,7 @@ Output: JSON on stdout for every operation (a list for `list`, an object otherwi
 
 import argparse
 import importlib
+import importlib.util
 import json
 import os
 import sys
@@ -28,12 +29,19 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "lib"))
 from workitems import WorkItemError  # noqa: E402
 
 
+class UnknownProviderError(Exception):
+    """Raised when settings.json names a provider with no matching lib/workitems/<provider>.py."""
+
+
 def load_settings(project_dir):
     settings_path = os.path.join(project_dir, "settings.json")
     if not os.path.isfile(settings_path):
         return {}
     with open(settings_path, "r", encoding="utf-8") as f:
-        return json.load(f)
+        try:
+            return json.load(f)
+        except json.JSONDecodeError as exc:
+            raise WorkItemError(f"invalid JSON in {settings_path}: {exc}") from exc
 
 
 def resolve_provider(settings, project_dir):
@@ -47,6 +55,12 @@ def resolve_provider(settings, project_dir):
 
 
 def load_backend(provider, config):
+    # find_spec() first so a missing dependency *inside* a valid provider module
+    # (e.g. a future youtrack.py importing `requests`) surfaces as its own error
+    # instead of being misreported as "unknown provider" by a broad
+    # `except ModuleNotFoundError` around the actual import.
+    if importlib.util.find_spec(f"workitems.{provider}") is None:
+        raise UnknownProviderError(provider)
     module = importlib.import_module(f"workitems.{provider}")
     return module.create(config)
 
@@ -100,22 +114,19 @@ def dispatch(backend, args):
 def main(argv=None):
     args = build_parser().parse_args(argv)
 
-    settings = load_settings(args.project_dir)
-    provider, config = resolve_provider(settings, args.project_dir)
-
     try:
+        settings = load_settings(args.project_dir)
+        provider, config = resolve_provider(settings, args.project_dir)
         backend = load_backend(provider, config)
-    except ModuleNotFoundError:
-        print(f"Unknown work-item provider: {provider}", file=sys.stderr)
-        return 1
-
-    try:
         result = dispatch(backend, args)
+    except UnknownProviderError as exc:
+        print(f"Unknown work-item provider: {exc}", file=sys.stderr)
+        return 1
     except WorkItemError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
-    print(json.dumps(result, indent=2))
+    print(json.dumps(result, indent=2, ensure_ascii=False))
     return 0
 
 

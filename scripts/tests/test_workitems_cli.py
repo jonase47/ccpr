@@ -103,6 +103,56 @@ class WorkitemsCliTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("does-not-exist", result.stderr)
 
+    def test_malformed_settings_json_fails_cleanly(self):
+        settings_path = self.project_dir / "settings.json"
+        settings_path.write_text("{ not valid json", encoding="utf-8")
+
+        result = self.run_cli("list")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn("Traceback", result.stderr)
+
+    def _write_provider(self, provider_name, source):
+        provider_path = SCRIPT_PATH.parent / "lib" / "workitems" / f"{provider_name}.py"
+        provider_path.write_text(source, encoding="utf-8")
+        self.addCleanup(provider_path.unlink, missing_ok=True)
+        return provider_name
+
+    def _use_provider(self, provider_name):
+        settings_path = self.project_dir / "settings.json"
+        settings_path.write_text(
+            json.dumps({"workitems": {"provider": provider_name}}), encoding="utf-8",
+        )
+
+    def test_work_item_error_from_backend_create_is_reported_cleanly(self):
+        provider_name = self._write_provider(
+            "_test_broken_provider",
+            "from workitems import WorkItemError\n\n"
+            "def create(config):\n"
+            "    raise WorkItemError('broken provider: missing token')\n",
+        )
+        self._use_provider(provider_name)
+
+        result = self.run_cli("list")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("broken provider: missing token", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+
+    def test_missing_dependency_inside_valid_provider_is_not_misreported_as_unknown_provider(self):
+        provider_name = self._write_provider(
+            "_test_provider_with_missing_dep",
+            "import this_dependency_does_not_exist_anywhere\n\n"
+            "def create(config):\n"
+            "    raise NotImplementedError\n",
+        )
+        self._use_provider(provider_name)
+
+        result = self.run_cli("list")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn(f"Unknown work-item provider: {provider_name}", result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()
