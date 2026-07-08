@@ -197,6 +197,57 @@ class WorkitemsCliTest(unittest.TestCase):
         self.assertIn("broken provider: missing token", result.stderr)
         self.assertNotIn("Traceback", result.stderr)
 
+    def test_migrate_moves_items_to_target_and_flips_the_active_provider(self):
+        # Self-contained in-memory fake target: no network, no cross-invocation
+        # persistence needed since this test only makes ONE CLI call and inspects
+        # its JSON report plus the on-disk idmap/settings.json artifacts.
+        provider_name = self._write_provider(
+            "_test_fake_migrate_target",
+            "from workitems import WorkItemError\n\n"
+            "_ITEMS = {}\n"
+            "_NEXT = [1]\n\n"
+            "def create(config):\n"
+            "    return _FakeBackend()\n\n"
+            "class _FakeBackend:\n"
+            "    def create(self, title, item_type=None, owner=None, description=None):\n"
+            "        item_id = f'FAKE-{_NEXT[0]}'\n"
+            "        _NEXT[0] += 1\n"
+            "        item = {'id': item_id, 'title': title, 'status': 'Backlog',\n"
+            "                'description': description or '', 'result-link': [], 'owner': owner}\n"
+            "        _ITEMS[item_id] = item\n"
+            "        return dict(item)\n"
+            "    def list(self, status=None, owner=None):\n"
+            "        return [dict(i) for i in _ITEMS.values()]\n"
+            "    def get(self, item_id):\n"
+            "        if item_id not in _ITEMS:\n"
+            "            raise WorkItemError(f'Unknown work item: {item_id}')\n"
+            "        return dict(_ITEMS[item_id])\n"
+            "    def claim(self, item_id, owner=None):\n"
+            "        if owner is not None:\n"
+            "            _ITEMS[item_id]['owner'] = owner\n"
+            "        return dict(_ITEMS[item_id])\n"
+            "    def set_status(self, item_id, status):\n"
+            "        _ITEMS[item_id]['status'] = status\n"
+            "        return dict(_ITEMS[item_id])\n"
+            "    def append_result(self, item_id, ref):\n"
+            "        _ITEMS[item_id]['result-link'].append(ref)\n"
+            "        return dict(_ITEMS[item_id])\n",
+        )
+
+        result = self.run_cli("migrate", "--to", provider_name)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        report = json.loads(result.stdout)
+        self.assertEqual(len(report["migrated"]), 1)
+        self.assertTrue(report["archived"])
+
+        idmap_path = self.project_dir / "docs" / "workitems-idmap.yml"
+        self.assertTrue(idmap_path.is_file())
+        self.assertIn("WI-0001", idmap_path.read_text(encoding="utf-8"))
+
+        settings = json.loads((self.project_dir / "settings.json").read_text(encoding="utf-8"))
+        self.assertEqual(settings["workitems"]["provider"], provider_name)
+
     def test_missing_dependency_inside_valid_provider_is_not_misreported_as_unknown_provider(self):
         provider_name = self._write_provider(
             "_test_provider_with_missing_dep",

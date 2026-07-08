@@ -12,6 +12,7 @@ Usage:
   workitems.py claim <id> [--owner OWNER] [--project DIR]
   workitems.py set-status <id> <status> [--project DIR]
   workitems.py append-result <id> <ref> [--project DIR]
+  workitems.py migrate --to <provider> [--project DIR]
 
 Output: JSON on stdout for every operation (a list for `list`, an object otherwise).
 """
@@ -28,6 +29,7 @@ DEFAULT_PROVIDER = "local"
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "lib"))
 
 from workitems import WorkItemError  # noqa: E402
+from workitems import migrate as migrate_module  # noqa: E402
 
 
 class UnknownProviderError(Exception):
@@ -45,14 +47,19 @@ def load_settings(project_dir):
             raise WorkItemError(f"invalid JSON in {settings_path}: {exc}") from exc
 
 
-def resolve_provider(settings, project_dir):
-    """Return (provider_name, provider_config) from settings.json's `workitems` block."""
+def resolve_provider_config(settings, project_dir, provider):
+    """Return the settings.json config block for a specific provider name."""
     workitems_settings = settings.get("workitems", {})
-    provider = workitems_settings.get("provider", DEFAULT_PROVIDER)
     config = dict(workitems_settings.get(provider, {}))
     if provider == "local" and "workitems_dir" not in config:
         config["workitems_dir"] = os.path.join(project_dir, "docs", "workitems")
-    return provider, config
+    return config
+
+
+def resolve_provider(settings, project_dir):
+    """Return (provider_name, provider_config) for the CURRENTLY ACTIVE provider."""
+    provider = settings.get("workitems", {}).get("provider", DEFAULT_PROVIDER)
+    return provider, resolve_provider_config(settings, project_dir, provider)
 
 
 def load_backend(provider, config):
@@ -101,6 +108,12 @@ def build_parser():
     p_append.add_argument("id")
     p_append.add_argument("ref")
 
+    p_migrate = sub.add_parser(
+        "migrate", help="Move items to a target backend, once, reversibly (ADR-0004)",
+        parents=[project_arg],
+    )
+    p_migrate.add_argument("--to", required=True, help="Target provider name")
+
     return parser
 
 
@@ -123,6 +136,41 @@ def dispatch(backend, args):
     raise ValueError(f"Unknown operation: {args.operation}")
 
 
+def _run_migrate(settings, args, source_provider, source_config, source_backend):
+    """`migrate --to <provider>`: not a per-backend contract op (it spans TWO
+    backends), so it's handled here rather than in dispatch()."""
+    target_provider = args.to
+    target_config = resolve_provider_config(settings, args.project_dir, target_provider)
+    target_backend = load_backend(target_provider, target_config)
+
+    idmap_path = os.path.join(args.project_dir, "docs", "workitems-idmap.yml")
+    source_workitems_dir = (
+        source_config.get("workitems_dir") if source_provider == "local" else None
+    )
+
+    report = migrate_module.migrate(
+        source_backend, target_backend, idmap_path,
+        source_workitems_dir=source_workitems_dir,
+    )
+
+    # Leave exactly one active backend afterward (ADR-0002/ADR-0004): once every
+    # source item is accounted for (migrate() only archives once that's true),
+    # flip settings.json's active provider to the target.
+    if report.get("archived"):
+        _update_provider_in_settings(args.project_dir, target_provider)
+
+    return report
+
+
+def _update_provider_in_settings(project_dir, new_provider):
+    settings_path = os.path.join(project_dir, "settings.json")
+    settings = load_settings(project_dir)
+    settings.setdefault("workitems", {})["provider"] = new_provider
+    with open(settings_path, "w", encoding="utf-8") as f:
+        json.dump(settings, f, indent=2)
+        f.write("\n")
+
+
 def main(argv=None):
     args = build_parser().parse_args(argv)
 
@@ -130,7 +178,10 @@ def main(argv=None):
         settings = load_settings(args.project_dir)
         provider, config = resolve_provider(settings, args.project_dir)
         backend = load_backend(provider, config)
-        result = dispatch(backend, args)
+        if args.operation == "migrate":
+            result = _run_migrate(settings, args, provider, config, backend)
+        else:
+            result = dispatch(backend, args)
     except UnknownProviderError as exc:
         print(f"Unknown work-item provider: {exc}", file=sys.stderr)
         return 1
