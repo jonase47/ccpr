@@ -22,7 +22,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "lib"))
 
-from workitems import WorkItemError, youtrack  # noqa: E402
+from workitems import WorkItemError, sweep, youtrack  # noqa: E402
 
 from .contract import WorkItemsContractTestCase
 from .fake_youtrack_transport import FakeYouTrackTransport
@@ -343,6 +343,49 @@ class YouTrackClaimingTest(unittest.TestCase):
 
         self.assertEqual(resumed["status"], "In Progress")
         self.assertEqual(resumed["runner"], "agent-2")
+
+
+class YouTrackSweepIntegrationTest(unittest.TestCase):
+    """sweep() was tested in isolation (test_sweep.py) against a minimal fake
+    backend, decoupled from any one backend's representation. This proves sweep()
+    correctly interprets the REAL YouTrackBackend's tag-based runner/heartbeat --
+    the two modules actually interoperate, not just each in isolation."""
+
+    def setUp(self):
+        self.transport = FakeYouTrackTransport(project_short_name="TEST")
+        self.clock = _MutableClock(FIXED_NOW)
+        self.backend = youtrack.YouTrackBackend(
+            base_url="https://faketrack.example.org", project="TEST",
+            token="fake-token", transport=self.transport,
+            clock=self.clock, stale_after_seconds=3600,
+        )
+
+    def test_stale_claim_with_branch_commits_is_parked(self):
+        item = self.backend.create(title="New feature")
+        self.backend.claim(item["id"], runner="agent-1")
+        self.clock.advance(7200)  # 2 hours -- past the 1h staleAfter
+
+        report = sweep.sweep(
+            self.backend, clock=self.clock,
+            has_branch_commits=lambda item_id: True, stale_after_seconds=3600,
+        )
+
+        self.assertEqual(report["parked"], [item["id"]])
+        self.assertEqual(self.backend.get(item["id"])["status"], "Parked")
+
+    def test_stale_claim_without_branch_commits_is_left_in_progress(self):
+        item = self.backend.create(title="New feature")
+        self.backend.claim(item["id"], runner="agent-1")
+        self.clock.advance(7200)
+
+        report = sweep.sweep(
+            self.backend, clock=self.clock,
+            has_branch_commits=lambda item_id: False, stale_after_seconds=3600,
+        )
+
+        self.assertEqual(report["parked"], [])
+        self.assertEqual(report["left_in_progress"], [item["id"]])
+        self.assertEqual(self.backend.get(item["id"])["status"], "In Progress")
 
 
 class YouTrackCreateFactoryTest(unittest.TestCase):
