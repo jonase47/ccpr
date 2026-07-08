@@ -240,16 +240,31 @@ class YouTrackAppendResultTest(unittest.TestCase):
 FIXED_NOW = datetime.datetime(2026, 7, 8, 16, 0, 0, tzinfo=datetime.timezone.utc)
 
 
+class _MutableClock:
+    """A settable clock for tests that need to simulate time passing between a
+    claim and a later liveness check, without a real sleep()."""
+
+    def __init__(self, initial):
+        self.current = initial
+
+    def __call__(self):
+        return self.current
+
+    def advance(self, seconds):
+        self.current += datetime.timedelta(seconds=seconds)
+
+
 class YouTrackClaimingTest(unittest.TestCase):
     """Claiming is MANDATORY for remote backends (ADR-0002 SS6, ADR-0005): claim()
     records the runner:<id> signal + a heartbeat timestamp and sets In Progress."""
 
     def setUp(self):
         self.transport = FakeYouTrackTransport(project_short_name="TEST")
+        self.clock = _MutableClock(FIXED_NOW)
         self.backend = youtrack.YouTrackBackend(
             base_url="https://faketrack.example.org", project="TEST",
             token="fake-token", transport=self.transport,
-            clock=lambda: FIXED_NOW, stale_after_seconds=3600,
+            clock=self.clock, stale_after_seconds=3600,
         )
 
     def test_claim_with_runner_sets_runner_heartbeat_and_in_progress(self):
@@ -264,6 +279,40 @@ class YouTrackClaimingTest(unittest.TestCase):
         fetched = self.backend.get(item["id"])
         self.assertEqual(fetched["runner"], "agent-1")
         self.assertEqual(fetched["heartbeat"], FIXED_NOW.isoformat())
+
+    def test_claim_refuses_takeover_of_a_live_claim_by_different_runner(self):
+        item = self.backend.create(title="New feature")
+        self.backend.claim(item["id"], runner="agent-1")
+
+        self.clock.advance(600)  # 10 minutes later -- well within the 1h staleAfter
+
+        with self.assertRaises(WorkItemError):
+            self.backend.claim(item["id"], runner="agent-2")
+
+        fetched = self.backend.get(item["id"])
+        self.assertEqual(fetched["runner"], "agent-1")
+
+    def test_claim_allows_takeover_of_a_stale_claim(self):
+        item = self.backend.create(title="New feature")
+        self.backend.claim(item["id"], runner="agent-1")
+
+        self.clock.advance(7200)  # 2 hours later -- past the 1h staleAfter
+
+        claimed = self.backend.claim(item["id"], runner="agent-2")
+
+        self.assertEqual(claimed["runner"], "agent-2")
+        fetched = self.backend.get(item["id"])
+        self.assertEqual(fetched["runner"], "agent-2")
+
+    def test_claim_by_the_same_runner_again_is_allowed_and_refreshes(self):
+        item = self.backend.create(title="New feature")
+        self.backend.claim(item["id"], runner="agent-1")
+
+        self.clock.advance(600)
+        claimed = self.backend.claim(item["id"], runner="agent-1")
+
+        self.assertEqual(claimed["runner"], "agent-1")
+        self.assertEqual(claimed["heartbeat"], self.clock().isoformat())
 
 
 class YouTrackCreateFactoryTest(unittest.TestCase):
