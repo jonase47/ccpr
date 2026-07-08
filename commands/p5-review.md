@@ -5,7 +5,19 @@ Conducts a structured code review: first code quality, then security. Each dimen
 ## Argument: $ARGUMENTS = [File/module/feature name]
 
 If provided: Review the named code area.
-If not provided: Read SPRINT.md and ask which code should be reviewed.
+If not provided: resolve the story via the work-item adoption guard below (falls back to reading
+SPRINT.md and asking, if the project is still on prose).
+
+## 0. Work-item adoption guard (ADR-0002 §8)
+
+Run `python3 ~/.claude/scripts/workitems.py list`.
+- **Non-empty array** → the project uses the structured store. Use the CLI for all item state below:
+  - No `$ARGUMENTS`: resolve the story via `workitems list --status "Waiting for Approval"`, pick
+    the top item, ask for confirmation.
+- **`[]` and no `docs/workitems/` directory** → still on prose. Read SPRINT.md to find/ask which
+  story is next, as before. Emit one line: *"Tip: run `lift` to adopt the structured work-item store."*
+
+See Manual/WORKITEMS.md §8 for the full guard rationale and the status-verb mapping.
 
 ## Flow
 
@@ -25,7 +37,12 @@ Use the wingman summary as the basis for presenting results to the user.
 ## Notes
 - Both reviews can run in parallel (no dependency)
 - For CRITICAL findings from either review: `/p5-bugfix` before acceptance
-- Update SPRINT.md after completion: mark story as "Approved" or "Back to Dev"
+- On completion, using the same guard result from step 0:
+  - Structured store: approved → `workitems set-status <id> "Done"`; back to Dev →
+    `workitems set-status <id> "In Progress"`.
+  - Prose fallback: update SPRINT.md — mark story as "Approved" or "Back to Dev".
+- Once wired, item status is never hand-edited in SPRINT.md/BACKLOG.md — those are planning views
+  (Manual/WORKITEMS.md §8).
 - Document review results in reviews/ or SPRINT.md
 
 ### Handover Epilog
