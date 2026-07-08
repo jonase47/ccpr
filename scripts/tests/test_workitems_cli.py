@@ -6,6 +6,7 @@ and JSON-on-stdout behaviour.
 """
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -116,6 +117,38 @@ class WorkitemsCliTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         item = json.loads(result.stdout)
         self.assertIn("https://example.org/pr/1", item["result-link"])
+
+    def test_youtrack_provider_config_is_resolved_generically_no_network(self):
+        # Proves resolve_provider()/load_backend() work for a non-local provider
+        # without any provider-specific dispatcher code — the failure here (missing
+        # token env var) happens in youtrack.create()'s config validation, before any
+        # HTTP call, so this stays network-free.
+        token_env = "CCPR_TEST_YOUTRACK_TOKEN_CLI_MISSING"
+        env = dict(os.environ)
+        env.pop(token_env, None)
+        settings_path = self.project_dir / "settings.json"
+        settings_path.write_text(
+            json.dumps({
+                "workitems": {
+                    "provider": "youtrack",
+                    "youtrack": {
+                        "baseUrl": "https://faketrack.example.org",
+                        "project": "TEST",
+                        "tokenEnv": token_env,
+                    },
+                },
+            }),
+            encoding="utf-8",
+        )
+
+        result = subprocess.run(
+            [sys.executable, str(SCRIPT_PATH), "list", "--project", str(self.project_dir)],
+            capture_output=True, text=True, env=env,
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(token_env, result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
 
     def test_unknown_provider_fails_with_stderr_message(self):
         settings_path = self.project_dir / "settings.json"
