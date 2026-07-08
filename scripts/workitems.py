@@ -153,6 +153,19 @@ def _run_migrate(settings, args, source_provider, source_config, source_backend)
     """`migrate --to <provider>`: not a per-backend contract op (it spans TWO
     backends), so it's handled here rather than in dispatch()."""
     target_provider = args.to
+
+    if target_provider == source_provider:
+        # A prior successful migrate already flipped the active provider to this
+        # target. Re-running would look "unmigrated" from the wrong side: the idmap
+        # holds OLD (source) ids as keys, but source_backend.list() now returns the
+        # TARGET's own ids (since it IS the active/source backend here) -- none of
+        # which are idmap keys, so every item would look never-migrated and get
+        # recreated. Refuse instead of silently duplicating everything.
+        raise WorkItemError(
+            f"'{target_provider}' is already the active provider; nothing to migrate. "
+            "Re-running migrate --to would duplicate every item."
+        )
+
     target_config = resolve_provider_config(settings, args.project_dir, target_provider)
     target_backend = load_backend(target_provider, target_config)
 

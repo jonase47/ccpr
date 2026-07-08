@@ -291,6 +291,55 @@ class WorkitemsCliTest(unittest.TestCase):
         settings = json.loads((self.project_dir / "settings.json").read_text(encoding="utf-8"))
         self.assertEqual(settings["workitems"]["provider"], provider_name)
 
+    def test_migrating_twice_to_the_same_target_refuses_on_the_second_call(self):
+        provider_name = self._write_provider(
+            "_test_fake_migrate_target_twice",
+            "from workitems import WorkItemError\n\n"
+            "_ITEMS = {}\n"
+            "_NEXT = [1]\n\n"
+            "def create(config):\n"
+            "    return _FakeBackend()\n\n"
+            "class _FakeBackend:\n"
+            "    def create(self, title, item_type=None, owner=None, description=None):\n"
+            "        item_id = f'FAKE-{_NEXT[0]}'\n"
+            "        _NEXT[0] += 1\n"
+            "        item = {'id': item_id, 'title': title, 'status': 'Backlog',\n"
+            "                'description': description or '', 'result-link': [], 'owner': owner}\n"
+            "        _ITEMS[item_id] = item\n"
+            "        return dict(item)\n"
+            "    def list(self, status=None, owner=None):\n"
+            "        return [dict(i) for i in _ITEMS.values()]\n"
+            "    def get(self, item_id):\n"
+            "        if item_id not in _ITEMS:\n"
+            "            raise WorkItemError(f'Unknown work item: {item_id}')\n"
+            "        return dict(_ITEMS[item_id])\n"
+            "    def claim(self, item_id, owner=None):\n"
+            "        if owner is not None:\n"
+            "            _ITEMS[item_id]['owner'] = owner\n"
+            "        return dict(_ITEMS[item_id])\n"
+            "    def set_status(self, item_id, status):\n"
+            "        _ITEMS[item_id]['status'] = status\n"
+            "        return dict(_ITEMS[item_id])\n"
+            "    def append_result(self, item_id, ref):\n"
+            "        _ITEMS[item_id]['result-link'].append(ref)\n"
+            "        return dict(_ITEMS[item_id])\n",
+        )
+
+        first_result = self.run_cli("migrate", "--to", provider_name)
+        self.assertEqual(first_result.returncode, 0, first_result.stderr)
+        first_report = json.loads(first_result.stdout)
+        self.assertEqual(len(first_report["migrated"]), 1)
+
+        second_result = self.run_cli("migrate", "--to", provider_name)
+
+        self.assertNotEqual(second_result.returncode, 0)
+        self.assertIn("already the active provider", second_result.stderr)
+        # No duplicate: re-run created nothing new (the CLI refused before doing
+        # anything, so there's no target-side count to check here, but the idmap
+        # must be untouched from the first run).
+        idmap_path = self.project_dir / "docs" / "workitems-idmap.yml"
+        self.assertEqual(idmap_path.read_text(encoding="utf-8").count("WI-0001"), 1)
+
     def test_missing_dependency_inside_valid_provider_is_not_misreported_as_unknown_provider(self):
         provider_name = self._write_provider(
             "_test_provider_with_missing_dep",
