@@ -237,6 +237,41 @@ class YouTrackAppendResultTest(unittest.TestCase):
         self.assertEqual(fetched["result-link"], [])
 
 
+class YouTrackMalformedHeartbeatTest(unittest.TestCase):
+    """runner:/heartbeat: tags are editable in the YouTrack UI -- a human (or a
+    fat-fingered API call) can leave a heartbeat tag that doesn't match the expected
+    compact-timestamp format. That must degrade to "no valid heartbeat" (best-effort:
+    the item is then simply not considered live), never a raw crash past the CLI
+    boundary's `except WorkItemError`."""
+
+    def setUp(self):
+        self.transport = FakeYouTrackTransport(project_short_name="TEST")
+        self.backend = youtrack.YouTrackBackend(
+            base_url="https://faketrack.example.org", project="TEST",
+            token="fake-token", transport=self.transport,
+        )
+
+    def test_get_does_not_crash_on_a_malformed_heartbeat_tag(self):
+        item = self.backend.create(title="New feature")
+        self.transport._require_issue(item["id"])["tags"].append("heartbeat:not-a-real-timestamp")
+
+        fetched = self.backend.get(item["id"])
+
+        self.assertIsNone(fetched["heartbeat"])
+
+    def test_claim_does_not_crash_on_a_malformed_heartbeat_tag(self):
+        item = self.backend.create(title="New feature")
+        self.transport._require_issue(item["id"])["tags"].append("runner:agent-1")
+        self.transport._require_issue(item["id"])["tags"].append("heartbeat:not-a-real-timestamp")
+        self.backend.set_status(item["id"], "In Progress")
+
+        # A malformed heartbeat is never "live" -- treated as stale, so a different
+        # runner claiming it must be ALLOWED, not crash and not be refused.
+        claimed = self.backend.claim(item["id"], runner="agent-2")
+
+        self.assertEqual(claimed["runner"], "agent-2")
+
+
 FIXED_NOW = datetime.datetime(2026, 7, 8, 16, 0, 0, tzinfo=datetime.timezone.utc)
 
 

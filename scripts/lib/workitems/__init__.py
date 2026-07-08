@@ -45,6 +45,30 @@ def validate_item_id(item_id):
 # without forcing every project to configure it before claiming works at all.
 DEFAULT_STALE_AFTER_SECONDS = 3600.0
 
+
+def safe_parse_datetime(value, parser):
+    """Best-effort datetime parse: returns None (never raises) if `value` is falsy or
+    `parser(value)` fails.
+
+    Heartbeat timestamps can be hand-edited in a tracker's UI (a YouTrack tag, e.g.)
+    into something malformed — a bad timestamp must mean "no valid heartbeat" (the
+    item is then simply not considered live / not swept), never a crash that escapes
+    past the CLI's `except WorkItemError` boundary as a raw traceback.
+
+    `parser` is injected so this one helper covers every timestamp shape in this
+    codebase that needs the same "never raise" treatment: youtrack.py's compact tag
+    format (via `functools.partial(datetime.datetime.strptime, format=...)` or a
+    lambda) and the ISO-8601 string every item dict's `heartbeat` field carries
+    (via `datetime.datetime.fromisoformat`), used by both youtrack.py's own
+    liveness check and sweep.py.
+    """
+    if not value:
+        return None
+    try:
+        return parser(value)
+    except (ValueError, TypeError):
+        return None
+
 _DURATION_PATTERN = re.compile(r"^(\d+(?:\.\d+)?)\s*(s|m|h|d)?$")
 _DURATION_UNIT_SECONDS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
 

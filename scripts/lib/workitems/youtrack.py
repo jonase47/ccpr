@@ -38,7 +38,10 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from workitems import DEFAULT_STALE_AFTER_SECONDS, STATUS_VALUES, WorkItemError, validate_item_id
+from workitems import (
+    DEFAULT_STALE_AFTER_SECONDS, STATUS_VALUES, WorkItemError, safe_parse_datetime,
+    validate_item_id,
+)
 
 _ISSUE_FIELDS = (
     "idReadable,summary,description,customFields(name,value(name,login)),"
@@ -203,9 +206,9 @@ class YouTrackBackend:
         return self.get(item_id)
 
     def _is_heartbeat_live(self, heartbeat_iso):
-        if not heartbeat_iso:
-            return False
-        heartbeat_dt = datetime.datetime.fromisoformat(heartbeat_iso)
+        heartbeat_dt = safe_parse_datetime(heartbeat_iso, datetime.datetime.fromisoformat)
+        if heartbeat_dt is None:
+            return False  # missing or malformed -- never considered live
         age_seconds = (self.clock() - heartbeat_dt).total_seconds()
         return age_seconds < self.stale_after_seconds
 
@@ -322,7 +325,9 @@ class YouTrackBackend:
             if comment.get("text", "").startswith(RESULT_COMMENT_MARKER)
         ]
 
-        runner, heartbeat = self._runner_and_heartbeat_from_tags(issue.get("tags", []))
+        runner, heartbeat = self._runner_and_heartbeat_from_tags(
+            issue.get("tags", []), issue.get("idReadable"),
+        )
 
         return {
             "id": issue.get("idReadable"),
@@ -335,7 +340,7 @@ class YouTrackBackend:
             "heartbeat": heartbeat,
         }
 
-    def _runner_and_heartbeat_from_tags(self, tags):
+    def _runner_and_heartbeat_from_tags(self, tags, item_id):
         runner = None
         heartbeat = None
         for tag in tags:
@@ -346,7 +351,18 @@ class YouTrackBackend:
                 runner = name[len(_RUNNER_TAG_PREFIX):]
             elif name.startswith(_HEARTBEAT_TAG_PREFIX):
                 compact = name[len(_HEARTBEAT_TAG_PREFIX):]
-                heartbeat_dt = datetime.datetime.strptime(compact, _HEARTBEAT_TAG_FORMAT)
+                # runner:/heartbeat: tags are editable in the YouTrack UI -- a
+                # malformed one must degrade to "no valid heartbeat", never crash.
+                heartbeat_dt = safe_parse_datetime(
+                    compact, lambda v: datetime.datetime.strptime(v, _HEARTBEAT_TAG_FORMAT),
+                )
+                if heartbeat_dt is None:
+                    print(
+                        f"Warning: YouTrack issue {item_id} has a malformed "
+                        f"heartbeat tag ({name!r}); treating it as no heartbeat.",
+                        file=sys.stderr,
+                    )
+                    continue
                 heartbeat = heartbeat_dt.replace(tzinfo=datetime.timezone.utc).isoformat()
         return runner, heartbeat
 

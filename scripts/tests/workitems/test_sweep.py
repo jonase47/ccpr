@@ -107,6 +107,23 @@ class SweepTest(unittest.TestCase):
         self.assertEqual(report["parked"], [])
         self.assertEqual(backend.status_changes, [])
 
+    def test_malformed_heartbeat_does_not_crash_and_is_left_in_progress(self):
+        # A backend could hand sweep() an already-malformed ISO string (a hand-edited
+        # tag in a real tracker's UI, or simply a bug) -- must degrade to "no valid
+        # heartbeat" (skip, don't sweep), never raise past this function.
+        backend = _FakeBackend([
+            {"id": "WI-0001", "status": "In Progress", "heartbeat": "not-a-real-timestamp"},
+        ])
+
+        report = sweep.sweep(
+            backend, clock=lambda: FIXED_NOW,
+            has_branch_commits=lambda item_id: True,
+            stale_after_seconds=3600,
+        )
+
+        self.assertEqual(report["parked"], [])
+        self.assertEqual(backend.status_changes, [])
+
     def test_only_in_progress_items_are_considered(self):
         backend = _FakeBackend([
             {"id": "WI-0001", "status": "Done", "heartbeat": iso(FIXED_NOW - datetime.timedelta(hours=5))},

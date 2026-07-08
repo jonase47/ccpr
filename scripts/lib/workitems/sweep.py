@@ -22,7 +22,7 @@ need a real "now" or a real git repository. The CLI wires a default git-based
 import datetime
 import subprocess
 
-from workitems import DEFAULT_STALE_AFTER_SECONDS
+from workitems import DEFAULT_STALE_AFTER_SECONDS, safe_parse_datetime
 
 
 def default_clock():
@@ -46,11 +46,13 @@ def sweep(backend, clock=None, has_branch_commits=None, stale_after_seconds=None
     report = {"parked": [], "left_in_progress": []}
 
     for item in backend.list(status="In Progress"):
-        heartbeat_iso = item.get("heartbeat")
-        if not heartbeat_iso:
-            continue  # no heartbeat at all (local, or a remote item never claimed)
+        # A malformed heartbeat (any backend could hand us one -- a hand-edited
+        # tracker field, a bug) degrades to "no valid heartbeat", same as missing:
+        # never considered live, never swept, never a crash.
+        heartbeat_dt = safe_parse_datetime(item.get("heartbeat"), datetime.datetime.fromisoformat)
+        if heartbeat_dt is None:
+            continue
 
-        heartbeat_dt = datetime.datetime.fromisoformat(heartbeat_iso)
         age_seconds = (now - heartbeat_dt).total_seconds()
         if age_seconds < stale_after_seconds:
             continue  # still alive
