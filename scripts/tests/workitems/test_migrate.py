@@ -109,6 +109,29 @@ class MigrateLocalToYouTrackTest(unittest.TestCase):
         # second item -- NOT a duplicate "First item".
         self.assertEqual(len(self.target_backend.list()), 2)
 
+    def test_recovers_from_a_crash_between_create_and_idmap_write_without_duplicating(self):
+        # Simulate a crash strictly narrower than the "partial idmap" scenario above:
+        # create() (and set_status()) already succeeded in the target for first_id in
+        # a prior run -- the item exists, carrying its provenance marker -- but the
+        # process died BEFORE the idmap write for that item, so idmap_path doesn't
+        # exist at all yet (unlike the partial-idmap test, where the idmap already
+        # correctly recorded the pairing).
+        pre_existing = self.target_backend.create(
+            title="First item", owner="alice",
+            description=f"Desc one.\n\nMigrated from {self.first_id}.",
+        )
+        self.target_backend.set_status(pre_existing["id"], "In Progress")
+
+        report = self.run_migrate()
+
+        # Exactly 2 target items: the pre-existing (adopted) one plus the second
+        # item -- NOT a duplicate "First item" created alongside it.
+        self.assertEqual(len(self.target_backend.list()), 2)
+        idmap = migrate.read_idmap(str(self.idmap_path))
+        self.assertEqual(idmap[self.first_id], pre_existing["id"])
+        self.assertEqual([source_id for source_id, _ in report["migrated"]],
+                          [self.first_id, self.second_id])
+
     def test_report_exposes_fully_migrated_decoupled_from_archived(self):
         # source_workitems_dir=None simulates a non-local source: there is nothing to
         # archive, but every item still made it across -- these are two DIFFERENT

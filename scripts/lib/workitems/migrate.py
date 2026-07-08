@@ -23,7 +23,10 @@ get a deterministic archive directory name.
 
 import datetime
 import os
+import re
 import shutil
+
+_PROVENANCE_PATTERN = re.compile(r"^Migrated from (.+)\.$", re.MULTILINE)
 
 
 def default_clock():
@@ -79,6 +82,12 @@ def migrate(source_backend, target_backend, idmap_path, source_workitems_dir=Non
     """
     clock = clock or default_clock
     idmap = read_idmap(idmap_path)
+    # Crash recovery for the window between create()/set_status() succeeding in the
+    # target and the idmap write that records the pairing: if a prior run created an
+    # item and then died before that write, the idmap alone won't show it as
+    # migrated. Scan the target for its own provenance marker first, so such an item
+    # is ADOPTED (its id recorded in the idmap) instead of recreated.
+    existing_markers = _existing_migration_markers(target_backend)
 
     source_items = source_backend.list()
     report = {"migrated": [], "skipped_already_migrated": []}
@@ -89,15 +98,21 @@ def migrate(source_backend, target_backend, idmap_path, source_workitems_dir=Non
             report["skipped_already_migrated"].append(source_id)
             continue
 
-        description = item.get("description") or ""
-        provenance = f"Migrated from {source_id}."
-        description = f"{description}\n\n{provenance}" if description else provenance
+        if source_id in existing_markers:
+            target_id = existing_markers[source_id]
+        else:
+            description = item.get("description") or ""
+            provenance = f"Migrated from {source_id}."
+            description = f"{description}\n\n{provenance}" if description else provenance
 
-        created = target_backend.create(
-            title=item["title"], owner=item.get("owner"), description=description,
-        )
-        target_id = created["id"]
+            created = target_backend.create(
+                title=item["title"], owner=item.get("owner"), description=description,
+            )
+            target_id = created["id"]
 
+        # Re-applied unconditionally, even for an adopted item: a crash could have
+        # happened before set_status() ran in the prior attempt, so the adopted item
+        # might still be sitting at its create-time default (Backlog).
         status = item.get("status")
         if status and status != "Backlog":
             target_backend.set_status(target_id, status)
@@ -115,6 +130,18 @@ def migrate(source_backend, target_backend, idmap_path, source_workitems_dir=Non
         report["archive_path"] = archive_path
 
     return report
+
+
+def _existing_migration_markers(target_backend):
+    """Map source_id -> target_id for every target item already carrying a
+    "Migrated from <source_id>." provenance line (mirrors lift.py's own
+    Lift-Key:/_existing_lift_keys pattern for the same crash-recovery purpose)."""
+    markers = {}
+    for item in target_backend.list():
+        description = item.get("description") or ""
+        for match in _PROVENANCE_PATTERN.finditer(description):
+            markers[match.group(1)] = item["id"]
+    return markers
 
 
 def _archive(source_dir, archive_root, clock):
