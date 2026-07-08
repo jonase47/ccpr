@@ -66,8 +66,16 @@ def resolve_provider_config(settings, project_dir, provider):
     # Claiming (ADR-0005): workitems.claiming.staleAfter is a project-wide setting,
     # not per-provider, but every backend that implements claiming needs it (for the
     # takeover-check) -- merged in here so any provider's create(config) can read
-    # config["stale_after_seconds"] the same way.
-    claiming_settings = workitems_settings.get("claiming", {})
+    # config["stale_after_seconds"] the same way. heartbeatInterval is deliberately
+    # NOT consumed anywhere in this repo: it's advisory for whatever schedules a
+    # runner's heartbeat calls (the external runner-loop's concern), not something
+    # the backend itself needs to act on.
+    claiming_settings = workitems_settings.get("claiming") or {}
+    if not isinstance(claiming_settings, dict):
+        raise WorkItemError(
+            "Invalid workitems.claiming in settings.json: expected an object "
+            f'(e.g. {{"staleAfter": "1h"}}), got {claiming_settings!r}'
+        )
     if "staleAfter" in claiming_settings:
         config["stale_after_seconds"] = parse_duration_seconds(claiming_settings["staleAfter"])
 

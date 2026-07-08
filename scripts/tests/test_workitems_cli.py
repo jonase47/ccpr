@@ -564,6 +564,31 @@ class WorkitemsCliTest(unittest.TestCase):
         run("add", "work.txt")
         run("commit", "-q", "-m", "did work")
 
+    def test_null_claiming_config_is_treated_as_absent_not_an_error(self):
+        # "claiming": null is a common, reasonable JSON idiom for "no value" -- treat
+        # it the same as the key being absent (silent defaults), not a hard error.
+        settings_path = self.project_dir / "settings.json"
+        settings_path.write_text(
+            json.dumps({"workitems": {"provider": "local", "claiming": None}}),
+            encoding="utf-8",
+        )
+
+        result = self.run_cli("list")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_non_object_claiming_config_fails_cleanly_not_with_a_traceback(self):
+        settings_path = self.project_dir / "settings.json"
+        settings_path.write_text(
+            json.dumps({"workitems": {"provider": "local", "claiming": 3600}}),
+            encoding="utf-8",
+        )
+
+        result = self.run_cli("list")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn("Traceback", result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()
