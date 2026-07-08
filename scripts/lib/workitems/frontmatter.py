@@ -7,9 +7,15 @@ no PyYAML dependency today (scripts/ is stdlib-only), and the frontmatter schema
 is narrow enough that a full YAML library would be a heavy dependency for what it buys.
 """
 
+import re
+
 FRONTMATTER_KEY_ORDER = (
     "id", "title", "status", "type", "owner", "refs", "tags", "created",
 )
+
+# A scalar is an inline list only if the ENTIRE trimmed value is bracketed —
+# not merely prefixed with "[" (e.g. `title: [WIP] Rate limiting` is a scalar).
+_LIST_PATTERN = re.compile(r"^\[.*\]$")
 
 
 def parse(text):
@@ -64,8 +70,9 @@ def render(data, body):
 
 
 def _parse_scalar(value):
-    if value.startswith("[") and "]" in value:
-        inner = value[1:value.index("]")]
+    value = value.strip()
+    if _LIST_PATTERN.match(value):
+        inner = value[1:-1]
         if not inner.strip():
             return []
         return [_unquote(v.strip()) for v in inner.split(",")]
@@ -97,11 +104,14 @@ def _unquote(value):
 
 
 def _format_value(value):
+    if value is None:
+        return ""
     if isinstance(value, list):
         return "[" + ", ".join(value) + "]"
     text = str(value)
-    if "#" in text:
-        # Quote so a later parse doesn't mistake the `#` for a comment marker.
+    if text.startswith("[") or "#" in text:
+        # Quote so a later parse doesn't mistake this for an inline list (leading
+        # "[") or a comment marker ("#").
         quote = "'" if '"' in text else '"'
         return f"{quote}{text}{quote}"
     return text
