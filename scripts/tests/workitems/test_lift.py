@@ -132,6 +132,55 @@ class LiftTest(unittest.TestCase):
 
         self.assertIn("does NOT verify", report["disclaimer"])
 
+    def test_a_title_with_both_apostrophe_and_double_quote_now_writes_successfully(self):
+        # The motivating case for the frontmatter escaping fix: this used to break
+        # the round-trip and would have been caught by the try/except below as a
+        # failure. It no longer fails at all -- proving the root-cause fix, not just
+        # the safety net.
+        tricky_path = Path(self.tmp_dir) / "tricky.md"
+        tricky_path.write_text('- [ ] It\'s "done" #wip\n', encoding="utf-8")
+
+        report = lift.lift([str(tricky_path)], self.backend, apply=True)
+
+        self.assertEqual(report["failed"], [])
+        self.assertEqual(len(report["proposed"]), 1)
+        self.assertIsNotNone(report["proposed"][0]["id"])
+        titles = [item["title"] for item in self.backend.list()]
+        self.assertIn('It\'s "done" #wip', titles)
+
+    def test_apply_survives_a_per_item_failure_and_continues_the_batch(self):
+        # Fault injection at the backend level, independent of whatever today's
+        # frontmatter parser does or doesn't handle -- this proves the try/except
+        # safety net itself, not any one specific bug.
+        class _BackendThatRejectsOneTitle:
+            def __init__(self, backend, poison_title):
+                self._backend = backend
+                self._poison_title = poison_title
+
+            def create(self, title, item_type=None, owner=None, description=None):
+                if title == self._poison_title:
+                    raise RuntimeError("simulated failure writing this item")
+                return self._backend.create(
+                    title=title, item_type=item_type, owner=owner, description=description,
+                )
+
+            def __getattr__(self, name):
+                return getattr(self._backend, name)
+
+        poison_title = "Add rate limiting to login endpoint"
+        faulty_backend = _BackendThatRejectsOneTitle(self.backend, poison_title)
+
+        report = lift.lift([str(self.source_path)], faulty_backend, apply=True)
+
+        self.assertEqual(len(report["failed"]), 1)
+        self.assertEqual(report["failed"][0]["title"], poison_title)
+        self.assertIn("simulated failure", report["failed"][0]["error"])
+
+        # The rest of the batch still gets written despite the one failure.
+        remaining_titles = [item["title"] for item in self.backend.list()]
+        self.assertIn("Fix flaky test in auth module", remaining_titles)
+        self.assertNotIn(poison_title, remaining_titles)
+
 
 if __name__ == "__main__":
     unittest.main()

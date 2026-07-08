@@ -57,7 +57,8 @@ def lift(source_paths, local_backend, exclude_rules=None, apply=False):
     apply=True: creates each proposed item via local_backend.create() (so ids are
     assigned the same way any other local item gets one), re-reads it to confirm it
     parses (fails loudly if not — "parse its own output"), and records the assigned
-    id in the report.
+    id in the report. A single item's failure (whatever the cause) is caught,
+    recorded in report["failed"], and does not abort the rest of the batch.
     """
     compiled_rules = [
         {"compiled": re.compile(rule["pattern"], re.IGNORECASE), "reason": rule["reason"]}
@@ -67,7 +68,7 @@ def lift(source_paths, local_backend, exclude_rules=None, apply=False):
     report = {
         "proposed": [], "already_lifted": [], "excluded": [],
         "skipped_unsupported": [], "contradictions": [], "duplicate_within_batch": [],
-        "applied": bool(apply), "disclaimer": DISCLAIMER,
+        "failed": [], "applied": bool(apply), "disclaimer": DISCLAIMER,
     }
 
     candidates = []
@@ -194,34 +195,44 @@ def _existing_lift_keys(local_backend):
 
 def _apply(report, local_backend):
     for entry in report["proposed"]:
-        description_lines = [
-            "Lifted via `ccpr workitems lift` (ADR-0004) — status NOT verified against code.",
-        ]
-        description_lines.extend(
-            f"Source: {source['file']}:{source['line']}" for source in entry["sources"]
+        try:
+            _apply_one(entry, local_backend)
+        except Exception as exc:
+            # One bad item (an edge case the frontmatter writer/parser doesn't
+            # handle, a backend-level failure, anything) must not abort the whole
+            # batch -- record it and continue with the rest.
+            report["failed"].append({"title": entry["title"], "error": str(exc)})
+
+
+def _apply_one(entry, local_backend):
+    description_lines = [
+        "Lifted via `ccpr workitems lift` (ADR-0004) — status NOT verified against code.",
+    ]
+    description_lines.extend(
+        f"Source: {source['file']}:{source['line']}" for source in entry["sources"]
+    )
+    if entry["confidence"] == "low":
+        description_lines.append(
+            "Confidence: low — status could not be determined from the source "
+            "text; defaulted to Backlog. Please review against the actual code."
         )
-        if entry["confidence"] == "low":
-            description_lines.append(
-                "Confidence: low — status could not be determined from the source "
-                "text; defaulted to Backlog. Please review against the actual code."
-            )
-        description_lines.append(f"{LIFT_KEY_PREFIX}{','.join(entry['dedup_keys'])}")
-        description = "\n".join(description_lines)
+    description_lines.append(f"{LIFT_KEY_PREFIX}{','.join(entry['dedup_keys'])}")
+    description = "\n".join(description_lines)
 
-        created = local_backend.create(title=entry["title"], description=description)
-        item_id = created["id"]
-        if entry["status"] != "Backlog":
-            local_backend.set_status(item_id, entry["status"])
+    created = local_backend.create(title=entry["title"], description=description)
+    item_id = created["id"]
+    if entry["status"] != "Backlog":
+        local_backend.set_status(item_id, entry["status"])
 
-        # Parse its own output (ADR-0004): re-read from disk and fail loudly if it
-        # doesn't come back the way it was just written, rather than silently
-        # shipping a serialization that turns out to be unparseable.
-        reread = local_backend.get(item_id)
-        if reread["title"] != entry["title"] or reread["status"] != entry["status"]:
-            raise WorkItemError(
-                f"lift: failed to parse its own output for item {item_id!r} "
-                f"(expected title={entry['title']!r} status={entry['status']!r}, "
-                f"got title={reread['title']!r} status={reread['status']!r})"
-            )
+    # Parse its own output (ADR-0004): re-read from disk and fail loudly if it
+    # doesn't come back the way it was just written, rather than silently
+    # shipping a serialization that turns out to be unparseable.
+    reread = local_backend.get(item_id)
+    if reread["title"] != entry["title"] or reread["status"] != entry["status"]:
+        raise WorkItemError(
+            f"lift: failed to parse its own output for item {item_id!r} "
+            f"(expected title={entry['title']!r} status={entry['status']!r}, "
+            f"got title={reread['title']!r} status={reread['status']!r})"
+        )
 
-        entry["id"] = item_id
+    entry["id"] = item_id
