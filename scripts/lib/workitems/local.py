@@ -37,14 +37,33 @@ class LocalBackend:
     def get(self, item_id):
         return self._item_from_path(self._path_for(item_id))
 
+    def claim(self, item_id, owner=None):
+        """No-op beyond optionally setting owner (local has nothing to lock; ADR-0002 §6)."""
+        path = self._path_for(item_id)
+        data, body = frontmatter.parse(path.read_text(encoding="utf-8"))
+        if owner is not None:
+            data["owner"] = owner
+        self._write(path, data, body)
+        return self._item_from_data(data, body)
+
     def _path_for(self, item_id):
         path = self.workitems_dir / f"{item_id}.md"
         if not path.is_file():
             raise WorkItemError(f"Unknown work item: {item_id}")
         return path
 
+    def _write(self, path, data, body):
+        """Write via a temp file + atomic rename so a failed write never corrupts the item."""
+        text = frontmatter.render(data, body)
+        tmp_path = path.with_suffix(path.suffix + ".tmp")
+        tmp_path.write_text(text, encoding="utf-8")
+        tmp_path.replace(path)
+
     def _item_from_path(self, path):
         data, body = frontmatter.parse(path.read_text(encoding="utf-8"))
+        return self._item_from_data(data, body)
+
+    def _item_from_data(self, data, body):
         return {
             "id": data.get("id"),
             "title": data.get("title"),

@@ -114,3 +114,20 @@ class WorkItemsContractTestCase:
     def test_get_unknown_id_raises(self):
         with self.assertRaises(Exception):
             self.backend.get("WI-9999")
+
+    # --- claim ---
+
+    def test_claim_sets_owner(self):
+        self.write_item("WI-0001", owner="")
+
+        item = self.backend.claim("WI-0001", owner="alice")
+
+        self.assertEqual(item["owner"], "alice")
+        self.assertEqual(self.backend.get("WI-0001")["owner"], "alice")
+
+    def test_claim_without_owner_leaves_existing_owner_unchanged(self):
+        self.write_item("WI-0001", owner="alice")
+
+        item = self.backend.claim("WI-0001")
+
+        self.assertEqual(item["owner"], "alice")
