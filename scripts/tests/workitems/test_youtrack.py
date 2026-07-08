@@ -425,6 +425,26 @@ class YouTrackClaimingTest(unittest.TestCase):
         self.assertEqual(claimed["status"], "In Progress")
         self.assertEqual(claimed["runner"], "agent-1")
 
+    def test_a_non_utc_aware_clock_is_normalized_to_utc_in_the_written_heartbeat(self):
+        # 18:00 at UTC+2 is 16:00 UTC. strftime() on an aware datetime formats the
+        # WALL-CLOCK fields verbatim, ignoring the offset -- writing the heartbeat
+        # tag without normalizing to UTC first would literally record "18:00" as if
+        # it were UTC, two hours off from the true instant.
+        non_utc_now = datetime.datetime(
+            2026, 7, 8, 18, 0, 0, tzinfo=datetime.timezone(datetime.timedelta(hours=2)),
+        )
+        transport = FakeYouTrackTransport(project_short_name="TEST")
+        backend = youtrack.YouTrackBackend(
+            base_url="https://faketrack.example.org", project="TEST",
+            token="fake-token", transport=transport,
+            clock=lambda: non_utc_now, stale_after_seconds=3600,
+        )
+        item = backend.create(title="New feature")
+
+        claimed = backend.claim(item["id"], runner="agent-1")
+
+        self.assertEqual(claimed["heartbeat"], "2026-07-08T16:00:00+00:00")
+
 
 class YouTrackSweepIntegrationTest(unittest.TestCase):
     """sweep() was tested in isolation (test_sweep.py) against a minimal fake

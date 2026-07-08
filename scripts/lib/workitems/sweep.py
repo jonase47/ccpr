@@ -42,7 +42,12 @@ def sweep(backend, clock=None, has_branch_commits=None, stale_after_seconds=None
         stale_after_seconds if stale_after_seconds is not None else DEFAULT_STALE_AFTER_SECONDS
     )
 
-    now = clock()
+    # Normalized to UTC at the point of use (cheap insurance): a future clock
+    # injection that returns a naive or non-UTC-aware datetime must not silently
+    # skew the staleness comparison or crash outright when subtracted from an
+    # aware heartbeat datetime. A no-op for every already-UTC-aware clock (every
+    # test fixture and the real default_clock above).
+    now = clock().astimezone(datetime.timezone.utc)
     report = {"parked": [], "left_in_progress": []}
 
     for item in backend.list(status="In Progress"):

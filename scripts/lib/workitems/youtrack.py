@@ -223,11 +223,25 @@ class YouTrackBackend:
         self._refresh_runner_and_heartbeat(item_id, runner)
         return self.get(item_id)
 
+    def _now_utc(self):
+        """self.clock(), normalized to UTC at the point of use. Cheap insurance
+        against a future clock injection that returns a naive or non-UTC-aware
+        datetime: `strftime` (the heartbeat tag write) formats wall-clock fields
+        verbatim and silently ignores any offset, and subtracting a naive from an
+        aware datetime raises TypeError outright. `.astimezone(utc)` on an ALREADY
+        UTC-aware datetime (every test fixture and the real default clock) is a
+        no-op; on a naive datetime, Python assumes it represents the system's local
+        timezone (astimezone()'s documented behaviour) rather than raising -- still
+        better than a crash, though a naive clock meant to already BE UTC should be
+        made aware at the injection site instead of relying on this fallback.
+        """
+        return self.clock().astimezone(datetime.timezone.utc)
+
     def _is_heartbeat_live(self, heartbeat_iso):
         heartbeat_dt = safe_parse_datetime(heartbeat_iso, datetime.datetime.fromisoformat)
         if heartbeat_dt is None:
             return False  # missing or malformed -- never considered live
-        age_seconds = (self.clock() - heartbeat_dt).total_seconds()
+        age_seconds = (self._now_utc() - heartbeat_dt).total_seconds()
         return age_seconds < self.stale_after_seconds
 
     def _refresh_runner_and_heartbeat(self, item_id, runner):
@@ -239,7 +253,7 @@ class YouTrackBackend:
             if name and (name.startswith(_RUNNER_TAG_PREFIX) or name.startswith(_HEARTBEAT_TAG_PREFIX)):
                 self._run_command(item_id, f"remove tag {name}")
 
-        heartbeat_str = self.clock().strftime(_HEARTBEAT_TAG_FORMAT)
+        heartbeat_str = self._now_utc().strftime(_HEARTBEAT_TAG_FORMAT)
         self._run_command(item_id, f"tag {_RUNNER_TAG_PREFIX}{runner}")
         self._run_command(item_id, f"tag {_HEARTBEAT_TAG_PREFIX}{heartbeat_str}")
 
