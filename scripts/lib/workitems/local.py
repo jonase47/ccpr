@@ -5,12 +5,16 @@ test fixture (see scripts/tests/workitems/contract.py). No server, no token: rea
 writes one Markdown file per item.
 """
 
+import datetime
 import os
+import re
 from pathlib import Path
 
 from workitems import STATUS_VALUES, WorkItemError, frontmatter, validate_item_id
 
 RESULT_HEADING = "## Result"
+
+_ID_NUMBER_PATTERN = re.compile(r"^WI-(\d+)$")
 
 
 def create(config):
@@ -22,6 +26,48 @@ def create(config):
 class LocalBackend:
     def __init__(self, workitems_dir):
         self.workitems_dir = Path(workitems_dir)
+
+    def create(self, title, item_type=None, owner=None, description=None):
+        if not title:
+            raise WorkItemError("title is required")
+
+        self.workitems_dir.mkdir(parents=True, exist_ok=True)
+        body = _new_item_body(description)
+
+        # Concurrency note: two processes could scan the same directory and compute
+        # the same "next" id (a small TOCTOU race). The actual safeguard is the
+        # exclusive create below ("x" mode never overwrites an existing file); on a
+        # collision we just rescan and retry a bounded number of times. This is
+        # "safe-ish", not a real lock — an adversarial flood of simultaneous creates
+        # could still exhaust the retry budget. Acceptable for the target usage (a
+        # solo dev or small team working one repo), not a distributed-lock guarantee.
+        max_attempts = 20
+        for _ in range(max_attempts):
+            item_id = self._next_id()
+            path = self.workitems_dir / f"{item_id}.md"
+            data = {"id": item_id, "title": title, "status": "Backlog"}
+            if item_type:
+                data["type"] = item_type
+            if owner:
+                data["owner"] = owner
+            data["created"] = datetime.date.today().isoformat()
+            text = frontmatter.render(data, body)
+            try:
+                with open(path, "x", encoding="utf-8") as f:
+                    f.write(text)
+                return self._item_from_data(data, body)
+            except FileExistsError:
+                continue
+        raise WorkItemError("Could not assign a unique work-item id after several attempts")
+
+    def _next_id(self):
+        highest = 0
+        if self.workitems_dir.is_dir():
+            for path in self.workitems_dir.glob("WI-*.md"):
+                match = _ID_NUMBER_PATTERN.match(path.stem)
+                if match:
+                    highest = max(highest, int(match.group(1)))
+        return f"WI-{highest + 1:04d}"
 
     def list(self, status=None, owner=None):
         if not self.workitems_dir.is_dir():
@@ -114,6 +160,11 @@ class LocalBackend:
             "tags": data.get("tags"),
             "created": data.get("created"),
         }
+
+
+def _new_item_body(description):
+    description = (description or "").strip()
+    return f"{description}\n\n## Acceptance Criteria\n\n## Result\n"
 
 
 def _extract_description(body):

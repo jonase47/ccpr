@@ -1,12 +1,15 @@
 """contract.py – Reusable contract test suite for CCPR work-item backends (ADR-0002).
 
 `local` is the reference implementation *and* the contract test fixture (ADR-0002 §9):
-any backend that implements the five-operation contract (list/get/claim/set-status/
+any backend that implements the six-operation contract (create/list/get/claim/set-status/
 append-result) can be validated against this suite by subclassing
 `WorkItemsContractTestCase` and overriding `create_backend()`. The backend under test
-is a parameter, not hardcoded — see test_local.py for the `local` wiring; a future
-`youtrack` backend adds its own subclass (e.g. test_youtrack.py) against a sandbox
-project instead of a temp directory.
+is a parameter, not hardcoded — see test_local.py for the `local` wiring; test_youtrack.py
+wires a mocked YouTrack backend against the same suite.
+
+Ids are never assumed to look like `WI-NNNN` anywhere in this file — that is local's own
+id scheme, not part of the contract (a remote backend's id, e.g. YouTrack's `PROJ-42`,
+looks nothing like it). Every test captures the id `create` returns and uses that.
 """
 
 import os
@@ -14,30 +17,9 @@ import shutil
 import tempfile
 from pathlib import Path
 
-ITEM_TEMPLATE = """---
-id: {id}
-title: {title}
-status: {status}
-type: feat
-owner: {owner}
-refs: [ADR-0011]
-tags: [security]
-created: 2026-07-08
----
-
-{description}
-
-## Acceptance Criteria
-- Criterion one.
-- Criterion two.
-
-## Result
-<!-- append-result writes PR/commit links here -->
-"""
-
 
 class WorkItemsContractTestCase:
-    """Mixin exercising the five-operation contract against a backend.
+    """Mixin exercising the six-operation contract against a backend.
 
     Deliberately NOT a `unittest.TestCase` subclass: a concrete backend test combines
     this mixin with `unittest.TestCase` (see test_local.py). Extending TestCase here
@@ -45,70 +27,110 @@ class WorkItemsContractTestCase:
     (and failing) test case wherever it is imported.
 
     Subclasses must override `create_backend(workitems_dir)` to return a backend
-    instance rooted at the given temp directory, and `create_item(...)` to seed a
-    fixture item the backend-under-test can read back.
+    instance rooted at the given temp directory (backends that aren't filesystem-based,
+    e.g. a mocked YouTrack, may ignore the argument).
     """
 
     def create_backend(self, workitems_dir):
         raise NotImplementedError("Subclasses must return a backend instance.")
 
-    def create_item(self, item_id, title="Untitled", status="Backlog", owner="",
+    def create_item(self, title="Untitled", status="Backlog", owner=None,
                      description="Description."):
-        """Create a fixture item the backend-under-test can read back.
+        """Seed a fixture item via the real `create` contract operation, then drive it
+        to the requested status via `set_status` if it isn't the create-time default.
 
-        No default implementation: for `local` this writes a Markdown file directly
-        into the temp workitems dir (see test_local.py); a future `youtrack` backend
-        would instead create an issue via its API or seed a sandbox project. Raising
-        here — rather than defaulting to a filesystem write — means a new backend
-        can't silently inherit a fixture path the real backend never reads.
+        Every fixture setup therefore exercises `create` itself — a backend that hasn't
+        implemented it fails immediately here, in every test that seeds a fixture, not
+        only in a dedicated create() test. Returns the backend-assigned id.
         """
-        raise NotImplementedError("Subclasses must implement create_item().")
+        item = self.backend.create(title=title, owner=owner, description=description)
+        item_id = item["id"]
+        if status and status != "Backlog":
+            self.backend.set_status(item_id, status)
+        return item_id
 
     def setUp(self):
         self.tmp_dir = tempfile.mkdtemp(prefix="ccpr-workitems-")
         self.addCleanup(shutil.rmtree, self.tmp_dir, ignore_errors=True)
         self.backend = self.create_backend(self.tmp_dir)
 
+    # --- create ---
+
+    def test_create_assigns_an_id_and_defaults_to_backlog(self):
+        item = self.backend.create(title="New feature")
+
+        self.assertTrue(item["id"])
+        self.assertEqual(item["title"], "New feature")
+        self.assertEqual(item["status"], "Backlog")
+
+    def test_create_sets_owner_and_description_when_given(self):
+        item = self.backend.create(title="New feature", owner="alice", description="Some text.")
+
+        self.assertEqual(item["owner"], "alice")
+        self.assertEqual(item["description"], "Some text.")
+
+    def test_create_without_owner_leaves_it_unset(self):
+        item = self.backend.create(title="New feature")
+
+        self.assertIsNone(item["owner"])
+
+    def test_created_item_is_retrievable_by_its_returned_id(self):
+        created = self.backend.create(title="New feature")
+
+        fetched = self.backend.get(created["id"])
+
+        self.assertEqual(fetched["title"], "New feature")
+
+    def test_create_assigns_distinct_ids_to_successive_items(self):
+        first = self.backend.create(title="First")
+        second = self.backend.create(title="Second")
+
+        self.assertNotEqual(first["id"], second["id"])
+
+    def test_create_requires_a_title(self):
+        with self.assertRaises(Exception):
+            self.backend.create(title="")
+
     # --- list ---
 
     def test_list_returns_all_items(self):
-        self.create_item("WI-0001", title="First")
-        self.create_item("WI-0002", title="Second")
+        first_id = self.create_item(title="First")
+        second_id = self.create_item(title="Second")
 
         items = self.backend.list()
 
-        self.assertEqual({item["id"] for item in items}, {"WI-0001", "WI-0002"})
+        self.assertEqual({item["id"] for item in items}, {first_id, second_id})
 
     def test_list_on_empty_store_returns_empty_list(self):
         self.assertEqual(self.backend.list(), [])
 
     def test_list_filters_by_status(self):
-        self.create_item("WI-0001", status="Backlog")
-        self.create_item("WI-0002", status="Done")
+        self.create_item(status="Backlog")
+        done_id = self.create_item(status="Done")
 
         items = self.backend.list(status="Done")
 
-        self.assertEqual([item["id"] for item in items], ["WI-0002"])
+        self.assertEqual([item["id"] for item in items], [done_id])
 
     def test_list_filters_by_owner(self):
-        self.create_item("WI-0001", owner="alice")
-        self.create_item("WI-0002", owner="bob")
+        self.create_item(owner="alice")
+        bob_id = self.create_item(owner="bob")
 
         items = self.backend.list(owner="bob")
 
-        self.assertEqual([item["id"] for item in items], ["WI-0002"])
+        self.assertEqual([item["id"] for item in items], [bob_id])
 
     # --- get ---
 
     def test_get_returns_full_item(self):
-        self.create_item(
-            "WI-0001", title="Rate limiting", status="In Progress",
+        item_id = self.create_item(
+            title="Rate limiting", status="In Progress",
             owner="alice", description="Add a limiter.",
         )
 
-        item = self.backend.get("WI-0001")
+        item = self.backend.get(item_id)
 
-        self.assertEqual(item["id"], "WI-0001")
+        self.assertEqual(item["id"], item_id)
         self.assertEqual(item["title"], "Rate limiting")
         self.assertEqual(item["status"], "In Progress")
         self.assertEqual(item["owner"], "alice")
@@ -121,62 +143,62 @@ class WorkItemsContractTestCase:
     # --- claim ---
 
     def test_claim_sets_owner(self):
-        self.create_item("WI-0001", owner="")
+        item_id = self.create_item(owner=None)
 
-        item = self.backend.claim("WI-0001", owner="alice")
+        item = self.backend.claim(item_id, owner="alice")
 
         self.assertEqual(item["owner"], "alice")
-        self.assertEqual(self.backend.get("WI-0001")["owner"], "alice")
+        self.assertEqual(self.backend.get(item_id)["owner"], "alice")
 
     def test_claim_without_owner_leaves_existing_owner_unchanged(self):
-        self.create_item("WI-0001", owner="alice")
+        item_id = self.create_item(owner="alice")
 
-        item = self.backend.claim("WI-0001")
+        item = self.backend.claim(item_id)
 
         self.assertEqual(item["owner"], "alice")
 
     # --- set-status ---
 
     def test_set_status_updates_status(self):
-        self.create_item("WI-0001", status="Backlog")
+        item_id = self.create_item(status="Backlog")
 
-        item = self.backend.set_status("WI-0001", "In Progress")
+        item = self.backend.set_status(item_id, "In Progress")
 
         self.assertEqual(item["status"], "In Progress")
-        self.assertEqual(self.backend.get("WI-0001")["status"], "In Progress")
+        self.assertEqual(self.backend.get(item_id)["status"], "In Progress")
 
     def test_set_status_rejects_unknown_status(self):
-        self.create_item("WI-0001", status="Backlog")
+        item_id = self.create_item(status="Backlog")
 
         with self.assertRaises(Exception):
-            self.backend.set_status("WI-0001", "Not-A-Status")
-        self.assertEqual(self.backend.get("WI-0001")["status"], "Backlog")
+            self.backend.set_status(item_id, "Not-A-Status")
+        self.assertEqual(self.backend.get(item_id)["status"], "Backlog")
 
     def test_set_status_accepts_every_vocabulary_value(self):
-        self.create_item("WI-0001", status="Backlog")
+        item_id = self.create_item(status="Backlog")
 
         for status in (
             "Backlog", "Ready", "In Progress", "Parked",
             "Waiting for Approval", "Done", "Blocked", "Cancelled",
         ):
-            item = self.backend.set_status("WI-0001", status)
+            item = self.backend.set_status(item_id, status)
             self.assertEqual(item["status"], status)
 
     # --- append-result ---
 
     def test_append_result_adds_a_reference(self):
-        self.create_item("WI-0001")
+        item_id = self.create_item()
 
-        item = self.backend.append_result("WI-0001", "https://example.org/pr/1")
+        item = self.backend.append_result(item_id, "https://example.org/pr/1")
 
         self.assertIn("https://example.org/pr/1", item["result-link"])
-        self.assertIn("https://example.org/pr/1", self.backend.get("WI-0001")["result-link"])
+        self.assertIn("https://example.org/pr/1", self.backend.get(item_id)["result-link"])
 
     def test_append_result_twice_keeps_both_references_in_order(self):
-        self.create_item("WI-0001")
+        item_id = self.create_item()
 
-        self.backend.append_result("WI-0001", "https://example.org/pr/1")
-        item = self.backend.append_result("WI-0001", "https://example.org/pr/2")
+        self.backend.append_result(item_id, "https://example.org/pr/1")
+        item = self.backend.append_result(item_id, "https://example.org/pr/2")
 
         self.assertEqual(
             item["result-link"],
@@ -184,9 +206,9 @@ class WorkItemsContractTestCase:
         )
 
     def test_append_result_does_not_touch_other_sections(self):
-        self.create_item("WI-0001", description="Original description.")
+        item_id = self.create_item(description="Original description.")
 
-        item = self.backend.append_result("WI-0001", "https://example.org/pr/1")
+        item = self.backend.append_result(item_id, "https://example.org/pr/1")
 
         self.assertEqual(item["description"], "Original description.")
 

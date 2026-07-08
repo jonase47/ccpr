@@ -16,23 +16,35 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "lib"))
 
 from workitems import local  # noqa: E402
 
-from .contract import ITEM_TEMPLATE, WorkItemsContractTestCase
+from .contract import WorkItemsContractTestCase
+
+# Raw fixture template for local-only white-box tests that need to write a Markdown
+# file directly (bypassing backend.create()) to set up a specific starting shape.
+ITEM_TEMPLATE = """---
+id: {id}
+title: {title}
+status: {status}
+type: feat
+owner: {owner}
+refs: [ADR-0011]
+tags: [security]
+created: 2026-07-08
+---
+
+{description}
+
+## Acceptance Criteria
+- Criterion one.
+- Criterion two.
+
+## Result
+<!-- append-result writes PR/commit links here -->
+"""
 
 
 class LocalBackendContractTest(WorkItemsContractTestCase, unittest.TestCase):
     def create_backend(self, workitems_dir):
         return local.create({"workitems_dir": workitems_dir})
-
-    def create_item(self, item_id, title="Untitled", status="Backlog", owner="",
-                     description="Description."):
-        path = Path(self.tmp_dir) / f"{item_id}.md"
-        path.write_text(
-            ITEM_TEMPLATE.format(
-                id=item_id, title=title, status=status, owner=owner,
-                description=description,
-            ),
-            encoding="utf-8",
-        )
 
 
 class LocalBackendWriteFailureTest(unittest.TestCase):
@@ -92,6 +104,52 @@ class LocalBackendAppendResultWithoutSectionTest(unittest.TestCase):
             item["result-link"],
             ["https://example.org/pr/1", "https://example.org/pr/2"],
         )
+
+
+class LocalBackendCreateTest(unittest.TestCase):
+    """local-specific create() behaviour beyond the backend-neutral contract suite:
+    monotonic WI-NNNN id assignment and the body shape written to disk."""
+
+    def setUp(self):
+        self.tmp_dir = tempfile.mkdtemp(prefix="ccpr-workitems-create-")
+        self.addCleanup(shutil.rmtree, self.tmp_dir, ignore_errors=True)
+        self.backend = local.create({"workitems_dir": self.tmp_dir})
+
+    def test_first_item_in_an_empty_store_is_wi_0001(self):
+        item = self.backend.create(title="First")
+
+        self.assertEqual(item["id"], "WI-0001")
+
+    def test_ids_are_monotonic_and_zero_padded(self):
+        self.backend.create(title="First")
+        self.backend.create(title="Second")
+        third = self.backend.create(title="Third")
+
+        self.assertEqual(third["id"], "WI-0003")
+
+    def test_next_id_continues_after_the_highest_existing_file_not_the_count(self):
+        # A gap (WI-0001 missing, e.g. archived/deleted) must not cause a collision.
+        (Path(self.tmp_dir) / "WI-0005.md").write_text(
+            ITEM_TEMPLATE.format(
+                id="WI-0005", title="Existing", status="Backlog", owner="",
+                description="Description.",
+            ),
+            encoding="utf-8",
+        )
+
+        item = self.backend.create(title="Next")
+
+        self.assertEqual(item["id"], "WI-0006")
+
+    def test_created_item_has_empty_acceptance_criteria_and_result_sections(self):
+        item = self.backend.create(title="First")
+
+        path = Path(self.tmp_dir) / f"{item['id']}.md"
+        text = path.read_text(encoding="utf-8")
+
+        self.assertIn("## Acceptance Criteria", text)
+        self.assertIn("## Result", text)
+        self.assertEqual(item["result-link"], [])
 
 
 if __name__ == "__main__":
