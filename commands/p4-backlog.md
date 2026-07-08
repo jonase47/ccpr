@@ -60,10 +60,23 @@ Delegate effort estimation and technical validation to the **senior-developer** 
 > 4. Are there technical dependencies not reflected in the backlog?
 > 5. What should be implemented in the first sprint to lay a solid foundation?
 
-### 4. Write Detail Files
+### 4. Create Work Items (work-item-backend contract, ADR-0002 §8)
+For every user story from step 2/3, instead of authoring it as BACKLOG.md prose, create it as a
+work item:
+
+```
+python3 ~/.claude/scripts/workitems.py create --title "<story title>" --type feat --description "<story text + acceptance criteria>"
+```
+
+The backend assigns the `id` (`WI-NNNN` on the `local` provider) — never invent one. This is the
+adoption point: it establishes the structured store, so no prose-fallback branch applies here (see
+Manual/WORKITEMS.md §8 for the full adoption guard used by commands that transition an *existing*
+store). `BACKLOG.md` becomes a generated **view** over the created items, not their source of truth.
+
+### 5. Write Detail Files
 This subskill writes the phase index `PROJECT_PLAN.md` plus the backlog. The backlog uses one of two layouts depending on size — both belong in `docs/planning/`.
 
-#### 4a. Choose Backlog Layout
+#### 5a. Choose Backlog Layout
 
 | Condition | Layout |
 |---|---|
@@ -72,7 +85,7 @@ This subskill writes the phase index `PROJECT_PLAN.md` plus the backlog. The bac
 
 Sub-Index layout follows the generic convention in `~/.claude/docs/PROJECT_PHASES.md` ("Sub-Index for growing detail files").
 
-#### 4b. Flat Layout (small backlogs)
+#### 5b. Flat Layout (small backlogs)
 
 Write `docs/planning/BACKLOG.md` with frontmatter:
 
@@ -88,7 +101,7 @@ last_updated: <DD.MM.YYYY>
 
 Body sections: `## Epics`, `## User Stories` (per epic), `## Estimates & Acceptance Criteria`, `## Dependencies`, `## Labels`.
 
-#### 4c. Sub-Index Layout (recommended for MVP-scale backlogs)
+#### 5c. Sub-Index Layout (recommended for MVP-scale backlogs)
 
 Write a lean **sub-index** `docs/planning/BACKLOG.md`:
 
@@ -129,7 +142,7 @@ Optional cross-reference files in `docs/planning/backlog/`:
 - `STORY_INDEX.md` — table of all stories at a glance: `Story-ID | Epic | Title | T-Shirt | Status | Detail-File`
 - `FEATURE_COVERAGE.md` — feature-ID ↔ epic mapping (if Feature-IDs are referenced from stories)
 
-#### 4d. Phase Index `PROJECT_PLAN.md`
+#### 5d. Phase Index `PROJECT_PLAN.md`
 
 Create from index template if missing — see `~/.claude/docs/PROJECT_PHASES.md`. Populate:
 - `## Key Decisions`: lift the milestone names + their dates (e.g. `- M1: MVP feature-complete by 30.06.2026 → see PROJECT_PLAN.md (Milestones section)`).
@@ -151,7 +164,10 @@ All IDs follow this consistent schema. Phase is metadata in BACKLOG.md, not part
 
 ## Result
 
-- **`docs/planning/BACKLOG.md`** (living, prioritized, estimated backlog with frontmatter `status: living`)
+- Work items created via `workitems create` — one per story, backend-assigned ids (source of truth)
+- **`docs/planning/BACKLOG.md`** (generated **view** over the created items — living, prioritized,
+  estimated; frontmatter `status: living`; item status is never hand-edited here, see
+  Manual/WORKITEMS.md §8)
 - **`docs/planning/PROJECT_PLAN.md`** (phase index with `## Milestones & Release Planning` body section)
 - Foundation for `/p4-sprint` (populate first sprint) and all P5 commands
 
