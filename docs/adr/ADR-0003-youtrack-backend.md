@@ -117,6 +117,27 @@ step, not a backend responsibility.
 - **Raw custom-field writes** for state/assignee: dispreferred vs the Command API, which is name-based
   and avoids resolving numeric field IDs at all.
 
+## Implementation notes (validated against a live instance)
+
+Points the first implementation had to resolve, verified read-only against a real self-hosted YouTrack:
+
+- **Project id resolution.** `POST /api/issues` needs the project's internal id, not its short name.
+  Resolve `project` (short name in config) → id by lookup — the same "resolve by name" principle,
+  extended to the project axis. The lookup endpoint is admin-scoped, so a minimally-scoped token may
+  lack permission; the backend raises a clear error distinguishing "not permitted" from "not found".
+- **`append-result` uses a machine marker, not a human phrase.** Result comments are tagged with
+  `<!-- ccpr:result -->` so `get`/`list` can distinguish them from ordinary human comments; an English
+  prefix like "Result:" would collide with comments a person might actually type.
+- **Listing disables pagination explicitly** (`$top=-1`) rather than trusting the tracker's default
+  page size — otherwise a large project silently returns a truncated list, which would corrupt any
+  bulk operation (`lift`/`migrate`).
+- **Out-of-vocabulary read states pass through with a warning.** A project may carry `State` values
+  outside CCPR's vocabulary and without a `stateMap` entry; on read the raw name is surfaced with a
+  one-line warning rather than dropped or silently coerced. `set-status` still validates on write.
+- **Invalid commands are rejected atomically.** An unresolvable `State`/`for <user>` command returns
+  HTTP 400 and leaves the issue unchanged (no partial apply) — it surfaces as an error, never a silent
+  "applied". This is why the write-loop can trust a successful command.
+
 ## Notes
 
 The concrete API behaviours above are abstracted from a real self-hosted YouTrack integration; the
