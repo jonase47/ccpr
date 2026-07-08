@@ -109,6 +109,18 @@ class MigrateLocalToYouTrackTest(unittest.TestCase):
         # second item -- NOT a duplicate "First item".
         self.assertEqual(len(self.target_backend.list()), 2)
 
+    def test_report_exposes_fully_migrated_decoupled_from_archived(self):
+        # source_workitems_dir=None simulates a non-local source: there is nothing to
+        # archive, but every item still made it across -- these are two DIFFERENT
+        # facts, and the report must expose both, not conflate them.
+        report = migrate.migrate(
+            self.source_backend, self.target_backend, str(self.idmap_path),
+            source_workitems_dir=None, clock=FIXED_CLOCK,
+        )
+
+        self.assertTrue(report["fully_migrated"])
+        self.assertFalse(report["archived"])
+
 
 if __name__ == "__main__":
     unittest.main()

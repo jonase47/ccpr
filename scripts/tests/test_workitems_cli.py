@@ -340,6 +340,56 @@ class WorkitemsCliTest(unittest.TestCase):
         idmap_path = self.project_dir / "docs" / "workitems-idmap.yml"
         self.assertEqual(idmap_path.read_text(encoding="utf-8").count("WI-0001"), 1)
 
+    def test_migrate_from_a_non_local_source_still_flips_provider_on_full_success(self):
+        # A non-local source has nothing to archive (source_workitems_dir is None),
+        # so report["archived"] is always False for it -- the provider flip must be
+        # gated on fully_migrated, not archived, or a non-local->X migration would
+        # never flip the active provider even on complete success.
+        source_provider_name = self._write_provider(
+            "_test_fake_nonlocal_source",
+            "from workitems import WorkItemError\n\n"
+            "_ITEMS = {'FAKE-SRC-1': {'id': 'FAKE-SRC-1', 'title': 'Existing item',\n"
+            "    'status': 'Backlog', 'description': '', 'result-link': [], 'owner': None}}\n"
+            "_NEXT = [2]\n\n"
+            "def create(config):\n"
+            "    return _FakeBackend()\n\n"
+            "class _FakeBackend:\n"
+            "    def create(self, title, item_type=None, owner=None, description=None):\n"
+            "        item_id = f'FAKE-SRC-{_NEXT[0]}'\n"
+            "        _NEXT[0] += 1\n"
+            "        item = {'id': item_id, 'title': title, 'status': 'Backlog',\n"
+            "                'description': description or '', 'result-link': [], 'owner': owner}\n"
+            "        _ITEMS[item_id] = item\n"
+            "        return dict(item)\n"
+            "    def list(self, status=None, owner=None):\n"
+            "        return [dict(i) for i in _ITEMS.values()]\n"
+            "    def get(self, item_id):\n"
+            "        if item_id not in _ITEMS:\n"
+            "            raise WorkItemError(f'Unknown work item: {item_id}')\n"
+            "        return dict(_ITEMS[item_id])\n"
+            "    def claim(self, item_id, owner=None):\n"
+            "        if owner is not None:\n"
+            "            _ITEMS[item_id]['owner'] = owner\n"
+            "        return dict(_ITEMS[item_id])\n"
+            "    def set_status(self, item_id, status):\n"
+            "        _ITEMS[item_id]['status'] = status\n"
+            "        return dict(_ITEMS[item_id])\n"
+            "    def append_result(self, item_id, ref):\n"
+            "        _ITEMS[item_id]['result-link'].append(ref)\n"
+            "        return dict(_ITEMS[item_id])\n",
+        )
+        self._use_provider(source_provider_name)
+
+        result = self.run_cli("migrate", "--to", "local")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        report = json.loads(result.stdout)
+        self.assertTrue(report["fully_migrated"])
+        self.assertFalse(report["archived"])
+
+        settings = json.loads((self.project_dir / "settings.json").read_text(encoding="utf-8"))
+        self.assertEqual(settings["workitems"]["provider"], "local")
+
     def test_missing_dependency_inside_valid_provider_is_not_misreported_as_unknown_provider(self):
         provider_name = self._write_provider(
             "_test_provider_with_missing_dep",

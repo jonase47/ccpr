@@ -179,10 +179,12 @@ def _run_migrate(settings, args, source_provider, source_config, source_backend)
         source_workitems_dir=source_workitems_dir,
     )
 
-    # Leave exactly one active backend afterward (ADR-0002/ADR-0004): once every
-    # source item is accounted for (migrate() only archives once that's true),
-    # flip settings.json's active provider to the target.
-    if report.get("archived"):
+    # Leave exactly one active backend afterward (ADR-0002/ADR-0004): flip
+    # settings.json's active provider once every source item is accounted for.
+    # Gated on fully_migrated, NOT archived -- archived is only ever True for a
+    # filesystem-based (local) source, so gating on it meant a non-local source
+    # never flipped the provider even on complete, successful migration.
+    if report.get("fully_migrated"):
         _update_provider_in_settings(args.project_dir, target_provider)
 
     return report

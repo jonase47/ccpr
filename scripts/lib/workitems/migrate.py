@@ -108,6 +108,7 @@ def migrate(source_backend, target_backend, idmap_path, source_workitems_dir=Non
 
     report["archived"] = False
     fully_migrated = all(item["id"] in idmap for item in source_items)
+    report["fully_migrated"] = fully_migrated
     if fully_migrated and source_workitems_dir is not None and os.path.isdir(source_workitems_dir):
         archive_path = _archive(source_workitems_dir, archive_root, clock)
         report["archived"] = True
