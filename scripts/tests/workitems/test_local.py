@@ -106,6 +106,45 @@ class LocalBackendAppendResultWithoutSectionTest(unittest.TestCase):
         )
 
 
+class LocalBackendClaimingTest(unittest.TestCase):
+    """Claiming is mandatory for remote backends and a genuine no-op for `local`
+    (ADR-0002 §6 / ADR-0005): local has nothing to lock, no runner concept, no
+    heartbeat -- these tests confirm the no-op holds, not just "doesn't error"."""
+
+    def setUp(self):
+        self.tmp_dir = tempfile.mkdtemp(prefix="ccpr-workitems-claiming-")
+        self.addCleanup(shutil.rmtree, self.tmp_dir, ignore_errors=True)
+        self.backend = local.create({"workitems_dir": self.tmp_dir})
+
+    def test_items_always_expose_runner_and_heartbeat_as_none(self):
+        item = self.backend.create(title="First")
+
+        self.assertIsNone(item["runner"])
+        self.assertIsNone(item["heartbeat"])
+
+    def test_claim_with_runner_is_accepted_but_ignored(self):
+        item = self.backend.create(title="First")
+
+        claimed = self.backend.claim(item["id"], owner="alice", runner="agent-1")
+
+        self.assertEqual(claimed["owner"], "alice")
+        self.assertIsNone(claimed["runner"])
+        self.assertIsNone(claimed["heartbeat"])
+
+    def test_heartbeat_is_a_no_op(self):
+        item = self.backend.create(title="First")
+
+        result = self.backend.heartbeat(item["id"], runner="agent-1")
+
+        self.assertIsNone(result["runner"])
+        self.assertIsNone(result["heartbeat"])
+        self.assertEqual(result["status"], "Backlog")
+
+    def test_heartbeat_on_unknown_id_still_raises(self):
+        with self.assertRaises(Exception):
+            self.backend.heartbeat("WI-9999", runner="agent-1")
+
+
 class LocalBackendCreateTest(unittest.TestCase):
     """local-specific create() behaviour beyond the backend-neutral contract suite:
     monotonic WI-NNNN id assignment and the body shape written to disk."""

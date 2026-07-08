@@ -86,13 +86,20 @@ class LocalBackend:
     def get(self, item_id):
         return self._item_from_path(self._path_for(item_id))
 
-    def claim(self, item_id, owner=None):
-        """No-op beyond optionally setting owner (local has nothing to lock; ADR-0002 §6)."""
+    def claim(self, item_id, owner=None, runner=None):
+        """No-op beyond optionally setting owner (local has nothing to lock; ADR-0002
+        §6). `runner` is accepted for CLI/signature parity with remote backends but
+        genuinely ignored: local has no runner/heartbeat concept (ADR-0005)."""
         path, data, body = self._read(item_id)
         if owner is not None:
             data["owner"] = owner
         self._write(path, data, body)
         return self._item_from_data(data, body)
+
+    def heartbeat(self, item_id, runner=None):
+        """No-op (ADR-0005): local has no runner/heartbeat to refresh. Still
+        validates the id exists, matching every other operation's behaviour."""
+        return self.get(item_id)
 
     def set_status(self, item_id, status):
         if status not in STATUS_VALUES:
@@ -159,6 +166,10 @@ class LocalBackend:
             "refs": data.get("refs"),
             "tags": data.get("tags"),
             "created": data.get("created"),
+            # Claiming / branch-runner protocol (ADR-0005): local never tracks these
+            # (no runner concept, nothing to lock) -- always None, on every item.
+            "runner": None,
+            "heartbeat": None,
         }
 
 
