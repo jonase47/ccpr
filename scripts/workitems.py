@@ -13,6 +13,7 @@ Usage:
   workitems.py set-status <id> <status> [--project DIR]
   workitems.py append-result <id> <ref> [--project DIR]
   workitems.py migrate --to <provider> [--project DIR]
+  workitems.py lift <source-file...> [--apply] [--exclude PATTERN=REASON ...] [--project DIR]
 
 Output: JSON on stdout for every operation (a list for `list`, an object otherwise).
 """
@@ -29,6 +30,7 @@ DEFAULT_PROVIDER = "local"
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "lib"))
 
 from workitems import WorkItemError  # noqa: E402
+from workitems import lift as lift_module  # noqa: E402
 from workitems import migrate as migrate_module  # noqa: E402
 
 
@@ -114,6 +116,17 @@ def build_parser():
     )
     p_migrate.add_argument("--to", required=True, help="Target provider name")
 
+    p_lift = sub.add_parser(
+        "lift", help="Propose local items from prose sources; dry-run by default (ADR-0004)",
+        parents=[project_arg],
+    )
+    p_lift.add_argument("source_files", nargs="+", metavar="SOURCE_FILE")
+    p_lift.add_argument("--apply", action="store_true", help="Write proposed items (default: dry-run)")
+    p_lift.add_argument(
+        "--exclude", action="append", default=[], metavar="PATTERN=REASON",
+        help="Exclude lines matching PATTERN (regex), reported with REASON (repeatable)",
+    )
+
     return parser
 
 
@@ -171,17 +184,32 @@ def _update_provider_in_settings(project_dir, new_provider):
         f.write("\n")
 
 
+def _run_lift(settings, args):
+    """`lift` always targets the `local` backend (ADR-0004: heterogeneous -> local),
+    regardless of whichever provider is currently active — it must not fail just
+    because the active provider (e.g. a remote one) happens to be misconfigured."""
+    local_config = resolve_provider_config(settings, args.project_dir, "local")
+    local_backend = load_backend("local", local_config)
+    exclude_rules = [lift_module.parse_exclude_rule(raw) for raw in args.exclude]
+    return lift_module.lift(
+        args.source_files, local_backend, exclude_rules=exclude_rules, apply=args.apply,
+    )
+
+
 def main(argv=None):
     args = build_parser().parse_args(argv)
 
     try:
         settings = load_settings(args.project_dir)
-        provider, config = resolve_provider(settings, args.project_dir)
-        backend = load_backend(provider, config)
-        if args.operation == "migrate":
-            result = _run_migrate(settings, args, provider, config, backend)
+        if args.operation == "lift":
+            result = _run_lift(settings, args)
         else:
-            result = dispatch(backend, args)
+            provider, config = resolve_provider(settings, args.project_dir)
+            backend = load_backend(provider, config)
+            if args.operation == "migrate":
+                result = _run_migrate(settings, args, provider, config, backend)
+            else:
+                result = dispatch(backend, args)
     except UnknownProviderError as exc:
         print(f"Unknown work-item provider: {exc}", file=sys.stderr)
         return 1

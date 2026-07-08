@@ -197,6 +197,49 @@ class WorkitemsCliTest(unittest.TestCase):
         self.assertIn("broken provider: missing token", result.stderr)
         self.assertNotIn("Traceback", result.stderr)
 
+    def test_lift_dry_run_writes_nothing(self):
+        source_path = self.project_dir / "OLD_BACKLOG.md"
+        source_path.write_text("- [ ] Add rate limiting to login endpoint\n", encoding="utf-8")
+
+        result = self.run_cli("lift", str(source_path))
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        report = json.loads(result.stdout)
+        self.assertEqual(len(report["proposed"]), 1)
+        self.assertFalse(report["applied"])
+        # WI-0001 from setUp's fixture is the only item; dry run created nothing new.
+        list_result = self.run_cli("list")
+        self.assertEqual(len(json.loads(list_result.stdout)), 1)
+
+    def test_lift_apply_writes_the_proposed_item(self):
+        source_path = self.project_dir / "OLD_BACKLOG.md"
+        source_path.write_text("- [x] Fix flaky test in auth module\n", encoding="utf-8")
+
+        result = self.run_cli("lift", str(source_path), "--apply")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        report = json.loads(result.stdout)
+        self.assertTrue(report["applied"])
+        self.assertIsNotNone(report["proposed"][0]["id"])
+
+        list_result = self.run_cli("list")
+        titles = [item["title"] for item in json.loads(list_result.stdout)]
+        self.assertIn("Fix flaky test in auth module", titles)
+
+    def test_lift_exclude_flag_excludes_a_line_with_reason(self):
+        source_path = self.project_dir / "OLD_BACKLOG.md"
+        source_path.write_text("- [ ] Roll out feature flag for new dashboard\n", encoding="utf-8")
+
+        result = self.run_cli(
+            "lift", str(source_path),
+            "--exclude", "feature flag=ops rollout note, not a work item",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["proposed"], [])
+        self.assertEqual(report["excluded"][0]["reason"], "ops rollout note, not a work item")
+
     def test_migrate_moves_items_to_target_and_flips_the_active_provider(self):
         # Self-contained in-memory fake target: no network, no cross-invocation
         # persistence needed since this test only makes ONE CLI call and inspects
