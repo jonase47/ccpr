@@ -132,6 +132,13 @@ class MigrateLocalToYouTrackTest(unittest.TestCase):
         self.assertEqual([source_id for source_id, _ in report["migrated"]],
                           [self.first_id, self.second_id])
 
+    def test_carries_over_type_to_the_target(self):
+        typed = self.source_backend.create(title="Typed item", item_type="feat")
+
+        self.run_migrate()
+
+        self.assertIn("Type feat", self.transport.commands_received)
+
     def test_report_exposes_fully_migrated_decoupled_from_archived(self):
         # source_workitems_dir=None simulates a non-local source: there is nothing to
         # archive, but every item still made it across -- these are two DIFFERENT

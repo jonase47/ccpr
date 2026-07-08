@@ -106,7 +106,8 @@ def migrate(source_backend, target_backend, idmap_path, source_workitems_dir=Non
             description = f"{description}\n\n{provenance}" if description else provenance
 
             created = target_backend.create(
-                title=item["title"], owner=item.get("owner"), description=description,
+                title=item["title"], item_type=item.get("type"),
+                owner=item.get("owner"), description=description,
             )
             target_id = created["id"]
 
