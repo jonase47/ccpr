@@ -81,17 +81,33 @@ def _parse_scalar(value):
 
 
 def _strip_inline_comment(value):
-    """Strip a trailing `# comment`, but never split on a `#` inside a quoted value."""
+    """Strip a trailing `# comment`, but never split on a `#` inside a quoted value.
+
+    Scans char-by-char honoring `\\` as an escape prefix, so an escaped quote
+    (`\\"` inside a double-quoted value) never ends the scan early — the previous
+    heuristic ("find the next occurrence of the opening quote character") broke on
+    any value that itself contained that character unescaped, e.g. the apostrophe
+    in `'It's "done"'`.
+    """
     value = value.strip()
     if value and value[0] in ("'", '"'):
         quote = value[0]
-        closing = value.find(quote, 1)
-        if closing != -1:
-            remainder = value[closing + 1:]
-            if "#" in remainder:
-                remainder = remainder.split("#", 1)[0]
-            return (value[:closing + 1] + remainder).strip()
-        return value  # no closing quote found; treat literally rather than guess
+        i = 1
+        closing = None
+        while i < len(value):
+            if value[i] == "\\" and i + 1 < len(value):
+                i += 2
+                continue
+            if value[i] == quote:
+                closing = i
+                break
+            i += 1
+        if closing is None:
+            return value  # no closing quote found; treat literally rather than guess
+        remainder = value[closing + 1:]
+        if "#" in remainder:
+            remainder = remainder.split("#", 1)[0]
+        return (value[:closing + 1] + remainder).strip()
     if "#" in value:
         value = value.split("#", 1)[0]
     return value.strip()
@@ -99,7 +115,12 @@ def _strip_inline_comment(value):
 
 def _unquote(value):
     if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
-        return value[1:-1]
+        inner = value[1:-1]
+        if value[0] == '"':
+            # Reverse of _format_value's escaping, in the opposite order: unescape
+            # \" before \\, or a literal \\" would be mis-decoded.
+            inner = inner.replace('\\"', '"').replace("\\\\", "\\")
+        return inner
     return value
 
 
@@ -111,7 +132,10 @@ def _format_value(value):
     text = str(value)
     if text.startswith("[") or "#" in text:
         # Quote so a later parse doesn't mistake this for an inline list (leading
-        # "[") or a comment marker ("#").
-        quote = "'" if '"' in text else '"'
-        return f"{quote}{text}{quote}"
+        # "[") or a comment marker ("#"). Always double-quote and ESCAPE embedded
+        # quotes/backslashes rather than heuristically picking single vs. double as
+        # the delimiter — a value containing BOTH quote characters (e.g. an
+        # apostrophe and a literal double quote) has no safe delimiter to pick.
+        escaped = text.replace("\\", "\\\\").replace('"', '\\"')
+        return f'"{escaped}"'
     return text
