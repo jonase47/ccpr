@@ -5,7 +5,22 @@ Tests an implemented feature against its requirements from a user perspective: a
 ## Argument: $ARGUMENTS = [Feature name/Story ID]
 
 If provided: Test the named feature against its acceptance criteria.
-If not provided: Read SPRINT.md and ask which feature should be tested. If context is missing, ask for the feature name or story ID.
+If not provided: resolve the story via the work-item adoption guard below (falls back to reading
+SPRINT.md and asking, if the project is still on prose). If context is missing, ask for the feature
+name or story ID.
+
+## 0. Work-item adoption guard (ADR-0002 §8)
+
+Run `python3 ~/.claude/scripts/workitems.py list`.
+- **Non-empty array** → the project uses the structured store. Use the CLI for all item state below:
+  - No `$ARGUMENTS`: resolve the story via `workitems list --status "Waiting for Approval"`, pick
+    the top item, ask for confirmation. Acceptance criteria come from `workitems get <id>`
+    (`description` field) instead of BACKLOG.md prose.
+- **`[]` and no `docs/workitems/` directory** → still on prose. Read SPRINT.md/BACKLOG.md to
+  find/ask which story is next, as before. Emit one line: *"Tip: run `lift` to adopt the structured
+  work-item store."*
+
+See Manual/WORKITEMS.md §8 for the full guard rationale and the status-verb mapping.
 
 ## Execution
 
@@ -67,14 +82,21 @@ Create **ACCEPTANCE_[Feature-Name].md** in the `tests/` directory (or supplement
 - List of found bugs with severity
 - Overall evaluation: Done / Conditionally Done / Not Done
 
-Update **SPRINT.md**: story status to "Done" or back to "In Dev".
+On completion, using the same guard result from step 0:
+- Structured store: accepted → `workitems set-status <id> "Done"`; rejected →
+  `workitems set-status <id> "In Progress"`.
+- Prose fallback: update SPRINT.md — story status to "Done" or back to "In Dev".
+
+Once wired, item status is never hand-edited in SPRINT.md/BACKLOG.md — those are planning views
+(Manual/WORKITEMS.md §8).
 
 ## Result
 
 - **tests/ACCEPTANCE_[Feature].md** (test results per acceptance criterion)
-- **SPRINT.md** updated (story status)
+- Work item status updated (structured store) or **SPRINT.md** updated (prose fallback)
 - If bugs found: next step is `/p5-bugfix`
-- If Done: story is complete, take next story from SPRINT.md
+- If Done: story is complete, take next story from `workitems list --status "Ready"` (or SPRINT.md
+  in prose fallback)
 
 ### Handover Epilog
 Update `docs/HANDOVER.md`:
