@@ -24,8 +24,10 @@ report for this increment):
 2. **Disambiguating `append-result` comments from ordinary human comments.** The ADR
    says `append-result` "add[s] a comment with the PR/commit link" but doesn't specify
    how `get`/`list` later recognise which comments are result references versus regular
-   issue discussion. This implementation prefixes result comments with `Result: ` and
-   only surfaces comments carrying that prefix as `result-link` entries.
+   issue discussion. This implementation prefixes result comments with a machine
+   marker (`<!-- ccpr:result -->`, not English prose — a human commenting "Result:
+   I don't think this fixed it..." must not be mistaken for a real result reference)
+   and only surfaces comments carrying that marker as `result-link` entries.
 """
 
 import json
@@ -37,7 +39,7 @@ import urllib.request
 from workitems import STATUS_VALUES, WorkItemError, validate_item_id
 
 _ISSUE_FIELDS = "idReadable,summary,description,customFields(name,value(name,login)),comments(text)"
-RESULT_COMMENT_PREFIX = "Result: "
+RESULT_COMMENT_MARKER = "<!-- ccpr:result -->"
 
 
 def create(config):
@@ -135,7 +137,7 @@ class YouTrackBackend:
         validate_item_id(item_id)
         self._request(
             "POST", f"/api/issues/{item_id}/comments",
-            body={"text": f"{RESULT_COMMENT_PREFIX}{ref}"},
+            body={"text": f"{RESULT_COMMENT_MARKER} {ref}"},
         )
         return self.get(item_id)
 
@@ -191,9 +193,9 @@ class YouTrackBackend:
             owner = assignee_value.get("login") or assignee_value.get("name")
 
         result_links = [
-            comment["text"][len(RESULT_COMMENT_PREFIX):]
+            comment["text"][len(RESULT_COMMENT_MARKER):].strip()
             for comment in issue.get("comments", [])
-            if comment.get("text", "").startswith(RESULT_COMMENT_PREFIX)
+            if comment.get("text", "").startswith(RESULT_COMMENT_MARKER)
         ]
 
         return {

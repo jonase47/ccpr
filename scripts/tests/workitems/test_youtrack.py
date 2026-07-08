@@ -130,7 +130,7 @@ class YouTrackInvalidCommandTest(unittest.TestCase):
 
 class YouTrackAppendResultTest(unittest.TestCase):
     """append-result adds a comment; get/list must recognise ONLY comments carrying
-    the Result: prefix as result-link entries — an ordinary human comment on the
+    the result marker as result-link entries — an ordinary human comment on the
     issue must not be mistaken for one (ADR-0003 doesn't specify a disambiguation
     mechanism; this is this implementation's resolution of that gap)."""
 
@@ -152,6 +152,19 @@ class YouTrackAppendResultTest(unittest.TestCase):
         fetched = self.backend.get(item["id"])
 
         self.assertEqual(fetched["result-link"], ["https://example.org/pr/1"])
+
+    def test_human_comment_that_happens_to_start_with_the_word_result_is_not_picked_up(self):
+        # A human writing prose ("Result: I don't think this fixed it...") must not be
+        # mistaken for a result reference — this is exactly why an English prefix isn't
+        # a safe marker; only a marker a human would never type naturally qualifies.
+        item = self.backend.create(title="New feature")
+        self.transport._require_issue(item["id"])["comments"].append(
+            {"text": "Result: I don't think this fixed it, reverting."}
+        )
+
+        fetched = self.backend.get(item["id"])
+
+        self.assertEqual(fetched["result-link"], [])
 
 
 class YouTrackCreateFactoryTest(unittest.TestCase):
