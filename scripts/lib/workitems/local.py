@@ -90,8 +90,12 @@ class LocalBackend:
         """Write via a temp file + atomic rename so a failed write never corrupts the item."""
         text = frontmatter.render(data, body)
         tmp_path = path.with_suffix(path.suffix + ".tmp")
-        tmp_path.write_text(text, encoding="utf-8")
-        tmp_path.replace(path)
+        try:
+            tmp_path.write_text(text, encoding="utf-8")
+            tmp_path.replace(path)
+        except Exception:
+            tmp_path.unlink(missing_ok=True)
+            raise
 
     def _item_from_path(self, path):
         data, body = frontmatter.parse(path.read_text(encoding="utf-8"))
