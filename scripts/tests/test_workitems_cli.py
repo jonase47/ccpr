@@ -36,6 +36,77 @@ Add a limiter to the login endpoint.
 <!-- append-result writes PR/commit links here -->
 """
 
+# A self-contained fake provider modeling claim/heartbeat with a runner + a FIXED
+# (deliberately old) heartbeat timestamp -- old enough that it is always stale
+# relative to the real "now" a sweep CLI invocation uses (there is no clock
+# injection at the CLI boundary; sweep()'s clock parameter is for the module-level
+# tests). Persists to a JSON state file (config["state_file"]) since claim/heartbeat/
+# sweep CLI tests need STATE TO SURVIVE ACROSS SEPARATE SUBPROCESS INVOCATIONS
+# (create in one `workitems.py` call, claim in the next) -- an in-memory module
+# global (as migrate's single-invocation fake used) resets every time. This is
+# purely for proving CLI WIRING (arg parsing, config resolution, dispatch) -- the
+# actual claim/heartbeat/sweep LOGIC is covered thoroughly against the real
+# youtrack backend in test_youtrack.py / test_sweep.py.
+FAKE_CLAIMING_PROVIDER_SOURCE = (
+    "import json\n"
+    "import os\n"
+    "from workitems import WorkItemError\n\n"
+    "def create(config):\n"
+    "    return _FakeBackend(config['state_file'])\n\n"
+    "class _FakeBackend:\n"
+    "    def __init__(self, state_file):\n"
+    "        self.state_file = state_file\n"
+    "        if os.path.isfile(state_file):\n"
+    "            with open(state_file, encoding='utf-8') as f:\n"
+    "                data = json.load(f)\n"
+    "        else:\n"
+    "            data = {'items': {}, 'next': 1}\n"
+    "        self._items = data['items']\n"
+    "        self._next = data['next']\n"
+    "    def _save(self):\n"
+    "        with open(self.state_file, 'w', encoding='utf-8') as f:\n"
+    "            json.dump({'items': self._items, 'next': self._next}, f)\n"
+    "    def create(self, title, item_type=None, owner=None, description=None):\n"
+    "        item_id = f'FAKE-{self._next}'\n"
+    "        self._next += 1\n"
+    "        item = {'id': item_id, 'title': title, 'status': 'Backlog',\n"
+    "                'description': description or '', 'result-link': [], 'owner': owner,\n"
+    "                'runner': None, 'heartbeat': None}\n"
+    "        self._items[item_id] = item\n"
+    "        self._save()\n"
+    "        return dict(item)\n"
+    "    def list(self, status=None, owner=None):\n"
+    "        items = list(self._items.values())\n"
+    "        if status is not None:\n"
+    "            items = [i for i in items if i['status'] == status]\n"
+    "        return [dict(i) for i in items]\n"
+    "    def get(self, item_id):\n"
+    "        if item_id not in self._items:\n"
+    "            raise WorkItemError(f'Unknown work item: {item_id}')\n"
+    "        return dict(self._items[item_id])\n"
+    "    def claim(self, item_id, owner=None, runner=None):\n"
+    "        if owner is not None:\n"
+    "            self._items[item_id]['owner'] = owner\n"
+    "        if runner:\n"
+    "            self._items[item_id]['runner'] = runner\n"
+    "            self._items[item_id]['heartbeat'] = '2026-01-01T00:00:00+00:00'\n"
+    "            self._items[item_id]['status'] = 'In Progress'\n"
+    "        self._save()\n"
+    "        return dict(self._items[item_id])\n"
+    "    def heartbeat(self, item_id, runner):\n"
+    "        self._items[item_id]['heartbeat'] = '2030-01-01T00:00:00+00:00'\n"
+    "        self._save()\n"
+    "        return dict(self._items[item_id])\n"
+    "    def set_status(self, item_id, status):\n"
+    "        self._items[item_id]['status'] = status\n"
+    "        self._save()\n"
+    "        return dict(self._items[item_id])\n"
+    "    def append_result(self, item_id, ref):\n"
+    "        self._items[item_id]['result-link'].append(ref)\n"
+    "        self._save()\n"
+    "        return dict(self._items[item_id])\n"
+)
+
 
 class WorkitemsCliTest(unittest.TestCase):
     def setUp(self):
@@ -181,6 +252,18 @@ class WorkitemsCliTest(unittest.TestCase):
         settings_path.write_text(
             json.dumps({"workitems": {"provider": provider_name}}), encoding="utf-8",
         )
+
+    def _use_claiming_provider(self, provider_name, claiming_config=None):
+        """Like _use_provider, but also gives FAKE_CLAIMING_PROVIDER_SOURCE the
+        state_file it needs to persist across separate CLI subprocess invocations."""
+        workitems_config = {
+            "provider": provider_name,
+            provider_name: {"state_file": str(self.project_dir / "_fake_claim_state.json")},
+        }
+        if claiming_config:
+            workitems_config["claiming"] = claiming_config
+        settings_path = self.project_dir / "settings.json"
+        settings_path.write_text(json.dumps({"workitems": workitems_config}), encoding="utf-8")
 
     def test_work_item_error_from_backend_create_is_reported_cleanly(self):
         provider_name = self._write_provider(
@@ -412,6 +495,18 @@ class WorkitemsCliTest(unittest.TestCase):
 
         self.assertNotEqual(result.returncode, 0)
         self.assertNotIn(f"Unknown work-item provider: {provider_name}", result.stderr)
+
+    def test_claim_with_runner_sets_runner_and_in_progress(self):
+        provider_name = self._write_provider("_test_fake_claiming_provider", FAKE_CLAIMING_PROVIDER_SOURCE)
+        self._use_claiming_provider(provider_name)
+        item = json.loads(self.run_cli("create", "--title", "New feature").stdout)
+
+        result = self.run_cli("claim", item["id"], "--runner", "agent-1")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        claimed = json.loads(result.stdout)
+        self.assertEqual(claimed["runner"], "agent-1")
+        self.assertEqual(claimed["status"], "In Progress")
 
 
 if __name__ == "__main__":

@@ -101,6 +101,7 @@ def build_parser():
     p_claim = sub.add_parser("claim", help="Take ownership / mark active", parents=[project_arg])
     p_claim.add_argument("id")
     p_claim.add_argument("--owner")
+    p_claim.add_argument("--runner", help="Runner identity (ADR-0005); mandatory-claiming on remote backends")
 
     p_set_status = sub.add_parser("set-status", help="Move an item through its lifecycle", parents=[project_arg])
     p_set_status.add_argument("id")
@@ -141,7 +142,7 @@ def dispatch(backend, args):
     if args.operation == "get":
         return backend.get(args.id)
     if args.operation == "claim":
-        return backend.claim(args.id, owner=args.owner)
+        return backend.claim(args.id, owner=args.owner, runner=args.runner)
     if args.operation == "set-status":
         return backend.set_status(args.id, args.status)
     if args.operation == "append-result":
