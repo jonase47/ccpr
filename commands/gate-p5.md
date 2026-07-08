@@ -20,6 +20,17 @@ Before evaluating the gate, ensure the whole-sprint code review exists and is cu
 
 **Use the result:** the holistic review feeds the "Code review" criterion (§2.4). Any unresolved CRITICAL/HIGH finding is a gate blocker → `/p5-bugfix`, then re-run the gate (the guard re-runs the review against the new HEAD).
 
+### 0a. Work-item adoption guard (ADR-0002 §8)
+
+Run `python3 ~/.claude/scripts/workitems.py list`.
+- **Non-empty array** → the project uses the structured store. Use the CLI for all story-status
+  data below (the "Story status" criterion in step 2 and the write-back in step 3), instead of
+  reading it from BACKLOG.md prose.
+- **`[]` and no `docs/workitems/` directory** → still on prose. Read SPRINT.md/BACKLOG.md for
+  story status, as before. Emit one line: *"Tip: run `lift` to adopt the structured work-item store."*
+
+See Manual/WORKITEMS.md §8 for the full guard rationale and the status-verb mapping.
+
 ### 1. Read Preflight Report
 
 Read `docs/.gate-preflight-p5.md` as the primary source of information. This report contains:
@@ -28,7 +39,7 @@ Read `docs/.gate-preflight-p5.md` as the primary source of information. This rep
 - Document summaries (via Ollama, if available)
 
 If the preflight report does not exist or is older than 10 minutes, read the sprint documents directly instead:
-- **SPRINT.md**, **BACKLOG.md**, **reviews/**, **tests/**, **RISKS.md**
+- **SPRINT.md**, **BACKLOG.md** (or `workitems list`, per the §8 guard above), **reviews/**, **tests/**, **RISKS.md**
 
 ### 1a. Constitution Inviolables (mandatory pre-gate)
 
@@ -66,8 +77,16 @@ Delegate the sprint gate check to the **project-planner** agent with a focused p
 
 ### 3. Create Gate Protocol
 
-Add the gate result to **SPRINT.md** (sprint review and retrospective).
-Update **BACKLOG.md**: mark completed stories, return deferred stories to the backlog.
+Add the gate result to **SPRINT.md** (sprint review and retrospective — this stays prose narrative,
+not item state, per Manual/WORKITEMS.md §10).
+
+Using the guard result from step 0a:
+- Structured store: `workitems set-status <id> "Done"` for every completed story; `workitems
+  set-status <id> "Backlog"` for every deferred story.
+- Prose fallback: update BACKLOG.md — mark completed stories, return deferred stories to the backlog.
+
+Once wired, item status is never hand-edited in SPRINT.md/BACKLOG.md — those are planning views
+(Manual/WORKITEMS.md §8).
 
 ---
 
@@ -96,7 +115,8 @@ The following points are covered by preflight (mechanically) and agent (content)
 ## Result
 
 - **SPRINT.md** (updated with gate result, sprint review, retrospective)
-- **BACKLOG.md** (updated with deferred stories)
+- Work item statuses updated (structured store) or **BACKLOG.md** updated (prose fallback) with
+  completed/deferred stories
 
 ## Possible Outcomes
 
@@ -111,7 +131,8 @@ The following points are covered by preflight (mechanically) and agent (content)
 When this gate runs, perform the operations strictly in this order. The HANDOVER update must precede the cleanup so that an aborted run never leaves a missing handover behind:
 
 1. Add gate result to **`docs/planning/SPRINT.md`** (sprint review + retrospective from §3 above)
-2. Update **`docs/planning/BACKLOG.md`**: mark completed stories Done, return deferred stories
+2. Structured store: `workitems set-status <id> "Done"` / `"Backlog"` per story (§3 above). Prose
+   fallback: update **`docs/planning/BACKLOG.md`** — mark completed stories Done, return deferred stories
 3. Update **`docs/HANDOVER.md`** (see Handover Epilogue below)
 4. **Cleanup**: `rm -f docs/.gate-preflight-p5.md` (last operation)
 
