@@ -9,13 +9,19 @@ Usage:
   workitems.py create --title T [--type X] [--owner O] [--description D] [--project DIR]
   workitems.py list [--status STATUS] [--owner OWNER] [--project DIR]
   workitems.py get <id> [--project DIR]
-  workitems.py claim <id> [--owner OWNER] [--project DIR]
+  workitems.py claim <id> [--owner OWNER] [--runner R] [--project DIR]
+  workitems.py heartbeat <id> --runner R [--project DIR]
   workitems.py set-status <id> <status> [--project DIR]
   workitems.py append-result <id> <ref> [--project DIR]
   workitems.py migrate --to <provider> [--project DIR]
   workitems.py lift <source-file...> [--apply] [--exclude PATTERN=REASON ...] [--project DIR]
+  workitems.py sweep [--project DIR]
 
 Output: JSON on stdout for every operation (a list for `list`, an object otherwise).
+
+Claiming (ADR-0005): --runner records the runner:<id> signal + a heartbeat and sets
+In Progress; mandatory for remote backends, a no-op for `local`. `sweep` reconciles
+abandoned claims into Parked based on `workitems.claiming.staleAfter` in settings.json.
 """
 
 import argparse
