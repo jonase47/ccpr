@@ -103,6 +103,13 @@ def build_parser():
     p_claim.add_argument("--owner")
     p_claim.add_argument("--runner", help="Runner identity (ADR-0005); mandatory-claiming on remote backends")
 
+    p_heartbeat = sub.add_parser(
+        "heartbeat", help="Refresh the liveness signal for a claimed item (ADR-0005)",
+        parents=[project_arg],
+    )
+    p_heartbeat.add_argument("id")
+    p_heartbeat.add_argument("--runner", required=True)
+
     p_set_status = sub.add_parser("set-status", help="Move an item through its lifecycle", parents=[project_arg])
     p_set_status.add_argument("id")
     p_set_status.add_argument("status")
@@ -143,6 +150,8 @@ def dispatch(backend, args):
         return backend.get(args.id)
     if args.operation == "claim":
         return backend.claim(args.id, owner=args.owner, runner=args.runner)
+    if args.operation == "heartbeat":
+        return backend.heartbeat(args.id, runner=args.runner)
     if args.operation == "set-status":
         return backend.set_status(args.id, args.status)
     if args.operation == "append-result":

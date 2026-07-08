@@ -508,6 +508,18 @@ class WorkitemsCliTest(unittest.TestCase):
         self.assertEqual(claimed["runner"], "agent-1")
         self.assertEqual(claimed["status"], "In Progress")
 
+    def test_heartbeat_subcommand_refreshes_the_timestamp(self):
+        provider_name = self._write_provider("_test_fake_claiming_provider_hb", FAKE_CLAIMING_PROVIDER_SOURCE)
+        self._use_claiming_provider(provider_name)
+        item = json.loads(self.run_cli("create", "--title", "New feature").stdout)
+        claimed = json.loads(self.run_cli("claim", item["id"], "--runner", "agent-1").stdout)
+
+        result = self.run_cli("heartbeat", item["id"], "--runner", "agent-1")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        refreshed = json.loads(result.stdout)
+        self.assertNotEqual(refreshed["heartbeat"], claimed["heartbeat"])
+
 
 if __name__ == "__main__":
     unittest.main()
