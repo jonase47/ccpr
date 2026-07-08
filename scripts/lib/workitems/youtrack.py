@@ -145,7 +145,19 @@ class YouTrackBackend:
     def _resolve_project_id(self):
         if self._project_id is not None:
             return self._project_id
-        projects = self._request("GET", "/api/admin/projects", fields="id,shortName")
+        # GET /api/admin/projects is admin-scoped; a minimally-scoped token (a
+        # realistic setup) may lack it. Re-raise with an actionable message rather
+        # than letting the raw HTTP error propagate, since a permission failure
+        # would otherwise look identical to a misconfigured project short name.
+        try:
+            projects = self._request("GET", "/api/admin/projects", fields="id,shortName")
+        except WorkItemError as exc:
+            raise WorkItemError(
+                f"Could not resolve YouTrack project {self.project!r} via "
+                "GET /api/admin/projects (requires an admin-scoped token): the token "
+                f"may lack project-read permission, or the project may not exist. "
+                f"Original error: {exc}"
+            ) from exc
         for project in projects:
             if project.get("shortName") == self.project:
                 self._project_id = project["id"]

@@ -158,6 +158,45 @@ class YouTrackStateOutsideVocabularyTest(unittest.TestCase):
         self.assertIn("Under Review", captured_stderr.getvalue())
 
 
+class YouTrackResolveProjectIdTest(unittest.TestCase):
+    """_resolve_project_id() calls GET /api/admin/projects, which requires an
+    admin-scoped token -- a minimally-scoped token (a common real-world setup)
+    may lack it. These tests cover both failure branches: shortName genuinely
+    not found (coverage-add; the existing "not found" branch already worked
+    correctly, no bug there), and the admin-projects call itself being
+    forbidden (the actual gap: the raw 403 propagated without any indication
+    of WHY, and a real token misconfiguration would look identical to a wrong
+    project name)."""
+
+    def test_project_short_name_not_found_raises_clear_error(self):
+        transport = FakeYouTrackTransport(project_short_name="OTHERPROJECT")
+        backend = youtrack.YouTrackBackend(
+            base_url="https://faketrack.example.org", project="DOES-NOT-EXIST",
+            token="fake-token", transport=transport,
+        )
+
+        with self.assertRaises(WorkItemError):
+            backend.create(title="New feature")
+
+    def test_admin_projects_permission_error_is_reported_clearly(self):
+        class ForbiddenTransport:
+            def request(self, method, url, token, body=None):
+                if "/api/admin/projects" in url:
+                    raise WorkItemError(
+                        "YouTrack API error 403 for GET .../api/admin/projects: forbidden"
+                    )
+                raise AssertionError("should not reach further requests")
+
+        backend = youtrack.YouTrackBackend(
+            base_url="https://faketrack.example.org", project="TEST",
+            token="fake-token", transport=ForbiddenTransport(),
+        )
+
+        with self.assertRaises(WorkItemError) as ctx:
+            backend.create(title="New feature")
+        self.assertIn("project-read permission", str(ctx.exception))
+
+
 class YouTrackAppendResultTest(unittest.TestCase):
     """append-result adds a comment; get/list must recognise ONLY comments carrying
     the result marker as result-link entries — an ordinary human comment on the
