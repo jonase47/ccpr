@@ -90,6 +90,9 @@ class YouTrackBackend:
 
         # A fresh issue starts in the project's own default state, which is not
         # necessarily one named "Backlog" — drive it explicitly, same as set_status().
+        # One Command API call per field, never combined into a single query: keeps
+        # each field's success/failure independently attributable (a rejected Type
+        # command, say, must not also roll back the State change already applied).
         self.set_status(item_id, "Backlog")
         if item_type:
             self._run_command(item_id, f"Type {item_type}")
