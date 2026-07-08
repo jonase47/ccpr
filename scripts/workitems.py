@@ -29,9 +29,10 @@ DEFAULT_PROVIDER = "local"
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "lib"))
 
-from workitems import WorkItemError  # noqa: E402
+from workitems import WorkItemError, parse_duration_seconds  # noqa: E402
 from workitems import lift as lift_module  # noqa: E402
 from workitems import migrate as migrate_module  # noqa: E402
+from workitems import sweep as sweep_module  # noqa: E402
 
 
 class UnknownProviderError(Exception):
@@ -55,6 +56,15 @@ def resolve_provider_config(settings, project_dir, provider):
     config = dict(workitems_settings.get(provider, {}))
     if provider == "local" and "workitems_dir" not in config:
         config["workitems_dir"] = os.path.join(project_dir, "docs", "workitems")
+
+    # Claiming (ADR-0005): workitems.claiming.staleAfter is a project-wide setting,
+    # not per-provider, but every backend that implements claiming needs it (for the
+    # takeover-check) -- merged in here so any provider's create(config) can read
+    # config["stale_after_seconds"] the same way.
+    claiming_settings = workitems_settings.get("claiming", {})
+    if "staleAfter" in claiming_settings:
+        config["stale_after_seconds"] = parse_duration_seconds(claiming_settings["staleAfter"])
+
     return config
 
 
@@ -133,6 +143,11 @@ def build_parser():
     p_lift.add_argument(
         "--exclude", action="append", default=[], metavar="PATTERN=REASON",
         help="Exclude lines matching PATTERN (regex), reported with REASON (repeatable)",
+    )
+
+    sub.add_parser(
+        "sweep", help="Reconcile abandoned claims into Parked (ADR-0005)",
+        parents=[project_arg],
     )
 
     return parser
@@ -221,6 +236,18 @@ def _update_provider_in_settings(project_dir, new_provider):
         f.write("\n")
 
 
+def _run_sweep(settings, args, config, backend):
+    """`sweep`: reconciles the CURRENTLY ACTIVE backend's abandoned claims (a
+    per-backend contract op wouldn't make sense here either -- it operates over
+    every In Progress item, not one id -- so it's handled here like migrate/lift)."""
+    stale_after_seconds = config.get("stale_after_seconds")
+    has_branch_commits = sweep_module.make_git_branch_commits_checker(args.project_dir)
+    return sweep_module.sweep(
+        backend, has_branch_commits=has_branch_commits,
+        stale_after_seconds=stale_after_seconds,
+    )
+
+
 def _run_lift(settings, args):
     """`lift` always targets the `local` backend (ADR-0004: heterogeneous -> local),
     regardless of whichever provider is currently active — it must not fail just
@@ -245,6 +272,8 @@ def main(argv=None):
             backend = load_backend(provider, config)
             if args.operation == "migrate":
                 result = _run_migrate(settings, args, provider, config, backend)
+            elif args.operation == "sweep":
+                result = _run_sweep(settings, args, config, backend)
             else:
                 result = dispatch(backend, args)
     except UnknownProviderError as exc:

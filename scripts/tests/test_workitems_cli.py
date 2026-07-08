@@ -520,6 +520,50 @@ class WorkitemsCliTest(unittest.TestCase):
         refreshed = json.loads(result.stdout)
         self.assertNotEqual(refreshed["heartbeat"], claimed["heartbeat"])
 
+    def test_sweep_leaves_stale_claim_in_progress_when_there_is_no_git_repo(self):
+        # No git repo at all in project_dir: the default has_branch_commits must
+        # treat that as "nothing to resume" (False), not raise.
+        provider_name = self._write_provider("_test_fake_claiming_provider_sweep1", FAKE_CLAIMING_PROVIDER_SOURCE)
+        self._use_claiming_provider(provider_name, claiming_config={"staleAfter": "1h"})
+        item = json.loads(self.run_cli("create", "--title", "New feature").stdout)
+        self.run_cli("claim", item["id"], "--runner", "agent-1")  # fixed old heartbeat -> always stale
+
+        result = self.run_cli("sweep")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["parked"], [])
+        self.assertIn(item["id"], report["left_in_progress"])
+
+    def test_sweep_parks_stale_claim_with_ticket_branch_commits(self):
+        provider_name = self._write_provider("_test_fake_claiming_provider_sweep2", FAKE_CLAIMING_PROVIDER_SOURCE)
+        self._use_claiming_provider(provider_name, claiming_config={"staleAfter": "1h"})
+        item = json.loads(self.run_cli("create", "--title", "New feature").stdout)
+        self.run_cli("claim", item["id"], "--runner", "agent-1")
+
+        self._init_git_repo_with_ticket_branch(item["id"])
+
+        result = self.run_cli("sweep")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["parked"], [item["id"]])
+
+    def _init_git_repo_with_ticket_branch(self, item_id):
+        def run(*git_args):
+            subprocess.run(["git", *git_args], cwd=self.project_dir, check=True, capture_output=True)
+
+        run("init", "-q", "-b", "main")
+        run("config", "user.email", "test@example.org")
+        run("config", "user.name", "Test")
+        (self.project_dir / "README.md").write_text("hello\n", encoding="utf-8")
+        run("add", "README.md")
+        run("commit", "-q", "-m", "initial")
+        run("checkout", "-q", "-b", f"ticket/{item_id}")
+        (self.project_dir / "work.txt").write_text("work\n", encoding="utf-8")
+        run("add", "work.txt")
+        run("commit", "-q", "-m", "did work")
+
 
 if __name__ == "__main__":
     unittest.main()
