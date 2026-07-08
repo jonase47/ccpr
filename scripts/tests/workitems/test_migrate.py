@@ -85,6 +85,12 @@ class MigrateLocalToYouTrackTest(unittest.TestCase):
         self.assertEqual(len(list(archive_path.glob("*.md"))), 2)
         self.assertIn("20260708153000", archive_path.name)
 
+    def test_archiving_reports_the_exact_restore_command(self):
+        report = self.run_migrate()
+
+        self.assertIn(report["archive_path"], report["restore_command"])
+        self.assertIn(str(self.source_dir), report["restore_command"])
+
     def test_second_full_run_is_a_no_op_no_duplicates(self):
         self.run_migrate()
         first_target_count = len(self.target_backend.list())

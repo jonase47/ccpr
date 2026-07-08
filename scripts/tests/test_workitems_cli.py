@@ -291,6 +291,15 @@ class WorkitemsCliTest(unittest.TestCase):
         settings = json.loads((self.project_dir / "settings.json").read_text(encoding="utf-8"))
         self.assertEqual(settings["workitems"]["provider"], provider_name)
 
+        # Rollback path: archiving never deletes, but nothing moves it back
+        # automatically -- the exact restore command must be spelled out, both in
+        # the JSON report and as an informational stderr message for a human
+        # running the CLI directly.
+        self.assertIn(report["archive_path"], report["restore_instructions"])
+        self.assertIn("local", report["restore_instructions"])
+        self.assertIn("mv ", result.stderr)
+        self.assertIn(report["archive_path"], result.stderr)
+
     def test_migrating_twice_to_the_same_target_refuses_on_the_second_call(self):
         provider_name = self._write_provider(
             "_test_fake_migrate_target_twice",

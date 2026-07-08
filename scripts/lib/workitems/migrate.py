@@ -129,6 +129,12 @@ def migrate(source_backend, target_backend, idmap_path, source_workitems_dir=Non
         archive_path = _archive(source_workitems_dir, archive_root, clock)
         report["archived"] = True
         report["archive_path"] = archive_path
+        # The rollback path (ADR-0004): archiving moves the directory, it never
+        # deletes it, but nothing moves it back automatically. Spell out the exact
+        # command rather than leaving that to memory -- move it back, then set
+        # workitems.provider back to the source (the CLI adds that second half,
+        # which needs the provider NAME, not just backend instances).
+        report["restore_command"] = f"mv {archive_path} {source_workitems_dir}"
 
     return report
 

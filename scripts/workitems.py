@@ -187,6 +187,18 @@ def _run_migrate(settings, args, source_provider, source_config, source_backend)
     if report.get("fully_migrated"):
         _update_provider_in_settings(args.project_dir, target_provider)
 
+    # Rollback path (ADR-0004): archiving moves the directory, never deletes it,
+    # but nothing moves it back automatically. Spell out the exact restore command
+    # -- migrate() already gives the mv half; the CLI adds the provider-name half,
+    # since migrate() only ever sees backend instances, not provider name strings.
+    if report.get("archived"):
+        restore_instructions = (
+            f"{report['restore_command']} && set workitems.provider back to "
+            f"{source_provider!r} in settings.json"
+        )
+        report["restore_instructions"] = restore_instructions
+        print(f"Rollback: to restore the previous state, run: {restore_instructions}", file=sys.stderr)
+
     return report
 
 
