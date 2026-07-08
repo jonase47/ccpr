@@ -6,6 +6,19 @@ dispatcher (scripts/workitems.py) reads `workitems.provider` from settings.json 
 imports the matching module by name.
 """
 
+# Status vocabulary (Manual/WORKITEMS.md §2 / ADR-0002): backends map their own states
+# onto this set. `set-status` rejects anything outside it.
+STATUS_VALUES = (
+    "Backlog",
+    "Ready",
+    "In Progress",
+    "Parked",
+    "Waiting for Approval",
+    "Done",
+    "Blocked",
+    "Cancelled",
+)
+
 
 class WorkItemError(Exception):
     """Raised for invalid work-item operations (unknown id, invalid status, ...)."""

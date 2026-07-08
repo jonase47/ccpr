@@ -131,3 +131,30 @@ class WorkItemsContractTestCase:
         item = self.backend.claim("WI-0001")
 
         self.assertEqual(item["owner"], "alice")
+
+    # --- set-status ---
+
+    def test_set_status_updates_status(self):
+        self.write_item("WI-0001", status="Backlog")
+
+        item = self.backend.set_status("WI-0001", "In Progress")
+
+        self.assertEqual(item["status"], "In Progress")
+        self.assertEqual(self.backend.get("WI-0001")["status"], "In Progress")
+
+    def test_set_status_rejects_unknown_status(self):
+        self.write_item("WI-0001", status="Backlog")
+
+        with self.assertRaises(Exception):
+            self.backend.set_status("WI-0001", "Not-A-Status")
+        self.assertEqual(self.backend.get("WI-0001")["status"], "Backlog")
+
+    def test_set_status_accepts_every_vocabulary_value(self):
+        self.write_item("WI-0001", status="Backlog")
+
+        for status in (
+            "Backlog", "Ready", "In Progress", "Parked",
+            "Waiting for Approval", "Done", "Blocked", "Cancelled",
+        ):
+            item = self.backend.set_status("WI-0001", status)
+            self.assertEqual(item["status"], status)

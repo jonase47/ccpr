@@ -7,7 +7,7 @@ writes one Markdown file per item.
 
 from pathlib import Path
 
-from workitems import WorkItemError, frontmatter
+from workitems import STATUS_VALUES, WorkItemError, frontmatter
 
 
 def create(config):
@@ -43,6 +43,17 @@ class LocalBackend:
         data, body = frontmatter.parse(path.read_text(encoding="utf-8"))
         if owner is not None:
             data["owner"] = owner
+        self._write(path, data, body)
+        return self._item_from_data(data, body)
+
+    def set_status(self, item_id, status):
+        if status not in STATUS_VALUES:
+            raise WorkItemError(
+                f"Unknown status '{status}'. Valid values: {', '.join(STATUS_VALUES)}"
+            )
+        path = self._path_for(item_id)
+        data, body = frontmatter.parse(path.read_text(encoding="utf-8"))
+        data["status"] = status
         self._write(path, data, body)
         return self._item_from_data(data, body)
 
