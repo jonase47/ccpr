@@ -77,8 +77,9 @@ Moves items between backends (e.g. `local → youtrack`):
 - Writes an **id-map** (`docs/workitems-idmap.yml`, `local-id ↔ remote-id`) so references in
   `HANDOVER.md` and learnings stay resolvable across the switch, and puts the source id in each remote
   item's description (reverse lookup / provenance).
-- **Archives** the old store (never deletes) — this is the rollback path: set `provider` back and
-  keep working.
+- **Archives** the old store (never deletes) — this is the rollback path: **restore the archived
+  store, then set `provider` back** and keep working (setting the provider alone is not enough — the
+  source was moved aside, so it must be restored too; `migrate` prints the exact restore command).
 - Leaves exactly **one active backend** afterward (no bidirectional sync — ADR-0002).
 
 ### The pipeline
