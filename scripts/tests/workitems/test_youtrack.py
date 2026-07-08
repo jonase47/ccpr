@@ -10,6 +10,7 @@ and HttpTransportTest below for the urllib-level tests (mocking urllib.request.u
 directly, per the reviewer's second suggested option).
 """
 
+import contextlib
 import io
 import os
 import sys
@@ -126,6 +127,35 @@ class YouTrackInvalidCommandTest(unittest.TestCase):
 
         with self.assertRaises(WorkItemError):
             self.backend.claim(item["id"], owner="mallory")
+
+
+class YouTrackStateOutsideVocabularyTest(unittest.TestCase):
+    """A project's State bundle may legitimately have values outside CCPR's status
+    vocabulary and outside any configured stateMap (e.g. a custom workflow state).
+    get/list pass such a state through as-is rather than raising -- set_status would
+    reject it as a WRITE target, but a value already on the issue must still be
+    readable -- while emitting a one-line stderr warning so this stays visible
+    instead of silently producing an item whose status looks like any other."""
+
+    def setUp(self):
+        self.transport = FakeYouTrackTransport(project_short_name="TEST")
+        self.backend = youtrack.YouTrackBackend(
+            base_url="https://faketrack.example.org", project="TEST",
+            token="fake-token", transport=self.transport,
+        )
+
+    def test_state_outside_vocabulary_passes_through_with_a_stderr_warning(self):
+        item = self.backend.create(title="New feature")
+        # Simulate a project state outside CCPR's vocabulary and outside any
+        # stateMap, set directly via the transport (bypassing set_status's guard).
+        self.transport._require_issue(item["id"])["state"] = "Under Review"
+
+        captured_stderr = io.StringIO()
+        with contextlib.redirect_stderr(captured_stderr):
+            fetched = self.backend.get(item["id"])
+
+        self.assertEqual(fetched["status"], "Under Review")
+        self.assertIn("Under Review", captured_stderr.getvalue())
 
 
 class YouTrackAppendResultTest(unittest.TestCase):

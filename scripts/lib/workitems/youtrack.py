@@ -32,6 +32,7 @@ report for this increment):
 
 import json
 import os
+import sys
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -186,6 +187,19 @@ class YouTrackBackend:
         state_value = custom_fields.get("State")
         status = state_value.get("name") if isinstance(state_value, dict) else None
         status = self._unmap_state(status)
+        if status is not None and status not in STATUS_VALUES:
+            # A project's State bundle may legitimately have values outside CCPR's
+            # vocabulary (and outside any stateMap) — pass it through rather than
+            # raising (set_status already refuses to WRITE such a value; a value
+            # already on the issue must still be readable), but make this visible
+            # instead of silently returning an item whose status looks ordinary.
+            print(
+                f"Warning: YouTrack issue {issue.get('idReadable')} has state "
+                f"{status!r}, which is outside the CCPR status vocabulary "
+                f"({', '.join(STATUS_VALUES)}). Passing it through as-is; consider "
+                "adding it to workitems.youtrack.stateMap.",
+                file=sys.stderr,
+            )
 
         assignee_value = custom_fields.get("Assignee")
         owner = None
