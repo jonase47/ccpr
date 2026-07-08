@@ -14,16 +14,22 @@ class FakeYouTrackTransport:
     """Implements the same `.request(method, url, token, body=None)` interface as the
     real `_HttpTransport`, so YouTrackBackend cannot tell the difference."""
 
-    def __init__(self, project_short_name="TEST"):
+    def __init__(self, project_short_name="TEST", page_size_cap=None):
         self.project_short_name = project_short_name
         self.project_internal_id = "0-0"
         self.commands_received = []  # for tests asserting on the exact command string
         self._issues = {}  # idReadable -> internal issue dict
         self._next_number = 1
+        # Simulates a real YouTrack instance's default page size: without an explicit
+        # "$top=-1", a GET /api/issues that would return more than this many issues is
+        # truncated. Used to prove list() actually sends "$top=-1" instead of relying
+        # on undocumented server-default behaviour.
+        self.page_size_cap = page_size_cap
 
     def request(self, method, url, token, body=None):
         parsed = urllib.parse.urlparse(url)
         path = parsed.path
+        query_params = dict(urllib.parse.parse_qsl(parsed.query))
 
         if method == "GET" and path == "/api/admin/projects":
             return [{"id": self.project_internal_id, "shortName": self.project_short_name}]
@@ -32,7 +38,10 @@ class FakeYouTrackTransport:
             return self._create_issue(body)
 
         if method == "GET" and path == "/api/issues":
-            return [self._render_issue(issue) for issue in self._issues.values()]
+            all_issues = [self._render_issue(issue) for issue in self._issues.values()]
+            if self.page_size_cap is not None and query_params.get("$top") != "-1":
+                return all_issues[:self.page_size_cap]
+            return all_issues
 
         if method == "GET" and path.startswith("/api/issues/"):
             item_id = path.rsplit("/", 1)[-1]

@@ -96,8 +96,10 @@ class YouTrackBackend:
         return self.get(item_id)
 
     def list(self, status=None, owner=None):
+        # $top=-1 disables pagination explicitly — without it, some YouTrack versions
+        # cap /api/issues to a default page size, silently truncating a large project.
         issues = self._request(
-            "GET", "/api/issues", fields=_ISSUE_FIELDS, query=f"project: {self.project}",
+            "GET", "/api/issues", fields=_ISSUE_FIELDS, query=f"project: {self.project}", top=-1,
         )
         items = [self._item_from_issue(issue) for issue in issues]
         if status is not None:
@@ -153,13 +155,15 @@ class YouTrackBackend:
             body={"query": query, "issues": [{"idReadable": item_id}]},
         )
 
-    def _request(self, method, path, body=None, fields=None, query=None):
+    def _request(self, method, path, body=None, fields=None, query=None, top=None):
         url = f"{self.base_url}{path}"
         params = {}
         if fields:
             params["fields"] = fields
         if query:
             params["query"] = query
+        if top is not None:
+            params["$top"] = top
         if params:
             url += "?" + urllib.parse.urlencode(params)
         return self.transport.request(method, url, self.token, body=body)

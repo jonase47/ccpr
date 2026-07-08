@@ -74,6 +74,25 @@ class YouTrackStateMapTest(unittest.TestCase):
         self.assertIn("State Open", self.transport.commands_received)
 
 
+class YouTrackPaginationTest(unittest.TestCase):
+    """A real YouTrack instance can silently cap GET /api/issues to a default page
+    size unless $top=-1 is passed explicitly. FakeYouTrackTransport's page_size_cap
+    simulates that default so list() is proven to send $top=-1, not rely on it."""
+
+    def test_list_returns_everything_even_when_the_fake_caps_page_size(self):
+        transport = FakeYouTrackTransport(project_short_name="TEST", page_size_cap=2)
+        backend = youtrack.YouTrackBackend(
+            base_url="https://faketrack.example.org", project="TEST",
+            token="fake-token", transport=transport,
+        )
+        for i in range(5):
+            backend.create(title=f"Item {i}")
+
+        items = backend.list()
+
+        self.assertEqual(len(items), 5)
+
+
 class YouTrackAppendResultTest(unittest.TestCase):
     """append-result adds a comment; get/list must recognise ONLY comments carrying
     the Result: prefix as result-link entries — an ordinary human comment on the
