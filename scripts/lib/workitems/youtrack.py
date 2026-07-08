@@ -206,6 +206,9 @@ class YouTrackBackend:
         }
 
 
+_REQUEST_TIMEOUT_SECONDS = 10
+
+
 class _HttpTransport:
     """Real transport: stdlib urllib.request only, no third-party HTTP library."""
 
@@ -218,7 +221,7 @@ class _HttpTransport:
             req.add_header("Content-Type", "application/json")
 
         try:
-            with urllib.request.urlopen(req, timeout=10) as resp:
+            with urllib.request.urlopen(req, timeout=_REQUEST_TIMEOUT_SECONDS) as resp:
                 raw = resp.read()
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", "replace")
@@ -226,9 +229,19 @@ class _HttpTransport:
             raise WorkItemError(
                 f"YouTrack API error {exc.code} for {method} {url}: {detail}"
             ) from exc
-        except urllib.error.URLError as exc:
+        except OSError as exc:
+            # Covers urllib.error.URLError (DNS/connection failures) AND a bare
+            # TimeoutError/socket.timeout during connect or read. URLError does NOT
+            # subclass TimeoutError (and vice versa) — a stall during resp.read()
+            # inside the `with` block above raises a plain TimeoutError, which would
+            # otherwise bypass this except entirely and surface as a raw traceback.
             raise WorkItemError(f"YouTrack request failed for {method} {url}: {exc}") from exc
 
         if not raw:
             return None
-        return json.loads(raw)
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise WorkItemError(
+                f"YouTrack returned a response that isn't valid JSON for {method} {url}: {exc}"
+            ) from exc

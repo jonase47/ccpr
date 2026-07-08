@@ -223,6 +223,47 @@ class HttpTransportTest(unittest.TestCase):
             with self.assertRaises(WorkItemError):
                 transport.request("GET", "https://example.org/api/issues/PROJ-1", "secret-token")
 
+    def test_read_timeout_is_translated_into_workitemerror_not_a_raw_exception(self):
+        # A stall during resp.read() raises a bare TimeoutError (an OSError subclass
+        # NOT a urllib.error.URLError subclass) — it must not bypass the except clause
+        # and surface as an unhandled traceback to the CLI user.
+        class StallingResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc_info):
+                return False
+
+            def read(self):
+                raise TimeoutError("timed out")
+
+        def fake_urlopen(req, timeout=None):
+            return StallingResponse()
+
+        with mock.patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            transport = youtrack._HttpTransport()
+            with self.assertRaises(WorkItemError):
+                transport.request("GET", "https://example.org/api/issues", "secret-token")
+
+    def test_invalid_json_response_is_translated_into_workitemerror(self):
+        class GarbageResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc_info):
+                return False
+
+            def read(self):
+                return b"not json at all"
+
+        def fake_urlopen(req, timeout=None):
+            return GarbageResponse()
+
+        with mock.patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            transport = youtrack._HttpTransport()
+            with self.assertRaises(WorkItemError):
+                transport.request("GET", "https://example.org/api/issues", "secret-token")
+
 
 if __name__ == "__main__":
     unittest.main()
