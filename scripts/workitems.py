@@ -6,6 +6,7 @@ provider implementation in scripts/lib/workitems/<provider>.py. `local` is the d
 and reference backend: no server, no token, structured Markdown at docs/workitems/.
 
 Usage:
+  workitems.py create --title T [--type X] [--owner O] [--description D] [--project DIR]
   workitems.py list [--status STATUS] [--owner OWNER] [--project DIR]
   workitems.py get <id> [--project DIR]
   workitems.py claim <id> [--owner OWNER] [--project DIR]
@@ -75,6 +76,12 @@ def build_parser():
     parser = argparse.ArgumentParser(prog="workitems.py", description="CCPR work-item backend CLI", parents=[project_arg])
     sub = parser.add_subparsers(dest="operation", required=True)
 
+    p_create = sub.add_parser("create", help="Create a new item; the backend assigns the id", parents=[project_arg])
+    p_create.add_argument("--title", required=True)
+    p_create.add_argument("--type", dest="type")
+    p_create.add_argument("--owner")
+    p_create.add_argument("--description")
+
     p_list = sub.add_parser("list", help="Enumerate work items (JSON array)", parents=[project_arg])
     p_list.add_argument("--status")
     p_list.add_argument("--owner")
@@ -98,6 +105,11 @@ def build_parser():
 
 
 def dispatch(backend, args):
+    if args.operation == "create":
+        return backend.create(
+            title=args.title, item_type=args.type, owner=args.owner,
+            description=args.description,
+        )
     if args.operation == "list":
         return backend.list(status=args.status, owner=args.owner)
     if args.operation == "get":

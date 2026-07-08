@@ -51,6 +51,31 @@ class WorkitemsCliTest(unittest.TestCase):
         )
         return result
 
+    def test_create_assigns_id_and_defaults_to_backlog(self):
+        result = self.run_cli("create", "--title", "New feature")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        item = json.loads(result.stdout)
+        self.assertTrue(item["id"])
+        self.assertEqual(item["title"], "New feature")
+        self.assertEqual(item["status"], "Backlog")
+
+        # The created item must be discoverable through the other operations too.
+        list_result = self.run_cli("list")
+        ids = [i["id"] for i in json.loads(list_result.stdout)]
+        self.assertIn(item["id"], ids)
+
+    def test_create_with_owner_and_description(self):
+        result = self.run_cli(
+            "create", "--title", "New feature",
+            "--owner", "alice", "--description", "Some text.",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        item = json.loads(result.stdout)
+        self.assertEqual(item["owner"], "alice")
+        self.assertEqual(item["description"], "Some text.")
+
     def test_list_defaults_to_local_provider_and_prints_json(self):
         result = self.run_cli("list")
 
