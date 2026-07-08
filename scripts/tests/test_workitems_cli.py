@@ -123,6 +123,56 @@ class WorkitemsCliTest(unittest.TestCase):
         )
         return result
 
+    def test_project_flag_before_the_subcommand_is_honored_not_silently_ignored(self):
+        # Regression: argparse's subparsers merge a fresh sub-namespace into the
+        # outer one after parsing the remaining args. The subcommand's OWN copy of
+        # --project (inherited from the shared parent) carried its own
+        # os.getcwd() default, which clobbered the value the top-level parser had
+        # already parsed when --project appeared BEFORE the subcommand -- silently
+        # redirecting every write to whatever directory the CLI happened to be
+        # invoked from. Run with an explicit, harmless decoy cwd (never this repo)
+        # so that if the bug reproduces, it writes into a throwaway directory
+        # instead of polluting the real repository.
+        decoy_cwd = Path(tempfile.mkdtemp(prefix="ccpr-workitems-decoy-cwd-"))
+        self.addCleanup(shutil.rmtree, decoy_cwd, ignore_errors=True)
+
+        result = subprocess.run(
+            [
+                sys.executable, str(SCRIPT_PATH), "--project", str(self.project_dir),
+                "create", "--title", "New feature", "--type", "feat",
+            ],
+            capture_output=True, text=True, cwd=decoy_cwd,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        item = json.loads(result.stdout)
+        created_path = self.project_dir / "docs" / "workitems" / f"{item['id']}.md"
+        self.assertTrue(
+            created_path.is_file(),
+            f"expected {created_path} to exist; --project before the subcommand "
+            "must not be overridden by the subcommand's own default",
+        )
+        # Nothing must have leaked into the decoy cwd.
+        self.assertFalse((decoy_cwd / "docs").exists())
+
+    def test_project_flag_after_the_subcommand_still_works(self):
+        decoy_cwd = Path(tempfile.mkdtemp(prefix="ccpr-workitems-decoy-cwd-"))
+        self.addCleanup(shutil.rmtree, decoy_cwd, ignore_errors=True)
+
+        result = subprocess.run(
+            [
+                sys.executable, str(SCRIPT_PATH), "create", "--title", "New feature",
+                "--type", "feat", "--project", str(self.project_dir),
+            ],
+            capture_output=True, text=True, cwd=decoy_cwd,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        item = json.loads(result.stdout)
+        created_path = self.project_dir / "docs" / "workitems" / f"{item['id']}.md"
+        self.assertTrue(created_path.is_file())
+        self.assertFalse((decoy_cwd / "docs").exists())
+
     def test_create_assigns_id_and_defaults_to_backlog(self):
         result = self.run_cli("create", "--title", "New feature")
 

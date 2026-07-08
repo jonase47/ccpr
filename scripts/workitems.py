@@ -103,8 +103,23 @@ def build_parser():
     # `--project` is defined on a shared parent so it can appear either before or after
     # the subcommand (argparse hands everything past the subcommand name to the chosen
     # subparser, which otherwise would not recognise a parent-level-only option).
+    #
+    # default=SUPPRESS here, NOT os.getcwd(): every subparser gets its OWN copy of this
+    # action (parents=[project_arg] on each one), and argparse's subparser handling
+    # parses the remaining args into a FRESH namespace, then merges every key from
+    # that namespace into the outer one -- including project_dir's default, even when
+    # --project was never given to the subparser at all. With a real default, that
+    # merge SILENTLY OVERWRITES a --project value already parsed by the top-level
+    # parser when it appeared BEFORE the subcommand (a data-safety footgun: writes
+    # redirect to the wrong directory with no error). SUPPRESS means the action sets
+    # nothing at all unless --project was explicitly given in that exact argv segment,
+    # so the merge can never clobber an already-parsed value. The actual default
+    # (os.getcwd()) is resolved exactly once, in main(), after parsing completes.
     project_arg = argparse.ArgumentParser(add_help=False)
-    project_arg.add_argument("--project", dest="project_dir", default=os.getcwd(), help="Project root (default: cwd)")
+    project_arg.add_argument(
+        "--project", dest="project_dir", default=argparse.SUPPRESS,
+        help="Project root (default: cwd)",
+    )
 
     parser = argparse.ArgumentParser(prog="workitems.py", description="CCPR work-item backend CLI", parents=[project_arg])
     sub = parser.add_subparsers(dest="operation", required=True)
@@ -276,6 +291,11 @@ def _run_lift(settings, args):
 
 def main(argv=None):
     args = build_parser().parse_args(argv)
+    # The single place the --project default is resolved (see build_parser()'s
+    # comment on why it's SUPPRESS'd on the argparse side): args.project_dir is only
+    # absent here if --project was never given anywhere in argv.
+    if not hasattr(args, "project_dir"):
+        args.project_dir = os.getcwd()
 
     try:
         settings = load_settings(args.project_dir)
