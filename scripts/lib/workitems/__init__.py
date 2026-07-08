@@ -38,3 +38,37 @@ def validate_item_id(item_id):
     containment checks as defense-in-depth (e.g. `local`'s resolved-path check)."""
     if not item_id or not ID_PATTERN.match(item_id):
         raise WorkItemError(f"Invalid work-item id: {item_id!r}")
+
+
+# Claiming / branch-runner protocol (ADR-0005): default if workitems.claiming.staleAfter
+# isn't configured. 1 hour is a reasonable default for a heartbeat-based liveness check
+# without forcing every project to configure it before claiming works at all.
+DEFAULT_STALE_AFTER_SECONDS = 3600.0
+
+_DURATION_PATTERN = re.compile(r"^(\d+(?:\.\d+)?)\s*(s|m|h|d)?$")
+_DURATION_UNIT_SECONDS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
+
+
+def parse_duration_seconds(value):
+    """Parse a `workitems.claiming` duration (staleAfter / heartbeatInterval) into
+    seconds. Accepts a bare number (seconds) or a string with a single-letter unit
+    suffix: s(econds)/m(inutes)/h(ours)/d(ays) — e.g. "30m", "2h", "1d", or a plain
+    "3600". Deliberately not ISO 8601 durations: a feature this narrow (two config
+    keys) doesn't need a heavier parser, and this format is easier for a human to
+    read and write directly in settings.json.
+    """
+    if isinstance(value, bool):
+        raise WorkItemError(f"Invalid duration: {value!r}")
+    if isinstance(value, (int, float)):
+        return float(value)
+    if not isinstance(value, str):
+        raise WorkItemError(f"Invalid duration: {value!r}")
+
+    match = _DURATION_PATTERN.match(value.strip())
+    if not match:
+        raise WorkItemError(
+            f"Invalid duration {value!r}: expected a number of seconds, or a number "
+            "followed by s/m/h/d (e.g. '30m', '2h', '1d')."
+        )
+    number, unit = match.groups()
+    return float(number) * _DURATION_UNIT_SECONDS.get(unit, 1)
