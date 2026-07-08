@@ -327,6 +327,29 @@ class YouTrackClaimingTest(unittest.TestCase):
         fetched = self.backend.get(item["id"])
         self.assertEqual(fetched["runner"], "agent-1")
 
+    def test_a_refused_takeover_leaves_owner_unchanged(self):
+        item = self.backend.create(title="New feature", owner="alice")
+        self.backend.claim(item["id"], runner="agent-1")
+
+        self.clock.advance(600)  # still live -- this claim attempt must be refused
+
+        with self.assertRaises(WorkItemError):
+            self.backend.claim(item["id"], owner="bob", runner="agent-2")
+
+        fetched = self.backend.get(item["id"])
+        self.assertEqual(fetched["owner"], "alice")
+        self.assertEqual(fetched["runner"], "agent-1")
+
+    def test_a_refused_claim_on_a_done_item_leaves_owner_unchanged(self):
+        item = self.backend.create(title="New feature", owner="alice")
+        self.backend.set_status(item["id"], "Done")
+
+        with self.assertRaises(WorkItemError):
+            self.backend.claim(item["id"], owner="bob", runner="agent-1")
+
+        fetched = self.backend.get(item["id"])
+        self.assertEqual(fetched["owner"], "alice")
+
     def test_claim_allows_takeover_of_a_stale_claim(self):
         item = self.backend.create(title="New feature")
         self.backend.claim(item["id"], runner="agent-1")

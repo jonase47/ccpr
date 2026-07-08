@@ -161,10 +161,14 @@ class YouTrackBackend:
         """Claiming is MANDATORY for remote backends (ADR-0002 §6, ADR-0005): when a
         `runner` is given, records the runner:<id> signal + a heartbeat timestamp and
         sets status to In Progress. `owner` (Assignee) is independent of `runner` —
-        the responsible human vs. the process executing the item right now."""
+        the responsible human vs. the process executing the item right now.
+
+        ALL guards are evaluated before ANY mutation: a refused claim (terminal
+        state, or a live takeover by a different runner) must leave the item exactly
+        as it was, including `owner` -- reassigning owner and then raising would be a
+        side effect from an operation that's supposed to have failed outright.
+        """
         validate_item_id(item_id)
-        if owner:
-            self._run_command(item_id, f"for {owner}")
 
         if runner:
             current = self.get(item_id)
@@ -193,6 +197,12 @@ class YouTrackBackend:
                     "with a live heartbeat; refusing to steal the claim. Wait for it "
                     "to go stale, or have that runner release it first."
                 )
+
+        # Every guard above passed (or there was nothing to guard, i.e. no runner
+        # given) -- only now is it safe to mutate.
+        if owner:
+            self._run_command(item_id, f"for {owner}")
+        if runner:
             self._refresh_runner_and_heartbeat(item_id, runner)
             self.set_status(item_id, "In Progress")
 
