@@ -442,6 +442,17 @@ class WorkItemsContractTestCase:
         with self.assertRaises(Exception):
             self.backend.add_tag(item_id, "")
 
+    def test_add_tag_rejects_a_trailing_newline(self):
+        """A trailing "\\n" must not slip past validate_tag's charset check: an
+        unanchored `$` in the pattern matches just before a trailing newline, not
+        only at the true end of string, which would otherwise let a tag containing
+        an embedded newline reach the frontmatter writer and corrupt it across two
+        lines on the next parse (review follow-up, 09.07.2026)."""
+        item_id = self.create_item()
+
+        with self.assertRaises(Exception):
+            self.backend.add_tag(item_id, "security\n")
+
     def test_add_tag_unknown_id_raises(self):
         with self.assertRaises(Exception):
             self.backend.add_tag("WI-9999", "security")
@@ -608,6 +619,17 @@ class WorkItemsContractTestCase:
 
         with self.assertRaises(Exception):
             self.backend.add_link(item_id, "depends-on", "WI-9999")
+
+    def test_add_link_rejects_a_target_id_with_a_trailing_newline(self):
+        """Same `$`-vs-`\\n` trap as validate_tag (see
+        test_add_tag_rejects_a_trailing_newline), but for validate_item_id: a target
+        id with an embedded trailing newline must not reach the frontmatter writer
+        either (review follow-up, 09.07.2026)."""
+        item_id = self.create_item()
+        target_id = self.create_item()
+
+        with self.assertRaises(Exception):
+            self.backend.add_link(item_id, "depends-on", f"{target_id}\n")
 
     def test_remove_link_unknown_id_raises(self):
         with self.assertRaises(Exception):

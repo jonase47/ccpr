@@ -12,7 +12,11 @@ import re
 # here (not only in the `local` backend) because an id can end up in a filesystem
 # path today (local) and in a `ticket/<id>` branch name tomorrow (ADR-0005) — both
 # are injection surfaces if an id is accepted unchecked.
-ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
+# `\Z` (not a bare `$`): `$` matches just before a trailing "\n" too, not only at the
+# true end of string -- an id ending in a newline would otherwise pass this check and
+# reach a writer that embeds it verbatim, corrupting a frontmatter file across two
+# physical lines on the next parse (review follow-up, 09.07.2026).
+ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]+\Z")
 
 # Status vocabulary (Manual/WORKITEMS.md §2 / ADR-0002): backends map their own states
 # onto this set. `set-status` rejects anything outside it.
@@ -50,7 +54,9 @@ RESERVED_TAG_PREFIXES = ("runner:", "heartbeat:")
 # No spaces: the YouTrack Command API tokenizes a `tag <name>` command on whitespace,
 # and a space-containing tag would either need quoting (an extra parsing mode this
 # contract doesn't otherwise have) or silently split into two tokens.
-_TAG_PATTERN = re.compile(r"^[A-Za-z0-9_:.-]+$")
+# `\Z` (not a bare `$`) for the same reason as ID_PATTERN above -- a trailing "\n"
+# must not slip past this check either.
+_TAG_PATTERN = re.compile(r"^[A-Za-z0-9_:.-]+\Z")
 
 
 def is_reserved_tag(tag):
@@ -170,7 +176,11 @@ def validate_link_type(link_type):
         )
 
 
-_DURATION_PATTERN = re.compile(r"^(\d+(?:\.\d+)?)\s*(s|m|h|d)?$")
+# `\Z` for consistency with ID_PATTERN/_TAG_PATTERN above (same `$`-vs-trailing-"\n"
+# trap) -- not independently exploitable here today, since parse_duration_seconds
+# already calls value.strip() before matching, but this pattern must not silently
+# rely on that caller-side strip to stay safe.
+_DURATION_PATTERN = re.compile(r"^(\d+(?:\.\d+)?)\s*(s|m|h|d)?\Z")
 _DURATION_UNIT_SECONDS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
 
 
