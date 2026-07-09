@@ -350,17 +350,35 @@ class WorkItemsContractTestCase:
     #
     # Ids may end up in filesystem paths (local) today and in `ticket/<id>` branch
     # names (ADR-0005) tomorrow — every backend must reject anything that is not a
-    # bare identifier, not just `local`.
+    # bare identifier, not just `local`. Every mutating op is covered here -- including
+    # the four maintenance ops added by the ADR-0002 addendum (09.07.2026) -- so a
+    # future refactor that drops id validation in any one of them turns this red
+    # instead of silently reopening the traversal surface.
+
+    def _call_with_id(self, op, item_id):
+        """Invokes `op` (one of the contract's mutating operation names) with a
+        syntactically-valid extra argument, on the given (possibly malicious) id."""
+        args = {
+            "get": (item_id,),
+            "set_status": (item_id, "Done"),
+            "append_result": (item_id, "ref"),
+            "comment": (item_id, "a note"),
+            "set_description": (item_id, "text"),
+            "set_title": (item_id, "New title"),
+            "set_type": (item_id, "bug"),
+        }[op]
+        return getattr(self.backend, op)(*args)
 
     def test_rejects_ids_with_path_separators_or_dots(self):
+        ops = (
+            "get", "set_status", "append_result",
+            "comment", "set_description", "set_title", "set_type",
+        )
         for malicious_id in ("../../x", "/etc/x", "a/b", "a.md"):
-            with self.subTest(malicious_id=malicious_id):
-                with self.assertRaises(Exception):
-                    self.backend.get(malicious_id)
-                with self.assertRaises(Exception):
-                    self.backend.set_status(malicious_id, "Done")
-                with self.assertRaises(Exception):
-                    self.backend.append_result(malicious_id, "ref")
+            for op in ops:
+                with self.subTest(malicious_id=malicious_id, op=op):
+                    with self.assertRaises(Exception):
+                        self._call_with_id(op, malicious_id)
 
     def test_path_traversal_id_cannot_read_or_write_outside_workitems_dir(self):
         canary_dir = tempfile.mkdtemp(prefix="ccpr-workitems-canary-")
@@ -371,9 +389,13 @@ class WorkItemsContractTestCase:
         # A relative id that walks out of the workitems dir into the canary dir.
         relative_id = f"{os.path.relpath(canary_dir, self.tmp_dir)}/canary"
 
-        with self.assertRaises(Exception):
-            self.backend.get(relative_id)
-        with self.assertRaises(Exception):
-            self.backend.append_result(relative_id, "https://example.org/pwned")
+        ops = (
+            "get", "append_result",
+            "comment", "set_description", "set_title", "set_type",
+        )
+        for op in ops:
+            with self.subTest(op=op):
+                with self.assertRaises(Exception):
+                    self._call_with_id(op, relative_id)
 
         self.assertEqual(canary_path.read_text(encoding="utf-8"), "original")
