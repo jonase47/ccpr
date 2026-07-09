@@ -7,6 +7,18 @@ Keeps the security of the running system current: regular dependency updates, se
 If provided: Execute the specified security task.
 If not provided: Read TECH_STACK.md and SECURITY.md and conduct a complete security update review. If any context is missing, ask about the desired focus or recommend the standard procedure.
 
+## 0. Work-item adoption guard (ADR-0002 §8)
+
+Run `python3 ~/.claude/scripts/workitems.py list`.
+- **Non-empty array** → the project uses the structured store. Use the CLI for the Critical
+  findings in step 4 below (instead of appending BACKLOG.md prose).
+- **`[]` and no `docs/workitems/` directory** → still on prose. Append Critical findings to
+  BACKLOG.md as before. Emit one line: *"Tip: run `lift` to adopt the structured work-item store."*
+- **`[]` but `docs/workitems/` exists** → adopted store, just empty right now. Treat as adopted: use
+  the CLI, not the prose fallback.
+
+See Manual/WORKITEMS.md §8 for the full guard rationale and the status-verb mapping.
+
 ## Execution
 
 ### 1. Read Context
@@ -79,7 +91,16 @@ Update `docs/operations/OPS.md`:
 - In **Detail Files** table: ensure a row for `[SECURITY.md](SECURITY.md)` with status `living`.
 - Lift any active Critical/High security finding into **Open Risks**.
 
-Cross-file update: append Critical findings as new items to `docs/planning/BACKLOG.md` (for `/p8-iteration`) and bump its `last_updated`.
+Cross-file update, using the guard result from step 0:
+- Structured store: `workitems create --title "<finding>" --type fix --description "[security]
+  <finding + CVE/CVSS + remediation>"` per Critical finding (check the full, unfiltered `workitems
+  list` for a matching title first — trim + casefold — so a re-run never duplicates an
+  already-created finding; record the assigned `**Work-Item:** WI-NNNN` id in this file's `## Open
+  Items`). The CLI's `create` has no `--tags` flag (checked `scripts/workitems.py` — only
+  `--title`/`--type`/`--owner`/`--description` exist) — a `[security]` prefix in the description is
+  the closest available signal, not an invented flag.
+- Prose fallback: append Critical findings as new items to `docs/planning/BACKLOG.md` (for
+  `/p8-iteration`) and bump its `last_updated`.
 
 ## Result
 
@@ -88,7 +109,7 @@ Cross-file update: append Critical findings as new items to `docs/planning/BACKL
 - Updated dependencies in the repository
 - Updated **`docs/architecture/SECURITY.md`** (P3 sub-index) if applicable
 - **`docs/operations/OPS.md`** (phase index updated)
-- Critical findings as new items in `docs/planning/BACKLOG.md` (for `/p8-iteration`)
+- Critical findings as new work items (structured store) or new items in `docs/planning/BACKLOG.md` (prose fallback) — either way, input for `/p8-iteration`
 
 ### Handover Epilogue
 Update `docs/HANDOVER.md`:
