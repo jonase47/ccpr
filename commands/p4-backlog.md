@@ -61,8 +61,29 @@ Delegate effort estimation and technical validation to the **senior-developer** 
 > 5. What should be implemented in the first sprint to lay a solid foundation?
 
 ### 4. Create Work Items (work-item-backend contract, ADR-0002 §8)
+
+#### 4a. Origination guard (avoid forking the store on a re-run)
+Before creating anything, check which store already exists:
+- A prose `docs/planning/BACKLOG.md` with actual story content exists **AND** `docs/workitems/`
+  does **NOT** exist → the project has an established prose backlog that hasn't been adopted into
+  the structured store yet. Do **not** blindly `create` (that would fork a second, competing
+  register — the §7 drift Manual/WORKITEMS.md warns against). Instead, recommend running
+  `python3 ~/.claude/scripts/workitems.py lift docs/planning/BACKLOG.md` first, then re-run
+  `/p4-backlog` once the store is adopted.
+- `docs/workitems/` already exists (structured store adopted, whether via a prior `/p4-backlog` run
+  or via `lift`) → proceed below; this is a same-store re-run (e.g. a focus-epic pass) and is safe.
+
+#### 4b. Idempotent creation
 For every user story from step 2/3, instead of authoring it as BACKLOG.md prose, create it as a
-work item:
+work item — but first check it doesn't already exist, so re-running `/p4-backlog` (e.g. to add a
+newly-scoped epic) never duplicates a story that a previous run already created:
+
+```
+python3 ~/.claude/scripts/workitems.py list --status "Backlog"
+```
+
+If an item with a matching title is already present in the returned array, skip creating it and
+reuse its `id`. Otherwise create it:
 
 ```
 python3 ~/.claude/scripts/workitems.py create --title "<story title>" --type feat --description "<story text + acceptance criteria>"
@@ -72,6 +93,8 @@ The backend assigns the `id` (`WI-NNNN` on the `local` provider) — never inven
 adoption point: it establishes the structured store, so no prose-fallback branch applies here (see
 Manual/WORKITEMS.md §8 for the full adoption guard used by commands that transition an *existing*
 store). `BACKLOG.md` becomes a generated **view** over the created items, not their source of truth.
+Record every story's assigned `id` — the view written in step 5 references it (see §5b/§5c) so
+downstream commands resolve `<id>` by a real reference instead of a fuzzy title match.
 
 ### 5. Write Detail Files
 This subskill writes the phase index `PROJECT_PLAN.md` plus the backlog. The backlog uses one of two layouts depending on size — both belong in `docs/planning/`.
@@ -99,7 +122,9 @@ last_updated: <DD.MM.YYYY>
 ---
 ```
 
-Body sections: `## Epics`, `## User Stories` (per epic), `## Estimates & Acceptance Criteria`, `## Dependencies`, `## Labels`.
+Body sections: `## Epics`, `## User Stories` (per epic), `## Estimates & Acceptance Criteria`, `## Dependencies`, `## Labels`. Each story carries a `**Work-Item:** WI-NNNN` line with the id assigned in
+step 4b, so downstream commands (`/p5-implement`, `/p5-review`, `/p5-acceptance`, `gate-p5`) resolve
+it by a real reference, never by matching the title text.
 
 #### 5c. Sub-Index Layout (recommended for MVP-scale backlogs)
 
@@ -136,10 +161,12 @@ last_updated: <DD.MM.YYYY>
 ---
 ```
 
-Body: epic header (Goal, Scope, T-Shirt, Dependencies, Labels, Notes) + all user stories of this epic as H5 (`##### E-0X-S01 · Title`) with their acceptance criteria, estimate, dependencies, labels, notes.
+Body: epic header (Goal, Scope, T-Shirt, Dependencies, Labels, Notes) + all user stories of this epic as H5 (`##### E-0X-S01 · Title`) with their acceptance criteria, estimate, dependencies, labels, notes,
+and a `**Work-Item:** WI-NNNN` line with the id assigned in step 4b (see §5b — same rationale:
+downstream commands resolve by id, not by title match).
 
 Optional cross-reference files in `docs/planning/backlog/`:
-- `STORY_INDEX.md` — table of all stories at a glance: `Story-ID | Epic | Title | T-Shirt | Status | Detail-File`
+- `STORY_INDEX.md` — table of all stories at a glance: `Story-ID | Work-Item | Epic | Title | T-Shirt | Status | Detail-File`
 - `FEATURE_COVERAGE.md` — feature-ID ↔ epic mapping (if Feature-IDs are referenced from stories)
 
 #### 5d. Phase Index `PROJECT_PLAN.md`
