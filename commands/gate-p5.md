@@ -79,8 +79,11 @@ Delegate the sprint gate check to the **project-planner** agent with a focused p
 >
 > **Per-story verdict table (structured-store projects only, per the §0a guard):** the criteria
 > above are judged at the sprint level, but the write-back in step 3 needs a per-story decision.
-> Cross-reference this sprint's story scope (SPRINT.md) against `workitems list` — every story
-> carries its `**Work-Item:** WI-NNNN` reference from `/p4-backlog` — and output one row per story:
+> Read each story's `Work-Item` id directly from SPRINT.md's Sprint Table (`/p4-sprint` carries it
+> forward from BACKLOG.md's `**Work-Item:**` line into that table's Work-Item column) — do not
+> fuzzy-match on the story title. If a story's Sprint Table row has no Work-Item id (an
+> older/unmigrated sprint plan predating this column), fall back to matching its title against
+> `workitems list` and flag it so the id gets backfilled. Output one row per story:
 > `Story | Work-Item id | Verdict (Done / Backlog)`. A story is `Done` only if it individually meets
 > criteria 2 and 5 above; otherwise `Backlog` (deferred). This table, not fuzzy title matching, is
 > what step 3 below applies `set-status` against.
