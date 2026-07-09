@@ -54,7 +54,14 @@ Before planning the new sprint, archive the previous sprint's polish artefact so
 
 Create `.handover-archive/sprint-<prev>/` if it does not yet exist.
 
-### 1c. Capture Sprint Base Commit (anchors the end-of-sprint review)
+### 1c. Determine the Current Sprint Number
+Read the previous sprint's `sprint:` frontmatter value — from `docs/planning/SPRINT.md` (flat layout) or the most recent `docs/planning/sprint/SPRINT-NN.md` (sub-index layout). Increment it by 1 for the new sprint (start at `1` if no previous sprint carries this field yet, e.g. the project's first `/p4-sprint` run). Call this `N`. It is used for:
+- the new sprint's frontmatter (`sprint: <N>`, see 4b/4c)
+- the per-story `workitems set-sprint <id> <N>` call in step 2B below
+
+`sprint: <N>` in SPRINT.md's frontmatter (or the active `sprint/SPRINT-NN.md`'s, for the sub-index layout) is the **single source of truth** for "what is the current sprint number" — `/guide` and `/gate-p5` read it from there, not from filenames or prose.
+
+### 1d. Capture Sprint Base Commit (anchors the end-of-sprint review)
 Record the current `HEAD` as this sprint's base, so `/p5-review-sprint` and `/gate-p5` can resolve **exactly** which commits belong to the sprint — regardless of how many commits or pushes happen mid-sprint:
 - At the start of planning (before writing the sprint docs), run `git rev-parse HEAD` and capture the SHA.
 - Write it into the sprint frontmatter as `base_commit: <sha>` (see 4b / 4c). The end-of-sprint review then scopes itself to `git diff <base_commit>..HEAD`.
@@ -84,11 +91,14 @@ Delegate sprint planning to the **project-planner** agent:
 >   line in BACKLOG.md if the project has partially adopted the store, otherwise there is none yet.
 >   This is the same id `/p5-implement`, `/p5-review`, `/p5-acceptance`, and `gate-p5` resolve
 >   `set-status` against, so it must be carried into the Sprint Table below, not dropped.
-> - **Promote each selected story to `Ready`** (structured store only): `workitems set-status <id>
->   "Ready"` — being pulled into this sprint's Sprint Table IS the commitment event, and `Ready` is
->   what `/p5-implement` resolves its own selection from. Do this for every story written into the
->   Sprint Table below, not just a subset — an item left at `Backlog` after being listed in the
->   Sprint Table would be invisible to `/p5-implement` and silently never get worked on.
+> - **Promote each selected story to `Ready` and stamp it with the sprint** (structured store only):
+>   `workitems set-status <id> "Ready"` **and** `workitems set-sprint <id> <N>` (N from step 1c) —
+>   being pulled into this sprint's Sprint Table IS the commitment event; `Ready` is what
+>   `/p5-implement` resolves its own selection from, and the `sprint` field is what `/guide` and
+>   `/gate-p5` resolve sprint *membership* from (`list --sprint <N>`) — the Sprint Table below is a
+>   human-readable view from here on, not the machine source of membership. Do this for every story
+>   written into the Sprint Table, not just a subset — an item left without both `Ready` and
+>   `sprint: <N>` would be invisible to `/p5-implement` and/or `/gate-p5`/`/guide`'s sprint scoping.
 >
 > **C. Sprint Table**
 > | Story ID | Work-Item | Title | Epic | Story Points | Type | Dependency |
@@ -134,6 +144,7 @@ kind: detail
 status: living   # current sprint plan, replaced each call
 last_updated: <DD.MM.YYYY>
 base_commit: <sha>   # HEAD at sprint start — anchors the /p5-review-sprint diff
+sprint: <N>   # current sprint number (step 1c) — the source /guide and /gate-p5 read for sprint scoping
 ---
 ```
 
@@ -167,7 +178,7 @@ Per sprint (current and previous), write one detail file `docs/planning/sprint/S
 phase: P4
 subskill: sprint
 kind: sprint-detail
-sprint: NN
+sprint: NN   # this sprint's number (step 1c) — the source /guide and /gate-p5 read for sprint scoping
 base_commit: <sha>   # HEAD at sprint start — anchors the /p5-review-sprint diff
 status: living | complete   # complete after sprint end
 last_updated: <DD.MM.YYYY>
@@ -252,7 +263,7 @@ Update `docs/planning/PROJECT_PLAN.md` (the P4 phase index, created by `/p4-back
 - Direct entry point into `/p5-implement` for the first story of the sprint
 
 ## Note on Sprint Numbers
-The sprint number is managed in SPRINT.md and incremented with each new sprint call. The command itself does not manage numbering.
+The sprint number `N` is determined by this command (step 1c): previous sprint's `sprint:` frontmatter value + 1, starting at `1` if none exists yet. It is written into SPRINT.md's (or the active `sprint/SPRINT-NN.md`'s) frontmatter as `sprint: <N>` — the single source of truth `/guide` and `/gate-p5` read for sprint scoping — and stamped onto every committed story via `workitems set-sprint <id> <N>`.
 
 ## Ticket ID Formats in Sprint
 Bugs and findings that arise during the sprint follow the schema from `/p4-backlog`:
