@@ -47,6 +47,8 @@ abandoned claims into Parked based on `workitems.claiming.staleAfter` in `.claud
 Typed links (ADR-0008): <type> is one of depends-on/blocks/relates-to/subtask-of.
 `blocks` is client-side sugar for the inverse of depends-on (delegates to
 `add-link <target-id> depends-on <id>`); add-link/remove-link are idempotent.
+NOTE: a `blocks` call returns <target-id>'s state, not <id>'s (the swap happens
+before the final read) -- follow up with `get <id>` if you need <id>'s own state.
 
 Planning fields (ADR-0002 2nd addendum): set-sprint is single-valued (a later set
 overwrites); set-priority is a closed vocabulary (Critical/High/Medium/Low),

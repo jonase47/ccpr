@@ -69,6 +69,13 @@ This keeps the link-type vocabulary the instance needs to know about to exactly 
 (`depends-on`, `relates-to`, `subtask-of`), not four, and avoids needing YouTrack's inward-direction
 command phrase at all (only the outward phrase for each of the three real types is ever sent).
 
+**Return value for `blocks` (documented, 09.07.2026 review follow-up):** because `add-link <id> blocks
+<target>`/`remove-link <id> blocks <target>` swap `id`/`target` before delegating to `depends-on`, the
+item state the call returns is the **target's** (`<target>`'s), not `<id>`'s — the swap happens before
+the final `get()`. Correct (the mutation itself did land on the swapped `depends-on` edge, readable from
+either side via `links[]`), but easy to miss without this note; a caller wanting `<id>`'s own updated
+state back after a `blocks` call should follow up with a plain `get <id>`.
+
 ### Direction & read-back normalization (the load-bearing rule)
 
 YouTrack reports each link **relative to the issue being read** (`direction: OUTWARD | INWARD | BOTH`,

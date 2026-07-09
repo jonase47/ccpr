@@ -582,6 +582,18 @@ class WorkItemsContractTestCase:
             self.backend.get(target_id)["links"],
         )
 
+    def test_add_link_with_blocks_returns_the_targets_state(self):
+        """`add-link <id> blocks <target>` swaps id/target BEFORE the final read
+        (see add_link's blocks-delegation), so the item state it returns is the
+        TARGET's, not <id>'s -- documented behaviour (ADR-0008, 09.07.2026 review
+        follow-up), fixed here so it can't silently regress."""
+        item_id = self.create_item()
+        target_id = self.create_item()
+
+        returned = self.backend.add_link(item_id, "blocks", target_id)
+
+        self.assertEqual(returned["id"], target_id)
+
     def test_remove_link_with_blocks_delegates_to_the_targets_depends_on(self):
         item_id = self.create_item()
         target_id = self.create_item()
