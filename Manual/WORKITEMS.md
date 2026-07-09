@@ -176,11 +176,21 @@ item state — it stays prose; see §10.)
 A project may not have adopted the structured store yet (no `docs/workitems/`, still prose
 `BACKLOG.md`). A wired command must degrade gracefully — **never fork the store, never hard-fail**:
 
-> Run `python3 ~/.claude/scripts/workitems.py list`.
-> - **Non-empty array** → the project uses the structured store. Use the CLI for **all** item state below.
-> - **`[]` and no `docs/workitems/` directory** → the project is still on prose. Fall back to the
->   existing `SPRINT.md`/`BACKLOG.md` editing behaviour, and emit one line: *"Tip: run `lift` to adopt
->   the structured work-item store."*
+> Run `python3 ~/.claude/scripts/workitems.py list` **and** check whether the `docs/workitems/`
+> directory exists (e.g. `ls docs/workitems/`). Both signals are needed — see the note below.
+> - **Non-empty list** → the project uses the structured store. Use the CLI for **all** item state below.
+> - **Empty list, but `docs/workitems/` exists** → the store is adopted, just empty for this query (an
+>   empty store, or a `--status`-filtered query with no matches). **Use the CLI — the empty result is
+>   real.** For a gate that means a genuine finding (e.g. "no Ready story" = Not Met), NOT a reason to
+>   fall back to prose.
+> - **Empty list and no `docs/workitems/` directory** → not adopted, still on prose. Fall back to the
+>   existing `SPRINT.md`/`BACKLOG.md` behaviour, and emit one line: *"Tip: run `lift` to adopt the
+>   structured work-item store."*
+>
+> **Why the directory check is essential:** `list` returns the identical `[]` for an adopted-but-empty
+> store and a never-adopted project — only the directory's existence tells them apart. Treating an
+> adopted-empty store as never-adopted would **false-pass a gate** (skip a real Not-Met via the prose
+> exemption).
 
 Rationale: **dual-write** re-creates two writable registers (the §7 drift). **Requiring `lift`** breaks
 every project on upgrade. Feature-detect honours "old and new coexist" and the empty-list case is
