@@ -41,7 +41,7 @@ import urllib.request
 from workitems import (
     DEFAULT_STALE_AFTER_SECONDS, RESULT_MARKER, STATUS_VALUES, WorkItemError,
     is_reserved_tag, reject_result_marker, safe_parse_datetime, validate_item_id,
-    validate_link_type, validate_tag,
+    validate_link_type, validate_priority, validate_tag,
 )
 
 # `links(direction,linkType(name),issues(idReadable))` (ADR-0008) lets _item_from_issue
@@ -112,12 +112,14 @@ def create(config):
         base_url, project, token, state_map=config.get("stateMap"),
         stale_after_seconds=config.get("stale_after_seconds"),
         link_type_map=config.get("linkTypeMap"),
+        priority_map=config.get("priorityMap"),
     )
 
 
 class YouTrackBackend:
     def __init__(self, base_url, project, token, state_map=None, transport=None,
-                 clock=None, stale_after_seconds=None, link_type_map=None):
+                 clock=None, stale_after_seconds=None, link_type_map=None,
+                 priority_map=None):
         self.base_url = base_url.rstrip("/")
         self.project = project
         self.token = token
@@ -125,6 +127,8 @@ class YouTrackBackend:
         self._reverse_state_map = {v: k for k, v in self.state_map.items()}
         self.link_type_map = link_type_map or {}
         self._reverse_link_type_map = {v: k for k, v in self.link_type_map.items()}
+        self.priority_map = priority_map or {}
+        self._reverse_priority_map = {v: k for k, v in self.priority_map.items()}
         self.transport = transport or _HttpTransport()
         self._project_id = None
         # Claiming (ADR-0005): clock is injected (zero-arg callable -> datetime),
@@ -230,7 +234,7 @@ class YouTrackBackend:
         self._request("DELETE", f"/api/issues/{item_id}")
 
     def list(self, status=None, owner=None, tags=None, item_type=None, query=None,
-             sprint=None):
+             sprint=None, priority=None):
         # $top=-1 disables pagination explicitly — without it, some YouTrack versions
         # cap /api/issues to a default page size, silently truncating a large project.
         # `query` is passed through verbatim to YouTrack's own query language, always
@@ -254,6 +258,8 @@ class YouTrackBackend:
             items = [item for item in items if item["type"] == item_type]
         if sprint is not None:
             items = [item for item in items if item["sprint"] == sprint]
+        if priority is not None:
+            items = [item for item in items if item["priority"] == priority]
         return items
 
     def get(self, item_id):
@@ -436,6 +442,17 @@ class YouTrackBackend:
         self._run_command(item_id, f"Sprint {sprint}")
         return self.get(item_id)
 
+    def set_priority(self, item_id, priority):
+        """Validates against the closed CCPR vocabulary (ADR-0002 2nd addendum),
+        then maps to the project's own `Priority` bundle name via `priorityMap`
+        (identity default, same escape hatch as `stateMap`). Fails hard on
+        rejection, same as set_type/set_sprint."""
+        validate_item_id(item_id)
+        validate_priority(priority)
+        mapped = self._map_priority(priority)
+        self._run_command(item_id, f"Priority {mapped}")
+        return self.get(item_id)
+
     def add_tag(self, item_id, tag):
         """Checks the current (already reserved-filtered) tag list first so a
         redundant call is skipped rather than relying on the Command API's own
@@ -543,6 +560,16 @@ class YouTrackBackend:
             return None
         return self._reverse_state_map.get(project_state_name, project_state_name)
 
+    def _map_priority(self, ccpr_priority):
+        """CCPR vocabulary name -> the project's own Priority bundle name."""
+        return self.priority_map.get(ccpr_priority, ccpr_priority)
+
+    def _unmap_priority(self, project_priority_name):
+        """The project's own Priority bundle name -> CCPR vocabulary name."""
+        if project_priority_name is None:
+            return None
+        return self._reverse_priority_map.get(project_priority_name, project_priority_name)
+
     def _map_link_type(self, canonical_verb):
         """Canonical verb -> the instance's actual YouTrack link-type name. Unlike
         _map_state's identity default, this falls back to the MECHANICAL dehyphenated
@@ -624,6 +651,10 @@ class YouTrackBackend:
         sprint_value = custom_fields.get("Sprint")
         sprint = sprint_value.get("name") if isinstance(sprint_value, dict) else None
 
+        priority_value = custom_fields.get("Priority")
+        priority_name = priority_value.get("name") if isinstance(priority_value, dict) else None
+        priority = self._unmap_priority(priority_name)
+
         # comment() and append_result() share the SAME comments stream (both POST to
         # /api/issues/<id>/comments); the marker is the only thing that tells them
         # apart on read-back -- a hard either/or partition, never both (ADR-0002
@@ -661,6 +692,7 @@ class YouTrackBackend:
             "type": item_type,
             "tags": tags,
             "sprint": sprint,
+            "priority": priority,
             "links": self._parse_links(issue.get("links", [])),
             "runner": runner,
             "heartbeat": heartbeat,

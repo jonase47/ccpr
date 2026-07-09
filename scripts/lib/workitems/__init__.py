@@ -127,6 +127,20 @@ def safe_parse_datetime(value, parser):
     except (ValueError, TypeError):
         return None
 
+# Closed CCPR-defined priority vocabulary (ADR-0002 2nd addendum) -- validated on
+# BOTH backends, unlike `type`'s freeform-on-local behaviour: CCPR defines these four
+# values itself, so there is no legitimate reason for a project to extend the set, and
+# `list --priority` needs a closed, shared vocabulary to stay meaningfully consistent.
+PRIORITY_VALUES = ("Critical", "High", "Medium", "Low")
+
+
+def validate_priority(priority):
+    if priority not in PRIORITY_VALUES:
+        raise WorkItemError(
+            f"Unknown priority {priority!r}. Valid values: {', '.join(PRIORITY_VALUES)}"
+        )
+
+
 # Typed work-item links (ADR-0008). `blocks` is pure client-side sugar for the
 # inverse of `depends-on` -- never stored as its own edge (see add_link/remove_link
 # in local.py/youtrack.py, which swap id/target and delegate to "depends-on" for it).

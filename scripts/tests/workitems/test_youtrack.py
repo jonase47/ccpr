@@ -770,6 +770,35 @@ class YouTrackQueryTest(unittest.TestCase):
         self.assertEqual(self.transport.list_queries_received[-1], "project: TEST")
 
 
+class YouTrackPriorityMapTest(unittest.TestCase):
+    """priorityMap lets a project whose Priority bundle doesn't name its values to
+    match CCPR's four-value vocabulary supply a name->name mapping -- the same
+    escape hatch stateMap already provides for status (ADR-0002 2nd addendum)."""
+
+    def setUp(self):
+        self.transport = FakeYouTrackTransport(project_short_name="TEST")
+        self.backend = youtrack.YouTrackBackend(
+            base_url="https://faketrack.example.org", project="TEST", token="fake-token",
+            priority_map={"Critical": "Show-stopper"},
+            transport=self.transport,
+        )
+
+    def test_set_priority_sends_the_mapped_project_priority_name(self):
+        item = self.backend.create(title="New feature")
+
+        self.backend.set_priority(item["id"], "Critical")
+
+        self.assertIn("Priority Show-stopper", self.transport.commands_received)
+
+    def test_get_reports_back_the_ccpr_vocabulary_name_not_the_project_name(self):
+        item = self.backend.create(title="New feature")
+
+        self.backend.set_priority(item["id"], "Critical")
+        fetched = self.backend.get(item["id"])
+
+        self.assertEqual(fetched["priority"], "Critical")
+
+
 class YouTrackSetSprintHardFailTest(unittest.TestCase):
     """Unlike create()'s best-effort field handling, set-sprint is a dedicated call
     with nothing else to protect via atomicity -- it fails hard on an unmappable

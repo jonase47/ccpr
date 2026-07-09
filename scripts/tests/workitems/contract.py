@@ -670,6 +670,52 @@ class WorkItemsContractTestCase:
 
         self.assertEqual(items, [])
 
+    # --- set-priority / list --priority ---
+    #
+    # `priority` is a closed CCPR vocabulary ({Critical, High, Medium, Low}),
+    # validated on BOTH backends (ADR-0002 2nd addendum) -- unlike `type`, which is
+    # freeform on `local`.
+
+    def test_fresh_item_has_no_priority(self):
+        item_id = self.create_item()
+
+        self.assertIsNone(self.backend.get(item_id)["priority"])
+
+    def test_set_priority_sets_and_reads_back(self):
+        item_id = self.create_item()
+
+        item = self.backend.set_priority(item_id, "High")
+
+        self.assertEqual(item["priority"], "High")
+        self.assertEqual(self.backend.get(item_id)["priority"], "High")
+
+    def test_set_priority_rejects_a_value_outside_the_vocabulary(self):
+        item_id = self.create_item()
+
+        with self.assertRaises(Exception):
+            self.backend.set_priority(item_id, "Urgent")
+        self.assertIsNone(self.backend.get(item_id)["priority"])
+
+    def test_set_priority_unknown_id_raises(self):
+        with self.assertRaises(Exception):
+            self.backend.set_priority("WI-9999", "High")
+
+    def test_list_filters_by_priority(self):
+        self.create_item()
+        high_id = self.create_item()
+        self.backend.set_priority(high_id, "High")
+
+        items = self.backend.list(priority="High")
+
+        self.assertEqual([item["id"] for item in items], [high_id])
+
+    def test_list_by_priority_with_no_match_returns_empty_list(self):
+        self.create_item()
+
+        items = self.backend.list(priority="Low")
+
+        self.assertEqual(items, [])
+
     # --- id validation / path traversal ---
     #
     # Ids may end up in filesystem paths (local) today and in `ticket/<id>` branch
@@ -695,6 +741,7 @@ class WorkItemsContractTestCase:
             "add_link": (item_id, "depends-on", "WI-9999"),
             "remove_link": (item_id, "depends-on", "WI-9999"),
             "set_sprint": (item_id, "4"),
+            "set_priority": (item_id, "High"),
         }[op]
         return getattr(self.backend, op)(*args)
 
@@ -703,6 +750,7 @@ class WorkItemsContractTestCase:
             "get", "set_status", "append_result",
             "comment", "set_description", "set_title", "set_type",
             "add_tag", "remove_tag", "add_link", "remove_link", "set_sprint",
+            "set_priority",
         )
         for malicious_id in ("../../x", "/etc/x", "a/b", "a.md"):
             for op in ops:
@@ -723,6 +771,7 @@ class WorkItemsContractTestCase:
             "get", "append_result",
             "comment", "set_description", "set_title", "set_type",
             "add_tag", "remove_tag", "add_link", "remove_link", "set_sprint",
+            "set_priority",
         )
         for op in ops:
             with self.subTest(op=op):

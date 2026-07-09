@@ -12,7 +12,7 @@ from pathlib import Path
 
 from workitems import (
     STATUS_VALUES, WorkItemError, frontmatter, reject_result_marker, validate_item_id,
-    validate_link_type, validate_tag,
+    validate_link_type, validate_priority, validate_tag,
 )
 
 RESULT_HEADING = "## Result"
@@ -117,7 +117,7 @@ class LocalBackend:
         return f"WI-{highest + 1:04d}"
 
     def list(self, status=None, owner=None, tags=None, item_type=None, query=None,
-             sprint=None):
+             sprint=None, priority=None):
         if query:
             # local has no server-side query language to pass through to
             # (ADR-0002 2nd addendum) -- raise rather than silently ignoring the
@@ -143,6 +143,8 @@ class LocalBackend:
             if item_type is not None and item["type"] != item_type:
                 continue
             if sprint is not None and item["sprint"] != sprint:
+                continue
+            if priority is not None and item["priority"] != priority:
                 continue
             items.append(item)
         return items
@@ -251,6 +253,17 @@ class LocalBackend:
         self._write(path, data, body)
         return self._item_from_data(data, body)
 
+    def set_priority(self, item_id, priority):
+        """Validates against the closed vocabulary on `local` too (ADR-0002 2nd
+        addendum) -- a deliberate departure from `type`'s freeform local behaviour,
+        since CCPR itself defines this vocabulary (no project-specific bundle to
+        defer to)."""
+        validate_priority(priority)
+        path, data, body = self._read(item_id)
+        data["priority"] = priority
+        self._write(path, data, body)
+        return self._item_from_data(data, body)
+
     def add_link(self, item_id, link_type, target_id):
         """Creates a typed edge from `item_id` to `target_id` (ADR-0008), idempotent
         (an already-present edge is a no-op). `blocks` is pure sugar for the inverse
@@ -343,6 +356,7 @@ class LocalBackend:
             # reads as an empty list, not a missing/None value.
             "tags": data.get("tags") or [],
             "sprint": data.get("sprint"),
+            "priority": data.get("priority"),
             # links[] never None (ADR-0008), same discipline as tags/comments.
             "links": _parse_links(data.get("links") or []),
             "created": data.get("created"),
