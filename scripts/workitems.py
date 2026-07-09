@@ -19,6 +19,7 @@ Usage:
   workitems.py comment <id> <text> [--project DIR]
   workitems.py set-description <id> <text> [--project DIR]
   workitems.py set-title <id> <text> [--project DIR]
+  workitems.py set-type <id> <type> [--project DIR]
   workitems.py migrate --to <provider> [--project DIR]
   workitems.py lift <source-file...> [--apply] [--exclude PATTERN=REASON ...] [--project DIR]
   workitems.py sweep [--project DIR]
@@ -210,6 +211,13 @@ def build_parser():
     p_set_title.add_argument("id")
     p_set_title.add_argument("text")
 
+    p_set_type = sub.add_parser(
+        "set-type", help="Replace/set the type extension field (fails hard on rejection)",
+        parents=[project_arg],
+    )
+    p_set_type.add_argument("id")
+    p_set_type.add_argument("type")
+
     p_migrate = sub.add_parser(
         "migrate", help="Move items to a target backend, once, reversibly (ADR-0004)",
         parents=[project_arg],
@@ -259,6 +267,8 @@ def dispatch(backend, args):
         return backend.set_description(args.id, args.text)
     if args.operation == "set-title":
         return backend.set_title(args.id, args.text)
+    if args.operation == "set-type":
+        return backend.set_type(args.id, args.type)
     raise ValueError(f"Unknown operation: {args.operation}")
 
 

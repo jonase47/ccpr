@@ -140,6 +140,16 @@ class LocalBackend:
         self._write(path, data, body)
         return self._item_from_data(data, body)
 
+    def set_type(self, item_id, item_type):
+        """`local` has no Type bundle to validate against, so any non-empty string
+        is accepted -- same freeform behaviour `create` already has for `type`."""
+        if not item_type:
+            raise WorkItemError("type is required")
+        path, data, body = self._read(item_id)
+        data["type"] = item_type
+        self._write(path, data, body)
+        return self._item_from_data(data, body)
+
     def _path_for(self, item_id):
         validate_item_id(item_id)  # primary defense: reject anything but a bare id
 

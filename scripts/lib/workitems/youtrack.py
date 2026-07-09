@@ -365,6 +365,20 @@ class YouTrackBackend:
         self._request("POST", f"/api/issues/{item_id}", body={"summary": text})
         return self.get(item_id)
 
+    def set_type(self, item_id, item_type):
+        """A DEDICATED call, unlike create()'s best-effort type-setting: there is
+        nothing else to protect via atomicity here (the issue already exists and
+        nothing else commits alongside this), and a rejection is a real error the
+        caller -- who explicitly chose this value -- needs to see, not routine
+        friction to paper over. Fails hard on a rejected Command API call, run
+        directly (not wrapped in _apply_optional_create_field). ADR-0002 addendum,
+        09.07.2026."""
+        validate_item_id(item_id)
+        if not item_type:
+            raise WorkItemError("type is required")
+        self._run_command(item_id, f"Type {item_type}")
+        return self.get(item_id)
+
     def _resolve_project_id(self):
         if self._project_id is not None:
             return self._project_id
@@ -441,6 +455,9 @@ class YouTrackBackend:
         if isinstance(assignee_value, dict):
             owner = assignee_value.get("login") or assignee_value.get("name")
 
+        type_value = custom_fields.get("Type")
+        item_type = type_value.get("name") if isinstance(type_value, dict) else None
+
         # comment() and append_result() share the SAME comments stream (both POST to
         # /api/issues/<id>/comments); the marker is the only thing that tells them
         # apart on read-back -- a hard either/or partition, never both (ADR-0002
@@ -466,6 +483,7 @@ class YouTrackBackend:
             "result-link": result_links,
             "comments": comments,
             "owner": owner,
+            "type": item_type,
             "runner": runner,
             "heartbeat": heartbeat,
         }

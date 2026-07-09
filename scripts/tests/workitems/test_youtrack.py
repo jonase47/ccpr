@@ -181,6 +181,38 @@ class YouTrackCreateOptionalFieldTest(unittest.TestCase):
         self.assertEqual(len(self.transport._issues), 1)
 
 
+class YouTrackSetTypeHardFailTest(unittest.TestCase):
+    """Unlike create()'s best-effort type-setting (warn + continue on a rejected
+    Type command), a dedicated set-type call has no atomicity to protect (nothing
+    else commits alongside it) and no "expected friction" justification (the
+    caller explicitly chose this type) -- it fails hard on rejection (ADR-0002
+    addendum, 09.07.2026). `local` has no Type bundle to validate against and
+    accepts any string -- that's already covered by the shared contract suite;
+    this hard-fail behaviour is youtrack-specific."""
+
+    def setUp(self):
+        self.transport = FakeYouTrackTransport(
+            project_short_name="TEST", known_types={"Bug", "Feature", "Task"},
+        )
+        self.backend = youtrack.YouTrackBackend(
+            base_url="https://faketrack.example.org", project="TEST",
+            token="fake-token", transport=self.transport,
+        )
+
+    def test_set_type_with_unmappable_type_raises(self):
+        item = self.backend.create(title="New feature")
+
+        with self.assertRaises(WorkItemError):
+            self.backend.set_type(item["id"], "chore")
+
+    def test_set_type_with_known_type_succeeds(self):
+        item = self.backend.create(title="New feature")
+
+        updated = self.backend.set_type(item["id"], "Bug")
+
+        self.assertEqual(updated["type"], "Bug")
+
+
 class YouTrackCreateRollbackTest(unittest.TestCase):
     """Unlike `type`/`owner` (optional, best-effort per 4c2d0c4), the initial State
     command sets a CORE, mandatory contract field (ADR-0002 §2) -- a rejection there

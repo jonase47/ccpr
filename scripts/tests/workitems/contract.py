@@ -313,6 +313,26 @@ class WorkItemsContractTestCase:
         with self.assertRaises(Exception):
             self.backend.set_title("WI-9999", "New title")
 
+    # --- set-type ---
+
+    def test_set_type_replaces_it(self):
+        item_id = self.create_item()
+
+        item = self.backend.set_type(item_id, "bug")
+
+        self.assertEqual(item["type"], "bug")
+        self.assertEqual(self.backend.get(item_id)["type"], "bug")
+
+    def test_set_type_rejects_empty_string(self):
+        item_id = self.create_item()
+
+        with self.assertRaises(Exception):
+            self.backend.set_type(item_id, "")
+
+    def test_set_type_unknown_id_raises(self):
+        with self.assertRaises(Exception):
+            self.backend.set_type("WI-9999", "bug")
+
     # --- id validation / path traversal ---
     #
     # Ids may end up in filesystem paths (local) today and in `ticket/<id>` branch
