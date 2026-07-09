@@ -181,6 +181,76 @@ class YouTrackCreateOptionalFieldTest(unittest.TestCase):
         self.assertEqual(len(self.transport._issues), 1)
 
 
+class YouTrackCreateRollbackTest(unittest.TestCase):
+    """Unlike `type`/`owner` (optional, best-effort per 4c2d0c4), the initial State
+    command sets a CORE, mandatory contract field (ADR-0002 §2) -- a rejection there
+    (e.g. "Backlog" missing from the project's own State bundle / stateMap) is a real
+    configuration problem, not something to silently continue past. But it still
+    happens AFTER POST /api/issues already committed the issue, so raising without
+    rolling back would orphan it exactly like the type/owner bug did. create() must
+    delete the just-created issue before raising: either a fully-created item, or
+    nothing -- never an orphan."""
+
+    def setUp(self):
+        # Deliberately excludes "Backlog" -- mirrors a real project whose State
+        # bundle (or a misconfigured stateMap) doesn't have a value named that.
+        self.transport = FakeYouTrackTransport(
+            project_short_name="TEST",
+            known_states={"Open", "In Progress", "Closed"},
+        )
+        self.backend = youtrack.YouTrackBackend(
+            base_url="https://faketrack.example.org", project="TEST",
+            token="fake-token", transport=self.transport,
+        )
+
+    def test_create_rolls_back_the_issue_when_initial_state_is_rejected(self):
+        with self.assertRaises(WorkItemError) as ctx:
+            self.backend.create(title="New feature")
+
+        self.assertIn("TEST-1", str(ctx.exception))
+        self.assertIn("Backlog", str(ctx.exception))
+        # Zero issues -- proves rollback, not orphan-and-raise. A retry after this
+        # is safe: it won't collide with a half-created TEST-1 left behind.
+        self.assertEqual(len(self.transport._issues), 0)
+
+    def test_create_does_not_delete_when_initial_state_is_accepted(self):
+        transport = FakeYouTrackTransport(
+            project_short_name="TEST", known_states={"Backlog", "In Progress", "Done"},
+        )
+        backend = youtrack.YouTrackBackend(
+            base_url="https://faketrack.example.org", project="TEST",
+            token="fake-token", transport=transport,
+        )
+
+        item = backend.create(title="New feature")
+
+        self.assertEqual(item["status"], "Backlog")
+        self.assertEqual(len(transport._issues), 1)
+
+    def test_create_reports_both_failures_when_rollback_delete_also_fails(self):
+        class DeleteFailingTransport(FakeYouTrackTransport):
+            def request(self, method, url, token, body=None):
+                if method == "DELETE":
+                    raise WorkItemError("YouTrack API error 500 for DELETE: internal error")
+                return super().request(method, url, token, body=body)
+
+        transport = DeleteFailingTransport(
+            project_short_name="TEST", known_states={"Open", "In Progress", "Closed"},
+        )
+        backend = youtrack.YouTrackBackend(
+            base_url="https://faketrack.example.org", project="TEST",
+            token="fake-token", transport=transport,
+        )
+
+        with self.assertRaises(WorkItemError) as ctx:
+            backend.create(title="New feature")
+
+        message = str(ctx.exception)
+        self.assertIn("Backlog", message)
+        self.assertIn("rollback delete also failed", message)
+        self.assertIn("TEST-1", message)
+
+
 class YouTrackStateOutsideVocabularyTest(unittest.TestCase):
     """A project's State bundle may legitimately have values outside CCPR's status
     vocabulary and outside any configured stateMap (e.g. a custom workflow state).

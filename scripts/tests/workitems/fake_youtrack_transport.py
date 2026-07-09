@@ -73,6 +73,12 @@ class FakeYouTrackTransport:
             issue["comments"].append({"text": body["text"]})
             return {"text": body["text"]}
 
+        if method == "DELETE" and path.startswith("/api/issues/"):
+            item_id = path.rsplit("/", 1)[-1]
+            self._require_issue(item_id)
+            del self._issues[item_id]
+            return None
+
         raise AssertionError(f"FakeYouTrackTransport: unhandled request {method} {path}")
 
     def _require_issue(self, item_id):

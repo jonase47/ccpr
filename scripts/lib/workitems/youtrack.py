@@ -129,15 +129,20 @@ class YouTrackBackend:
         # POST /api/issues above is the actual commit -- the issue exists from this
         # point on, so anything below that raises WITHOUT rolling the issue back
         # would orphan it while create() reports failure (a retry then duplicates
-        # it). The initial State command is the one exception: status is a core,
-        # mandatory contract field (ADR-0002 §2), not an optional extension, so a
-        # rejection here (e.g. "Backlog" missing from stateMap/the project's own
-        # State bundle) is a real configuration problem worth surfacing loudly
-        # rather than silently creating an item with no explicit status.
+        # it). The initial State command is the one exception to the best-effort
+        # treatment below: status is a core, mandatory contract field (ADR-0002
+        # §2), not an optional extension, so a rejection here (e.g. "Backlog"
+        # missing from stateMap/the project's own State bundle) is a real
+        # configuration problem worth surfacing loudly -- but it must not leave an
+        # orphan either. This makes create() atomic: either a fully-created item,
+        # or nothing.
         #
         # A fresh issue starts in the project's own default state, which is not
         # necessarily one named "Backlog" — drive it explicitly, same as set_status().
-        self.set_status(item_id, "Backlog")
+        try:
+            self.set_status(item_id, "Backlog")
+        except WorkItemError as exc:
+            self._rollback_failed_create(item_id, "Backlog", exc)
 
         # `type` and `owner` at create time ARE optional/backend-specific (ADR-0002:
         # the core contract never relies on `type`; `owner` is "optional while
@@ -167,6 +172,33 @@ class YouTrackBackend:
                 f"{item_id} (rejected by YouTrack): {exc}. Continuing without it.",
                 file=sys.stderr,
             )
+
+    def _rollback_failed_create(self, item_id, attempted_state, original_exc):
+        """The initial State command is the one create()-time field that is NOT
+        best-effort (see create()): a rejection means the issue was created but
+        never reached a valid CCPR status, so it must not survive as an orphan.
+        Deletes the just-created issue, then raises -- surfacing the delete
+        failure too if THAT also fails, rather than swallowing it, so a genuinely
+        stuck issue stays visible instead of silently lost."""
+        try:
+            self._delete_issue(item_id)
+        except WorkItemError as delete_exc:
+            raise WorkItemError(
+                f"create rolled back: could not set initial state {attempted_state!r} "
+                f"on {item_id} ({original_exc}) -- and the rollback delete also failed "
+                f"({delete_exc}); issue {item_id} may be orphaned in YouTrack, check "
+                "manually."
+            ) from original_exc
+        raise WorkItemError(
+            f"create rolled back: could not set initial state {attempted_state!r} "
+            f"on {item_id} ({original_exc})"
+        ) from original_exc
+
+    def _delete_issue(self, item_id):
+        """Backend-internal recovery only -- NOT part of the six-op contract (the
+        contract stays workflow-only: Cancelled, not delete). Used exclusively to
+        undo a create() whose mandatory initial state could not be set."""
+        self._request("DELETE", f"/api/issues/{item_id}")
 
     def list(self, status=None, owner=None):
         # $top=-1 disables pagination explicitly — without it, some YouTrack versions
