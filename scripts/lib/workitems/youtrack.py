@@ -40,8 +40,8 @@ import urllib.request
 
 from workitems import (
     DEFAULT_STALE_AFTER_SECONDS, RESULT_MARKER, STATUS_VALUES, WorkItemError,
-    is_reserved_tag, reject_result_marker, safe_parse_datetime, validate_item_id,
-    validate_link_type, validate_priority, validate_tag,
+    is_reserved_tag, reject_result_marker, safe_parse_datetime, validate_estimate,
+    validate_item_id, validate_link_type, validate_priority, validate_tag,
 )
 
 # `links(direction,linkType(name),issues(idReadable))` (ADR-0008) lets _item_from_issue
@@ -113,13 +113,14 @@ def create(config):
         stale_after_seconds=config.get("stale_after_seconds"),
         link_type_map=config.get("linkTypeMap"),
         priority_map=config.get("priorityMap"),
+        estimate_field=config.get("estimateField"),
     )
 
 
 class YouTrackBackend:
     def __init__(self, base_url, project, token, state_map=None, transport=None,
                  clock=None, stale_after_seconds=None, link_type_map=None,
-                 priority_map=None):
+                 priority_map=None, estimate_field=None):
         self.base_url = base_url.rstrip("/")
         self.project = project
         self.token = token
@@ -129,6 +130,10 @@ class YouTrackBackend:
         self._reverse_link_type_map = {v: k for k, v in self.link_type_map.items()}
         self.priority_map = priority_map or {}
         self._reverse_priority_map = {v: k for k, v in self.priority_map.items()}
+        # No default (unlike stateMap/priorityMap): no YouTrack instance ships a
+        # story-point-like field by default, so it must be configured explicitly
+        # (ADR-0002 2nd addendum) -- set_estimate raises immediately if this is None.
+        self.estimate_field = estimate_field
         self.transport = transport or _HttpTransport()
         self._project_id = None
         # Claiming (ADR-0005): clock is injected (zero-arg callable -> datetime),
@@ -453,6 +458,23 @@ class YouTrackBackend:
         self._run_command(item_id, f"Priority {mapped}")
         return self.get(item_id)
 
+    def set_estimate(self, item_id, points):
+        """Sets a project-specific numeric custom field (name configured via
+        `estimateField`, no default -- ADR-0002 2nd addendum): raises immediately,
+        BEFORE any API call, if it isn't configured, rather than guessing a
+        plausible-sounding default that might not exist on a given instance."""
+        validate_item_id(item_id)
+        validate_estimate(points)
+        if not self.estimate_field:
+            raise WorkItemError(
+                "workitems.youtrack.estimateField is not configured in "
+                ".claude/settings.json -- set-estimate needs the name of a numeric "
+                "custom field for story-point estimates (no default exists, since no "
+                "YouTrack instance ships one by default)."
+            )
+        self._run_command(item_id, f"{self.estimate_field} {points}")
+        return self.get(item_id)
+
     def add_tag(self, item_id, tag):
         """Checks the current (already reserved-filtered) tag list first so a
         redundant call is skipped rather than relying on the Command API's own
@@ -655,6 +677,20 @@ class YouTrackBackend:
         priority_name = priority_value.get("name") if isinstance(priority_value, dict) else None
         priority = self._unmap_priority(priority_name)
 
+        # Unlike the Enum fields above (State/Type/Sprint/Priority, read via
+        # value(name)), the estimate field's YouTrack value is a bare SCALAR number
+        # -- this is the one field _ISSUE_FIELDS/_item_from_issue must handle
+        # differently (unverified against a live instance, see the module docstring
+        # note next to _ISSUE_FIELDS). Defensive on both shapes: a dict would mean an
+        # unexpected Enum-like wrapping, treated as absent rather than crashing.
+        estimate = None
+        if self.estimate_field:
+            estimate_value = custom_fields.get(self.estimate_field)
+            if isinstance(estimate_value, bool):
+                estimate = None
+            elif isinstance(estimate_value, (int, float)):
+                estimate = int(estimate_value)
+
         # comment() and append_result() share the SAME comments stream (both POST to
         # /api/issues/<id>/comments); the marker is the only thing that tells them
         # apart on read-back -- a hard either/or partition, never both (ADR-0002
@@ -693,6 +729,7 @@ class YouTrackBackend:
             "tags": tags,
             "sprint": sprint,
             "priority": priority,
+            "estimate": estimate,
             "links": self._parse_links(issue.get("links", [])),
             "runner": runner,
             "heartbeat": heartbeat,

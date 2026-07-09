@@ -34,11 +34,17 @@ class YouTrackBackendContractTest(WorkItemsContractTestCase, unittest.TestCase):
 
     def create_backend(self, workitems_dir):
         # workitems_dir is unused: YouTrack has no filesystem concept. Each test gets
-        # its own fresh in-memory "project" instead.
-        self.transport = FakeYouTrackTransport(project_short_name="TEST")
+        # its own fresh in-memory "project" instead. estimateField is configured here
+        # (a fictional "Story Points" field) so the shared happy-path set_estimate
+        # tests exercise the real read/write path -- the estimateField-NOT-configured
+        # error is a youtrack-only, dedicated test (see YouTrackSetEstimateTest below).
+        self.transport = FakeYouTrackTransport(
+            project_short_name="TEST", estimate_field_name="Story Points",
+        )
         return youtrack.YouTrackBackend(
             base_url="https://faketrack.example.org", project="TEST",
             token="fake-token", transport=self.transport,
+            estimate_field="Story Points",
         )
 
 
@@ -825,6 +831,71 @@ class YouTrackSetSprintHardFailTest(unittest.TestCase):
         updated = self.backend.set_sprint(item["id"], "4")
 
         self.assertEqual(updated["sprint"], "4")
+
+
+class YouTrackSetEstimateTest(unittest.TestCase):
+    """estimateField has NO default (unlike stateMap/priorityMap/Sprint's fixed
+    field name) -- set_estimate raises immediately, before any API call, when it
+    isn't configured (ADR-0002 2nd addendum)."""
+
+    def test_missing_estimate_field_config_raises_without_any_api_call(self):
+        transport = FakeYouTrackTransport(project_short_name="TEST")
+        backend = youtrack.YouTrackBackend(
+            base_url="https://faketrack.example.org", project="TEST",
+            token="fake-token", transport=transport,
+        )
+        item = backend.create(title="New feature")
+        transport.commands_received.clear()
+
+        with self.assertRaises(WorkItemError):
+            backend.set_estimate(item["id"], 3)
+
+        # No Command API call was made -- the config check happens before any
+        # network access, not as a rejected-command failure.
+        self.assertEqual(transport.commands_received, [])
+
+    def test_configured_but_the_field_does_not_exist_on_the_project_raises(self):
+        # Simulates a misconfigured estimateField name: the fake never recognises
+        # the resulting command as an estimate write (estimate_field_name unset),
+        # so it falls through to the generic link-command branch and fails there
+        # (no such issue to link to) -- exercising the same "Command API rejects it"
+        # hard-fail path set_type/set_sprint/set_priority already cover.
+        transport = FakeYouTrackTransport(project_short_name="TEST")
+        backend = youtrack.YouTrackBackend(
+            base_url="https://faketrack.example.org", project="TEST",
+            token="fake-token", transport=transport,
+            estimate_field="Story Points",
+        )
+        item = backend.create(title="New feature")
+
+        with self.assertRaises(WorkItemError):
+            backend.set_estimate(item["id"], 3)
+
+    def test_scalar_estimate_is_not_confused_with_an_enum_shaped_field(self):
+        """Regression test for the scalar-vs-Enum read distinction: estimate is read
+        as a bare number, never via the value(name) shape the Enum fields use."""
+        transport = FakeYouTrackTransport(
+            project_short_name="TEST", estimate_field_name="Story Points",
+        )
+        backend = youtrack.YouTrackBackend(
+            base_url="https://faketrack.example.org", project="TEST",
+            token="fake-token", transport=transport,
+            estimate_field="Story Points",
+        )
+        item = backend.create(title="New feature")
+
+        updated = backend.set_estimate(item["id"], 5)
+
+        self.assertEqual(updated["estimate"], 5)
+        self.assertIsInstance(updated["estimate"], int)
+        # The raw issue's customFields entry for "Story Points" carries a bare
+        # scalar value, NOT a {"name": ...} dict like State/Type/Sprint/Priority.
+        raw_issue = transport._require_issue(item["id"])
+        rendered = transport._render_issue(raw_issue)
+        story_points_field = next(
+            f for f in rendered["customFields"] if f["name"] == "Story Points"
+        )
+        self.assertNotIsInstance(story_points_field["value"], dict)
 
 
 class YouTrackLinksDirectionTest(unittest.TestCase):

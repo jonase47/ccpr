@@ -141,6 +141,18 @@ def validate_priority(priority):
         )
 
 
+def validate_estimate(points):
+    """`estimate` (story points) is a non-negative integer, on both backends
+    (ADR-0002 2nd addendum) -- deliberately not restricted to a Fibonacci-like
+    subset, that is a usage convention (p4-backlog), not a data-integrity
+    constraint. `bool` is excluded explicitly: it is a Python `int` subclass, so
+    `isinstance(True, int)` is True and would otherwise silently pass."""
+    if isinstance(points, bool) or not isinstance(points, int) or points < 0:
+        raise WorkItemError(
+            f"Invalid estimate {points!r}: must be a non-negative integer"
+        )
+
+
 # Typed work-item links (ADR-0008). `blocks` is pure client-side sugar for the
 # inverse of `depends-on` -- never stored as its own edge (see add_link/remove_link
 # in local.py/youtrack.py, which swap id/target and delegate to "depends-on" for it).

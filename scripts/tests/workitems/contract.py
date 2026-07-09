@@ -716,6 +716,49 @@ class WorkItemsContractTestCase:
 
         self.assertEqual(items, [])
 
+    # --- set-estimate ---
+    #
+    # `estimate` (story points) is a non-negative integer, validated on BOTH backends
+    # (ADR-0002 2nd addendum). Read is a bare scalar on `youtrack` (unlike the Enum
+    # fields sprint/priority/type) -- the scalar-vs-enum read distinction is a
+    # youtrack-specific regression test in test_youtrack.py.
+
+    def test_fresh_item_has_no_estimate(self):
+        item_id = self.create_item()
+
+        self.assertIsNone(self.backend.get(item_id)["estimate"])
+
+    def test_set_estimate_sets_and_reads_back(self):
+        item_id = self.create_item()
+
+        item = self.backend.set_estimate(item_id, 3)
+
+        self.assertEqual(item["estimate"], 3)
+        self.assertEqual(self.backend.get(item_id)["estimate"], 3)
+
+    def test_set_estimate_accepts_zero(self):
+        item_id = self.create_item()
+
+        item = self.backend.set_estimate(item_id, 0)
+
+        self.assertEqual(item["estimate"], 0)
+
+    def test_set_estimate_rejects_a_negative_value(self):
+        item_id = self.create_item()
+
+        with self.assertRaises(Exception):
+            self.backend.set_estimate(item_id, -1)
+
+    def test_set_estimate_rejects_a_non_integer_value(self):
+        item_id = self.create_item()
+
+        with self.assertRaises(Exception):
+            self.backend.set_estimate(item_id, "abc")
+
+    def test_set_estimate_unknown_id_raises(self):
+        with self.assertRaises(Exception):
+            self.backend.set_estimate("WI-9999", 3)
+
     # --- id validation / path traversal ---
     #
     # Ids may end up in filesystem paths (local) today and in `ticket/<id>` branch
@@ -742,6 +785,7 @@ class WorkItemsContractTestCase:
             "remove_link": (item_id, "depends-on", "WI-9999"),
             "set_sprint": (item_id, "4"),
             "set_priority": (item_id, "High"),
+            "set_estimate": (item_id, 3),
         }[op]
         return getattr(self.backend, op)(*args)
 
@@ -750,7 +794,7 @@ class WorkItemsContractTestCase:
             "get", "set_status", "append_result",
             "comment", "set_description", "set_title", "set_type",
             "add_tag", "remove_tag", "add_link", "remove_link", "set_sprint",
-            "set_priority",
+            "set_priority", "set_estimate",
         )
         for malicious_id in ("../../x", "/etc/x", "a/b", "a.md"):
             for op in ops:
@@ -771,7 +815,7 @@ class WorkItemsContractTestCase:
             "get", "append_result",
             "comment", "set_description", "set_title", "set_type",
             "add_tag", "remove_tag", "add_link", "remove_link", "set_sprint",
-            "set_priority",
+            "set_priority", "set_estimate",
         )
         for op in ops:
             with self.subTest(op=op):

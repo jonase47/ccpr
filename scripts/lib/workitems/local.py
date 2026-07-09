@@ -11,8 +11,8 @@ import re
 from pathlib import Path
 
 from workitems import (
-    STATUS_VALUES, WorkItemError, frontmatter, reject_result_marker, validate_item_id,
-    validate_link_type, validate_priority, validate_tag,
+    STATUS_VALUES, WorkItemError, frontmatter, reject_result_marker, validate_estimate,
+    validate_item_id, validate_link_type, validate_priority, validate_tag,
 )
 
 RESULT_HEADING = "## Result"
@@ -264,6 +264,17 @@ class LocalBackend:
         self._write(path, data, body)
         return self._item_from_data(data, body)
 
+    def set_estimate(self, item_id, points):
+        """Rewrites the `estimate` frontmatter field: non-negative integer story
+        points, validated the same way on both backends (ADR-0002 2nd addendum) --
+        `local` has no field-name concept to configure (there is only ever the one
+        `estimate:` key)."""
+        validate_estimate(points)
+        path, data, body = self._read(item_id)
+        data["estimate"] = points
+        self._write(path, data, body)
+        return self._item_from_data(data, body)
+
     def add_link(self, item_id, link_type, target_id):
         """Creates a typed edge from `item_id` to `target_id` (ADR-0008), idempotent
         (an already-present edge is a no-op). `blocks` is pure sugar for the inverse
@@ -357,6 +368,7 @@ class LocalBackend:
             "tags": data.get("tags") or [],
             "sprint": data.get("sprint"),
             "priority": data.get("priority"),
+            "estimate": _coerce_estimate(data.get("estimate")),
             # links[] never None (ADR-0008), same discipline as tags/comments.
             "links": _parse_links(data.get("links") or []),
             "created": data.get("created"),
@@ -365,6 +377,21 @@ class LocalBackend:
             "runner": None,
             "heartbeat": None,
         }
+
+
+def _coerce_estimate(value):
+    """`estimate` is written as a Python int at set-time, but a value re-read from
+    disk always comes back as a string from the frontmatter parser (it has no int
+    type) -- coerce either shape into an int (or None if unset/unparseable), so
+    set_estimate()'s return value and a later get() agree."""
+    if value is None or value == "":
+        return None
+    if isinstance(value, int):
+        return value
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _parse_links(raw_links):

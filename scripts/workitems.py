@@ -28,6 +28,7 @@ Usage:
   workitems.py remove-link <id> <type> <target-id> [--project DIR]
   workitems.py set-sprint <id> <n> [--project DIR]
   workitems.py set-priority <id> <priority> [--project DIR]
+  workitems.py set-estimate <id> <points> [--project DIR]
   workitems.py migrate --to <provider> [--project DIR]
   workitems.py lift <source-file...> [--apply] [--exclude PATTERN=REASON ...] [--project DIR]
   workitems.py sweep [--project DIR]
@@ -49,8 +50,9 @@ Typed links (ADR-0008): <type> is one of depends-on/blocks/relates-to/subtask-of
 
 Planning fields (ADR-0002 2nd addendum): set-sprint is single-valued (a later set
 overwrites); set-priority is a closed vocabulary (Critical/High/Medium/Low),
-validated on both backends; set-estimate follows in a later increment. --sprint/
---priority on `list` are client-side exact-match filters, both backends.
+validated on both backends; set-estimate is a non-negative integer (story points),
+also validated on both backends. --sprint/--priority on `list` are client-side
+exact-match filters, both backends.
 """
 
 import argparse
@@ -295,6 +297,13 @@ def build_parser():
     p_set_priority.add_argument("id")
     p_set_priority.add_argument("priority")
 
+    p_set_estimate = sub.add_parser(
+        "set-estimate", help="Set estimate (non-negative integer story points)",
+        parents=[project_arg],
+    )
+    p_set_estimate.add_argument("id")
+    p_set_estimate.add_argument("points")
+
     p_migrate = sub.add_parser(
         "migrate", help="Move items to a target backend, once, reversibly (ADR-0004)",
         parents=[project_arg],
@@ -318,6 +327,18 @@ def build_parser():
     )
 
     return parser
+
+
+def _parse_estimate_arg(raw):
+    """CLI args are always strings -- converts the `set-estimate` positional to an
+    int before it reaches the contract, so `validate_estimate`'s `isinstance(points,
+    int)` check applies uniformly whether the caller is the CLI or a direct Python
+    caller of the backend. A non-integer value raises the same WorkItemError shape
+    every other CLI-boundary error uses."""
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        raise WorkItemError(f"Invalid estimate {raw!r}: must be an integer") from None
 
 
 def dispatch(backend, args):
@@ -361,6 +382,8 @@ def dispatch(backend, args):
         return backend.set_sprint(args.id, args.sprint)
     if args.operation == "set-priority":
         return backend.set_priority(args.id, args.priority)
+    if args.operation == "set-estimate":
+        return backend.set_estimate(args.id, _parse_estimate_arg(args.points))
     raise ValueError(f"Unknown operation: {args.operation}")
 
 

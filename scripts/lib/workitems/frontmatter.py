@@ -11,7 +11,7 @@ import re
 
 FRONTMATTER_KEY_ORDER = (
     "id", "title", "status", "type", "owner", "refs", "tags", "sprint", "priority",
-    "links", "created",
+    "estimate", "links", "created",
 )
 
 # A scalar is an inline list only if the ENTIRE trimmed value is bracketed —
