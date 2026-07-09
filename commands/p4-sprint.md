@@ -4,14 +4,36 @@ Plans the current sprint: pulls matching stories from the backlog, defines the s
 
 ## Argument: $ARGUMENTS = [Sprint goal, e.g. "Complete auth flow", "MVP core running"]
 
-If provided: Use as the sprint goal and select matching stories from the backlog that support this goal.
-If not provided: Read BACKLOG.md and PROJECT_PLAN.md and derive a sensible sprint goal. If BACKLOG.md is missing, point this out and recommend running `/p4-backlog` first.
+If provided: Use as the sprint goal and select matching stories that support this goal, resolved via
+the work-item adoption guard below (falls back to reading BACKLOG.md prose, if the project is still
+on prose).
+If not provided: Read PROJECT_PLAN.md and derive a sensible sprint goal from the available story
+candidates (guard below). If no candidate stories exist, point this out and recommend running
+`/p4-backlog` first.
+
+## 0. Work-item adoption guard (ADR-0002 §8)
+
+Run `python3 ~/.claude/scripts/workitems.py list`.
+- **Non-empty array** → the project uses the structured store. Select candidate stories via
+  `workitems list --status "Ready"` (step 2B) instead of reading BACKLOG.md prose for candidates —
+  BACKLOG.md/`backlog/E-0X-*.md` remain readable for the full story text (title, description,
+  acceptance criteria) once a candidate's id is known, but the candidate SET itself comes from the
+  CLI, not from re-parsing prose.
+- **`[]` and no `docs/workitems/` directory** → still on prose. Read BACKLOG.md for candidate
+  stories, as before. Emit one line: *"Tip: run `lift` to adopt the structured work-item store."*
+- **`[]` but `docs/workitems/` exists** → adopted store, just empty right now (e.g. everything
+  already claimed or done). Treat as adopted: use the CLI — an empty `Ready` list means no
+  candidate stories, not "fall back to prose".
+
+See Manual/WORKITEMS.md §8 for the full guard rationale and the status-verb mapping.
 
 ## Execution
 
 ### 1. Read Context
 Read the following files (if available):
-- **BACKLOG.md** (prioritized backlog – source of sprint stories)
+- **BACKLOG.md** / `backlog/E-0X-*.md` (story text: title, description, acceptance criteria — the
+  candidate set itself comes from `workitems list --status "Ready"` per the §8 guard above, on a
+  structured-store project)
 - **PROJECT_PLAN.md** (milestones – where does the project stand?)
 - **SPRINT.md** (if available: last sprint as reference for velocity)
 - **RISKS.md** (consider known risks)
@@ -37,22 +59,29 @@ Record the current `HEAD` as this sprint's base, so `/p5-review-sprint` and `/ga
 Delegate sprint planning to the **project-planner** agent:
 
 > Plan the next sprint. Sprint goal (if provided): **$ARGUMENTS**
-> Context from BACKLOG.md and PROJECT_PLAN.md: [Insert backlog status, milestones, last sprint velocity]
+> Context: [Insert PROJECT_PLAN.md milestones, last sprint velocity, and the candidate stories from
+> the §0 guard: `workitems list --status "Ready"` (structured store) or BACKLOG.md prose (fallback)]
 >
 > **A. Formulate Sprint Goal**
 > - 1–2 sentences describing what should be achieved by the end of the sprint
 > - The goal must be achievable through the selected stories
 >
 > **B. Select Stories**
-> - Choose stories from the backlog that support the sprint goal
+> - Structured store: choose from the `Ready` candidates (§0 guard) that support the sprint goal —
+>   read each candidate's full story text (title, description, acceptance criteria) from
+>   BACKLOG.md/`backlog/E-0X-*.md` via its `**Work-Item:** WI-NNNN` reference. Prose fallback:
+>   choose stories directly from BACKLOG.md, as before.
 > - Note: dependencies must be resolved before a story can be pulled
 > - Capacity: estimate realistically (no more than 80% of available story points)
 > - Sort stories by implementation order within the sprint
-> - For each selected story, carry forward its `**Work-Item:** WI-NNNN` id (read it from the
->   story's line in BACKLOG.md/`backlog/E-0X-*.md`, or from `workitems list` if the Work-Item line
->   is missing) — this is the same id `/p5-implement`, `/p5-review`, `/p5-acceptance`, and
->   `gate-p5` resolve `set-status` against, so it must be carried into the Sprint Table below, not
->   dropped.
+> - For each selected story, carry forward its `Work-Item` id — on the structured store it's already
+>   known from the `Ready` list (§0); on prose fallback, read it from the story's `**Work-Item:**`
+>   line in BACKLOG.md if the project has partially adopted the store, otherwise there is none yet.
+>   This is the same id `/p5-implement`, `/p5-review`, `/p5-acceptance`, and `gate-p5` resolve
+>   `set-status` against, so it must be carried into the Sprint Table below, not dropped.
+> - Claiming a story into the sprint does not change its work-item status — it stays `Ready` until
+>   `/p5-implement` claims it and moves it to `In Progress`; `/p4-sprint` only plans, it doesn't
+>   mutate item state.
 >
 > **C. Sprint Table**
 > | Story ID | Work-Item | Title | Epic | Story Points | Type | Dependency |
