@@ -22,16 +22,24 @@ Before evaluating the gate, ensure the whole-sprint code review exists and is cu
 
 ### 0a. Work-item adoption guard (ADR-0002 §8)
 
-Run `python3 ~/.claude/scripts/workitems.py list`.
-- **Non-empty array** → the project uses the structured store. Use the CLI for all story-status
+Run `python3 ~/.claude/scripts/workitems.py list` **and** explicitly check whether the
+`docs/workitems/` directory exists (e.g. `ls docs/workitems/`). Both signals are required — `list`
+returns the identical `[]` for an adopted-but-empty store and a never-adopted project; only the
+directory's existence tells them apart, and getting this wrong lets the gate **falsely pass** a
+sprint with zero actually-tracked story status.
+- **Non-empty list** → the project uses the structured store. Use the CLI for all story-status
   data below (the "Story status" criterion in step 2 and the write-back in step 3), instead of
   reading it from BACKLOG.md prose.
-- **`[]` and no `docs/workitems/` directory** → still on prose. Read SPRINT.md/BACKLOG.md for
-  story status, as before. Emit one line: *"Tip: run `lift` to adopt the structured work-item store."*
-- **`[]` but `docs/workitems/` exists** → adopted store, just empty right now (e.g. between
-  sprints). Treat as adopted: use the CLI, not the prose fallback.
+- **Empty list, but `docs/workitems/` exists** → the store is adopted, just empty for this query
+  (e.g. every story already archived/migrated). **This is a genuine finding for the "Story status"
+  criterion — NOT an exemption to fall back to prose.** Evaluate it as "no stories tracked", not as
+  "still on prose".
+- **Empty list and no `docs/workitems/` directory** → not adopted, still on prose. Read
+  SPRINT.md/BACKLOG.md for story status, as before. Emit one line: *"Tip: run `lift` to adopt the
+  structured work-item store."*
 
-See Manual/WORKITEMS.md §8 for the full guard rationale and the status-verb mapping.
+See Manual/WORKITEMS.md §8 for the full guard rationale, the directory-check requirement, and the
+status-verb mapping.
 
 ### 1. Read Preflight Report
 
