@@ -14,18 +14,26 @@ recommendation, and disambiguation for unclear requests.
 
 1. **Work-item adoption guard (ADR-0002 §8)** — `project-guide` has no Bash access (by design, it's
    read-only via Read/Grep/Glob/Edit), so if the active phase is P4/P5, the orchestrator resolves
-   this beforehand and passes the result in: run `python3 ~/.claude/scripts/workitems.py list`.
-   - **Non-empty array** → the project uses the structured store. Also run `workitems list --status
-     "Ready"` / `"In Progress"` / `"Done"` for the current sprint's item counts (e.g. "6/10 Done, 2
-     In Progress, 2 Ready") — this is the SOURCE OF TRUTH for phase status, not SPRINT.md prose,
-     which is only a generated view and can lag behind CLI-driven status changes made outside a
-     `/p4-sprint`/`gate-p5` run.
-   - **`[]` and no `docs/workitems/` directory** → still on prose. Derive sprint status from
-     SPRINT.md as before.
-   - **`[]` but `docs/workitems/` exists** → adopted store, just empty right now. Report it as such
-     (e.g. "0 items in the current sprint"), don't fall back to prose.
-2. Start the `project-guide` agent via the Task tool, passing the resolved item counts (if any) as
-   part of its context alongside the request.
+   this beforehand and passes the result in. Run `python3 ~/.claude/scripts/workitems.py list`
+   **and** explicitly check whether the `docs/workitems/` directory exists (e.g. `ls
+   docs/workitems/`) — both signals are required, `list` returns the identical `[]` for an
+   adopted-but-empty store and a never-adopted project.
+   - **Non-empty list** → the project uses the structured store. **The work-item model has no
+     sprint field — a bare `list --status "Ready"/"In Progress"/"Done"` returns PROJECT-WIDE
+     totals across every sprint, not this sprint's.** Scope it: read the current sprint's
+     `**Work-Item:** WI-NNNN` ids from SPRINT.md's Sprint Table (the Work-Item column), then count
+     status only among those ids from the `list` result (or `get <id>` per id). Report the scoped
+     counts as "this sprint" (e.g. "6/10 Done, 2 In Progress, 2 Ready — this sprint"). If SPRINT.md
+     has no Sprint Table yet, or none of its rows carry a Work-Item id (an older sprint plan
+     predating that column), scoping isn't possible — report the unscoped `list`/`--status` counts
+     but label them explicitly **"project-wide"**, never "this sprint".
+   - **Empty list, but `docs/workitems/` exists** → the store is adopted, just empty right now (or
+     genuinely zero items). Report it as such (e.g. "0 items adopted yet" or "0 in this sprint"),
+     don't fall back to prose.
+   - **Empty list and no `docs/workitems/` directory** → not adopted, still on prose. Derive sprint
+     status from SPRINT.md as before.
+2. Start the `project-guide` agent via the Task tool, passing the resolved item counts (if any,
+   labeled "this sprint" or "project-wide" per the scoping above) as part of its context.
 3. Pass the argument (if present) as the request.
 4. The guide operates read-only on:
    - `.claude/CLAUDE.md`
