@@ -29,6 +29,15 @@ STATUS_VALUES = (
 )
 
 
+# The machine marker that disambiguates a `append-result` reference from a plain
+# human `comment` on the SAME underlying comment stream (ADR-0003, ADR-0002 addendum
+# 09.07.2026). Shared at package level (not just youtrack's own concern) because
+# `comment()` on every backend rejects text starting with this marker -- a human
+# calling `comment` must never be able to forge a `result-link` entry, regardless of
+# which backend is in play (see the contract test in contract.py).
+RESULT_MARKER = "<!-- ccpr:result -->"
+
+
 class WorkItemError(Exception):
     """Raised for invalid work-item operations (unknown id, invalid status, ...)."""
 
@@ -39,6 +48,19 @@ def validate_item_id(item_id):
     containment checks as defense-in-depth (e.g. `local`'s resolved-path check)."""
     if not item_id or not ID_PATTERN.match(item_id):
         raise WorkItemError(f"Invalid work-item id: {item_id!r}")
+
+
+def reject_result_marker(text):
+    """Shared guard for every backend's `comment`: a human comment must never be able
+    to forge a `result-link` entry by typing the marker `append-result` uses itself
+    (review follow-up, 09.07.2026). Applied uniformly across backends -- even `local`,
+    which partitions Result/Comments structurally and has nothing of its own to
+    protect here -- so `comment`'s semantics don't depend on which backend is in play."""
+    if text.startswith(RESULT_MARKER):
+        raise WorkItemError(
+            f"comment text cannot start with the reserved result marker {RESULT_MARKER!r} "
+            "-- use append-result to attach a result reference."
+        )
 
 
 # Claiming / branch-runner protocol (ADR-0005): default if workitems.claiming.staleAfter

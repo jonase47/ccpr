@@ -23,7 +23,7 @@ operations plus four item-maintenance operations (added 09.07.2026 — see below
 | claim | `workitems claim <id> [--owner O] [--runner R]` | take ownership / mark active |
 | set-status | `workitems set-status <id> <status>` | move an item through its lifecycle |
 | append-result | `workitems append-result <id> <ref>` | attach a result reference (PR/commit link) |
-| comment | `workitems comment <id> <text>` | append a plain human comment — no marker, never surfaced as `result-link` |
+| comment | `workitems comment <id> <text>` | append a plain human comment — no marker, never surfaced as `result-link`; rejects text starting with the result marker (both backends) |
 | set-description | `workitems set-description <id> <text>` | replace the description in full (empty string clears it) |
 | set-title | `workitems set-title <id> <text>` | replace the title (non-empty) |
 | set-type | `workitems set-type <id> <type>` | replace/set the `type` extension field (non-empty; fails hard on rejection — see ADR-0002 addendum) |

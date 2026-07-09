@@ -39,15 +39,14 @@ import urllib.parse
 import urllib.request
 
 from workitems import (
-    DEFAULT_STALE_AFTER_SECONDS, STATUS_VALUES, WorkItemError, safe_parse_datetime,
-    validate_item_id,
+    DEFAULT_STALE_AFTER_SECONDS, RESULT_MARKER, STATUS_VALUES, WorkItemError,
+    reject_result_marker, safe_parse_datetime, validate_item_id,
 )
 
 _ISSUE_FIELDS = (
     "idReadable,summary,description,customFields(name,value(name,login)),"
     "comments(text),tags(name)"
 )
-RESULT_COMMENT_MARKER = "<!-- ccpr:result -->"
 
 # Claiming / branch-runner protocol (ADR-0005). ADR-0003 doesn't specify a concrete
 # mechanism for the runner+heartbeat signals ("a concrete heartbeat implementation
@@ -332,7 +331,7 @@ class YouTrackBackend:
         validate_item_id(item_id)
         self._request(
             "POST", f"/api/issues/{item_id}/comments",
-            body={"text": f"{RESULT_COMMENT_MARKER} {ref}"},
+            body={"text": f"{RESULT_MARKER} {ref}"},
         )
         return self.get(item_id)
 
@@ -340,10 +339,14 @@ class YouTrackBackend:
         """Writes a plain human comment to the SAME comments endpoint append_result
         uses, but WITHOUT the marker -- get()/list() partition by marker presence
         (see _item_from_issue), so this never surfaces as a result-link (ADR-0002
-        addendum, 09.07.2026)."""
+        addendum, 09.07.2026). Rejects text starting with the marker itself: a human
+        typing it would otherwise forge a result-link entry (review follow-up,
+        09.07.2026) -- see the shared contract test for the uniform rejection across
+        backends."""
         validate_item_id(item_id)
         if not text:
             raise WorkItemError("comment text is required")
+        reject_result_marker(text)
         self._request(
             "POST", f"/api/issues/{item_id}/comments",
             body={"text": text},
@@ -466,8 +469,8 @@ class YouTrackBackend:
         comments = []
         for issue_comment in issue.get("comments", []):
             text = issue_comment.get("text", "")
-            if text.startswith(RESULT_COMMENT_MARKER):
-                result_links.append(text[len(RESULT_COMMENT_MARKER):].strip())
+            if text.startswith(RESULT_MARKER):
+                result_links.append(text[len(RESULT_MARKER):].strip())
             else:
                 comments.append(text)
 

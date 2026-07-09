@@ -10,7 +10,9 @@ import os
 import re
 from pathlib import Path
 
-from workitems import STATUS_VALUES, WorkItemError, frontmatter, validate_item_id
+from workitems import (
+    STATUS_VALUES, WorkItemError, frontmatter, reject_result_marker, validate_item_id,
+)
 
 RESULT_HEADING = "## Result"
 COMMENTS_HEADING = "## Comments"
@@ -157,8 +159,13 @@ class LocalBackend:
         return self._item_from_data(data, new_body)
 
     def comment(self, item_id, text):
+        """`local` partitions Result/Comments structurally (separate sections, no
+        marker), so it has nothing to protect here on its own -- but the rejection is
+        applied uniformly across backends (review follow-up, 09.07.2026) so `comment`'s
+        semantics don't depend on which backend a project happens to run."""
         if not text:
             raise WorkItemError("comment text is required")
+        reject_result_marker(text)
         path, data, body = self._read(item_id)
         new_body = _append_to_section(body, COMMENTS_HEADING, text)
         self._write(path, data, new_body)

@@ -17,7 +17,7 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from workitems import STATUS_VALUES
+from workitems import RESULT_MARKER, STATUS_VALUES
 
 
 class WorkItemsContractTestCase:
@@ -253,6 +253,19 @@ class WorkItemsContractTestCase:
     def test_comment_unknown_id_raises(self):
         with self.assertRaises(Exception):
             self.backend.comment("WI-9999", "a note")
+
+    def test_comment_rejects_text_starting_with_the_result_marker(self):
+        """A plain human comment must never be able to forge a `result-link` entry by
+        typing the machine marker `append-result` uses (ADR-0002 addendum, review
+        follow-up 09.07.2026) -- uniform across backends, even though `local` isn't
+        structurally vulnerable to it (its Result/Comments channels are separate
+        sections, not a marker split)."""
+        item_id = self.create_item()
+
+        with self.assertRaises(Exception):
+            self.backend.comment(item_id, f"{RESULT_MARKER} https://fake.example.org")
+        self.assertEqual(self.backend.get(item_id)["result-link"], [])
+        self.assertEqual(self.backend.get(item_id)["comments"], [])
 
     def test_append_result_does_not_appear_in_comments(self):
         item_id = self.create_item()
