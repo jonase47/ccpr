@@ -48,10 +48,15 @@ Delegate sprint planning to the **project-planner** agent:
 > - Note: dependencies must be resolved before a story can be pulled
 > - Capacity: estimate realistically (no more than 80% of available story points)
 > - Sort stories by implementation order within the sprint
+> - For each selected story, carry forward its `**Work-Item:** WI-NNNN` id (read it from the
+>   story's line in BACKLOG.md/`backlog/E-0X-*.md`, or from `workitems list` if the Work-Item line
+>   is missing) — this is the same id `/p5-implement`, `/p5-review`, `/p5-acceptance`, and
+>   `gate-p5` resolve `set-status` against, so it must be carried into the Sprint Table below, not
+>   dropped.
 >
 > **C. Sprint Table**
-> | Story ID | Title | Epic | Story Points | Type | Dependency |
-> |---|---|---|---|---|---|
+> | Story ID | Work-Item | Title | Epic | Story Points | Type | Dependency |
+> |---|---|---|---|---|---|---|
 >
 > **D. Identify Risks**
 > - Which stories in the sprint have the highest uncertainty?
@@ -96,7 +101,8 @@ base_commit: <sha>   # HEAD at sprint start — anchors the /p5-review-sprint di
 ---
 ```
 
-Body sections: `## Sprint Goal`, `## Selected Stories` (with order), `## Definition of Done`, `## Risks Identified This Sprint`.
+Body sections: `## Sprint Goal`, `## Selected Stories` (the Sprint Table from step 2C, including each
+story's Work-Item id, in order), `## Definition of Done`, `## Risks Identified This Sprint`.
 
 #### 4c. Sub-Index Layout — Sprint (recommended for non-trivial sprints / when history matters)
 
@@ -132,7 +138,9 @@ last_updated: <DD.MM.YYYY>
 ---
 ```
 
-Body: `## Sprint Goal`, `## Selected Stories` (with order, story-point estimates), `## Definition of Done`, `## Risks Identified This Sprint`, `## Sprint Review` (filled at sprint end).
+Body: `## Sprint Goal`, `## Selected Stories` (the Sprint Table from step 2C, including each story's
+Work-Item id, with order and story-point estimates), `## Definition of Done`, `## Risks Identified
+This Sprint`, `## Sprint Review` (filled at sprint end).
 
 #### 4d. Choose Layout — Risks
 
