@@ -1004,6 +1004,172 @@ class YouTrackLinksDirectionTest(unittest.TestCase):
         self.assertEqual(self.backend.get(parent["id"])["links"], [])
 
 
+class YouTrackLinkReadShapeTest(unittest.TestCase):
+    """Reproduces the exact raw `links[]` shape a live YouTrack instance returns
+    (verified against a real instance, 09.07.2026 -- see ADR-0008): `linkType.name`
+    is the link TYPE's own name (`"Depend"`, `"Relates"`, `"Subtask"`), never the
+    directional Command-API phrase, and each Depend/Subtask link is reported with
+    direction `INWARD` on the ISSUER's own side, `OUTWARD` on the target's side --
+    the exact opposite of what an earlier, purely mechanical implementation (and
+    the fake transport it was tested against) assumed. A prior version of this
+    suite could not catch either mistake: the fake modeled BOTH the type-name
+    lookup and the direction convention the same (wrong) way the production code
+    did, so the two bugs canceled out in every round-trip test. These tests build
+    the raw issue dict directly, matching a live capture, to pin the correct
+    behaviour independently of the fake."""
+
+    def setUp(self):
+        self.backend = youtrack.YouTrackBackend(
+            base_url="https://faketrack.example.org", project="TEST",
+            token="fake-token", transport=FakeYouTrackTransport(project_short_name="TEST"),
+        )
+
+    def _raw_issue(self, links):
+        return {
+            "idReadable": "TEST-1",
+            "summary": "Issue with links",
+            "description": "",
+            "project": {"shortName": "TEST"},
+            "customFields": [],
+            "comments": [],
+            "tags": [],
+            "links": links,
+        }
+
+    def test_depend_type_inward_direction_reads_as_depends_on(self):
+        raw_issue = self._raw_issue([
+            {
+                "direction": "INWARD",
+                "linkType": {"name": "Depend", "sourceToTarget": "is required for", "targetToSource": "depends on"},
+                "issues": [{"idReadable": "TEST-2"}],
+            },
+        ])
+
+        item = self.backend._item_from_issue(raw_issue)
+
+        self.assertEqual(item["links"], [{"type": "depends-on", "target": "TEST-2"}])
+
+    def test_depend_type_outward_direction_reads_as_blocks(self):
+        raw_issue = self._raw_issue([
+            {
+                "direction": "OUTWARD",
+                "linkType": {"name": "Depend", "sourceToTarget": "is required for", "targetToSource": "depends on"},
+                "issues": [{"idReadable": "TEST-2"}],
+            },
+        ])
+
+        item = self.backend._item_from_issue(raw_issue)
+
+        self.assertEqual(item["links"], [{"type": "blocks", "target": "TEST-2"}])
+
+    def test_relates_type_reads_as_relates_to_regardless_of_direction(self):
+        raw_issue = self._raw_issue([
+            {
+                "direction": "BOTH",
+                "linkType": {"name": "Relates", "sourceToTarget": "relates to", "targetToSource": ""},
+                "issues": [{"idReadable": "TEST-2"}],
+            },
+        ])
+
+        item = self.backend._item_from_issue(raw_issue)
+
+        self.assertEqual(item["links"], [{"type": "relates-to", "target": "TEST-2"}])
+
+    def test_subtask_type_inward_direction_reads_as_subtask_of(self):
+        raw_issue = self._raw_issue([
+            {
+                "direction": "INWARD",
+                "linkType": {"name": "Subtask", "sourceToTarget": "parent for", "targetToSource": "subtask of"},
+                "issues": [{"idReadable": "TEST-2"}],
+            },
+        ])
+
+        item = self.backend._item_from_issue(raw_issue)
+
+        self.assertEqual(item["links"], [{"type": "subtask-of", "target": "TEST-2"}])
+
+    def test_subtask_type_outward_direction_is_not_surfaced(self):
+        raw_issue = self._raw_issue([
+            {
+                "direction": "OUTWARD",
+                "linkType": {"name": "Subtask", "sourceToTarget": "parent for", "targetToSource": "subtask of"},
+                "issues": [{"idReadable": "TEST-2"}],
+            },
+        ])
+
+        item = self.backend._item_from_issue(raw_issue)
+
+        self.assertEqual(item["links"], [])
+
+    def test_unknown_link_type_name_is_skipped(self):
+        """E.g. a project's "Duplicate" link type, which this backend has no
+        canonical verb for -- must be silently ignored, not surfaced as a
+        made-up verb (ADR-0008)."""
+        raw_issue = self._raw_issue([
+            {
+                "direction": "BOTH",
+                "linkType": {"name": "Duplicate", "sourceToTarget": "duplicates", "targetToSource": "is duplicated by"},
+                "issues": [{"idReadable": "TEST-2"}],
+            },
+        ])
+
+        item = self.backend._item_from_issue(raw_issue)
+
+        self.assertEqual(item["links"], [])
+
+    def test_empty_issues_slot_for_a_link_type_is_ignored(self):
+        """YouTrack returns one `links[]` entry PER link type present on the
+        project, even ones with no actual edge (`"issues": []`) -- must not
+        produce a phantom entry."""
+        raw_issue = self._raw_issue([
+            {
+                "direction": "OUTWARD",
+                "linkType": {"name": "Depend", "sourceToTarget": "is required for", "targetToSource": "depends on"},
+                "issues": [],
+            },
+        ])
+
+        item = self.backend._item_from_issue(raw_issue)
+
+        self.assertEqual(item["links"], [])
+
+
+class YouTrackLinkTypeNameMapTest(unittest.TestCase):
+    """`linkTypeNameMap` (ADR-0008, corrected 09.07.2026): a SEPARATE read-side
+    config from `linkTypeMap` -- YouTrack's `linkType.name` is the type's own
+    (renameable/localizable) name, independent of whatever Command-API phrase
+    `linkTypeMap` sends. Stock English defaults resolve `Depend`/`Relates`/
+    `Subtask` out of the box; a project whose instance renamed the type itself
+    (not just the phrase) overrides this map."""
+
+    def test_renamed_link_type_name_resolves_via_config(self):
+        raw_issue = {
+            "idReadable": "TEST-1",
+            "summary": "Issue with a renamed link type",
+            "description": "",
+            "project": {"shortName": "TEST"},
+            "customFields": [],
+            "comments": [],
+            "tags": [],
+            "links": [
+                {
+                    "direction": "INWARD",
+                    "linkType": {"name": "Abhaengt", "sourceToTarget": "wird benoetigt fuer", "targetToSource": "haengt ab von"},
+                    "issues": [{"idReadable": "TEST-2"}],
+                },
+            ],
+        }
+        backend = youtrack.YouTrackBackend(
+            base_url="https://faketrack.example.org", project="TEST",
+            token="fake-token", transport=FakeYouTrackTransport(project_short_name="TEST"),
+            link_type_name_map={"Abhaengt": "depends-on"},
+        )
+
+        item = backend._item_from_issue(raw_issue)
+
+        self.assertEqual(item["links"], [{"type": "depends-on", "target": "TEST-2"}])
+
+
 class YouTrackLinkTypeMapTest(unittest.TestCase):
     """linkTypeMap (ADR-0008) ships a mechanical default (the verb dehyphenated),
     unlike stateMap/priorityMap's identity default -- and is overridable per project."""
@@ -1022,7 +1188,17 @@ class YouTrackLinkTypeMapTest(unittest.TestCase):
         self.assertIn(f"depends on {target['id']}", transport.commands_received)
 
     def test_overridden_link_type_map_sends_the_configured_name(self):
-        transport = FakeYouTrackTransport(project_short_name="TEST")
+        """Overriding `linkTypeMap` only changes the WRITE-side Command phrase
+        (e.g. a project's outward phrase is "requires" instead of "depends on")
+        -- it does NOT imply the underlying YouTrack link TYPE itself was
+        renamed, so the fake here is told (like a real "Depend" type with a
+        custom phrase would read back) that "requires" is still the "Depend"
+        type; no `linkTypeNameMap` override is needed on the backend side for
+        this scenario (see YouTrackLinkTypeNameMapTest for when the type NAME
+        itself, not just the phrase, differs)."""
+        transport = FakeYouTrackTransport(
+            project_short_name="TEST", link_type_names={"requires": "Depend"},
+        )
         backend = youtrack.YouTrackBackend(
             base_url="https://faketrack.example.org", project="TEST",
             token="fake-token", transport=transport,

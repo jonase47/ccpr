@@ -64,7 +64,18 @@ _ISSUE_FIELDS = (
 # (see the ADR's "Alternatives considered" for why this one config key gets a default
 # and its siblings don't). `blocks` never appears here -- it's swapped/delegated to
 # `depends-on` before a Command API phrase is ever resolved (see add_link/remove_link).
-_STORED_LINK_VERBS = ("depends-on", "relates-to", "subtask-of")
+#
+# `linkTypeMap` is WRITE-side only (canonical verb -> Command-API phrase). The
+# READ side is a SEPARATE concern (`linkTypeNameMap` / `_DEFAULT_LINK_TYPE_NAME_MAP`
+# below): verified against a live instance (09.07.2026), `links(linkType(name))`
+# returns the link TYPE's own name (`"Depend"`, `"Relates"`, `"Subtask"`) -- never
+# the directional Command-API phrase -- so matching it against a dehyphenated verb
+# never works and silently drops every link. See _resolve_link_family.
+_DEFAULT_LINK_TYPE_NAME_MAP = {
+    "Depend": "depends-on",
+    "Relates": "relates-to",
+    "Subtask": "subtask-of",
+}
 
 # Claiming / branch-runner protocol (ADR-0005). ADR-0003 doesn't specify a concrete
 # mechanism for the runner+heartbeat signals ("a concrete heartbeat implementation
@@ -113,6 +124,7 @@ def create(config):
         base_url, project, token, state_map=config.get("stateMap"),
         stale_after_seconds=config.get("stale_after_seconds"),
         link_type_map=config.get("linkTypeMap"),
+        link_type_name_map=config.get("linkTypeNameMap"),
         priority_map=config.get("priorityMap"),
         estimate_field=config.get("estimateField"),
     )
@@ -121,14 +133,20 @@ def create(config):
 class YouTrackBackend:
     def __init__(self, base_url, project, token, state_map=None, transport=None,
                  clock=None, stale_after_seconds=None, link_type_map=None,
-                 priority_map=None, estimate_field=None):
+                 link_type_name_map=None, priority_map=None, estimate_field=None):
         self.base_url = base_url.rstrip("/")
         self.project = project
         self.token = token
         self.state_map = state_map or {}
         self._reverse_state_map = {v: k for k, v in self.state_map.items()}
         self.link_type_map = link_type_map or {}
-        self._reverse_link_type_map = {v: k for k, v in self.link_type_map.items()}
+        # READ-side resolution (ADR-0008, corrected 09.07.2026): stock English
+        # defaults, overridable per project the same way stateMap/priorityMap are --
+        # an instance's link-type NAMES (as opposed to the Command-API phrase
+        # linkTypeMap governs) are themselves renameable/localizable admin config.
+        self._link_type_name_map = {
+            **_DEFAULT_LINK_TYPE_NAME_MAP, **(link_type_name_map or {}),
+        }
         self.priority_map = priority_map or {}
         self._reverse_priority_map = {v: k for k, v in self.priority_map.items()}
         # No default (unlike stateMap/priorityMap): no YouTrack instance ships a
@@ -609,47 +627,51 @@ class YouTrackBackend:
         form (ADR-0008) rather than the bare verb itself."""
         return self.link_type_map.get(canonical_verb, canonical_verb.replace("-", " "))
 
-    def _unmap_link_type(self, project_link_type_name):
-        """The instance's link-type name -> a canonical verb, or None if it can't be
-        resolved (an unrelated link type present on the issue -- skipped on read,
-        never surfaced as a made-up verb)."""
-        if project_link_type_name in self._reverse_link_type_map:
-            return self._reverse_link_type_map[project_link_type_name]
-        mechanical_candidate = project_link_type_name.replace(" ", "-")
-        if mechanical_candidate in _STORED_LINK_VERBS:
-            return mechanical_candidate
-        return None
+    def _resolve_link_family(self, project_link_type_name):
+        """YouTrack's link TYPE name (`linkType.name`, e.g. `"Depend"`) -> one of
+        the three canonical link families, or None if it can't be resolved (an
+        unrelated link type present on the issue, e.g. a project's own "Duplicate"
+        type -- skipped on read, never surfaced as a made-up verb). Keyed by NAME,
+        never by the directional Command-API phrase -- see `_link_type_name_map`'s
+        docstring in __init__ and the module-level `_DEFAULT_LINK_TYPE_NAME_MAP`
+        comment for why this is a separate map from `linkTypeMap`/`_map_link_type`
+        (the write-side counterpart, which goes the other direction: canonical verb
+        -> phrase)."""
+        if project_link_type_name is None:
+            return None
+        return self._link_type_name_map.get(project_link_type_name)
 
     def _parse_links(self, raw_links):
         """Normalizes YouTrack's per-issue direction into the canonical {type,
-        target} shape (ADR-0008, the load-bearing rule):
+        target} shape (ADR-0008, the load-bearing rule -- direction convention
+        verified against a live instance, 09.07.2026):
 
-        - depends-on, OUTWARD (this item is the dependent)   -> depends-on
-        - depends-on, INWARD  (this item is depended upon)   -> blocks
-        - relates-to, any direction (symmetric)              -> relates-to
-        - subtask-of, INWARD  (this item is the child)       -> subtask-of
-        - subtask-of, OUTWARD (this item is the parent)      -> not surfaced
+        - Depend type,  INWARD  (this item is the dependent)      -> depends-on
+        - Depend type,  OUTWARD (this item is depended upon)      -> blocks
+        - Relates type, any direction (symmetric, reported BOTH)  -> relates-to
+        - Subtask type, INWARD  (this item is the child)          -> subtask-of
+        - Subtask type, OUTWARD (this item is the parent)         -> not surfaced
           (documented, intentional gap -- no "has-subtask" verb exists yet)
         """
         links = []
         for link in raw_links:
             link_type_name = (link.get("linkType") or {}).get("name")
-            canonical = self._unmap_link_type(link_type_name)
-            if canonical is None:
+            family = self._resolve_link_family(link_type_name)
+            if family is None:
                 continue
             direction = link.get("direction")
             for linked_issue in link.get("issues", []):
                 target = linked_issue.get("idReadable")
                 if not target:
                     continue
-                if canonical == "depends-on":
-                    if direction == "OUTWARD":
+                if family == "depends-on":
+                    if direction == "INWARD":
                         links.append({"type": "depends-on", "target": target})
-                    elif direction == "INWARD":
+                    elif direction == "OUTWARD":
                         links.append({"type": "blocks", "target": target})
-                elif canonical == "relates-to":
+                elif family == "relates-to":
                     links.append({"type": "relates-to", "target": target})
-                elif canonical == "subtask-of" and direction == "INWARD":
+                elif family == "subtask-of" and direction == "INWARD":
                     links.append({"type": "subtask-of", "target": target})
         return links
 

@@ -9,6 +9,17 @@ related:
   - ../../Manual/WORKITEMS.md
 ---
 
+> **Correction (verified against a live instance, 09.07.2026):** a live smoke test found two paired
+> mistakes in the original version of "Direction & read-back normalization" and `linkTypeMap` below —
+> the direction convention was inverted, and the read side was matching `linkType.name` against a
+> dehyphenated verb instead of the type's own name. Both sections have been rewritten in place to
+> match live behaviour; the mistakes are called out inline rather than removed, since the original
+> text is exactly the kind of untested-assumption trap this backend's docstrings otherwise flag
+> explicitly. Neither mistake was caught by the original test suite: the in-memory fake transport
+> modeled the same two wrong assumptions the production code did, so they canceled out in every
+> round-trip test (add a link, read it back, still "correct" by construction) without ever exercising
+> the real YouTrack JSON shape.
+
 # ADR-0008: Typed work-item links
 
 **Status:** Proposed (09.07.2026)
@@ -79,22 +90,27 @@ state back after a `blocks` call should follow up with a plain `get <id>`.
 ### Direction & read-back normalization (the load-bearing rule)
 
 YouTrack reports each link **relative to the issue being read** (`direction: OUTWARD | INWARD | BOTH`,
-plus `linkType.name`). `_item_from_issue` normalizes that into the canonical `{type, target}` shape as
-follows:
+plus `linkType.name`). `_item_from_issue` normalizes that into the canonical `{type, target}` shape.
 
-- **`depends-on`-typed link, direction `OUTWARD`** (this item is the dependent) → surfaced as
-  `{"type": "depends-on", "target": <linked-id>}`.
-- **`depends-on`-typed link, direction `INWARD`** (the linked item depends on *this* one) → surfaced as
+**Corrected, verified against a live instance (09.07.2026):** the original text of this section had
+the direction convention backwards (it claimed `OUTWARD` = "this item is the dependent"). A live
+`depends on`/`subtask of` command shows the opposite: the **issuer** of the command (the item the
+Command API call was run on) reads back `INWARD`; the **target** reads back `OUTWARD`. The corrected
+rule:
+
+- **Depend-typed link, direction `INWARD`** (this item is the dependent, i.e. it issued `depends on
+  <target>`) → surfaced as `{"type": "depends-on", "target": <linked-id>}`.
+- **Depend-typed link, direction `OUTWARD`** (the linked item depends on *this* one) → surfaced as
   `{"type": "blocks", "target": <linked-id>}` — the read-side counterpart of the write-side sugar
   above: reading a `depends-on` edge from the blocker's side gives you `blocks`, not a second
   `depends-on` entry pointing the "wrong" way.
-- **`relates-to`-typed link, any direction** → always surfaced as `{"type": "relates-to", ...}`. This
-  type is symmetric by nature (an association, not an ordering), so direction carries no information
-  worth encoding — both ends read the same verb.
-- **`subtask-of`-typed link, direction `INWARD`** (this item is the child) → surfaced as
-  `{"type": "subtask-of", "target": <parent-id>}`.
-- **`subtask-of`-typed link, direction `OUTWARD`** (this item is the parent, i.e. it *has* the linked
-  item as a subtask) → **not surfaced at all** in `links[]`. There is deliberately no canonical
+- **Relates-typed link, any direction** → always surfaced as `{"type": "relates-to", ...}`. This type
+  is symmetric by nature (an association, not an ordering) — a live instance reports it with
+  `direction: BOTH` on either side, so no direction-based branching is needed at all.
+- **Subtask-typed link, direction `INWARD`** (this item is the child, i.e. it issued `subtask of
+  <parent>`) → surfaced as `{"type": "subtask-of", "target": <parent-id>}`.
+- **Subtask-typed link, direction `OUTWARD`** (this item is the parent, i.e. it *has* the linked item
+  as a subtask) → **not surfaced at all** in `links[]`. There is deliberately no canonical
   "has-subtask" verb in this ADR's vocabulary (unlike `depends-on`/`blocks`, no consumer today needs
   the parent-looking-down view) — adding one would mean inventing a fourth sugar name nothing in the
   current scope asks for. This is a **documented, intentional gap**, not a silent bug: a future ADR (or
@@ -104,24 +120,33 @@ follows:
 `local` has no direction to normalize — the string encoding (below) stores the canonical verb directly
 as the caller wrote it, so this normalization logic is `youtrack`-only.
 
-### `linkTypeMap` — configuration, with a default (unlike `stateMap`)
+### `linkTypeMap` (write) vs. `linkTypeNameMap` (read) — two separate config keys
 
 `workitems.youtrack.linkTypeMap` maps a canonical verb to the instance's actual YouTrack link-type
-`name` (the same by-name-mapping shape `stateMap` already established for `status`), used both to
-build the Command API write (`"<mapped-name> <target>"`) and to match `linkType.name` back to a
-canonical verb on read.
+**Command-API phrase** (the same by-name-mapping shape `stateMap` already established for `status`),
+used to build the Command API write (`"<mapped-phrase> <target>"`).
 
 Unlike `stateMap`/`priorityMap` (which default to a bare identity pass-through, since a project's own
 `State`/`Priority` bundle values are unknowable in advance and have no natural relationship to CCPR's
 vocabulary), `linkTypeMap` ships a **mechanical default**: the canonical verb with hyphens replaced by
 spaces (`depends-on` → `"depends on"`, `relates-to` → `"relates to"`, `subtask-of` → `"subtask of"`).
-This default is not asserted as "the YouTrack out-of-the-box phrase" (link-type naming, like every
-other by-name resolution in this backend, is configured per instance and must be verified against a
-live one — flagged here the same way ADR-0003 flags its own resolved implementation gaps) — it exists
-because, unlike an arbitrary `State` bundle value, a link verb's dehyphenated form is a reasonable,
-predictable, testable starting point that a project can override with a single config entry if its
-instance names the type differently. `blocks` never appears in `linkTypeMap` (see above — it isn't a
-stored type).
+`blocks` never appears in `linkTypeMap` (see above — it isn't a stored type).
+
+**Corrected, verified against a live instance (09.07.2026):** the original text of this section
+additionally claimed `linkTypeMap` is also used "to match `linkType.name` back to a canonical verb on
+read" — this is wrong. A live instance's `links(linkType(name))` reports the link TYPE's own name
+(`"Depend"`, `"Relates"`, `"Subtask"` out of the box), which is a **structurally different string**
+from the directional Command-API phrase (`sourceToTarget`/`targetToSource`, e.g. `"is required for"` /
+`"depends on"`) that `linkTypeMap` governs. Matching the type name against a dehyphenated verb (the
+original, untested approach) never matches on a real instance and silently drops every link. The read
+side therefore has its **own** config key, `workitems.youtrack.linkTypeNameMap`, mapping the
+instance's link TYPE name to one of the three canonical families (`depends-on`, `relates-to`,
+`subtask-of` — further refined by direction per the rule above). It ships the stock English defaults
+(`{"Depend": "depends-on", "Relates": "relates-to", "Subtask": "subtask-of"}`), overridable the same
+way `linkTypeMap` is: an instance's link type names are themselves renameable/localizable admin
+config, same as `State`/`Priority` bundle values are for `stateMap`/`priorityMap`. A `linkType.name`
+absent from `linkTypeNameMap` (e.g. a project's own "Duplicate" type) resolves to `None` and is
+silently skipped on read — never surfaced as a made-up verb.
 
 ### `local` string encoding: flat strings, not nested dicts
 
@@ -174,7 +199,7 @@ read.
 | `add-link <id> depends-on <t>` | Command API `"<linkTypeMap[depends-on]> <t>"` on `<id>` | append `depends-on:<t>` to the `links` frontmatter list on `<id>`'s file |
 | `add-link <id> blocks <t>` | delegated to `add-link <t> depends-on <id>` | delegated to `add-link <t> depends-on <id>` |
 | `remove-link <id> <type> <t>` | check current `links[]` (a `get`); if present, the Command API removal for the mapped type; else no-op | check current `links[]`; if present, rewrite the frontmatter list without that entry; else no-op |
-| `get`/`list` → `links[]` | `_ISSUE_FIELDS` extended with `links(direction,linkType(name),issues(idReadable))`; normalized per the direction rule above | parsed from the `links: [type:target, ...]` frontmatter list |
+| `get`/`list` → `links[]` | `_ISSUE_FIELDS` extended with `links(direction,linkType(name),issues(idReadable))`; `linkType.name` resolved to a family via `linkTypeNameMap`, then normalized per the direction rule above | parsed from the `links: [type:target, ...]` frontmatter list |
 
 ## Alternatives considered
 
@@ -200,9 +225,10 @@ read.
 - **Contract fixture grows by two ops × two backends**, plus the direction-normalization and
   idempotence assertions (a link added from one side must read correctly, with the right verb, from
   the other side too — not just a field-exists check).
-- **One new provider-config key** (`workitems.youtrack.linkTypeMap`), with a default unlike its
-  siblings (`stateMap`/`priorityMap`) — documented above as a deliberate asymmetry, not an
-  inconsistency.
+- **Two new provider-config keys** (`workitems.youtrack.linkTypeMap` for the write-side Command-API
+  phrase, `workitems.youtrack.linkTypeNameMap` for the read-side type-name resolution — corrected
+  09.07.2026, see above), both with a default unlike their siblings (`stateMap`/`priorityMap`) —
+  documented above as a deliberate asymmetry, not an inconsistency.
 - **`local`'s frontmatter gains one more optional key** (`links`), absent-key-safe (`[]` default), no
   migration needed for existing item files.
 - **A documented, intentional gap**: the parent-side view of `subtask-of` is not representable in this

@@ -96,6 +96,7 @@ plus **`Parked`**, **`Blocked`**, and **`Cancelled`** crosscutting (the two gate
     "stateMap": { "Backlog": "Open" },
     "priorityMap": { "Critical": "Show-stopper" },
     "linkTypeMap": { "depends-on": "depends on", "relates-to": "relates to", "subtask-of": "subtask of" },
+    "linkTypeNameMap": { "Depend": "depends-on", "Relates": "relates-to", "Subtask": "subtask-of" },
     "estimateField": "Story Points"
   },
   "claiming": {
@@ -114,10 +115,16 @@ plus **`Parked`**, **`Blocked`**, and **`Cancelled`** crosscutting (the two gate
 - `priorityMap` (optional, `youtrack` only): canonical `{Critical, High, Medium, Low}` → the project's
   own `Priority` bundle name, same by-name-mapping shape as `stateMap`; default is identity pass-through
   (ADR-0002 2nd addendum).
-- `linkTypeMap` (optional, `youtrack` only): canonical link verb (`depends-on`/`relates-to`/
-  `subtask-of`) → the instance's actual link-type name; default is the verb with hyphens replaced by
-  spaces (`"depends on"`/`"relates to"`/`"subtask of"`) — a mechanical starting point, not an assertion
-  about any instance's actual configuration (ADR-0008).
+- `linkTypeMap` (optional, `youtrack` only, **write side**): canonical link verb (`depends-on`/
+  `relates-to`/`subtask-of`) → the instance's Command-API phrase for adding/removing that link; default
+  is the verb with hyphens replaced by spaces (`"depends on"`/`"relates to"`/`"subtask of"`) — a
+  mechanical starting point, not an assertion about any instance's actual configuration (ADR-0008).
+- `linkTypeNameMap` (optional, `youtrack` only, **read side**): the instance's YouTrack link-type
+  *name* (`linkType.name`, e.g. `"Depend"`) → one of the three canonical families; default is YouTrack's
+  own stock English type names (`{"Depend": "depends-on", "Relates": "relates-to", "Subtask":
+  "subtask-of"}`). This is a **separate map from `linkTypeMap`**: a live instance's `linkType.name` is
+  the type's own name, never the directional Command-API phrase `linkTypeMap` governs — override this
+  one if an instance renamed its link types (not just their phrasing) (ADR-0008, corrected 09.07.2026).
 - `estimateField` (**required** if `set-estimate` is used, `youtrack` only, no default): the name of a
   numeric custom field for story-point estimates. Unlike `State`/`Priority`/`Type`/`Assignee`, no
   YouTrack instance ships this by default, so it must be configured explicitly (ADR-0002 2nd addendum).
@@ -204,10 +211,12 @@ current tag list first so a redundant call is skipped rather than relying on the
 `set-sprint`/`set-priority`/`set-estimate` are Command API writes against a fixed (`Sprint`/`Priority`)
 or configured (`estimateField`) field name and **fail hard** on rejection, same as `set-type`; only
 `estimate`'s read is a bare scalar rather than an Enum `value(name)`. `add-link`/`remove-link` use the
-Command API with the type name resolved via `linkTypeMap` (default: the verb dehyphenated); reads
-extend `_ISSUE_FIELDS` with `links(direction,linkType(name),issues(idReadable))` and normalize
-direction into the canonical `{type, target}` shape (a `depends-on` edge read from the blocked side
-becomes `blocks`). Full rationale, the direction-normalization rule, and the `linkTypeMap` default:
+Command API with the phrase resolved via `linkTypeMap` (default: the verb dehyphenated); reads
+extend `_ISSUE_FIELDS` with `links(direction,linkType(name),issues(idReadable))`, resolve `linkType.name`
+to a family via the **separate** `linkTypeNameMap` (write and read use different config keys — a live
+instance's type name and its Command-API phrase are not the same string), and normalize direction into
+the canonical `{type, target}` shape (a `depends-on` edge read from the blocked side becomes `blocks`).
+Full rationale, the direction-normalization rule, and both `linkTypeMap`/`linkTypeNameMap` defaults:
 ADR-0008.
 
 **One active backend per project — no bidirectional sync.** Moving solo→team is the one-time

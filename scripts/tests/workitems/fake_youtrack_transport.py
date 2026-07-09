@@ -15,9 +15,26 @@ class FakeYouTrackTransport:
     """Implements the same `.request(method, url, token, body=None)` interface as the
     real `_HttpTransport`, so YouTrackBackend cannot tell the difference."""
 
+    # Default phrase (as sent by `linkTypeMap`'s mechanical dehyphenate default,
+    # or overridden) -> the real instance's link TYPE name (`linkType.name`). A
+    # live instance's `linkType.name` is the type's own name -- "Depend", not
+    # "depends on" -- independent of whatever Command-API phrase is configured to
+    # send (verified 09.07.2026, see ADR-0008). `symmetric` type names are
+    # reported with `direction: "BOTH"` from either side (e.g. "Relates"); every
+    # other type is reported `INWARD` on the ISSUER's own side and `OUTWARD` on
+    # the target's side (also verified against a live instance -- the opposite of
+    # what an earlier version of this fake assumed).
+    _DEFAULT_LINK_TYPE_NAMES = {
+        "depends on": "Depend",
+        "relates to": "Relates",
+        "subtask of": "Subtask",
+    }
+    _DEFAULT_SYMMETRIC_TYPE_NAMES = frozenset({"Relates"})
+
     def __init__(self, project_short_name="TEST", page_size_cap=None,
                  known_states=None, known_users=None, known_types=None, known_tags=None,
-                 known_sprints=None, estimate_field_name=None, child_side_link_names=None):
+                 known_sprints=None, estimate_field_name=None, link_type_names=None,
+                 symmetric_type_names=None):
         self.project_short_name = project_short_name
         self.project_internal_id = "0-0"
         self.commands_received = []  # for tests asserting on the exact command string
@@ -59,14 +76,18 @@ class FakeYouTrackTransport:
         # project that hasn't configured workitems.youtrack.estimateField).
         self.estimate_field_name = estimate_field_name
         # Typed links (ADR-0008): a shared, undirected edge list -- one edge is
-        # visible from BOTH linked issues (with an opposite `direction`), matching how
-        # a real YouTrack link record works. `child_side_link_names` models the one
-        # link type (by default "subtask of", the mechanical default name) whose
-        # ISSUER side reads back as INWARD rather than OUTWARD -- see _links_for.
+        # visible from BOTH linked issues (with an opposite `direction`), matching
+        # how a real YouTrack link record works. `link_type_names` resolves the
+        # Command-API phrase a link was created with to the real instance's link
+        # TYPE name (`linkType.name`) -- see the class-level docstring above and
+        # _links_for.
         self._links = []
-        self._child_side_link_names = (
-            child_side_link_names if child_side_link_names is not None
-            else {"subtask of"}
+        self._link_type_names = {
+            **self._DEFAULT_LINK_TYPE_NAMES, **(link_type_names or {}),
+        }
+        self._symmetric_type_names = (
+            symmetric_type_names if symmetric_type_names is not None
+            else self._DEFAULT_SYMMETRIC_TYPE_NAMES
         )
 
     def request(self, method, url, token, body=None):
@@ -251,16 +272,17 @@ class FakeYouTrackTransport:
 
     def _links_for(self, issue_id):
         links = []
-        for name, from_id, to_id in self._links:
-            child_side = name in self._child_side_link_names
+        for phrase, from_id, to_id in self._links:
+            type_name = self._link_type_names.get(phrase, phrase)
+            symmetric = type_name in self._symmetric_type_names
             if issue_id == from_id:
-                other, direction = to_id, ("INWARD" if child_side else "OUTWARD")
+                other, direction = to_id, ("BOTH" if symmetric else "INWARD")
             elif issue_id == to_id:
-                other, direction = from_id, ("OUTWARD" if child_side else "INWARD")
+                other, direction = from_id, ("BOTH" if symmetric else "OUTWARD")
             else:
                 continue
             links.append({
-                "direction": direction, "linkType": {"name": name},
+                "direction": direction, "linkType": {"name": type_name},
                 "issues": [{"idReadable": other}],
             })
         return links
