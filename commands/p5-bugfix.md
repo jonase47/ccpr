@@ -80,12 +80,12 @@ Delegate fix implementation to the **senior-developer** agent:
 Commit after fix: `fix: [Bug-ID] [Description]` (build + tests must be green).
 Supplement the original review or acceptance test protocol with the fix status.
 Using the same guard result from step 0:
-- Structured store: this command's own flow has no fixed review gate — the next step is
-  conditionally `/p5-review` (extensive fix) or straight to `/p5-acceptance` (minor fix, re-test
-  only), so the completion status must match whichever path applies:
-  - Fix warrants another code review (extensive change) → `workitems set-status <id> "In Review"`.
-  - Fix is minor, going straight back to acceptance re-test → `workitems set-status <id> "Waiting
-    for Approval"`.
+- Structured store: **default to `workitems set-status <id> "In Review"`** — bugs get code review
+  like any other story, and this project ships no designated no-review hotfix path today. Only use
+  `workitems set-status <id> "Waiting for Approval"` instead if a documented hotfix procedure
+  explicitly exempts this fix from code review (e.g. a project-specific emergency-patch policy
+  recorded in RUNBOOK.md/CONTRIBUTING.md) — absent such a documented exemption, always `"In
+  Review"`, never guess "this one looks minor enough to skip".
 - Prose fallback: update SPRINT.md — mark bug as "Fixed".
 If the bug has a broader impact, add a note to **RISKS.md**.
 Once wired, item status is never hand-edited in SPRINT.md/BACKLOG.md — those are planning views
