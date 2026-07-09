@@ -126,18 +126,47 @@ class YouTrackBackend:
         created = self._request("POST", "/api/issues", body=body, fields="idReadable")
         item_id = created["idReadable"]
 
+        # POST /api/issues above is the actual commit -- the issue exists from this
+        # point on, so anything below that raises WITHOUT rolling the issue back
+        # would orphan it while create() reports failure (a retry then duplicates
+        # it). The initial State command is the one exception: status is a core,
+        # mandatory contract field (ADR-0002 §2), not an optional extension, so a
+        # rejection here (e.g. "Backlog" missing from stateMap/the project's own
+        # State bundle) is a real configuration problem worth surfacing loudly
+        # rather than silently creating an item with no explicit status.
+        #
         # A fresh issue starts in the project's own default state, which is not
         # necessarily one named "Backlog" — drive it explicitly, same as set_status().
-        # One Command API call per field, never combined into a single query: keeps
-        # each field's success/failure independently attributable (a rejected Type
-        # command, say, must not also roll back the State change already applied).
         self.set_status(item_id, "Backlog")
+
+        # `type` and `owner` at create time ARE optional/backend-specific (ADR-0002:
+        # the core contract never relies on `type`; `owner` is "optional while
+        # unclaimed"). Verified against a real instance: CCPR's own type vocabulary
+        # (feat/fix/refactor/docs/chore) generally doesn't match a project's actual
+        # Type bundle (e.g. Bug/Feature/Task) verbatim, so this 400s routinely, not
+        # as an edge case. A rejected command here must warn and continue, not fail
+        # the create that already committed. One Command API call per field, never
+        # combined into a single query, so each field's success/failure stays
+        # independently attributable.
         if item_type:
-            self._run_command(item_id, f"Type {item_type}")
+            self._apply_optional_create_field(item_id, f"Type {item_type}", "type", item_type)
         if owner:
-            self._run_command(item_id, f"for {owner}")
+            self._apply_optional_create_field(item_id, f"for {owner}", "owner", owner)
 
         return self.get(item_id)
+
+    def _apply_optional_create_field(self, item_id, query, field_name, value):
+        """Runs a create-time field command that must never fail create() itself --
+        see the comment in create() for why `type`/`owner` are treated this way
+        while the initial State command is not."""
+        try:
+            self._run_command(item_id, query)
+        except WorkItemError as exc:
+            print(
+                f"Warning: could not set {field_name} {value!r} on new issue "
+                f"{item_id} (rejected by YouTrack): {exc}. Continuing without it.",
+                file=sys.stderr,
+            )
 
     def list(self, status=None, owner=None):
         # $top=-1 disables pagination explicitly — without it, some YouTrack versions

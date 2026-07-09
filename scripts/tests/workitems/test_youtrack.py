@@ -130,6 +130,57 @@ class YouTrackInvalidCommandTest(unittest.TestCase):
             self.backend.claim(item["id"], owner="mallory")
 
 
+class YouTrackCreateOptionalFieldTest(unittest.TestCase):
+    """Live-instance bug: `create --type chore` (CCPR's own type vocabulary very
+    often does not match a real project's Type bundle, e.g. Bug/Feature/Task) made
+    POST /api/issues succeed, then the follow-up `Type chore` command got rejected
+    (HTTP 400) -- and create() raised on that, AFTER the issue already existed.
+    The result was an orphaned issue while create() reported failure, and a retry
+    would create a duplicate. Per ADR-0002, `type` is an optional backend-specific
+    extension the core never relies on, so a rejected Type/owner command at create
+    time must warn and continue, never fail the create that already committed."""
+
+    def setUp(self):
+        self.transport = FakeYouTrackTransport(
+            project_short_name="TEST",
+            known_types={"Bug", "Feature", "Task"},
+            known_users={"alice"},
+        )
+        self.backend = youtrack.YouTrackBackend(
+            base_url="https://faketrack.example.org", project="TEST",
+            token="fake-token", transport=self.transport,
+        )
+
+    def test_create_with_unmappable_type_succeeds_and_leaves_no_orphan(self):
+        captured_stderr = io.StringIO()
+        with contextlib.redirect_stderr(captured_stderr):
+            item = self.backend.create(title="New feature", item_type="chore")
+
+        self.assertEqual(item["id"], "TEST-1")
+        self.assertIsNone(item.get("type"))
+        self.assertIn("chore", captured_stderr.getvalue())
+        # Exactly one issue exists -- not zero-and-raise, not a duplicate on retry.
+        self.assertEqual(len(self.transport._issues), 1)
+
+    def test_create_with_known_type_is_set_without_a_warning(self):
+        captured_stderr = io.StringIO()
+        with contextlib.redirect_stderr(captured_stderr):
+            self.backend.create(title="New feature", item_type="Feature")
+
+        self.assertIn("Type Feature", self.transport.commands_received)
+        self.assertEqual(captured_stderr.getvalue(), "")
+
+    def test_create_with_unresolvable_owner_succeeds_and_leaves_no_orphan(self):
+        captured_stderr = io.StringIO()
+        with contextlib.redirect_stderr(captured_stderr):
+            item = self.backend.create(title="New feature", owner="mallory")
+
+        self.assertEqual(item["id"], "TEST-1")
+        self.assertIsNone(item.get("owner"))
+        self.assertIn("mallory", captured_stderr.getvalue())
+        self.assertEqual(len(self.transport._issues), 1)
+
+
 class YouTrackStateOutsideVocabularyTest(unittest.TestCase):
     """A project's State bundle may legitimately have values outside CCPR's status
     vocabulary and outside any configured stateMap (e.g. a custom workflow state).
