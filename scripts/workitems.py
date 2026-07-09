@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """workitems.py – CLI dispatcher for the CCPR work-item backend contract (ADR-0002).
 
-Reads `workitems.provider` from settings.json (default: local) and dispatches to the
-provider implementation in scripts/lib/workitems/<provider>.py. `local` is the default
-and reference backend: no server, no token, structured Markdown at docs/workitems/.
+Reads `workitems.provider` from `.claude/settings.json` (default: local) and dispatches
+to the provider implementation in scripts/lib/workitems/<provider>.py. `local` is the
+default and reference backend: no server, no token, structured Markdown at
+docs/workitems/. Project config lives under `.claude/` (Claude Code's own convention),
+not a repo-root settings.json -- see load_settings()'s docstring for the exact
+precedence, including the `.claude/settings.local.json` dev override.
 
 Usage:
   workitems.py create --title T [--type X] [--owner O] [--description D] [--project DIR]
@@ -21,7 +24,7 @@ Output: JSON on stdout for every operation (a list for `list`, an object otherwi
 
 Claiming (ADR-0005): --runner records the runner:<id> signal + a heartbeat and sets
 In Progress; mandatory for remote backends, a no-op for `local`. `sweep` reconciles
-abandoned claims into Parked based on `workitems.claiming.staleAfter` in settings.json.
+abandoned claims into Parked based on `workitems.claiming.staleAfter` in `.claude/settings.json`.
 """
 
 import argparse
@@ -42,22 +45,52 @@ from workitems import sweep as sweep_module  # noqa: E402
 
 
 class UnknownProviderError(Exception):
-    """Raised when settings.json names a provider with no matching lib/workitems/<provider>.py."""
+    """Raised when .claude/settings.json names a provider with no matching
+    lib/workitems/<provider>.py."""
 
 
-def load_settings(project_dir):
-    settings_path = os.path.join(project_dir, "settings.json")
-    if not os.path.isfile(settings_path):
+def _claude_settings_path(project_dir):
+    return os.path.join(project_dir, ".claude", "settings.json")
+
+
+def _claude_settings_local_path(project_dir):
+    return os.path.join(project_dir, ".claude", "settings.local.json")
+
+
+def _read_json_file(path):
+    if not os.path.isfile(path):
         return {}
-    with open(settings_path, "r", encoding="utf-8") as f:
+    with open(path, "r", encoding="utf-8") as f:
         try:
             return json.load(f)
         except json.JSONDecodeError as exc:
-            raise WorkItemError(f"invalid JSON in {settings_path}: {exc}") from exc
+            raise WorkItemError(f"invalid JSON in {path}: {exc}") from exc
+
+
+def load_settings(project_dir):
+    """Reads the project's Claude Code settings, `.claude/settings.json` -- NOT a
+    repo-root settings.json (a CCPR project's config lives under `.claude/`, same as
+    Claude Code's own settings). Missing file -> {} (falls through to the default
+    `local` provider), same as before.
+
+    Mirrors Claude Code's own local-override precedence: if
+    `.claude/settings.local.json` also exists, it overrides the base file's
+    `workitems` block (a shallow merge at that key only -- not a deep merge of every
+    nested field) so a developer can point at a different provider locally without
+    committing the change. Any other top-level key in settings.local.json (there
+    normally isn't one relevant here) is ignored; `_update_provider_in_settings`
+    always writes back to the base, committed file, never to .local.
+    """
+    settings = _read_json_file(_claude_settings_path(project_dir))
+    local_settings = _read_json_file(_claude_settings_local_path(project_dir))
+    if "workitems" in local_settings:
+        settings = dict(settings)
+        settings["workitems"] = local_settings["workitems"]
+    return settings
 
 
 def resolve_provider_config(settings, project_dir, provider):
-    """Return the settings.json config block for a specific provider name."""
+    """Return the `.claude/settings.json` config block for a specific provider name."""
     workitems_settings = settings.get("workitems", {})
     config = dict(workitems_settings.get(provider, {}))
     if provider == "local" and "workitems_dir" not in config:
@@ -73,7 +106,7 @@ def resolve_provider_config(settings, project_dir, provider):
     claiming_settings = workitems_settings.get("claiming") or {}
     if not isinstance(claiming_settings, dict):
         raise WorkItemError(
-            "Invalid workitems.claiming in settings.json: expected an object "
+            "Invalid workitems.claiming in .claude/settings.json: expected an object "
             f'(e.g. {{"staleAfter": "1h"}}), got {claiming_settings!r}'
         )
     if "staleAfter" in claiming_settings:
@@ -234,7 +267,7 @@ def _run_migrate(settings, args, source_provider, source_config, source_backend)
     )
 
     # Leave exactly one active backend afterward (ADR-0002/ADR-0004): flip
-    # settings.json's active provider once every source item is accounted for.
+    # .claude/settings.json's active provider once every source item is accounted for.
     # Gated on fully_migrated, NOT archived -- archived is only ever True for a
     # filesystem-based (local) source, so gating on it meant a non-local source
     # never flipped the provider even on complete, successful migration.
@@ -248,7 +281,7 @@ def _run_migrate(settings, args, source_provider, source_config, source_backend)
     if report.get("archived"):
         restore_instructions = (
             f"{report['restore_command']} && set workitems.provider back to "
-            f"{source_provider!r} in settings.json"
+            f"{source_provider!r} in .claude/settings.json"
         )
         report["restore_instructions"] = restore_instructions
         print(f"Rollback: to restore the previous state, run: {restore_instructions}", file=sys.stderr)
@@ -257,8 +290,15 @@ def _run_migrate(settings, args, source_provider, source_config, source_backend)
 
 
 def _update_provider_in_settings(project_dir, new_provider):
-    settings_path = os.path.join(project_dir, "settings.json")
-    settings = load_settings(project_dir)
+    """Flips `workitems.provider` after a completed migration. Reads and writes the
+    BASE `.claude/settings.json` directly (not via load_settings(), which applies the
+    .local override for resolution) -- writing back the merged view would leak a
+    developer's local-only override into the committed file. Read-modify-write:
+    any other top-level key already in settings.json (permissions, hooks, ...) is
+    preserved untouched. Never writes to `.claude/settings.local.json`."""
+    settings_path = _claude_settings_path(project_dir)
+    os.makedirs(os.path.dirname(settings_path), exist_ok=True)
+    settings = _read_json_file(settings_path)
     settings.setdefault("workitems", {})["provider"] = new_provider
     with open(settings_path, "w", encoding="utf-8") as f:
         json.dump(settings, f, indent=2)

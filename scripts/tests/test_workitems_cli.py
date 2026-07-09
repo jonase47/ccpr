@@ -1,8 +1,8 @@
 """test_workitems_cli.py – End-to-end tests for the workitems.py CLI dispatcher (ADR-0002).
 
 Invokes the script as a subprocess (the real entry point: `workitems.py <op> ...`) rather
-than importing its internals, so these tests also cover settings.json provider resolution
-and JSON-on-stdout behaviour.
+than importing its internals, so these tests also cover `.claude/settings.json` provider
+resolution and JSON-on-stdout behaviour.
 """
 
 import json
@@ -116,6 +116,16 @@ class WorkitemsCliTest(unittest.TestCase):
         self.workitems_dir.mkdir(parents=True)
         (self.workitems_dir / "WI-0001.md").write_text(ITEM_TEXT, encoding="utf-8")
 
+    def _settings_path(self):
+        """Project config lives at `.claude/settings.json` (Claude Code convention),
+        NOT a repo-root settings.json. Creates the `.claude/` directory on demand."""
+        claude_dir = self.project_dir / ".claude"
+        claude_dir.mkdir(parents=True, exist_ok=True)
+        return claude_dir / "settings.json"
+
+    def _write_settings(self, data):
+        self._settings_path().write_text(json.dumps(data), encoding="utf-8")
+
     def run_cli(self, *args):
         result = subprocess.run(
             [sys.executable, str(SCRIPT_PATH), *args, "--project", str(self.project_dir)],
@@ -205,6 +215,34 @@ class WorkitemsCliTest(unittest.TestCase):
         items = json.loads(result.stdout)
         self.assertEqual([item["id"] for item in items], ["WI-0001"])
 
+    def test_missing_claude_settings_defaults_to_local_no_crash(self):
+        # No .claude/settings.json at all (setUp never writes one) -- load_settings()
+        # must fall through to {} and resolve_provider() to the default `local`
+        # provider, not crash or silently look somewhere else.
+        self.assertFalse((self.project_dir / ".claude" / "settings.json").exists())
+
+        result = self.run_cli("list")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        items = json.loads(result.stdout)
+        self.assertEqual([item["id"] for item in items], ["WI-0001"])
+
+    def test_local_settings_overrides_the_workitems_block_for_provider_resolution(self):
+        # .claude/settings.local.json is the Claude Code dev-override convention:
+        # a developer can point at a different provider locally without touching
+        # the committed .claude/settings.json. The base names a provider that would
+        # fail to resolve (proving it's genuinely overridden, not just ignored).
+        self._write_settings({"workitems": {"provider": "does-not-exist"}})
+        (self.project_dir / ".claude" / "settings.local.json").write_text(
+            json.dumps({"workitems": {"provider": "local"}}), encoding="utf-8",
+        )
+
+        result = self.run_cli("list")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        items = json.loads(result.stdout)
+        self.assertEqual([item["id"] for item in items], ["WI-0001"])
+
     def test_get_prints_full_item_as_json(self):
         result = self.run_cli("get", "WI-0001")
 
@@ -247,20 +285,16 @@ class WorkitemsCliTest(unittest.TestCase):
         token_env = "CCPR_TEST_YOUTRACK_TOKEN_CLI_MISSING"
         env = dict(os.environ)
         env.pop(token_env, None)
-        settings_path = self.project_dir / "settings.json"
-        settings_path.write_text(
-            json.dumps({
-                "workitems": {
-                    "provider": "youtrack",
-                    "youtrack": {
-                        "baseUrl": "https://faketrack.example.org",
-                        "project": "TEST",
-                        "tokenEnv": token_env,
-                    },
+        self._write_settings({
+            "workitems": {
+                "provider": "youtrack",
+                "youtrack": {
+                    "baseUrl": "https://faketrack.example.org",
+                    "project": "TEST",
+                    "tokenEnv": token_env,
                 },
-            }),
-            encoding="utf-8",
-        )
+            },
+        })
 
         result = subprocess.run(
             [sys.executable, str(SCRIPT_PATH), "list", "--project", str(self.project_dir)],
@@ -272,10 +306,7 @@ class WorkitemsCliTest(unittest.TestCase):
         self.assertNotIn("Traceback", result.stderr)
 
     def test_unknown_provider_fails_with_stderr_message(self):
-        settings_path = self.project_dir / "settings.json"
-        settings_path.write_text(
-            json.dumps({"workitems": {"provider": "does-not-exist"}}), encoding="utf-8",
-        )
+        self._write_settings({"workitems": {"provider": "does-not-exist"}})
 
         result = self.run_cli("list")
 
@@ -283,8 +314,7 @@ class WorkitemsCliTest(unittest.TestCase):
         self.assertIn("does-not-exist", result.stderr)
 
     def test_malformed_settings_json_fails_cleanly(self):
-        settings_path = self.project_dir / "settings.json"
-        settings_path.write_text("{ not valid json", encoding="utf-8")
+        self._settings_path().write_text("{ not valid json", encoding="utf-8")
 
         result = self.run_cli("list")
 
@@ -298,10 +328,7 @@ class WorkitemsCliTest(unittest.TestCase):
         return provider_name
 
     def _use_provider(self, provider_name):
-        settings_path = self.project_dir / "settings.json"
-        settings_path.write_text(
-            json.dumps({"workitems": {"provider": provider_name}}), encoding="utf-8",
-        )
+        self._write_settings({"workitems": {"provider": provider_name}})
 
     def _use_claiming_provider(self, provider_name, claiming_config=None):
         """Like _use_provider, but also gives FAKE_CLAIMING_PROVIDER_SOURCE the
@@ -312,8 +339,7 @@ class WorkitemsCliTest(unittest.TestCase):
         }
         if claiming_config:
             workitems_config["claiming"] = claiming_config
-        settings_path = self.project_dir / "settings.json"
-        settings_path.write_text(json.dumps({"workitems": workitems_config}), encoding="utf-8")
+        self._write_settings({"workitems": workitems_config})
 
     def test_work_item_error_from_backend_create_is_reported_cleanly(self):
         provider_name = self._write_provider(
@@ -421,7 +447,7 @@ class WorkitemsCliTest(unittest.TestCase):
         self.assertTrue(idmap_path.is_file())
         self.assertIn("WI-0001", idmap_path.read_text(encoding="utf-8"))
 
-        settings = json.loads((self.project_dir / "settings.json").read_text(encoding="utf-8"))
+        settings = json.loads(self._settings_path().read_text(encoding="utf-8"))
         self.assertEqual(settings["workitems"]["provider"], provider_name)
 
         # Rollback path: archiving never deletes, but nothing moves it back
@@ -432,6 +458,54 @@ class WorkitemsCliTest(unittest.TestCase):
         self.assertIn("local", report["restore_instructions"])
         self.assertIn("mv ", result.stderr)
         self.assertIn(report["archive_path"], result.stderr)
+
+    def test_migrate_provider_flip_preserves_unrelated_settings_keys(self):
+        # .claude/settings.json commonly carries non-workitems keys (permissions,
+        # hooks, ...) -- the provider flip is a read-modify-write, it must never
+        # clobber them.
+        self._write_settings({
+            "permissions": {"allow": ["Bash(git *)"]},
+            "workitems": {"provider": "local"},
+        })
+        provider_name = self._write_provider(
+            "_test_fake_migrate_target_preserve_keys",
+            "from workitems import WorkItemError\n\n"
+            "_ITEMS = {}\n"
+            "_NEXT = [1]\n\n"
+            "def create(config):\n"
+            "    return _FakeBackend()\n\n"
+            "class _FakeBackend:\n"
+            "    def create(self, title, item_type=None, owner=None, description=None):\n"
+            "        item_id = f'FAKE-{_NEXT[0]}'\n"
+            "        _NEXT[0] += 1\n"
+            "        item = {'id': item_id, 'title': title, 'status': 'Backlog',\n"
+            "                'description': description or '', 'result-link': [], 'owner': owner}\n"
+            "        _ITEMS[item_id] = item\n"
+            "        return dict(item)\n"
+            "    def list(self, status=None, owner=None):\n"
+            "        return [dict(i) for i in _ITEMS.values()]\n"
+            "    def get(self, item_id):\n"
+            "        if item_id not in _ITEMS:\n"
+            "            raise WorkItemError(f'Unknown work item: {item_id}')\n"
+            "        return dict(_ITEMS[item_id])\n"
+            "    def claim(self, item_id, owner=None):\n"
+            "        if owner is not None:\n"
+            "            _ITEMS[item_id]['owner'] = owner\n"
+            "        return dict(_ITEMS[item_id])\n"
+            "    def set_status(self, item_id, status):\n"
+            "        _ITEMS[item_id]['status'] = status\n"
+            "        return dict(_ITEMS[item_id])\n"
+            "    def append_result(self, item_id, ref):\n"
+            "        _ITEMS[item_id]['result-link'].append(ref)\n"
+            "        return dict(_ITEMS[item_id])\n",
+        )
+
+        result = self.run_cli("migrate", "--to", provider_name)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        settings = json.loads(self._settings_path().read_text(encoding="utf-8"))
+        self.assertEqual(settings["workitems"]["provider"], provider_name)
+        self.assertEqual(settings["permissions"], {"allow": ["Bash(git *)"]})
 
     def test_migrating_twice_to_the_same_target_refuses_on_the_second_call(self):
         provider_name = self._write_provider(
@@ -529,7 +603,7 @@ class WorkitemsCliTest(unittest.TestCase):
         self.assertTrue(report["fully_migrated"])
         self.assertFalse(report["archived"])
 
-        settings = json.loads((self.project_dir / "settings.json").read_text(encoding="utf-8"))
+        settings = json.loads(self._settings_path().read_text(encoding="utf-8"))
         self.assertEqual(settings["workitems"]["provider"], "local")
 
     def test_missing_dependency_inside_valid_provider_is_not_misreported_as_unknown_provider(self):
@@ -617,22 +691,14 @@ class WorkitemsCliTest(unittest.TestCase):
     def test_null_claiming_config_is_treated_as_absent_not_an_error(self):
         # "claiming": null is a common, reasonable JSON idiom for "no value" -- treat
         # it the same as the key being absent (silent defaults), not a hard error.
-        settings_path = self.project_dir / "settings.json"
-        settings_path.write_text(
-            json.dumps({"workitems": {"provider": "local", "claiming": None}}),
-            encoding="utf-8",
-        )
+        self._write_settings({"workitems": {"provider": "local", "claiming": None}})
 
         result = self.run_cli("list")
 
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_non_object_claiming_config_fails_cleanly_not_with_a_traceback(self):
-        settings_path = self.project_dir / "settings.json"
-        settings_path.write_text(
-            json.dumps({"workitems": {"provider": "local", "claiming": 3600}}),
-            encoding="utf-8",
-        )
+        self._write_settings({"workitems": {"provider": "local", "claiming": 3600}})
 
         result = self.run_cli("list")
 
