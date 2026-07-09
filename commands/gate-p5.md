@@ -28,6 +28,8 @@ Run `python3 ~/.claude/scripts/workitems.py list`.
   reading it from BACKLOG.md prose.
 - **`[]` and no `docs/workitems/` directory** → still on prose. Read SPRINT.md/BACKLOG.md for
   story status, as before. Emit one line: *"Tip: run `lift` to adopt the structured work-item store."*
+- **`[]` but `docs/workitems/` exists** → adopted store, just empty right now (e.g. between
+  sprints). Treat as adopted: use the CLI, not the prose fallback.
 
 See Manual/WORKITEMS.md §8 for the full guard rationale and the status-verb mapping.
 
@@ -74,6 +76,14 @@ Delegate the sprint gate check to the **project-planner** agent with a focused p
 >
 > Also create a 3-point retrospective (what went well / what to improve / velocity).
 > Overall recommendation: Sprint Done / Conditionally Done / Not Done.
+>
+> **Per-story verdict table (structured-store projects only, per the §0a guard):** the criteria
+> above are judged at the sprint level, but the write-back in step 3 needs a per-story decision.
+> Cross-reference this sprint's story scope (SPRINT.md) against `workitems list` — every story
+> carries its `**Work-Item:** WI-NNNN` reference from `/p4-backlog` — and output one row per story:
+> `Story | Work-Item id | Verdict (Done / Backlog)`. A story is `Done` only if it individually meets
+> criteria 2 and 5 above; otherwise `Backlog` (deferred). This table, not fuzzy title matching, is
+> what step 3 below applies `set-status` against.
 
 ### 3. Create Gate Protocol
 
@@ -81,8 +91,9 @@ Add the gate result to **SPRINT.md** (sprint review and retrospective — this s
 not item state, per Manual/WORKITEMS.md §10).
 
 Using the guard result from step 0a:
-- Structured store: `workitems set-status <id> "Done"` for every completed story; `workitems
-  set-status <id> "Backlog"` for every deferred story.
+- Structured store: apply the per-story verdict table from step 2 — `workitems set-status <id>
+  "Done"` for every row marked Done; `workitems set-status <id> "Backlog"` for every row marked
+  Backlog. The table's Work-Item ids are the resolution mechanism, never the story title text.
 - Prose fallback: update BACKLOG.md — mark completed stories, return deferred stories to the backlog.
 
 Once wired, item status is never hand-edited in SPRINT.md/BACKLOG.md — those are planning views
@@ -131,8 +142,9 @@ The following points are covered by preflight (mechanically) and agent (content)
 When this gate runs, perform the operations strictly in this order. The HANDOVER update must precede the cleanup so that an aborted run never leaves a missing handover behind:
 
 1. Add gate result to **`docs/planning/SPRINT.md`** (sprint review + retrospective from §3 above)
-2. Structured store: `workitems set-status <id> "Done"` / `"Backlog"` per story (§3 above). Prose
-   fallback: update **`docs/planning/BACKLOG.md`** — mark completed stories Done, return deferred stories
+2. Structured store: `workitems set-status <id> "Done"` / `"Backlog"` per the per-story verdict
+   table (§3 above). Prose fallback: update **`docs/planning/BACKLOG.md`** — mark completed stories
+   Done, return deferred stories
 3. Update **`docs/HANDOVER.md`** (see Handover Epilogue below)
 4. **Cleanup**: `rm -f docs/.gate-preflight-p5.md` (last operation)
 
