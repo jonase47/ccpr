@@ -16,6 +16,9 @@ Run `python3 ~/.claude/scripts/workitems.py list`.
   - No `$ARGUMENTS`: resolve the story via `workitems list --status "Waiting for Approval"`, pick
     the first item in the returned array, ask for confirmation. Acceptance criteria come from
     `workitems get <id>` (`description` field) instead of BACKLOG.md prose.
+  - `$ARGUMENTS` provided: resolve `<id>` by matching `$ARGUMENTS` against a story's title, or
+    directly if it looks like a `Work-Item` id (`WI-NNNN`) from BACKLOG.md/SPRINT.md, then confirm
+    the resolved item with the user before proceeding.
 - **`[]` and no `docs/workitems/` directory** → still on prose. Read SPRINT.md/BACKLOG.md to
   find/ask which story is next, as before. Emit one line: *"Tip: run `lift` to adopt the structured
   work-item store."*
