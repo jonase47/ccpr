@@ -336,6 +336,20 @@ class YouTrackBackend:
         )
         return self.get(item_id)
 
+    def comment(self, item_id, text):
+        """Writes a plain human comment to the SAME comments endpoint append_result
+        uses, but WITHOUT the marker -- get()/list() partition by marker presence
+        (see _item_from_issue), so this never surfaces as a result-link (ADR-0002
+        addendum, 09.07.2026)."""
+        validate_item_id(item_id)
+        if not text:
+            raise WorkItemError("comment text is required")
+        self._request(
+            "POST", f"/api/issues/{item_id}/comments",
+            body={"text": text},
+        )
+        return self.get(item_id)
+
     def _resolve_project_id(self):
         if self._project_id is not None:
             return self._project_id
@@ -412,11 +426,18 @@ class YouTrackBackend:
         if isinstance(assignee_value, dict):
             owner = assignee_value.get("login") or assignee_value.get("name")
 
-        result_links = [
-            comment["text"][len(RESULT_COMMENT_MARKER):].strip()
-            for comment in issue.get("comments", [])
-            if comment.get("text", "").startswith(RESULT_COMMENT_MARKER)
-        ]
+        # comment() and append_result() share the SAME comments stream (both POST to
+        # /api/issues/<id>/comments); the marker is the only thing that tells them
+        # apart on read-back -- a hard either/or partition, never both (ADR-0002
+        # addendum, 09.07.2026).
+        result_links = []
+        comments = []
+        for issue_comment in issue.get("comments", []):
+            text = issue_comment.get("text", "")
+            if text.startswith(RESULT_COMMENT_MARKER):
+                result_links.append(text[len(RESULT_COMMENT_MARKER):].strip())
+            else:
+                comments.append(text)
 
         runner, heartbeat = self._runner_and_heartbeat_from_tags(
             issue.get("tags", []), issue.get("idReadable"),
@@ -428,6 +449,7 @@ class YouTrackBackend:
             "status": status,
             "description": issue.get("description") or "",
             "result-link": result_links,
+            "comments": comments,
             "owner": owner,
             "runner": runner,
             "heartbeat": heartbeat,

@@ -13,6 +13,7 @@ from pathlib import Path
 from workitems import STATUS_VALUES, WorkItemError, frontmatter, validate_item_id
 
 RESULT_HEADING = "## Result"
+COMMENTS_HEADING = "## Comments"
 
 _ID_NUMBER_PATTERN = re.compile(r"^WI-(\d+)$")
 
@@ -113,7 +114,15 @@ class LocalBackend:
 
     def append_result(self, item_id, ref):
         path, data, body = self._read(item_id)
-        new_body = _append_to_result_section(body, ref)
+        new_body = _append_to_section(body, RESULT_HEADING, ref)
+        self._write(path, data, new_body)
+        return self._item_from_data(data, new_body)
+
+    def comment(self, item_id, text):
+        if not text:
+            raise WorkItemError("comment text is required")
+        path, data, body = self._read(item_id)
+        new_body = _append_to_section(body, COMMENTS_HEADING, text)
         self._write(path, data, new_body)
         return self._item_from_data(data, new_body)
 
@@ -160,7 +169,8 @@ class LocalBackend:
             "title": data.get("title"),
             "status": data.get("status"),
             "description": _extract_description(body),
-            "result-link": _extract_result_links(body),
+            "result-link": _extract_section_items(body, RESULT_HEADING),
+            "comments": _extract_section_items(body, COMMENTS_HEADING),
             "owner": data.get("owner") or None,
             "type": data.get("type"),
             "refs": data.get("refs"),
@@ -175,7 +185,7 @@ class LocalBackend:
 
 def _new_item_body(description):
     description = (description or "").strip()
-    return f"{description}\n\n## Acceptance Criteria\n\n## Result\n"
+    return f"{description}\n\n## Acceptance Criteria\n\n## Result\n\n## Comments\n"
 
 
 def _extract_description(body):
@@ -187,24 +197,29 @@ def _extract_description(body):
     return "\n".join(desc_lines).strip()
 
 
-def _extract_result_links(body):
-    return [_strip_bullet(line) for line in _result_section_lines(body.split("\n"))]
+def _extract_section_items(body, heading):
+    return [_strip_bullet(line) for line in _section_lines(body.split("\n"), heading)]
 
 
-def _append_to_result_section(body, ref):
+def _append_to_section(body, heading, text):
+    """Appends `text` as a bullet to the named section (creating it at the end of the
+    body if absent). Shared by `append_result` (RESULT_HEADING) and `comment`
+    (COMMENTS_HEADING) -- same append-and-rewrite logic, different heading, per
+    ADR-0002's addendum: the two channels are structurally separate sections, not a
+    marker split (that's youtrack's mechanism, not local's)."""
     lines = body.split("\n")
-    new_line = f"- {ref}"
-    heading_idx = _find_heading(lines, RESULT_HEADING)
+    new_line = f"- {text}"
+    heading_idx = _find_heading(lines, heading)
 
     if heading_idx is None:
         prefix = body.rstrip("\n")
         if prefix:
             prefix += "\n\n"
-        return f"{prefix}{RESULT_HEADING}\n{new_line}\n"
+        return f"{prefix}{heading}\n{new_line}\n"
 
     end_idx = _section_end(lines, heading_idx)
-    existing = [_strip_bullet(line) for line in _result_section_lines(lines, heading_idx, end_idx)]
-    new_section = [RESULT_HEADING] + [f"- {link}" for link in existing] + [new_line]
+    existing = [_strip_bullet(line) for line in _section_lines(lines, heading, heading_idx, end_idx)]
+    new_section = [heading] + [f"- {item}" for item in existing] + [new_line]
     return "\n".join(lines[:heading_idx] + new_section + lines[end_idx:])
 
 
@@ -222,9 +237,9 @@ def _section_end(lines, heading_idx):
     return len(lines)
 
 
-def _result_section_lines(lines, heading_idx=None, end_idx=None):
+def _section_lines(lines, heading, heading_idx=None, end_idx=None):
     if heading_idx is None:
-        heading_idx = _find_heading(lines, RESULT_HEADING)
+        heading_idx = _find_heading(lines, heading)
         if heading_idx is None:
             return []
         end_idx = _section_end(lines, heading_idx)

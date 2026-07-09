@@ -211,6 +211,65 @@ class WorkItemsContractTestCase:
 
         self.assertEqual(item["description"], "Original description.")
 
+    # --- comment ---
+    #
+    # A plain human comment — a channel structurally separate from result-link (ADR-0002
+    # addendum, 09.07.2026): a marker-tagged append-result entry must never surface in
+    # comments[], and a plain comment must never surface in result-link.
+
+    def test_comment_appears_in_comments_field(self):
+        item_id = self.create_item()
+
+        item = self.backend.comment(item_id, "Please double-check the retry logic.")
+
+        self.assertIn("Please double-check the retry logic.", item["comments"])
+        self.assertIn(
+            "Please double-check the retry logic.",
+            self.backend.get(item_id)["comments"],
+        )
+
+    def test_comment_does_not_appear_in_result_link(self):
+        item_id = self.create_item()
+
+        item = self.backend.comment(item_id, "Please double-check the retry logic.")
+
+        self.assertEqual(item["result-link"], [])
+
+    def test_comment_twice_keeps_both_in_order(self):
+        item_id = self.create_item()
+
+        self.backend.comment(item_id, "First note.")
+        item = self.backend.comment(item_id, "Second note.")
+
+        self.assertEqual(item["comments"], ["First note.", "Second note."])
+
+    def test_comment_rejects_empty_text(self):
+        item_id = self.create_item()
+
+        with self.assertRaises(Exception):
+            self.backend.comment(item_id, "")
+        self.assertEqual(self.backend.get(item_id)["comments"], [])
+
+    def test_comment_unknown_id_raises(self):
+        with self.assertRaises(Exception):
+            self.backend.comment("WI-9999", "a note")
+
+    def test_append_result_does_not_appear_in_comments(self):
+        item_id = self.create_item()
+
+        item = self.backend.append_result(item_id, "https://example.org/pr/1")
+
+        self.assertEqual(item["comments"], [])
+
+    # --- comments[] model (default shape) ---
+
+    def test_fresh_item_has_an_empty_comments_list(self):
+        item_id = self.create_item()
+
+        item = self.backend.get(item_id)
+
+        self.assertEqual(item["comments"], [])
+
     # --- id validation / path traversal ---
     #
     # Ids may end up in filesystem paths (local) today and in `ticket/<id>` branch
