@@ -7,6 +7,21 @@ Conducts unstructured, experience-based tests that automated tests and defined t
 If provided: Focus exploratory tests on the specified area.
 If not provided: Read FEATURES.md and TESTPROTOCOL_FUNCTIONAL.md and select areas that have received little test attention so far. If any context is missing, ask about the application area.
 
+## 0. Work-item adoption guard (ADR-0002 §8)
+
+Usability findings from this command are **optional** backlog items (see Result) — this guard only
+applies if the user chooses to capture one.
+
+Run `python3 ~/.claude/scripts/workitems.py list`.
+- **Non-empty array** → the project uses the structured store. If the user opts to capture a
+  usability finding as a backlog item, use the CLI (step 3 below) instead of BACKLOG.md prose.
+- **`[]` and no `docs/workitems/` directory** → still on prose. Append to BACKLOG.md as before, if
+  chosen. Emit one line: *"Tip: run `lift` to adopt the structured work-item store."*
+- **`[]` but `docs/workitems/` exists** → adopted store, just empty right now. Treat as adopted: use
+  the CLI, not the prose fallback.
+
+See Manual/WORKITEMS.md §8 for the full guard rationale and the status-verb mapping.
+
 ## Execution
 
 ### 1. Read Context
@@ -51,7 +66,17 @@ Delegate the exploratory tests to the **qa-tester** agent:
 >
 > For each finding: description, reproduction steps, severity, category (Bug / Usability / Enhancement)
 
-### 3. Write Detail File
+### 3. Optionally Capture Usability Findings as Work Items
+Per the Result section below, this is optional — most findings just stay documented in the
+EXPLORATORY.md protocol (step 4). Only when the user chooses to carry a usability finding forward
+into the backlog, using the guard result from step 0:
+- Structured store: `workitems create --title "<finding>" --type chore --description "<finding +
+  reproduction>"` (check the full, unfiltered `workitems list` for a matching title first — trim +
+  casefold — so a re-run never duplicates an already-captured finding; record the assigned
+  `**Work-Item:** WI-NNNN` id in EXPLORATORY.md's `## Findings` entry).
+- Prose fallback: add it to `docs/planning/BACKLOG.md` as before.
+
+### 4. Write Detail File
 Write the result to `docs/quality/EXPLORATORY.md` (overwrite if it exists). Start with:
 
 ```yaml
@@ -65,7 +90,7 @@ last_updated: <DD.MM.YYYY>
 
 Body sections: `## Test Scope & Heuristics`, `## Findings` (description, reproduction, severity, category per finding), `## Overall Assessment`.
 
-### 4. Update Phase Index
+### 5. Update Phase Index
 Update `docs/quality/QA.md` (the P6 phase index, created from template if missing — see `~/.claude/docs/PROJECT_PHASES.md`):
 - Set `**Last Updated:** <DD.MM.YYYY>`.
 - In **Detail Files** table: ensure a row for `[EXPLORATORY.md](EXPLORATORY.md)` with status `complete`.
@@ -76,7 +101,7 @@ Update `docs/quality/QA.md` (the P6 phase index, created from template if missin
 - **`docs/quality/EXPLORATORY.md`** (exploratory test protocols with findings)
 - **`docs/quality/QA.md`** (phase index updated)
 - Bugs as input for `/p6-bugfix`
-- Usability findings optionally as new backlog items in `docs/planning/BACKLOG.md`
+- Usability findings optionally as new work items (structured store) or backlog items in `docs/planning/BACKLOG.md` (prose fallback)
 
 ### Handover Epilogue
 Update `docs/HANDOVER.md`:
