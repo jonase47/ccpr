@@ -55,8 +55,8 @@ files has nothing to lock).
 ### Branches
 
 - **One `ticket/<id>` branch per claimed item**; runners push directly to the remote.
-- **`main` is protected / PR-only.** Completion is a PR (`Waiting for Approval` → review → merge →
-  `Done`).
+- **`main` is protected / PR-only.** Completion runs through the two gates (`In Review` → code review →
+  `Waiting for Approval` → acceptance/merge → `Done`).
 - This gives isolation, a resumable line of work, and a visible "has commits" signal.
 
 ### Heartbeat and `Parked`

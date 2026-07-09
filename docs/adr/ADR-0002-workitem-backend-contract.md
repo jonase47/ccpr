@@ -62,8 +62,10 @@ links). Every backend must map exactly these. Backends may expose richer fields 
 but **the CCPR core never relies on backend-specific fields** — that is what prevents a tool-lock-in
 from creeping into the public framework.
 
-**Status vocabulary:** `Backlog → Ready → In Progress → Parked → Waiting for Approval → Done`, with
-`Blocked` and `Cancelled` crosscutting. Backends map their own states onto this set.
+**Status vocabulary:** `Backlog → Ready → In Progress → In Review → Waiting for Approval → Done`, with
+`Parked`, `Blocked`, and `Cancelled` crosscutting. Backends map their own states onto this set. The two
+gates are distinct states: `In Review` (code review pending) precedes `Waiting for Approval`
+(acceptance pending).
 
 ### Provider selection
 

@@ -49,9 +49,10 @@ fields, or the public framework acquires a silent tool-lock-in):
 ### Status vocabulary
 
 ```
-Backlog → Ready → In Progress → Parked → Waiting for Approval → Done
+Backlog → Ready → In Progress → In Review → Waiting for Approval → Done
 ```
-plus **`Blocked`** and **`Cancelled`** crosscutting. Backends map their own states onto this set;
+plus **`Parked`**, **`Blocked`**, and **`Cancelled`** crosscutting (the two gates are distinct states:
+`In Review` = code review pending, `Waiting for Approval` = acceptance pending). Backends map their own states onto this set;
 `Parked` and the claiming semantics are specified in ADR-0005.
 
 ## 3. Provider configuration
@@ -154,9 +155,10 @@ Status is kept current **structurally, not by discipline** — the drift failure
 exists to prevent (a register that reads "open" while the code is done, or vice-versa).
 
 - **Workflow-driven (primary):** the CCPR commands invoke the contract at defined transitions —
-  `claim` + `set-status In Progress` when implementation starts, `set-status Waiting for Approval` +
-  `append-result <PR>` at completion, `set-status Done` on merge. The update happens because the
-  command runs it, not because an agent remembers.
+  `claim` + `set-status In Progress` when implementation starts, `set-status In Review` +
+  `append-result <PR>` when submitted for review, `set-status Waiting for Approval` on review-approval,
+  `set-status Done` on acceptance/merge. The update happens because the command runs it, not because an
+  agent remembers.
 - **Hook safety-net:** a git hook catches out-of-band events — a commit on a `ticket/<id>` branch
   records the commit against the item; a session-end hook consolidates. This closes the gap when work
   happens outside an orchestrated command. (The runner heartbeat is the extreme case — ADR-0005.)
@@ -188,12 +190,16 @@ already safe.
 
 | Prose phrase today | CLI call |
 |---|---|
-| "mark story In Review" | `set-status <id> "Waiting for Approval"` |
-| "Approved" / merged / "Fixed" | `set-status <id> "Done"` |
-| "back to Dev" / "In Dev" | `set-status <id> "In Progress"` |
 | start work on a story | `claim <id> --owner <who>` then `set-status <id> "In Progress"` |
+| implementation done → submit for code review | `set-status <id> "In Review"` |
+| code review **approved** (→ awaits acceptance) | `set-status <id> "Waiting for Approval"` |
+| acceptance **accepted** / merged | `set-status <id> "Done"` |
+| review or acceptance **rejected** ("back to Dev") | `set-status <id> "In Progress"` |
 | "add new item to BACKLOG" | `create --title … --type … --description …` (the backend assigns the id) |
 | record the delivered PR/commit | `append-result <id> <link>` |
+
+The two gates are **distinct states**, so `p5-review` (resolves `list --status "In Review"`) and
+`p5-acceptance` (resolves `list --status "Waiting for Approval"`) never contend for the same item.
 
 **Once wired, item status is NEVER hand-edited in `SPRINT.md`/`BACKLOG.md`** — those become planning
 **views** over the items (a `render` command to regenerate them is future work; during the transition

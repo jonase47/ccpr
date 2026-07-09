@@ -75,8 +75,8 @@ and robust, so the backend needs no instance-specific numeric field IDs.
 
 ### State vocabulary
 
-The backend maps CCPR's status vocabulary (`Backlog → Ready → In Progress → Parked → Waiting for
-Approval → Done`, plus `Blocked`/`Cancelled`) onto the project's `State` bundle **by name**. A project
+The backend maps CCPR's status vocabulary (`Backlog → Ready → In Progress → In Review → Waiting for
+Approval → Done`, plus `Parked`/`Blocked`/`Cancelled`) onto the project's `State` bundle **by name**. A project
 either names its `State` values to match, or supplies a name→name mapping in
 `workitems.youtrack.stateMap`. Resolving by name (not numeric bundle IDs) is what keeps the backend
 instance-independent.
