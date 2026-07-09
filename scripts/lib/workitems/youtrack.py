@@ -701,6 +701,22 @@ class YouTrackBackend:
                 estimate = None
             elif isinstance(estimate_value, (int, float)):
                 estimate = int(estimate_value)
+            elif estimate_value is not None:
+                # Anything other than a bare number (and not simply absent) means
+                # estimateField is misconfigured -- most likely pointing at an
+                # Enum/bundle custom field (which comes back as a {"name": ...}
+                # dict, mirroring the Enum fields above) instead of a plain numeric
+                # one. Surfaced the same way the state-outside-vocabulary case above
+                # is: visible on stderr, not silently swallowed into `estimate: None`.
+                print(
+                    f"Warning: YouTrack issue {issue.get('idReadable')} has a "
+                    f"non-numeric value {estimate_value!r} for the configured "
+                    f"estimate field {self.estimate_field!r} (expected a plain "
+                    "number). Passing it through as no estimate; check that "
+                    "workitems.youtrack.estimateField names a numeric custom field, "
+                    "not an Enum/bundle one.",
+                    file=sys.stderr,
+                )
 
         # comment() and append_result() share the SAME comments stream (both POST to
         # /api/issues/<id>/comments); the marker is the only thing that tells them

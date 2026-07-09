@@ -912,6 +912,40 @@ class YouTrackSetEstimateTest(unittest.TestCase):
         self.assertNotIsInstance(story_points_field["value"], dict)
 
 
+class YouTrackEstimateMisconfigurationTest(unittest.TestCase):
+    """A configured estimateField pointing at the WRONG kind of custom field (e.g. an
+    Enum/bundle field misconfigured in place of a plain numeric one) comes back from
+    YouTrack shaped like an Enum value (a dict), not a bare number. That must be
+    visible -- a stderr warning, same as the state-outside-vocabulary case above --
+    not silently swallowed into `estimate: None` (review follow-up, 09.07.2026)."""
+
+    def setUp(self):
+        self.backend = youtrack.YouTrackBackend(
+            base_url="https://faketrack.example.org", project="TEST",
+            token="fake-token", transport=FakeYouTrackTransport(project_short_name="TEST"),
+            estimate_field="Story Points",
+        )
+
+    def test_non_numeric_estimate_value_passes_through_with_a_stderr_warning(self):
+        raw_issue = {
+            "idReadable": "TEST-1",
+            "summary": "Mismapped estimate",
+            "description": "",
+            "project": {"shortName": "TEST"},
+            "customFields": [{"name": "Story Points", "value": {"name": "Large"}}],
+            "comments": [],
+            "tags": [],
+            "links": [],
+        }
+
+        captured_stderr = io.StringIO()
+        with contextlib.redirect_stderr(captured_stderr):
+            item = self.backend._item_from_issue(raw_issue)
+
+        self.assertIsNone(item["estimate"])
+        self.assertIn("Story Points", captured_stderr.getvalue())
+
+
 class YouTrackLinksDirectionTest(unittest.TestCase):
     """Direction normalization (ADR-0008, the load-bearing rule): a single shared
     link record reads differently depending on which linked issue you look from --
