@@ -92,13 +92,12 @@ Update `docs/operations/OPS.md`:
 - Lift any active Critical/High security finding into **Open Risks**.
 
 Cross-file update, using the guard result from step 0:
-- Structured store: `workitems create --title "<finding>" --type fix --description "[security]
-  <finding + CVE/CVSS + remediation>"` per Critical finding (check the full, unfiltered `workitems
+- Structured store: `workitems create --title "<finding>" --type fix --tag security --description
+  "<finding + CVE/CVSS + remediation>"` per Critical finding (check the full, unfiltered `workitems
   list` for a matching title first — trim + casefold — so a re-run never duplicates an
   already-created finding; record the assigned `**Work-Item:** WI-NNNN` id in this file's `## Open
-  Items`). The CLI's `create` has no `--tags` flag (checked `scripts/workitems.py` — only
-  `--title`/`--type`/`--owner`/`--description` exist) — a `[security]` prefix in the description is
-  the closest available signal, not an invented flag.
+  Items`). `--tag` marks the finding as `security` as a real, queryable field (`list --tag
+  security`) — no more description prefix.
 - Prose fallback: append Critical findings as new items to `docs/planning/BACKLOG.md` (for
   `/p8-iteration`) and bump its `last_updated`.
 
