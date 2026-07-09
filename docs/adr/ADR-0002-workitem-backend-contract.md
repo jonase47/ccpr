@@ -69,7 +69,8 @@ gates are distinct states: `In Review` (code review pending) precedes `Waiting f
 
 ### Provider selection
 
-`settings.json` carries `workitems.provider` (default: `local`). Remote-backend credentials come
+The project's `.claude/settings.json` carries `workitems.provider` (default: `local`; a
+`.claude/settings.local.json` overrides it locally). Remote-backend credentials come
 **exclusively from environment variables, never from the repo**.
 
 ### Backends are helper scripts; commands call the helpers

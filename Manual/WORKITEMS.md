@@ -27,7 +27,7 @@ CCPR commands never read work-state files directly. They call a helper that expo
 monotonic `WI-NNNN`; a remote backend returns the tracker's id). `lift` (ADR-0004) is bulk creation;
 `create` is the single-item path a planning command uses.
 
-The helper (`scripts/workitems.py`) reads `workitems.provider` from `settings.json` and dispatches to
+The helper (`scripts/workitems.py`) reads `workitems.provider` from the project's `.claude/settings.json` and dispatches to
 the provider implementation under `scripts/lib/workitems/<provider>.py`. `list` and `get` print JSON so
 commands can consume them without parsing prose.
 
@@ -57,7 +57,7 @@ plus **`Parked`**, **`Blocked`**, and **`Cancelled`** crosscutting (the two gate
 
 ## 3. Provider configuration
 
-`settings.json`:
+`.claude/settings.json` (the project's config; a `.claude/settings.local.json` overrides it locally):
 
 ```json
 "workitems": {
@@ -76,7 +76,7 @@ plus **`Parked`**, **`Blocked`**, and **`Cancelled`** crosscutting (the two gate
 
 - `provider` defaults to `local`. Set it per project.
 - Remote-backend **credentials come only from environment variables** (`tokenEnv` names the variable).
-  Never place a secret in `settings.json` or any tracked file.
+  Never place a secret in `.claude/settings.json` or any tracked file.
 - `claiming` (remote backends only): `staleAfter` is how long without a heartbeat before `sweep`
   moves a claimed item to `Parked`; `heartbeatInterval` is advisory for whatever refreshes a runner's
   heartbeat. Durations accept `45s` / `5m` / `2h` / `1d` or a bare number of seconds. See §6 and ADR-0005.
