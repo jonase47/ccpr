@@ -17,6 +17,8 @@ Usage:
   workitems.py set-status <id> <status> [--project DIR]
   workitems.py append-result <id> <ref> [--project DIR]
   workitems.py comment <id> <text> [--project DIR]
+  workitems.py set-description <id> <text> [--project DIR]
+  workitems.py set-title <id> <text> [--project DIR]
   workitems.py migrate --to <provider> [--project DIR]
   workitems.py lift <source-file...> [--apply] [--exclude PATTERN=REASON ...] [--project DIR]
   workitems.py sweep [--project DIR]
@@ -197,6 +199,17 @@ def build_parser():
     p_comment.add_argument("id")
     p_comment.add_argument("text")
 
+    p_set_description = sub.add_parser(
+        "set-description", help="Replace the description in full (empty string clears it)",
+        parents=[project_arg],
+    )
+    p_set_description.add_argument("id")
+    p_set_description.add_argument("text")
+
+    p_set_title = sub.add_parser("set-title", help="Replace the title", parents=[project_arg])
+    p_set_title.add_argument("id")
+    p_set_title.add_argument("text")
+
     p_migrate = sub.add_parser(
         "migrate", help="Move items to a target backend, once, reversibly (ADR-0004)",
         parents=[project_arg],
@@ -242,6 +255,10 @@ def dispatch(backend, args):
         return backend.append_result(args.id, args.ref)
     if args.operation == "comment":
         return backend.comment(args.id, args.text)
+    if args.operation == "set-description":
+        return backend.set_description(args.id, args.text)
+    if args.operation == "set-title":
+        return backend.set_title(args.id, args.text)
     raise ValueError(f"Unknown operation: {args.operation}")
 
 

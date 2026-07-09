@@ -145,6 +145,28 @@ class LocalBackendClaimingTest(unittest.TestCase):
             self.backend.heartbeat("WI-9999", runner="agent-1")
 
 
+class LocalBackendSetDescriptionTest(unittest.TestCase):
+    """set-description rewrites only the free-text block before the first `## `
+    heading -- Acceptance Criteria / Result / Comments sections must survive
+    untouched (ADR-0002 addendum, 09.07.2026)."""
+
+    def setUp(self):
+        self.tmp_dir = tempfile.mkdtemp(prefix="ccpr-workitems-setdesc-")
+        self.addCleanup(shutil.rmtree, self.tmp_dir, ignore_errors=True)
+        self.backend = local.create({"workitems_dir": self.tmp_dir})
+
+    def test_other_sections_survive_a_description_replacement(self):
+        item = self.backend.create(title="First", description="Original.")
+        self.backend.append_result(item["id"], "https://example.org/pr/1")
+        self.backend.comment(item["id"], "A note.")
+
+        updated = self.backend.set_description(item["id"], "Replaced.")
+
+        self.assertEqual(updated["description"], "Replaced.")
+        self.assertEqual(updated["result-link"], ["https://example.org/pr/1"])
+        self.assertEqual(updated["comments"], ["A note."])
+
+
 class LocalBackendCreateTest(unittest.TestCase):
     """local-specific create() behaviour beyond the backend-neutral contract suite:
     monotonic WI-NNNN id assignment and the body shape written to disk."""

@@ -270,6 +270,49 @@ class WorkItemsContractTestCase:
 
         self.assertEqual(item["comments"], [])
 
+    # --- set-description ---
+
+    def test_set_description_replaces_it(self):
+        item_id = self.create_item(description="Original description.")
+
+        item = self.backend.set_description(item_id, "Updated description.")
+
+        self.assertEqual(item["description"], "Updated description.")
+        self.assertEqual(self.backend.get(item_id)["description"], "Updated description.")
+
+    def test_set_description_with_empty_string_clears_it(self):
+        item_id = self.create_item(description="Original description.")
+
+        item = self.backend.set_description(item_id, "")
+
+        self.assertEqual(item["description"], "")
+        self.assertEqual(self.backend.get(item_id)["description"], "")
+
+    def test_set_description_unknown_id_raises(self):
+        with self.assertRaises(Exception):
+            self.backend.set_description("WI-9999", "text")
+
+    # --- set-title ---
+
+    def test_set_title_replaces_it(self):
+        item_id = self.create_item(title="Old title")
+
+        item = self.backend.set_title(item_id, "New title")
+
+        self.assertEqual(item["title"], "New title")
+        self.assertEqual(self.backend.get(item_id)["title"], "New title")
+
+    def test_set_title_rejects_empty_string(self):
+        item_id = self.create_item(title="Old title")
+
+        with self.assertRaises(Exception):
+            self.backend.set_title(item_id, "")
+        self.assertEqual(self.backend.get(item_id)["title"], "Old title")
+
+    def test_set_title_unknown_id_raises(self):
+        with self.assertRaises(Exception):
+            self.backend.set_title("WI-9999", "New title")
+
     # --- id validation / path traversal ---
     #
     # Ids may end up in filesystem paths (local) today and in `ticket/<id>` branch

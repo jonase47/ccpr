@@ -126,6 +126,20 @@ class LocalBackend:
         self._write(path, data, new_body)
         return self._item_from_data(data, new_body)
 
+    def set_description(self, item_id, text):
+        path, data, body = self._read(item_id)
+        new_body = _replace_description(body, text)
+        self._write(path, data, new_body)
+        return self._item_from_data(data, new_body)
+
+    def set_title(self, item_id, text):
+        if not text:
+            raise WorkItemError("title is required")
+        path, data, body = self._read(item_id)
+        data["title"] = text
+        self._write(path, data, body)
+        return self._item_from_data(data, body)
+
     def _path_for(self, item_id):
         validate_item_id(item_id)  # primary defense: reject anything but a bare id
 
@@ -195,6 +209,26 @@ def _extract_description(body):
             break
         desc_lines.append(line)
     return "\n".join(desc_lines).strip()
+
+
+def _replace_description(body, text):
+    """Rewrites the free-text block before the first `## ` heading, leaving every
+    section from that heading onward (Acceptance Criteria, Result, Comments)
+    untouched. An empty `text` is a valid, deliberate clear (ADR-0002 addendum,
+    09.07.2026), not an error -- unlike `set_title`."""
+    lines = body.split("\n")
+    heading_idx = _find_first_section_heading(lines)
+    rest = lines[heading_idx:] if heading_idx is not None else []
+    text = (text or "").strip()
+    prefix = f"{text}\n\n" if text else ""
+    return prefix + "\n".join(rest)
+
+
+def _find_first_section_heading(lines):
+    for i, line in enumerate(lines):
+        if line.strip().startswith("## "):
+            return i
+    return None
 
 
 def _extract_section_items(body, heading):

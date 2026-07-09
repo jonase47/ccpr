@@ -350,6 +350,21 @@ class YouTrackBackend:
         )
         return self.get(item_id)
 
+    def set_description(self, item_id, text):
+        """Direct field write, same endpoint `create` already uses for the initial
+        description (ADR-0003 precedent). An empty string is a valid, deliberate
+        clear -- not an error."""
+        validate_item_id(item_id)
+        self._request("POST", f"/api/issues/{item_id}", body={"description": text or ""})
+        return self.get(item_id)
+
+    def set_title(self, item_id, text):
+        validate_item_id(item_id)
+        if not text:
+            raise WorkItemError("title is required")
+        self._request("POST", f"/api/issues/{item_id}", body={"summary": text})
+        return self.get(item_id)
+
     def _resolve_project_id(self):
         if self._project_id is not None:
             return self._project_id

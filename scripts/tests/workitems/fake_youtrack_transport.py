@@ -73,6 +73,15 @@ class FakeYouTrackTransport:
             issue["comments"].append({"text": body["text"]})
             return {"text": body["text"]}
 
+        if method == "POST" and path.startswith("/api/issues/"):
+            item_id = path.rsplit("/", 1)[-1]
+            issue = self._require_issue(item_id)
+            if "summary" in body:
+                issue["summary"] = body["summary"]
+            if "description" in body:
+                issue["description"] = body["description"]
+            return {}
+
         if method == "DELETE" and path.startswith("/api/issues/"):
             item_id = path.rsplit("/", 1)[-1]
             self._require_issue(item_id)
