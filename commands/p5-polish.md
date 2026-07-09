@@ -22,6 +22,18 @@ If any precondition fails, write the reason and the recommended next command, th
 
 ## Execution
 
+### 0. Work-item adoption guard (ADR-0002 §8)
+
+Run `python3 ~/.claude/scripts/workitems.py list`.
+- **Non-empty array** → the project uses the structured store. Use the CLI for the `backlog`-triage
+  items in step 6 below (instead of appending BACKLOG.md prose).
+- **`[]` and no `docs/workitems/` directory** → still on prose. Append `backlog` items to
+  BACKLOG.md as before. Emit one line: *"Tip: run `lift` to adopt the structured work-item store."*
+- **`[]` but `docs/workitems/` exists** → adopted store, just empty right now. Treat as adopted: use
+  the CLI, not the prose fallback.
+
+See Manual/WORKITEMS.md §8 for the full guard rationale and the status-verb mapping.
+
 ### 1. Read Context
 Read the following files (if available):
 - **SPRINT.md** and current `sprint/SPRINT-NN.md` (deferred items, "Conditionally Done" notes, retrospective points)
@@ -94,7 +106,15 @@ For each `polish-now` item, delegate to the **senior-developer** agent:
 
 ### 6. Transfer Non-Executed Items
 
-- `backlog` items: append to `BACKLOG.md` as mini-stories with effort estimate, reference to POL-ID.
+- `backlog` items, using the guard result from step 0:
+  - Structured store: create a work item per `backlog` item — check the full, unfiltered
+    `workitems list` for a matching title first (trim + casefold), so a re-run never duplicates an
+    already-created polish item. Otherwise: `workitems create --title "<item title>" --type
+    refactor --description "POL-NN-MM: <effort estimate + description>"` (use `--type chore` instead
+    of `refactor` for tooling/cleanup items, matching the commit-type convention in step 5). Record
+    the assigned `**Work-Item:** WI-NNNN` id in the POLISH file's "Moved to Backlog" list (§7) — the
+    view references it, it never re-derives it from the title.
+  - Prose fallback: append to `BACKLOG.md` as mini-stories with effort estimate, reference to POL-ID.
 - `handover` items: add to `docs/HANDOVER.md` under "Open Points" with POL-ID and reason for blocking.
 - `drop` items: record in the POLISH file under "Dropped" with reason.
 
@@ -125,7 +145,8 @@ parent_index: ../PROJECT_PLAN.md
 - `## Polish Sources` – brief list of what was scanned (SPRINT.md, reviews/, code TODOs, etc.)
 - `## Triage Table` – columns: `ID | Source | Item | Size | Decision | Status | Commit/Ref`
 - `## Done (this run)` – list of `polish-now` items completed with commit hash
-- `## Moved to Backlog` – list with backlog story IDs (linkable)
+- `## Moved to Backlog` – list with backlog story IDs (structured store: the `Work-Item` id; prose
+  fallback: the BACKLOG.md story id), linkable
 - `## Moved to Handover` – list with reason
 - `## Dropped` – list with reason
 
@@ -142,7 +163,7 @@ Update `docs/planning/PROJECT_PLAN.md`:
 
 - `docs/planning/polish/POLISH-SPRINT-NN.md` (or flat `POLISH.md`) with triage outcome
 - 0–5 small commits for executed `polish-now` items
-- `BACKLOG.md` updated (mini-stories for `backlog` items)
+- Work items created for `backlog` items (structured store) or `BACKLOG.md` updated (mini-stories, prose fallback)
 - `HANDOVER.md` updated (open points for `handover` items)
 - `PROJECT_PLAN.md` updated (phase index)
 

@@ -60,10 +60,61 @@ Delegate effort estimation and technical validation to the **senior-developer** 
 > 4. Are there technical dependencies not reflected in the backlog?
 > 5. What should be implemented in the first sprint to lay a solid foundation?
 
-### 4. Write Detail Files
+### 4. Create Work Items (work-item-backend contract, ADR-0002 §8)
+
+#### 4a. Origination guard (avoid forking the store on a re-run)
+Before creating anything, check which store already exists:
+- A prose `docs/planning/BACKLOG.md` with actual story content exists **AND** `docs/workitems/`
+  does **NOT** exist → the project has an established prose backlog that hasn't been adopted into
+  the structured store yet. Do **not** blindly `create` (that would fork a second, competing
+  register — the §7 drift Manual/WORKITEMS.md warns against). Instead, recommend running
+  `python3 ~/.claude/scripts/workitems.py lift docs/planning/BACKLOG.md` first, then re-run
+  `/p4-backlog` once the store is adopted.
+- `docs/workitems/` already exists (structured store adopted, whether via a prior `/p4-backlog` run
+  or via `lift`) → proceed below; this is a same-store re-run (e.g. a focus-epic pass) and is safe
+  **only if the focus epic itself is already adopted** — check the next bullet before proceeding.
+- **Partial migration within the same store**: `docs/workitems/` existing does not guarantee EVERY
+  prose epic/story was carried over — a project can adopt the store via one epic's `lift` while
+  other epics still sit only in prose. Before proceeding on a focus epic (`$ARGUMENTS`), check
+  whether that epic's prose stories in `docs/planning/BACKLOG.md`/`backlog/E-0X-*.md` already carry
+  a `**Work-Item:**` line. If any story in the focus epic has **no** such line, that epic itself is
+  still unadopted — recommend `python3 ~/.claude/scripts/workitems.py lift <that epic's source
+  file>` for it before continuing, rather than silently `create`-ing fresh items for it (which would
+  orphan the epic's existing prose instead of lifting it).
+
+#### 4b. Idempotent creation
+For every user story from step 2/3, instead of authoring it as BACKLOG.md prose, create it as a
+work item — but first check it doesn't already exist, so re-running `/p4-backlog` (e.g. to add a
+newly-scoped epic) never duplicates a story that a previous run already created. Query the FULL,
+**unfiltered** list — a story already claimed, in review, or done by the time of a re-run is just
+as real a duplicate as one still sitting in Backlog, and an `--status "Backlog"` filter would miss
+exactly the stories a re-run is most likely to encounter:
+
+```
+python3 ~/.claude/scripts/workitems.py list
+```
+
+If an item with a matching title is already present in the returned array, skip creating it and
+reuse its `id`. Match case- and whitespace-insensitively (trim, then compare case-folded) so a
+trivial formatting difference doesn't cause a false duplicate or a false miss — this does not catch
+a genuinely *renamed* story (it recreates rather than updates in that case, which is an acceptable
+edge case for this minimal guard). Otherwise create it:
+
+```
+python3 ~/.claude/scripts/workitems.py create --title "<story title>" --type feat --description "<story text + acceptance criteria>"
+```
+
+The backend assigns the `id` (`WI-NNNN` on the `local` provider) — never invent one. This is the
+adoption point: it establishes the structured store, so no prose-fallback branch applies here (see
+Manual/WORKITEMS.md §8 for the full adoption guard used by commands that transition an *existing*
+store). `BACKLOG.md` becomes a generated **view** over the created items, not their source of truth.
+Record every story's assigned `id` — the view written in step 5 references it (see §5b/§5c) so
+downstream commands resolve `<id>` by a real reference instead of a fuzzy title match.
+
+### 5. Write Detail Files
 This subskill writes the phase index `PROJECT_PLAN.md` plus the backlog. The backlog uses one of two layouts depending on size — both belong in `docs/planning/`.
 
-#### 4a. Choose Backlog Layout
+#### 5a. Choose Backlog Layout
 
 | Condition | Layout |
 |---|---|
@@ -72,7 +123,7 @@ This subskill writes the phase index `PROJECT_PLAN.md` plus the backlog. The bac
 
 Sub-Index layout follows the generic convention in `~/.claude/docs/PROJECT_PHASES.md` ("Sub-Index for growing detail files").
 
-#### 4b. Flat Layout (small backlogs)
+#### 5b. Flat Layout (small backlogs)
 
 Write `docs/planning/BACKLOG.md` with frontmatter:
 
@@ -86,9 +137,11 @@ last_updated: <DD.MM.YYYY>
 ---
 ```
 
-Body sections: `## Epics`, `## User Stories` (per epic), `## Estimates & Acceptance Criteria`, `## Dependencies`, `## Labels`.
+Body sections: `## Epics`, `## User Stories` (per epic), `## Estimates & Acceptance Criteria`, `## Dependencies`, `## Labels`. Each story carries a `**Work-Item:** WI-NNNN` line with the id assigned in
+step 4b, so downstream commands (`/p5-implement`, `/p5-review`, `/p5-acceptance`, `gate-p5`) resolve
+it by a real reference, never by matching the title text.
 
-#### 4c. Sub-Index Layout (recommended for MVP-scale backlogs)
+#### 5c. Sub-Index Layout (recommended for MVP-scale backlogs)
 
 Write a lean **sub-index** `docs/planning/BACKLOG.md`:
 
@@ -123,13 +176,15 @@ last_updated: <DD.MM.YYYY>
 ---
 ```
 
-Body: epic header (Goal, Scope, T-Shirt, Dependencies, Labels, Notes) + all user stories of this epic as H5 (`##### E-0X-S01 · Title`) with their acceptance criteria, estimate, dependencies, labels, notes.
+Body: epic header (Goal, Scope, T-Shirt, Dependencies, Labels, Notes) + all user stories of this epic as H5 (`##### E-0X-S01 · Title`) with their acceptance criteria, estimate, dependencies, labels, notes,
+and a `**Work-Item:** WI-NNNN` line with the id assigned in step 4b (see §5b — same rationale:
+downstream commands resolve by id, not by title match).
 
 Optional cross-reference files in `docs/planning/backlog/`:
-- `STORY_INDEX.md` — table of all stories at a glance: `Story-ID | Epic | Title | T-Shirt | Status | Detail-File`
+- `STORY_INDEX.md` — table of all stories at a glance: `Story-ID | Work-Item | Epic | Title | T-Shirt | Status | Detail-File`
 - `FEATURE_COVERAGE.md` — feature-ID ↔ epic mapping (if Feature-IDs are referenced from stories)
 
-#### 4d. Phase Index `PROJECT_PLAN.md`
+#### 5d. Phase Index `PROJECT_PLAN.md`
 
 Create from index template if missing — see `~/.claude/docs/PROJECT_PHASES.md`. Populate:
 - `## Key Decisions`: lift the milestone names + their dates (e.g. `- M1: MVP feature-complete by 30.06.2026 → see PROJECT_PLAN.md (Milestones section)`).
@@ -151,7 +206,10 @@ All IDs follow this consistent schema. Phase is metadata in BACKLOG.md, not part
 
 ## Result
 
-- **`docs/planning/BACKLOG.md`** (living, prioritized, estimated backlog with frontmatter `status: living`)
+- Work items created via `workitems create` — one per story, backend-assigned ids (source of truth)
+- **`docs/planning/BACKLOG.md`** (generated **view** over the created items — living, prioritized,
+  estimated; frontmatter `status: living`; item status is never hand-edited here, see
+  Manual/WORKITEMS.md §8)
 - **`docs/planning/PROJECT_PLAN.md`** (phase index with `## Milestones & Release Planning` body section)
 - Foundation for `/p4-sprint` (populate first sprint) and all P5 commands
 

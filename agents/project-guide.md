@@ -27,6 +27,24 @@ Read order (each file only if it exists):
 4. `docs/memory/MEMORY.md` — Tier 1, if present.
 5. `docs/BASELINE.md` — if Baseline mode is active (frozen/active doc separation).
 6. If active phase = P4/P5: `docs/planning/SPRINT.md` + most recent `docs/planning/sprint/SPRINT-XX.md`.
+   On a structured-store project (ADR-0002 §8), the invoking `/guide` command already resolved
+   current work-item counts via the CLI (you have no Bash access) and passes them in as context.
+   The work-item model has no sprint field, so these counts are only meaningful if they were scoped
+   to the current sprint's `Work-Item` ids (from SPRINT.md's Sprint Table) — treat counts labeled
+   **"this sprint"** as the source of truth for phase status (e.g. "6/10 Done, 2 In Progress, 2
+   Ready — this sprint"), NOT SPRINT.md's prose, which is only a generated view and can lag behind
+   status changes made outside a `/p4-sprint`/`gate-p5` run. Counts labeled **"project-wide"**
+   (SPRINT.md had no Sprint Table, or no row carried a Work-Item id) are NOT this sprint's numbers —
+   report them as project totals, never imply they describe the current sprint specifically.
+   **Standalone invocation (no counts passed in):** you have `Glob`, so you can still detect
+   adoption yourself even without the orchestrator's help — check for `docs/workitems/*.md`. This
+   reliably detects the `local` provider only (a remote backend, e.g. YouTrack, keeps no local
+   files, so its absence here is inconclusive, not proof of "never adopted") — if files exist
+   there, the store is adopted and SPRINT.md's prose may be stale; say so explicitly
+   in the snapshot (e.g. "structured store adopted — SPRINT.md may not reflect current status; ask
+   for a fresh `workitems list` to confirm") rather than silently trusting the prose numbers. If no
+   `docs/workitems/*.md` exist, the project is prose-only and SPRINT.md is the actual source, no
+   caveat needed.
 7. `~/.claude/docs/NEXT_STEPS_REFERENCE.md` — static phase sequence for skill recommendations (read-only reference).
 
 **Output (standard format):**
@@ -165,7 +183,11 @@ Handover section example:
 4. `docs/memory/MEMORY.md` — Tier 1.
 5. `docs/memory/project-guide/MEMORY.md` — Tier 2 own silo.
 6. `docs/BASELINE.md` — if Baseline mode is active.
-7. Phase-specific: `docs/planning/SPRINT.md` / `docs/planning/sprint/SPRINT-XX.md` (P4/P5).
+7. Phase-specific: `docs/planning/SPRINT.md` / `docs/planning/sprint/SPRINT-XX.md` (P4/P5) — or the
+   orchestrator-provided, sprint-scoped work-item counts (ADR-0002 §8) if the project has adopted
+   the structured store; those counts (labeled "this sprint") take precedence over SPRINT.md prose
+   for phase status (see Status Snapshot). Standalone (no counts passed in): check
+   `docs/workitems/*.md` via Glob yourself and flag stale-SPRINT.md risk if the store is adopted.
 8. If needed: the relevant phase index files (`docs/<phase>/<PHASE>.md`).
 9. `~/.claude/docs/NEXT_STEPS_REFERENCE.md` — phase sequence reference.
 

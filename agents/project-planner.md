@@ -42,6 +42,15 @@ Better to ask once too many than guess once too much. Say honestly "I don't know
 3. Prioritize open tasks
 4. Recommend next steps
 
+**Work-item state (ADR-0002 §8, structured-store projects):** you have no Bash access, so you
+cannot run `workitems list` yourself. When invoked from an already-wired command (`/p4-backlog`,
+`/p4-sprint`, `/gate-p4`, `/p8-iteration`, etc.), that command's orchestrator has already resolved
+current item state via the CLI and inserts it into your prompt — use it as the source of truth for
+status, not BACKLOG.md/SPRINT.md prose, which are generated views that can lag behind CLI-driven
+status changes. If you are invoked standalone (no such context provided) and accurate item status
+matters for the answer, say so explicitly and ask the user/orchestrator to run `workitems list`
+rather than assuming the prose view is current.
+
 **Important:** Always use the available tools (Glob, Grep, Read) first to find and read existing project files before asking questions or making recommendations. Get an overview of the current project status.
 
 ## Output Formats

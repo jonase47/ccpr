@@ -5,7 +5,31 @@ Keeps code documentation in sync with the implemented code: inline comments, API
 ## Argument: $ARGUMENTS = [Module/feature/file]
 
 If provided: Focus documentation work on the named module, feature or file.
-If not provided: Read SPRINT.md and update the documentation for all features implemented in the current sprint. If context is missing, ask for the area to be documented.
+If not provided: resolve the stories to document via the work-item adoption guard below (falls
+back to reading SPRINT.md and asking, if the project is still on prose).
+
+## 0. Work-item adoption guard (ADR-0002 §8)
+
+`/p5-docs` runs last in the per-story loop (`p5-implement -> p5-review -> p5-acceptance -> p5-docs`
+— see `~/.claude/docs/NEXT_STEPS_REFERENCE.md`), so by the time it runs a story is already `Done`
+(set by `/p5-acceptance` on acceptance). This command has no code-review/acceptance gate of its
+own — it finalizes the Definition of Done, it doesn't move a story through one.
+
+Run `python3 ~/.claude/scripts/workitems.py list`.
+- **Non-empty array** → the project uses the structured store. Use the CLI for all item state below:
+  - No `$ARGUMENTS`: resolve the stories to document via `workitems list --status "Done"` (items
+    already through acceptance this sprint); if more than one, confirm scope with the user (all, or
+    a specific one) rather than assuming.
+  - `$ARGUMENTS` provided: resolve `<id>` by matching `$ARGUMENTS` against a story's title, or
+    directly if it looks like a `Work-Item` id (`WI-NNNN`) from BACKLOG.md/SPRINT.md, then confirm
+    with the user before proceeding.
+- **`[]` and no `docs/workitems/` directory** → still on prose. Read SPRINT.md and update the
+  documentation for all features implemented in the current sprint, as before. Emit one line:
+  *"Tip: run `lift` to adopt the structured work-item store."*
+- **`[]` but `docs/workitems/` exists** → adopted store, just empty right now. Treat as adopted: use
+  the CLI, not the prose fallback.
+
+See Manual/WORKITEMS.md §8 for the full guard rationale and the status-verb mapping.
 
 ## Execution
 
@@ -64,14 +88,19 @@ No separate artifact – changes are made directly in the existing documents:
 - **README.md** / **CONTRIBUTING.md** (updated if needed)
 - **.env.example** (new variables added)
 
-Update **SPRINT.md**: mark documentation task as completed.
+Using the same guard result from step 0:
+- Structured store: `workitems set-status <id> "Done"` for each documented story (re-affirms Done —
+  this command has no review/acceptance gate of its own, see step 0).
+- Prose fallback: update SPRINT.md — mark documentation task as completed.
+Once wired, item status is never hand-edited in SPRINT.md/BACKLOG.md — those are planning views
+(Manual/WORKITEMS.md §8).
 
 ## Result
 
 - Updated code documentation (inline comments, docstrings)
 - Updated **API_SPEC.md**
 - If applicable: updated **ARCHITECTURE.md**, **README.md**, **.env.example**
-- **SPRINT.md** updated
+- Work item status updated (structured store) or **SPRINT.md** updated (prose fallback)
 - Story is only fully "Done" when documentation is current
 
 ### Handover Epilog

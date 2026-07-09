@@ -7,6 +7,18 @@ Evaluates user feedback and operational insights, maintains the backlog, and ini
 If provided: Focus the iteration planning on the specified topic.
 If not provided: Read all available inputs (KPI reports, incident reports, user feedback) and conduct complete iteration planning. If any context is missing, ask about the available feedback sources.
 
+## 0. Work-item adoption guard (ADR-0002 §8)
+
+Run `python3 ~/.claude/scripts/workitems.py list`.
+- **Non-empty array** → the project uses the structured store. Use the CLI for the backlog updates
+  in step 2B below (instead of hand-editing BACKLOG.md prose).
+- **`[]` and no `docs/workitems/` directory** → still on prose. Edit BACKLOG.md directly, as before.
+  Emit one line: *"Tip: run `lift` to adopt the structured work-item store."*
+- **`[]` but `docs/workitems/` exists** → adopted store, just empty right now. Treat as adopted: use
+  the CLI, not the prose fallback.
+
+See Manual/WORKITEMS.md §8 for the full guard rationale and the status-verb mapping.
+
 ## Execution
 
 ### 1. Read Context
@@ -14,7 +26,7 @@ Read the following files (if available):
 - **KPI_REPORT_[current].md** (business insights and recommendations)
 - **INCIDENT_REPORT_*.md** / **OPS_REVIEW_*.md** (technical operational insights)
 - **SECURITY_UPDATE_*.md** (open security findings)
-- **BACKLOG.md** (current backlog status)
+- **BACKLOG.md** (current backlog status) / `workitems list` (structured store, per the §8 guard)
 - **PROJECT_PLAN.md** (milestones and progress to date)
 - **FEATURES.md** (original prioritisation as reference)
 
@@ -37,10 +49,19 @@ Delegate iteration planning to the **project-planner** agent:
 > Categories: Bug fix / Feature adjustment / New feature / Technical debt / Security / Performance / UX improvement
 >
 > **B. Update Backlog**
-> - Add new items from the feedback evaluation to BACKLOG.md (with estimates and acceptance criteria)
-> - Re-prioritise existing items based on new insights
-> - Mark or remove outdated items (no longer relevant)
-> - Make technical debt visible as its own epic (if accumulated)
+> Using the guard result from step 0:
+> - Structured store: new items from the feedback evaluation → `workitems create --title "<item>"
+>   --type feat --description "<estimate + acceptance criteria>"` (check the full, unfiltered
+>   `workitems list` for a matching title first — trim + casefold — so a re-run never duplicates an
+>   already-added item; record the assigned `**Work-Item:** WI-NNNN` id in the generated view, §4).
+>   Outdated items (no longer relevant) → `workitems set-status <id> "Cancelled"` (resolve `<id>` by
+>   matching title against `workitems list`), never a silent removal — a Cancelled item stays
+>   traceable. Re-prioritising existing items (ranking, not a status change) has no CLI equivalent
+>   yet — keep that ordering in the generated BACKLOG.md view.
+> - Prose fallback: add new items to BACKLOG.md (with estimates and acceptance criteria);
+>   re-prioritise existing items; mark or remove outdated items (no longer relevant).
+> - Make technical debt visible as its own epic (if accumulated) — either way, this is a BACKLOG.md
+>   view-level grouping, not a per-item CLI operation.
 >
 > **C. Evolution Loop Decision**
 > Based on the scope and nature of the next work: where does the evolution loop go?
@@ -82,7 +103,11 @@ last_updated: <DD.MM.YYYY>
 Body sections: `## Iteration Period`, `## Feedback Evaluation` (table), `## Evolution Loop Decision` (with reasoning: back to P1 / P3 / P5 / hold), `## Next Iteration Recommendation`.
 
 Cross-file updates:
-- `docs/planning/BACKLOG.md` (P4 living): add new items, re-prioritise, mark outdated; bump `last_updated`.
+- Structured store: new/cancelled work items from step 2B (`workitems create`/`set-status`).
+  `docs/planning/BACKLOG.md` (P4 living, generated view) still gets re-prioritised and its
+  `last_updated` bumped, but item creation/cancellation itself goes through the CLI, not hand-edits.
+- Prose fallback: `docs/planning/BACKLOG.md` (P4 living): add new items, re-prioritise, mark
+  outdated; bump `last_updated`.
 - `docs/planning/PROJECT_PLAN.md` (P4 phase index): update the `## Milestones & Release Planning` body section with the next iteration's milestones; bump `last_updated`.
 
 ### 5. Update Phase Index
@@ -94,7 +119,7 @@ Update `docs/operations/OPS.md`:
 ## Result
 
 - **`docs/operations/ITERATION.md`** (latest iteration plan)
-- Updated **`docs/planning/BACKLOG.md`** (re-prioritised)
+- New/cancelled work items (structured store) or updated **`docs/planning/BACKLOG.md`** (prose fallback, re-prioritised either way)
 - Updated **`docs/planning/PROJECT_PLAN.md`** (next-iteration milestones)
 - **`docs/operations/OPS.md`** (phase index updated)
 - **PROJECT_PLAN.md** (updated)

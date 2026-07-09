@@ -6,6 +6,30 @@ Checks whether all organizational and technical prerequisites are met to begin i
 
 Gate commands do not accept arguments. They always check the complete current project status.
 
+## 0. Work-item adoption guard (ADR-0002 §8)
+
+Criterion 6 below ("can the developer start without asking questions?") needs a concrete answer for
+whether at least one story is actually committed and ready to implement — not just "the backlog
+looks precise".
+
+Run `python3 ~/.claude/scripts/workitems.py list` **and** explicitly check whether the
+`docs/workitems/` directory exists (e.g. `ls docs/workitems/`). Both signals are required — `list`
+returns the identical `[]` for an adopted-but-empty store and a never-adopted project; only the
+directory's existence tells them apart, and getting this wrong lets the gate **falsely pass** a
+project with zero committed work.
+- **Non-empty list** → the project uses the structured store. Check `workitems list --status
+  "Ready"` for criterion 6: non-empty means `/p4-sprint` has committed at least one story
+  (`/p5-implement` will find it); empty is a genuine **Not Met** finding for criterion 6.
+- **Empty list, but `docs/workitems/` exists** → the store is adopted, just empty for this query.
+  **This is a genuine Not Met finding for criterion 6 — the developer has nothing to start on — NOT
+  an exemption to fall back to prose.** Do not treat this case the same as "never adopted".
+- **Empty list and no `docs/workitems/` directory** → not adopted, still on prose. Fall back to
+  reading BACKLOG.md/SPRINT.md prose for criterion 6, as before, and evaluate readiness from the
+  prose story status. Emit one line: *"Tip: run `lift` to adopt the structured work-item store."*
+
+See Manual/WORKITEMS.md §8 for the full guard rationale, the directory-check requirement, and the
+status-verb mapping.
+
 ## Execution
 
 ### 1. Read Preflight Report
@@ -43,6 +67,9 @@ Delegate the gate check to the **project-planner** agent with a focused prompt:
 
 > Gate P4 check. Preflight report (with summaries):
 > [Insert preflight content here]
+> Work-item state (§0 guard — project-planner has no CLI access, so this is resolved by the
+> orchestrator beforehand): [Insert the §0 guard's result: "Ready" list count/items on a
+> structured-store project, or "prose fallback, not yet adopted" if the store isn't adopted]
 >
 > Mechanical checks are done (file existence, sections, content patterns).
 > Evaluate the content:
@@ -51,7 +78,9 @@ Delegate the gate check to the **project-planner** agent with a focused prompt:
 > 3. **Milestones**: Are success criteria measurable and achievable?
 > 4. **Risks**: Are countermeasures concrete or just placeholders?
 > 5. **Technical readiness**: CI/CD, dev environment, secrets – can work start tomorrow?
-> 6. **First story**: Can the developer start without asking questions?
+> 6. **First story**: Can the developer start without asking questions? On a structured-store
+>    project, "Not Met" if the inserted `Ready` list is empty — there is nothing for
+>    `/p5-implement` to pick up regardless of how well-written the backlog prose is.
 >
 > If unclear: read the original file selectively (not all of them).
 > Format: Per point a rating (Met/Partially/Not met) + 1-2 sentences.
@@ -88,7 +117,8 @@ The following points are covered by preflight (mechanically) and agent (content)
 - Milestones: success criteria measurable
 - Risks: countermeasures concrete
 - Technical readiness: CI/CD, dev environment, secrets
-- First story: developer can start without asking questions
+- First story: developer can start without asking questions (structured store: at least one item
+  at `Ready`, per the §0 guard)
 
 ---
 

@@ -5,7 +5,33 @@ Systematically analyzes a found bug, identifies the root cause and fixes it with
 ## Argument: $ARGUMENTS = [Bug description/ticket ID]
 
 If provided: Analyze and fix the described bug or the bug with the named ID.
-If not provided: Read SPRINT.md or the latest review/acceptance protocols and ask which bug should be fixed. Do not make assumptions.
+If not provided: resolve the bug via the work-item adoption guard below (falls back to reading
+SPRINT.md or the latest review/acceptance protocols and asking, if the project is still on prose).
+Do not make assumptions.
+
+## 0. Work-item adoption guard (ADR-0002 §8)
+
+A bug is a work item too (`--type fix`) — whether it was found during `/p5-review`/`/p5-acceptance`
+(the story itself is already `In Progress`, sent back by the reviewing gate) or reported standalone
+(no existing item yet).
+
+Run `python3 ~/.claude/scripts/workitems.py list`.
+- **Non-empty array** → the project uses the structured store. Use the CLI for all item state below:
+  - No `$ARGUMENTS`: resolve the bug via `workitems list --status "In Progress"` (items sent back to
+    dev by a review/acceptance rejection land here); if more than one, ask which to fix — do not
+    assume.
+  - `$ARGUMENTS` provided: resolve `<id>` by matching `$ARGUMENTS` against a story's title, or
+    directly if it looks like a `Work-Item` id (`WI-NNNN`) from BACKLOG.md/SPRINT.md, then confirm
+    with the user. If it matches no existing item (a standalone bug report, not yet tracked),
+    create it first: `workitems create --title "<bug summary>" --type fix --description
+    "$ARGUMENTS"` (unfiltered `list` duplicate-title check first — trim + casefold — so a re-run
+    never recreates the same bug item).
+- **`[]` and no `docs/workitems/` directory** → still on prose. Read SPRINT.md to find/ask which
+  bug is next, as before. Emit one line: *"Tip: run `lift` to adopt the structured work-item store."*
+- **`[]` but `docs/workitems/` exists** → adopted store, just empty right now. Treat as adopted: use
+  the CLI, not the prose fallback.
+
+See Manual/WORKITEMS.md §8 for the full guard rationale and the status-verb mapping.
 
 ## Execution
 
@@ -53,13 +79,22 @@ Delegate fix implementation to the **senior-developer** agent:
 ### 4. Commit & Document Result
 Commit after fix: `fix: [Bug-ID] [Description]` (build + tests must be green).
 Supplement the original review or acceptance test protocol with the fix status.
-Update **SPRINT.md**: mark bug as "Fixed".
+Using the same guard result from step 0:
+- Structured store: **default to `workitems set-status <id> "In Review"`** — bugs get code review
+  like any other story, and this project ships no designated no-review hotfix path today. Only use
+  `workitems set-status <id> "Waiting for Approval"` instead if a documented hotfix procedure
+  explicitly exempts this fix from code review (e.g. a project-specific emergency-patch policy
+  recorded in RUNBOOK.md/CONTRIBUTING.md) — absent such a documented exemption, always `"In
+  Review"`, never guess "this one looks minor enough to skip".
+- Prose fallback: update SPRINT.md — mark bug as "Fixed".
 If the bug has a broader impact, add a note to **RISKS.md**.
+Once wired, item status is never hand-edited in SPRINT.md/BACKLOG.md — those are planning views
+(Manual/WORKITEMS.md §8).
 
 ## Result
 
 - Bug fix code with regression test
-- **SPRINT.md** updated (bug status "Fixed")
+- Work item status updated (structured store) or **SPRINT.md** updated (bug status "Fixed", prose fallback)
 - Next step: back to `/p5-acceptance` (re-run acceptance test for the affected feature) or `/p5-review` (if the fix was extensive)
 
 ### Handover Epilog
