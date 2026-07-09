@@ -10,25 +10,25 @@ Gate commands do not accept arguments. They always check the complete current pr
 
 Criterion 6 below ("can the developer start without asking questions?") needs a concrete answer for
 whether at least one story is actually committed and ready to implement — not just "the backlog
-looks precise". Run `python3 ~/.claude/scripts/workitems.py list`.
-- **Non-empty array** → the project uses the structured store. Check `workitems list --status
+looks precise".
+
+Run `python3 ~/.claude/scripts/workitems.py list` **and** explicitly check whether the
+`docs/workitems/` directory exists (e.g. `ls docs/workitems/`). Both signals are required — `list`
+returns the identical `[]` for an adopted-but-empty store and a never-adopted project; only the
+directory's existence tells them apart, and getting this wrong lets the gate **falsely pass** a
+project with zero committed work.
+- **Non-empty list** → the project uses the structured store. Check `workitems list --status
   "Ready"` for criterion 6: non-empty means `/p4-sprint` has committed at least one story
-  (`/p5-implement` will find it); empty is a genuine **Not Met** finding for criterion 6, not a
-  reason to fall back to prose.
-- **`[]` and no `docs/workitems/` directory** → the project has not adopted the structured store
-  yet. This is expected on a fresh project between `/p4-backlog` (if not yet run) and adoption — do
-  **not** treat an empty top-level `list` here as a gate failure by itself; fall back to reading
-  BACKLOG.md/SPRINT.md prose for criterion 6, as before, and evaluate readiness from the prose story
-  status.
-- **`[]` but `docs/workitems/` exists** → adopted store, but no story anywhere yet (e.g.
-  `/p4-backlog` never ran, or every item was deleted). This is a genuine **Not Met** finding — the
-  developer has nothing to start on — not a prose fallback.
+  (`/p5-implement` will find it); empty is a genuine **Not Met** finding for criterion 6.
+- **Empty list, but `docs/workitems/` exists** → the store is adopted, just empty for this query.
+  **This is a genuine Not Met finding for criterion 6 — the developer has nothing to start on — NOT
+  an exemption to fall back to prose.** Do not treat this case the same as "never adopted".
+- **Empty list and no `docs/workitems/` directory** → not adopted, still on prose. Fall back to
+  reading BACKLOG.md/SPRINT.md prose for criterion 6, as before, and evaluate readiness from the
+  prose story status. Emit one line: *"Tip: run `lift` to adopt the structured work-item store."*
 
-The distinction matters: an empty `list` is only a "fall back to prose" signal when the store was
-never adopted (no `docs/workitems/`); once adopted, an empty `Ready` list is real gate content, and
-misreading it as "not adopted" would let the gate falsely pass on a project with zero committed work.
-
-See Manual/WORKITEMS.md §8 for the full guard rationale and the status-verb mapping.
+See Manual/WORKITEMS.md §8 for the full guard rationale, the directory-check requirement, and the
+status-verb mapping.
 
 ## Execution
 
