@@ -1,7 +1,7 @@
 # Work Items — the backend-neutral work-state contract
 
 **Status:** Proposed (draft) — see [`docs/adr/ADR-0002-workitem-backend-contract.md`](../docs/adr/ADR-0002-workitem-backend-contract.md)
-**Date:** 08.07.2026
+**Date:** 09.07.2026
 
 > CCPR works **with or without a ticket system.** The default is local Markdown files in the repo —
 > no server, no token, no setup. A team can point the same commands at a remote tracker by changing
@@ -12,7 +12,8 @@
 
 ## 1. The contract
 
-CCPR commands never read work-state files directly. They call a helper that exposes six operations:
+CCPR commands never read work-state files directly. They call a helper that exposes six core lifecycle
+operations plus four item-maintenance operations (added 09.07.2026 — see below):
 
 | Operation | CLI | Meaning |
 |---|---|---|
@@ -22,10 +23,20 @@ CCPR commands never read work-state files directly. They call a helper that expo
 | claim | `workitems claim <id> [--owner O] [--runner R]` | take ownership / mark active |
 | set-status | `workitems set-status <id> <status>` | move an item through its lifecycle |
 | append-result | `workitems append-result <id> <ref>` | attach a result reference (PR/commit link) |
+| comment | `workitems comment <id> <text>` | append a plain human comment — no marker, never surfaced as `result-link` |
+| set-description | `workitems set-description <id> <text>` | replace the description in full (empty string clears it) |
+| set-title | `workitems set-title <id> <text>` | replace the title (non-empty) |
+| set-type | `workitems set-type <id> <type>` | replace/set the `type` extension field (non-empty; fails hard on rejection — see ADR-0002 addendum) |
 
 `create` assigns the `id` — callers never supply one (the `local` backend hands out the next
 monotonic `WI-NNNN`; a remote backend returns the tracker's id). `lift` (ADR-0004) is bulk creation;
 `create` is the single-item path a planning command uses.
+
+The four maintenance operations (`comment`, `set-description`, `set-title`, `set-type`) are **ad-hoc
+corrections**, not part of the status-transition write-loop (§7/§8) — they exist for fixing an item
+already in flight (a stale description block, a plain note, a corrected type), not for driving the
+lifecycle. See ADR-0002's addendum for the full rationale, the `comment`/`append-result` channel split,
+and the error semantics per operation.
 
 The helper (`scripts/workitems.py`) reads `workitems.provider` from the project's `.claude/settings.json` and dispatches to
 the provider implementation under `scripts/lib/workitems/<provider>.py`. `list` and `get` print JSON so
@@ -44,6 +55,7 @@ fields, or the public framework acquires a silent tool-lock-in):
 | `status` | one of the vocabulary below |
 | `description` | free text (Markdown) |
 | `result-link` | optional; where the delivered work lives — **accumulates** (`append-result` adds refs; an item may hold several PR/commit links) |
+| `comments` | optional; `List[str]` of plain human comment texts — **a separate channel from `result-link`**, never overlapping with it (see ADR-0002 addendum); accumulates via `comment` |
 | `owner` | the responsible human; optional while unclaimed |
 
 ### Status vocabulary
@@ -109,11 +121,22 @@ The login / refresh / API-key endpoints have no rate limiting. Add a limiter …
 
 ## Result
 <!-- append-result writes PR/commit links here -->
+
+## Comments
+<!-- comment writes plain human notes here — a separate section from Result, never mixed -->
 ```
 
 - **IDs** are stable and monotonic (`WI-0001`, `WI-0002`, …), assigned on creation. They are what
   HANDOVER, commit messages, and learnings reference — never renumber.
 - The local backend implements the contract by reading/writing these files. No server, no token.
+- `set-title` rewrites the `title` frontmatter field; `set-description` rewrites the free-text block
+  before the first `## ` heading (empty string clears it); `set-type` rewrites the `type` frontmatter
+  field (always succeeds — `local` has no `Type` bundle to validate against); `comment` appends to the
+  `## Comments` section, structurally separate from `## Result` from the start (no marker needed).
+- A description or comment line that reads exactly like a section heading (e.g. a comment containing
+  the literal line `## Comments`) is transparently escaped on write and un-escaped on read, so it can
+  never be mistaken for a real section boundary. This is internal to the local backend — the item dict
+  the contract returns is unaffected; only the raw Markdown on disk carries a leading `\` on such a line.
 - `claim` on `local` is a **no-op** that may set `owner` (a solo developer with local files has nothing
   to lock — see §6).
 - `BACKLOG.md` / `SPRINT.md` become **human-facing planning views** (roadmap narrative) over the items;
@@ -126,6 +149,12 @@ A remote backend maps the contract onto a tracker's API (the first, a self-hoste
 specified in ADR-0003). The item `id` is the tracker's own (e.g. `PROJ-42`); a project keeps a local
 **id-map** (`docs/workitems-idmap.yml`, written by `migrate`) so references in HANDOVER and learnings
 stay resolvable across the switch.
+
+On the `youtrack` backend, `set-title`/`set-description` are direct field writes
+(`POST /api/issues/<id>` with `{"summary": ...}` / `{"description": ...}`); `set-type` goes through the
+Command API (`Type <name>`) and — unlike `create`'s best-effort type-setting — **fails hard** on a
+rejected command; `comment` posts to the same comments endpoint `append-result` uses, just without the
+`<!-- ccpr:result -->` marker. Full rationale: ADR-0002's addendum.
 
 **One active backend per project — no bidirectional sync.** Moving solo→team is the one-time
 `ccpr workitems migrate` (ADR-0004), not a continuous sync (which would create merge conflicts in a

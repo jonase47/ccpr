@@ -167,6 +167,61 @@ class LocalBackendSetDescriptionTest(unittest.TestCase):
         self.assertEqual(updated["comments"], ["A note."])
 
 
+class LocalBackendSectionShadowingTest(unittest.TestCase):
+    """A user-authored line that reads exactly like a section heading (e.g. `## Comments`)
+    must never be mistaken for the real section boundary on the next read -- neither in
+    `description` nor in `comment` text. Regression test for the section-shadowing bug
+    found in review of the ADR-0002 addendum (09.07.2026): section boundaries used to be
+    determined by re-scanning the (user-influenced) body for heading-looking lines, so
+    user text containing one could truncate the description early and/or make the real
+    `## Comments`/`## Result` section unreachable."""
+
+    def setUp(self):
+        self.tmp_dir = tempfile.mkdtemp(prefix="ccpr-workitems-shadowing-")
+        self.addCleanup(shutil.rmtree, self.tmp_dir, ignore_errors=True)
+        self.backend = local.create({"workitems_dir": self.tmp_dir})
+
+    def test_set_description_with_a_fake_comments_heading_does_not_shadow_the_real_section(self):
+        item = self.backend.create(title="First", description="Original.")
+        self.backend.comment(item["id"], "Genuine earlier comment.")
+
+        updated = self.backend.set_description(
+            item["id"], "New text\n## Comments\nFake entry",
+        )
+
+        self.assertEqual(updated["description"], "New text\n## Comments\nFake entry")
+        self.assertEqual(updated["comments"], ["Genuine earlier comment."])
+
+    def test_set_description_with_a_fake_result_heading_does_not_shadow_the_real_section(self):
+        item = self.backend.create(title="First", description="Original.")
+        self.backend.append_result(item["id"], "https://example.org/pr/1")
+
+        updated = self.backend.set_description(
+            item["id"], "New text\n## Result\nFake result entry",
+        )
+
+        self.assertEqual(updated["description"], "New text\n## Result\nFake result entry")
+        self.assertEqual(updated["result-link"], ["https://example.org/pr/1"])
+
+    def test_description_with_a_fake_heading_line_round_trips_unchanged(self):
+        item = self.backend.create(title="First", description="Original.")
+
+        first = self.backend.set_description(item["id"], "Text one\n## Comments\nFake one")
+        second = self.backend.set_description(item["id"], first["description"])
+
+        self.assertEqual(second["description"], "Text one\n## Comments\nFake one")
+
+    def test_comment_with_a_fake_heading_line_does_not_shadow_the_real_result_section(self):
+        item = self.backend.create(title="First", description="Original.")
+        self.backend.append_result(item["id"], "https://example.org/pr/1")
+
+        self.backend.comment(item["id"], "## Result\nFake result via comment")
+
+        self.assertEqual(
+            self.backend.get(item["id"])["result-link"], ["https://example.org/pr/1"],
+        )
+
+
 class LocalBackendCreateTest(unittest.TestCase):
     """local-specific create() behaviour beyond the backend-neutral contract suite:
     monotonic WI-NNNN id assignment and the body shape written to disk."""

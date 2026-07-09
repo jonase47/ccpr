@@ -17,6 +17,44 @@ COMMENTS_HEADING = "## Comments"
 
 _ID_NUMBER_PATTERN = re.compile(r"^WI-(\d+)$")
 
+# Section boundaries (description vs. Acceptance Criteria/Result/Comments) are found by
+# scanning the body for lines that look like a heading (`## `). Free user text --
+# description, comment -- is embedded in that same body, so a line the user wrote that
+# happens to read like a heading (including an EXACT match, e.g. a comment reading
+# literally "## Comments") would otherwise be indistinguishable from a real section
+# boundary on the next read: the description would truncate early, and/or the real
+# section would become unreachable (a heading search matches the first occurrence,
+# which would then be the fake one). `_escape_heading_lookalikes` neutralizes every
+# such line before it is written; `_unescape_heading_lookalikes` reverses it when the
+# text is read back out. The backslash count is round-trip-safe for text that already
+# contains an escaped lookalike (of which there should never be any in practice, but
+# the transform stays a true inverse either way).
+_HEADING_LOOKALIKE_RE = re.compile(r"^(\s*)(\\*)(## .*)$")
+
+
+def _escape_heading_lookalikes(text):
+    return "\n".join(_escape_line(line) for line in text.split("\n"))
+
+
+def _escape_line(line):
+    match = _HEADING_LOOKALIKE_RE.match(line)
+    if not match:
+        return line
+    leading_ws, backslashes, heading_text = match.groups()
+    return f"{leading_ws}{backslashes}\\{heading_text}"
+
+
+def _unescape_heading_lookalikes(text):
+    return "\n".join(_unescape_line(line) for line in text.split("\n"))
+
+
+def _unescape_line(line):
+    match = _HEADING_LOOKALIKE_RE.match(line)
+    if not match or not match.group(2):
+        return line
+    leading_ws, backslashes, heading_text = match.groups()
+    return f"{leading_ws}{backslashes[1:]}{heading_text}"
+
 
 def create(config):
     """Factory used by the CLI dispatcher (scripts/workitems.py)."""
@@ -208,7 +246,7 @@ class LocalBackend:
 
 
 def _new_item_body(description):
-    description = (description or "").strip()
+    description = _escape_heading_lookalikes((description or "").strip())
     return f"{description}\n\n## Acceptance Criteria\n\n## Result\n\n## Comments\n"
 
 
@@ -218,18 +256,21 @@ def _extract_description(body):
         if line.strip().startswith("## "):
             break
         desc_lines.append(line)
-    return "\n".join(desc_lines).strip()
+    text = "\n".join(desc_lines).strip()
+    return _unescape_heading_lookalikes(text)
 
 
 def _replace_description(body, text):
     """Rewrites the free-text block before the first `## ` heading, leaving every
     section from that heading onward (Acceptance Criteria, Result, Comments)
     untouched. An empty `text` is a valid, deliberate clear (ADR-0002 addendum,
-    09.07.2026), not an error -- unlike `set_title`."""
+    09.07.2026), not an error -- unlike `set_title`. `text` is escaped before being
+    embedded (see `_escape_heading_lookalikes`) so it can never forge a section
+    boundary on the next read."""
     lines = body.split("\n")
     heading_idx = _find_first_section_heading(lines)
     rest = lines[heading_idx:] if heading_idx is not None else []
-    text = (text or "").strip()
+    text = _escape_heading_lookalikes((text or "").strip())
     prefix = f"{text}\n\n" if text else ""
     return prefix + "\n".join(rest)
 
@@ -242,7 +283,10 @@ def _find_first_section_heading(lines):
 
 
 def _extract_section_items(body, heading):
-    return [_strip_bullet(line) for line in _section_lines(body.split("\n"), heading)]
+    return [
+        _unescape_heading_lookalikes(_strip_bullet(line))
+        for line in _section_lines(body.split("\n"), heading)
+    ]
 
 
 def _append_to_section(body, heading, text):
@@ -250,9 +294,11 @@ def _append_to_section(body, heading, text):
     body if absent). Shared by `append_result` (RESULT_HEADING) and `comment`
     (COMMENTS_HEADING) -- same append-and-rewrite logic, different heading, per
     ADR-0002's addendum: the two channels are structurally separate sections, not a
-    marker split (that's youtrack's mechanism, not local's)."""
+    marker split (that's youtrack's mechanism, not local's). `text` is escaped before
+    being embedded (see `_escape_heading_lookalikes`) so it can never forge a section
+    boundary on the next read."""
     lines = body.split("\n")
-    new_line = f"- {text}"
+    new_line = f"- {_escape_heading_lookalikes(text)}"
     heading_idx = _find_heading(lines, heading)
 
     if heading_idx is None:
