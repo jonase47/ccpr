@@ -75,7 +75,8 @@ FAKE_CLAIMING_PROVIDER_SOURCE = (
     "        self._items[item_id] = item\n"
     "        self._save()\n"
     "        return dict(item)\n"
-    "    def list(self, status=None, owner=None, tags=None, item_type=None, query=None):\n"
+    "    def list(self, status=None, owner=None, tags=None, item_type=None, query=None,\n"
+    "             sprint=None, priority=None):\n"
     "        items = list(self._items.values())\n"
     "        if status is not None:\n"
     "            items = [i for i in items if i['status'] == status]\n"
@@ -619,6 +620,22 @@ class WorkitemsCliTest(unittest.TestCase):
 
         self.assertNotEqual(result.returncode, 0)
         self.assertNotIn(f"Unknown work-item provider: {provider_name}", result.stderr)
+
+    def test_list_subcommand_works_against_a_third_party_provider(self):
+        """dispatch()'s `list` call unconditionally passes sprint/priority through to
+        backend.list() -- a third-party provider whose `list` doesn't (yet) accept
+        those keyword arguments would otherwise crash with a raw TypeError instead of
+        a clean WorkItemError, and this codepath had no CLI-level test at all before
+        (review follow-up, 09.07.2026)."""
+        provider_name = self._write_provider("_test_fake_claiming_provider_list", FAKE_CLAIMING_PROVIDER_SOURCE)
+        self._use_claiming_provider(provider_name)
+        self.run_cli("create", "--title", "New feature")
+
+        result = self.run_cli("list")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        items = json.loads(result.stdout)
+        self.assertEqual(len(items), 1)
 
     def test_claim_with_runner_sets_runner_and_in_progress(self):
         provider_name = self._write_provider("_test_fake_claiming_provider", FAKE_CLAIMING_PROVIDER_SOURCE)
