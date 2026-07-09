@@ -172,6 +172,11 @@ def build_parser():
     p_list = sub.add_parser("list", help="Enumerate work items (JSON array)", parents=[project_arg])
     p_list.add_argument("--status")
     p_list.add_argument("--owner")
+    p_list.add_argument(
+        "--tag", dest="tags", action="append", default=[],
+        help="Filter by tag (repeatable; AND semantics)",
+    )
+    p_list.add_argument("--type", dest="type")
 
     p_get = sub.add_parser("get", help="Fetch one item (JSON object)", parents=[project_arg])
     p_get.add_argument("id")
@@ -264,7 +269,9 @@ def dispatch(backend, args):
             description=args.description,
         )
     if args.operation == "list":
-        return backend.list(status=args.status, owner=args.owner)
+        return backend.list(
+            status=args.status, owner=args.owner, tags=args.tags, item_type=args.type,
+        )
     if args.operation == "get":
         return backend.get(args.id)
     if args.operation == "claim":

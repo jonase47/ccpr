@@ -111,7 +111,7 @@ class LocalBackend:
                     highest = max(highest, int(match.group(1)))
         return f"WI-{highest + 1:04d}"
 
-    def list(self, status=None, owner=None):
+    def list(self, status=None, owner=None, tags=None, item_type=None):
         if not self.workitems_dir.is_dir():
             return []
 
@@ -121,6 +121,10 @@ class LocalBackend:
             if status is not None and item["status"] != status:
                 continue
             if owner is not None and item["owner"] != owner:
+                continue
+            if tags and not set(tags).issubset(item["tags"]):
+                continue
+            if item_type is not None and item["type"] != item_type:
                 continue
             items.append(item)
         return items

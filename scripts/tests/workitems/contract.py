@@ -429,6 +429,55 @@ class WorkItemsContractTestCase:
         with self.assertRaises(Exception):
             self.backend.remove_tag("WI-9999", "security")
 
+    # --- list --tag / --type filters ---
+    #
+    # Client-side filters, same shape as the existing --status/--owner filters
+    # (ADR-0002 2nd addendum): --tag is repeatable with AND semantics (an item must
+    # carry EVERY named tag to match).
+
+    def test_list_filters_by_a_single_tag(self):
+        self.create_item()
+        tagged_id = self.create_item()
+        self.backend.add_tag(tagged_id, "security")
+
+        items = self.backend.list(tags=["security"])
+
+        self.assertEqual([item["id"] for item in items], [tagged_id])
+
+    def test_list_with_repeated_tag_uses_and_semantics(self):
+        both_id = self.create_item()
+        self.backend.add_tag(both_id, "security")
+        self.backend.add_tag(both_id, "needs:feedback")
+        only_one_id = self.create_item()
+        self.backend.add_tag(only_one_id, "security")
+
+        items = self.backend.list(tags=["security", "needs:feedback"])
+
+        self.assertEqual([item["id"] for item in items], [both_id])
+
+    def test_list_by_tag_with_no_match_returns_empty_list(self):
+        self.create_item()
+
+        items = self.backend.list(tags=["does-not-exist"])
+
+        self.assertEqual(items, [])
+
+    def test_list_filters_by_type(self):
+        self.create_item()
+        typed_id = self.create_item()
+        self.backend.set_type(typed_id, "bug")
+
+        items = self.backend.list(item_type="bug")
+
+        self.assertEqual([item["id"] for item in items], [typed_id])
+
+    def test_list_by_type_with_no_match_returns_empty_list(self):
+        self.create_item()
+
+        items = self.backend.list(item_type="does-not-exist")
+
+        self.assertEqual(items, [])
+
     # --- id validation / path traversal ---
     #
     # Ids may end up in filesystem paths (local) today and in `ticket/<id>` branch

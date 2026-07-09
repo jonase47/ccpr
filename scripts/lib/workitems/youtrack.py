@@ -200,7 +200,7 @@ class YouTrackBackend:
         undo a create() whose mandatory initial state could not be set."""
         self._request("DELETE", f"/api/issues/{item_id}")
 
-    def list(self, status=None, owner=None):
+    def list(self, status=None, owner=None, tags=None, item_type=None):
         # $top=-1 disables pagination explicitly — without it, some YouTrack versions
         # cap /api/issues to a default page size, silently truncating a large project.
         issues = self._request(
@@ -211,6 +211,10 @@ class YouTrackBackend:
             items = [item for item in items if item["status"] == status]
         if owner is not None:
             items = [item for item in items if item["owner"] == owner]
+        if tags:
+            items = [item for item in items if set(tags).issubset(item["tags"])]
+        if item_type is not None:
+            items = [item for item in items if item["type"] == item_type]
         return items
 
     def get(self, item_id):
