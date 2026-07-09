@@ -17,6 +17,8 @@ import shutil
 import tempfile
 from pathlib import Path
 
+from workitems import STATUS_VALUES
+
 
 class WorkItemsContractTestCase:
     """Mixin exercising the six-operation contract against a backend.
@@ -177,10 +179,7 @@ class WorkItemsContractTestCase:
     def test_set_status_accepts_every_vocabulary_value(self):
         item_id = self.create_item(status="Backlog")
 
-        for status in (
-            "Backlog", "Ready", "In Progress", "Parked",
-            "Waiting for Approval", "Done", "Blocked", "Cancelled",
-        ):
+        for status in STATUS_VALUES:
             item = self.backend.set_status(item_id, status)
             self.assertEqual(item["status"], status)
 

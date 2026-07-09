@@ -20,6 +20,7 @@ STATUS_VALUES = (
     "Backlog",
     "Ready",
     "In Progress",
+    "In Review",
     "Parked",
     "Waiting for Approval",
     "Done",
