@@ -12,10 +12,12 @@ SPRINT.md and asking, if the project is still on prose).
 
 Run `python3 ~/.claude/scripts/workitems.py list`.
 - **Non-empty array** → the project uses the structured store. Use the CLI for all item state below:
-  - No `$ARGUMENTS`: resolve the story via `workitems list --status "Waiting for Approval"`, pick
-    the top item, ask for confirmation.
+  - No `$ARGUMENTS`: resolve the story via `workitems list --status "In Review"`, pick the first
+    item in the returned array, ask for confirmation.
 - **`[]` and no `docs/workitems/` directory** → still on prose. Read SPRINT.md to find/ask which
   story is next, as before. Emit one line: *"Tip: run `lift` to adopt the structured work-item store."*
+- **`[]` but `docs/workitems/` exists** → adopted store, just empty right now (e.g. between
+  sprints). Treat as adopted: use the CLI, not the prose fallback.
 
 See Manual/WORKITEMS.md §8 for the full guard rationale and the status-verb mapping.
 
@@ -38,8 +40,8 @@ Use the wingman summary as the basis for presenting results to the user.
 - Both reviews can run in parallel (no dependency)
 - For CRITICAL findings from either review: `/p5-bugfix` before acceptance
 - On completion, using the same guard result from step 0:
-  - Structured store: approved → `workitems set-status <id> "Done"`; back to Dev →
-    `workitems set-status <id> "In Progress"`.
+  - Structured store: approved → `workitems set-status <id> "Waiting for Approval"` (acceptance
+    pending); back to Dev → `workitems set-status <id> "In Progress"`.
   - Prose fallback: update SPRINT.md — mark story as "Approved" or "Back to Dev".
 - Once wired, item status is never hand-edited in SPRINT.md/BACKLOG.md — those are planning views
   (Manual/WORKITEMS.md §8).
