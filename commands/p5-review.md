@@ -14,6 +14,9 @@ Run `python3 ~/.claude/scripts/workitems.py list`.
 - **Non-empty array** → the project uses the structured store. Use the CLI for all item state below:
   - No `$ARGUMENTS`: resolve the story via `workitems list --status "In Review"`, pick the first
     item in the returned array, ask for confirmation.
+  - `$ARGUMENTS` provided: resolve `<id>` by matching `$ARGUMENTS` against a story's title, or
+    directly if it looks like a `Work-Item` id (`WI-NNNN`) from BACKLOG.md/SPRINT.md, then confirm
+    the resolved item with the user before proceeding.
 - **`[]` and no `docs/workitems/` directory** → still on prose. Read SPRINT.md to find/ask which
   story is next, as before. Emit one line: *"Tip: run `lift` to adopt the structured work-item store."*
 - **`[]` but `docs/workitems/` exists** → adopted store, just empty right now (e.g. between
