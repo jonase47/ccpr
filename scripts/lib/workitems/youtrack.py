@@ -40,7 +40,8 @@ import urllib.request
 
 from workitems import (
     DEFAULT_STALE_AFTER_SECONDS, RESULT_MARKER, STATUS_VALUES, WorkItemError,
-    reject_result_marker, safe_parse_datetime, validate_item_id,
+    is_reserved_tag, reject_result_marker, safe_parse_datetime, validate_item_id,
+    validate_tag,
 )
 
 _ISSUE_FIELDS = (
@@ -382,6 +383,29 @@ class YouTrackBackend:
         self._run_command(item_id, f"Type {item_type}")
         return self.get(item_id)
 
+    def add_tag(self, item_id, tag):
+        """Checks the current (already reserved-filtered) tag list first so a
+        redundant call is skipped rather than relying on the Command API's own
+        idempotence (ADR-0002 2nd addendum, 09.07.2026). `validate_tag` already
+        refuses a reserved tag before any request is made, so it can never reach
+        the membership check below."""
+        validate_item_id(item_id)
+        validate_tag(tag)
+        current = self.get(item_id)
+        if tag in current["tags"]:
+            return current
+        self._run_command(item_id, f"tag {tag}")
+        return self.get(item_id)
+
+    def remove_tag(self, item_id, tag):
+        validate_item_id(item_id)
+        validate_tag(tag)
+        current = self.get(item_id)
+        if tag not in current["tags"]:
+            return current
+        self._run_command(item_id, f"remove tag {tag}")
+        return self.get(item_id)
+
     def _resolve_project_id(self):
         if self._project_id is not None:
             return self._project_id
@@ -478,6 +502,15 @@ class YouTrackBackend:
             issue.get("tags", []), issue.get("idReadable"),
         )
 
+        # runner:/heartbeat: tags are claiming-protocol plumbing (ADR-0005), not
+        # tags a human or command added -- they must never leak into the
+        # user-facing `tags` field (ADR-0002 2nd addendum, 09.07.2026).
+        tags = [
+            tag.get("name") if isinstance(tag, dict) else tag
+            for tag in issue.get("tags", [])
+        ]
+        tags = [t for t in tags if t and not is_reserved_tag(t)]
+
         return {
             "id": issue.get("idReadable"),
             "title": issue.get("summary"),
@@ -487,6 +520,7 @@ class YouTrackBackend:
             "comments": comments,
             "owner": owner,
             "type": item_type,
+            "tags": tags,
             "runner": runner,
             "heartbeat": heartbeat,
         }

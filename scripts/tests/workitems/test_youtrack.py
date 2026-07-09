@@ -670,6 +670,47 @@ class YouTrackCreateFactoryTest(unittest.TestCase):
         self.assertNotIn("secret-value", repr(config))
 
 
+class YouTrackTagsTest(unittest.TestCase):
+    """Tags beyond the backend-neutral contract suite: the reserved runner:/
+    heartbeat: namespace must never leak into the user-facing `tags` field, and
+    add-tag/remove-tag check the current tag list before sending a Command API call
+    so a redundant call is skipped rather than relying on the API's own idempotence
+    (ADR-0002 2nd addendum, 09.07.2026)."""
+
+    def setUp(self):
+        self.transport = FakeYouTrackTransport(project_short_name="TEST")
+        self.backend = youtrack.YouTrackBackend(
+            base_url="https://faketrack.example.org", project="TEST",
+            token="fake-token", transport=self.transport,
+        )
+
+    def test_runner_and_heartbeat_tags_never_leak_into_the_tags_field(self):
+        item = self.backend.create(title="New feature")
+        self.backend.claim(item["id"], runner="agent-1")
+
+        fetched = self.backend.get(item["id"])
+
+        self.assertEqual(fetched["tags"], [])
+
+    def test_add_tag_sends_the_command_only_once_when_already_present(self):
+        item = self.backend.create(title="New feature")
+        self.backend.add_tag(item["id"], "security")
+
+        self.backend.add_tag(item["id"], "security")
+
+        self.assertEqual(
+            [c for c in self.transport.commands_received if c == "tag security"],
+            ["tag security"],
+        )
+
+    def test_remove_tag_sends_no_command_when_already_absent(self):
+        item = self.backend.create(title="New feature")
+
+        self.backend.remove_tag(item["id"], "security")
+
+        self.assertNotIn("remove tag security", self.transport.commands_received)
+
+
 class HttpTransportTest(unittest.TestCase):
     """Direct urllib-level tests for the real transport (mocking urllib.request.urlopen,
     per the reviewer's alternative to the fake-transport approach above) — the fake

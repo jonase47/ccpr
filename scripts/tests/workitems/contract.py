@@ -17,7 +17,7 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from workitems import RESULT_MARKER, STATUS_VALUES
+from workitems import RESERVED_TAG_PREFIXES, RESULT_MARKER, STATUS_VALUES
 
 
 class WorkItemsContractTestCase:
@@ -346,6 +346,89 @@ class WorkItemsContractTestCase:
         with self.assertRaises(Exception):
             self.backend.set_type("WI-9999", "bug")
 
+    # --- add-tag / remove-tag ---
+    #
+    # tags[] is a writable core-model field (ADR-0002 2nd addendum, 09.07.2026): a
+    # set-membership fact, idempotent in both directions, rejecting the reserved
+    # runner:/heartbeat: namespace (ADR-0005/ADR-0003) so a caller can never collide
+    # with the claiming protocol's own tags via the public API.
+
+    def test_fresh_item_has_an_empty_tags_list(self):
+        item_id = self.create_item()
+
+        item = self.backend.get(item_id)
+
+        self.assertEqual(item["tags"], [])
+
+    def test_add_tag_attaches_it(self):
+        item_id = self.create_item()
+
+        item = self.backend.add_tag(item_id, "security")
+
+        self.assertIn("security", item["tags"])
+        self.assertIn("security", self.backend.get(item_id)["tags"])
+
+    def test_add_tag_on_an_already_present_tag_is_a_no_op(self):
+        item_id = self.create_item()
+        self.backend.add_tag(item_id, "security")
+
+        item = self.backend.add_tag(item_id, "security")
+
+        self.assertEqual(item["tags"].count("security"), 1)
+
+    def test_remove_tag_detaches_it(self):
+        item_id = self.create_item()
+        self.backend.add_tag(item_id, "security")
+
+        item = self.backend.remove_tag(item_id, "security")
+
+        self.assertNotIn("security", item["tags"])
+        self.assertNotIn("security", self.backend.get(item_id)["tags"])
+
+    def test_remove_tag_on_an_absent_tag_is_a_no_op(self):
+        item_id = self.create_item()
+
+        item = self.backend.remove_tag(item_id, "security")
+
+        self.assertEqual(item["tags"], [])
+
+    def test_add_tag_rejects_every_reserved_prefix(self):
+        item_id = self.create_item()
+
+        for prefix in RESERVED_TAG_PREFIXES:
+            with self.subTest(prefix=prefix):
+                with self.assertRaises(Exception):
+                    self.backend.add_tag(item_id, f"{prefix}x")
+        self.assertEqual(self.backend.get(item_id)["tags"], [])
+
+    def test_remove_tag_rejects_every_reserved_prefix(self):
+        item_id = self.create_item()
+
+        for prefix in RESERVED_TAG_PREFIXES:
+            with self.subTest(prefix=prefix):
+                with self.assertRaises(Exception):
+                    self.backend.remove_tag(item_id, f"{prefix}x")
+
+    def test_add_tag_rejects_invalid_charset(self):
+        item_id = self.create_item()
+
+        with self.assertRaises(Exception):
+            self.backend.add_tag(item_id, "has space")
+
+    def test_add_tag_rejects_empty_tag(self):
+        item_id = self.create_item()
+
+        with self.assertRaises(Exception):
+            self.backend.add_tag(item_id, "")
+
+    def test_add_tag_unknown_id_raises(self):
+        with self.assertRaises(Exception):
+            self.backend.add_tag("WI-9999", "security")
+
+    def test_remove_tag_unknown_id_raises(self):
+        with self.assertRaises(Exception):
+            self.backend.remove_tag("WI-9999", "security")
+
     # --- id validation / path traversal ---
     #
     # Ids may end up in filesystem paths (local) today and in `ticket/<id>` branch
@@ -366,6 +449,8 @@ class WorkItemsContractTestCase:
             "set_description": (item_id, "text"),
             "set_title": (item_id, "New title"),
             "set_type": (item_id, "bug"),
+            "add_tag": (item_id, "security"),
+            "remove_tag": (item_id, "security"),
         }[op]
         return getattr(self.backend, op)(*args)
 
@@ -373,6 +458,7 @@ class WorkItemsContractTestCase:
         ops = (
             "get", "set_status", "append_result",
             "comment", "set_description", "set_title", "set_type",
+            "add_tag", "remove_tag",
         )
         for malicious_id in ("../../x", "/etc/x", "a/b", "a.md"):
             for op in ops:
@@ -392,6 +478,7 @@ class WorkItemsContractTestCase:
         ops = (
             "get", "append_result",
             "comment", "set_description", "set_title", "set_type",
+            "add_tag", "remove_tag",
         )
         for op in ops:
             with self.subTest(op=op):

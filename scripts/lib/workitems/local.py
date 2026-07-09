@@ -12,6 +12,7 @@ from pathlib import Path
 
 from workitems import (
     STATUS_VALUES, WorkItemError, frontmatter, reject_result_marker, validate_item_id,
+    validate_tag,
 )
 
 RESULT_HEADING = "## Result"
@@ -195,6 +196,29 @@ class LocalBackend:
         self._write(path, data, body)
         return self._item_from_data(data, body)
 
+    def add_tag(self, item_id, tag):
+        """Idempotent (ADR-0002 2nd addendum): re-asserting an already-present tag
+        is a no-op, not an error -- a tag is a set-membership fact."""
+        validate_tag(tag)
+        path, data, body = self._read(item_id)
+        tags = list(data.get("tags") or [])
+        if tag not in tags:
+            tags.append(tag)
+            data["tags"] = tags
+        self._write(path, data, body)
+        return self._item_from_data(data, body)
+
+    def remove_tag(self, item_id, tag):
+        """Idempotent: removing an absent tag is a no-op, not an error."""
+        validate_tag(tag)
+        path, data, body = self._read(item_id)
+        tags = list(data.get("tags") or [])
+        if tag in tags:
+            tags.remove(tag)
+            data["tags"] = tags
+        self._write(path, data, body)
+        return self._item_from_data(data, body)
+
     def _path_for(self, item_id):
         validate_item_id(item_id)  # primary defense: reject anything but a bare id
 
@@ -243,7 +267,9 @@ class LocalBackend:
             "owner": data.get("owner") or None,
             "type": data.get("type"),
             "refs": data.get("refs"),
-            "tags": data.get("tags"),
+            # Never None, on either backend (ADR-0002 2nd addendum): an unset field
+            # reads as an empty list, not a missing/None value.
+            "tags": data.get("tags") or [],
             "created": data.get("created"),
             # Claiming / branch-runner protocol (ADR-0005): local never tracks these
             # (no runner concept, nothing to lock) -- always None, on every item.

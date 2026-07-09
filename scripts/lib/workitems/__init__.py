@@ -38,6 +38,41 @@ STATUS_VALUES = (
 RESULT_MARKER = "<!-- ccpr:result -->"
 
 
+# Tags reserved for the claiming / branch-runner protocol (ADR-0005, ADR-0003):
+# `runner:<id>` and `heartbeat:<compact-utc-timestamp>`. Lifted up from youtrack.py
+# (the only backend that models claiming as tags) into this shared module -- both
+# the claiming protocol's internal writes (which bypass add_tag/remove_tag entirely,
+# calling _run_command directly) and add_tag/remove_tag (which must refuse them, so a
+# caller can never collide with claiming plumbing via the public API) need the same
+# list. Single source of truth (ADR-0002 2nd addendum, 09.07.2026).
+RESERVED_TAG_PREFIXES = ("runner:", "heartbeat:")
+
+# No spaces: the YouTrack Command API tokenizes a `tag <name>` command on whitespace,
+# and a space-containing tag would either need quoting (an extra parsing mode this
+# contract doesn't otherwise have) or silently split into two tokens.
+_TAG_PATTERN = re.compile(r"^[A-Za-z0-9_:.-]+$")
+
+
+def is_reserved_tag(tag):
+    """True if `tag` starts with a prefix reserved for the claiming protocol."""
+    return any(tag.startswith(prefix) for prefix in RESERVED_TAG_PREFIXES)
+
+
+def validate_tag(tag):
+    """Reject anything that is not a bare tag name (charset), or that collides with
+    the claiming protocol's reserved namespace. Charset is checked first (a
+    structural violation), the reserved-prefix check second -- both per ADR-0002's
+    2nd addendum error semantics."""
+    if not tag or not _TAG_PATTERN.match(tag):
+        raise WorkItemError(f"Invalid tag: {tag!r}")
+    if is_reserved_tag(tag):
+        raise WorkItemError(
+            f"Tag {tag!r} uses a namespace reserved for the claiming protocol "
+            f"({', '.join(RESERVED_TAG_PREFIXES)}); add-tag/remove-tag cannot be "
+            "used on it."
+        )
+
+
 class WorkItemError(Exception):
     """Raised for invalid work-item operations (unknown id, invalid status, ...)."""
 

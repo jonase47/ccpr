@@ -20,6 +20,8 @@ Usage:
   workitems.py set-description <id> <text> [--project DIR]
   workitems.py set-title <id> <text> [--project DIR]
   workitems.py set-type <id> <type> [--project DIR]
+  workitems.py add-tag <id> <tag> [--project DIR]
+  workitems.py remove-tag <id> <tag> [--project DIR]
   workitems.py migrate --to <provider> [--project DIR]
   workitems.py lift <source-file...> [--apply] [--exclude PATTERN=REASON ...] [--project DIR]
   workitems.py sweep [--project DIR]
@@ -218,6 +220,18 @@ def build_parser():
     p_set_type.add_argument("id")
     p_set_type.add_argument("type")
 
+    p_add_tag = sub.add_parser(
+        "add-tag", help="Attach a tag (idempotent)", parents=[project_arg],
+    )
+    p_add_tag.add_argument("id")
+    p_add_tag.add_argument("tag")
+
+    p_remove_tag = sub.add_parser(
+        "remove-tag", help="Detach a tag (idempotent)", parents=[project_arg],
+    )
+    p_remove_tag.add_argument("id")
+    p_remove_tag.add_argument("tag")
+
     p_migrate = sub.add_parser(
         "migrate", help="Move items to a target backend, once, reversibly (ADR-0004)",
         parents=[project_arg],
@@ -269,6 +283,10 @@ def dispatch(backend, args):
         return backend.set_title(args.id, args.text)
     if args.operation == "set-type":
         return backend.set_type(args.id, args.type)
+    if args.operation == "add-tag":
+        return backend.add_tag(args.id, args.tag)
+    if args.operation == "remove-tag":
+        return backend.remove_tag(args.id, args.tag)
     raise ValueError(f"Unknown operation: {args.operation}")
 
 
