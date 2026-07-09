@@ -177,6 +177,9 @@ def build_parser():
         help="Filter by tag (repeatable; AND semantics)",
     )
     p_list.add_argument("--type", dest="type")
+    p_list.add_argument(
+        "--query", help="YouTrack-only passthrough query (rejected by the local backend)",
+    )
 
     p_get = sub.add_parser("get", help="Fetch one item (JSON object)", parents=[project_arg])
     p_get.add_argument("id")
@@ -271,6 +274,7 @@ def dispatch(backend, args):
     if args.operation == "list":
         return backend.list(
             status=args.status, owner=args.owner, tags=args.tags, item_type=args.type,
+            query=args.query,
         )
     if args.operation == "get":
         return backend.get(args.id)

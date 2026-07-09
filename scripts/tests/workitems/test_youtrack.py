@@ -711,6 +711,34 @@ class YouTrackTagsTest(unittest.TestCase):
         self.assertNotIn("remove tag security", self.transport.commands_received)
 
 
+class YouTrackQueryTest(unittest.TestCase):
+    """`--query` is a project-scoped passthrough to YouTrack's own query language
+    (ADR-0002 2nd addendum, 09.07.2026): the `project: <PROJ> ` prefix is always
+    applied, so a query can never leak results from another project the token
+    happens to have read access to."""
+
+    def setUp(self):
+        self.transport = FakeYouTrackTransport(project_short_name="TEST")
+        self.backend = youtrack.YouTrackBackend(
+            base_url="https://faketrack.example.org", project="TEST",
+            token="fake-token", transport=self.transport,
+        )
+
+    def test_query_is_scoped_to_the_configured_project(self):
+        self.backend.create(title="New feature")
+
+        self.backend.list(query="Sprint: 4")
+
+        self.assertEqual(self.transport.list_queries_received[-1], "project: TEST Sprint: 4")
+
+    def test_list_without_query_still_scopes_to_the_project_only(self):
+        self.backend.create(title="New feature")
+
+        self.backend.list()
+
+        self.assertEqual(self.transport.list_queries_received[-1], "project: TEST")
+
+
 class HttpTransportTest(unittest.TestCase):
     """Direct urllib-level tests for the real transport (mocking urllib.request.urlopen,
     per the reviewer's alternative to the fake-transport approach above) — the fake

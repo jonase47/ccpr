@@ -200,11 +200,18 @@ class YouTrackBackend:
         undo a create() whose mandatory initial state could not be set."""
         self._request("DELETE", f"/api/issues/{item_id}")
 
-    def list(self, status=None, owner=None, tags=None, item_type=None):
+    def list(self, status=None, owner=None, tags=None, item_type=None, query=None):
         # $top=-1 disables pagination explicitly — without it, some YouTrack versions
         # cap /api/issues to a default page size, silently truncating a large project.
+        # `query` is passed through verbatim to YouTrack's own query language, always
+        # prefixed with `project: <PROJ> ` so a query can never leak results from
+        # another project the token happens to have read access to (ADR-0002 2nd
+        # addendum).
+        scoped_query = f"project: {self.project}"
+        if query:
+            scoped_query = f"{scoped_query} {query}"
         issues = self._request(
-            "GET", "/api/issues", fields=_ISSUE_FIELDS, query=f"project: {self.project}", top=-1,
+            "GET", "/api/issues", fields=_ISSUE_FIELDS, query=scoped_query, top=-1,
         )
         items = [self._item_from_issue(issue) for issue in issues]
         if status is not None:

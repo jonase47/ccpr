@@ -19,6 +19,9 @@ class FakeYouTrackTransport:
         self.project_short_name = project_short_name
         self.project_internal_id = "0-0"
         self.commands_received = []  # for tests asserting on the exact command string
+        # for tests asserting on the exact `query` param sent to GET /api/issues (the
+        # --query passthrough's project-scoping prefix, ADR-0002 2nd addendum).
+        self.list_queries_received = []
         self._issues = {}  # idReadable -> internal issue dict
         self._next_number = 1
         # Simulates a real YouTrack instance's default page size: without an explicit
@@ -55,6 +58,7 @@ class FakeYouTrackTransport:
             return self._create_issue(body)
 
         if method == "GET" and path == "/api/issues":
+            self.list_queries_received.append(query_params.get("query"))
             all_issues = [self._render_issue(issue) for issue in self._issues.values()]
             if self.page_size_cap is not None and query_params.get("$top") != "-1":
                 return all_issues[:self.page_size_cap]

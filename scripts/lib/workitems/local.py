@@ -111,7 +111,17 @@ class LocalBackend:
                     highest = max(highest, int(match.group(1)))
         return f"WI-{highest + 1:04d}"
 
-    def list(self, status=None, owner=None, tags=None, item_type=None):
+    def list(self, status=None, owner=None, tags=None, item_type=None, query=None):
+        if query:
+            # local has no server-side query language to pass through to
+            # (ADR-0002 2nd addendum) -- raise rather than silently ignoring the
+            # flag or approximating it with a client-side text search, either of
+            # which would give a caller a false sense that --query works the same
+            # way on both backends.
+            raise WorkItemError(
+                "the local backend does not support --query -- use --tag/--type/"
+                "--status/--owner filters instead"
+            )
         if not self.workitems_dir.is_dir():
             return []
 

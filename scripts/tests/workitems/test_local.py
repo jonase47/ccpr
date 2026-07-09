@@ -14,7 +14,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "lib"))
 
-from workitems import local  # noqa: E402
+from workitems import WorkItemError, local  # noqa: E402
 
 from .contract import WorkItemsContractTestCase
 
@@ -220,6 +220,24 @@ class LocalBackendSectionShadowingTest(unittest.TestCase):
         self.assertEqual(
             self.backend.get(item["id"])["result-link"], ["https://example.org/pr/1"],
         )
+
+
+class LocalBackendQueryRejectionTest(unittest.TestCase):
+    """`local` has no server-side query language to pass through to (ADR-0002 2nd
+    addendum, 09.07.2026): `list --query` raises rather than silently ignoring the
+    flag or approximating it with a client-side text search -- either of which would
+    give a caller a false sense that the same query semantics work on both backends."""
+
+    def setUp(self):
+        self.tmp_dir = tempfile.mkdtemp(prefix="ccpr-workitems-query-")
+        self.addCleanup(shutil.rmtree, self.tmp_dir, ignore_errors=True)
+        self.backend = local.create({"workitems_dir": self.tmp_dir})
+
+    def test_list_with_query_raises(self):
+        self.backend.create(title="First")
+
+        with self.assertRaises(WorkItemError):
+            self.backend.list(query="Sprint: 4")
 
 
 class LocalBackendCreateTest(unittest.TestCase):
