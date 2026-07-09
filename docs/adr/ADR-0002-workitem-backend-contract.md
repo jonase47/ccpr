@@ -6,6 +6,7 @@ last_updated: 09.07.2026
 related:
   - ../CONSTITUTION.md
   - ADR-0001-versioning-and-distribution.md
+  - ADR-0008-typed-workitem-links.md
   - ../../CHANGELOG.md
 ---
 
@@ -293,3 +294,207 @@ reject — `set-type` there always succeeds (same freeform-string behaviour `cre
 - **`youtrack`'s `set-description`/`set-title` use the direct field-write endpoint**, not the Command
   API — matches ADR-0003's own precedent (the original `description` write in `create` already uses
   `POST /api/issues/<id>` directly), not a new access pattern for this backend.
+
+## Addendum 2 (09.07.2026): Tags, queryable `list`, and planning custom-fields (`sprint`/`priority`/`estimate`)
+
+### Context
+
+Live use against a real YouTrack project surfaced three more gaps in daily (not just create→done)
+work: no writable tags (`needs:feedback`, `security` degrade to description-prefix hacks), no way to
+answer "what's in sprint N / what's High priority / what's tagged X" without a full-list client scan,
+and no planning fields at all (dependencies, priority, estimates). The costliest of the three is
+sprint membership — several commands (`/guide`, `/gate-p5`, `/p4-sprint`) reconstruct "current sprint"
+by parsing `SPRINT.md` prose plus client-side filtering, exactly the fragility this whole contract
+exists to remove.
+
+The key design move: sprint membership needs **no** CCPR-side code against YouTrack's Agile Board API
+(`/api/agiles`) — out of scope per ADR-0003's own boundary (a work-item store, not a board renderer).
+It is instead modeled as an ordinary **Enum custom field** (`Sprint`), written through the same
+Command-API-by-name mechanism `set-status`/`set-type` already use. A YouTrack project configures its
+Agile Board **field-based** on this `Sprint` field (an admin, UI-side setup step, not CCPR code) — the
+board becomes a *consumer* of the field CCPR writes, so full board functionality (burndown, drag-drop)
+comes for free without a second write path.
+
+Typed links (dependencies) are **not** part of this addendum — see the new **ADR-0008**, which gives
+them their own decision (direction normalization and a dedicated local encoding are structural enough
+to warrant it, unlike the field-mapping ops below, which all follow the existing `set-type` shape).
+
+### Decision
+
+Seven new operations, on **both** backends (same contract fixture):
+
+| Operation | CLI | Meaning |
+|---|---|---|
+| `add-tag` | `workitems add-tag <id> <tag>` | attach a tag (idempotent) |
+| `remove-tag` | `workitems remove-tag <id> <tag>` | detach a tag (idempotent) |
+| `set-sprint` | `workitems set-sprint <id> <n>` | set the `Sprint` field (single-valued — a later set overwrites, never accumulates) |
+| `set-priority` | `workitems set-priority <id> <priority>` | set `priority` (closed vocabulary, see below) |
+| `set-estimate` | `workitems set-estimate <id> <points>` | set `estimate` (non-negative integer story points) |
+
+Plus two extended existing ops: `create` gains repeatable `--tag`, and `list` gains `--tag`
+(repeatable), `--type`, `--sprint`, `--priority`, and `--query`.
+
+**Core model extension:** `get`/`list` gain `tags` (`List[str]`, default `[]`), `sprint`
+(`str | None`), `priority` (`str | None`), `estimate` (`int | None`). None of the four is ever
+absent from the dict — an unset field reads as `None` (or `[]` for `tags`), on both backends, the
+same "never a missing key" discipline the existing `comments`/`result-link` fields already follow.
+
+#### Tags
+
+- **Charset:** `^[A-Za-z0-9_:.-]+$` — no spaces, because the YouTrack Command API tokenizes on
+  whitespace (`tag <name>`), and a space-containing tag would either need quoting (an extra parsing
+  mode this contract doesn't otherwise have) or silently split into two tokens.
+- **Reserved namespace:** the `runner:`/`heartbeat:` prefixes (ADR-0005/ADR-0003) are lifted from
+  `youtrack.py` into `workitems/__init__.py` as `RESERVED_TAG_PREFIXES` — the **single source of
+  truth**, since both the claiming protocol (which writes these tags directly via `_run_command`, not
+  through the public `add_tag`) and the new `add-tag`/`remove-tag` (which must refuse them) need the
+  same list. `add-tag`/`remove-tag` reject a reserved tag with `WorkItemError`; the claiming protocol's
+  internal writes are unaffected (they bypass the public method entirely, so the reservation can't
+  block CCPR's own claiming machinery).
+- **Idempotence:** `add-tag` on an already-present tag, and `remove-tag` on an absent one, are
+  **no-ops** — same item returned unchanged, no error. A tag is a set-membership fact; re-asserting or
+  re-retracting a fact that already holds isn't an error condition, and treating it as one would force
+  every caller (a command that runs `add-tag ... security` unconditionally, say) to first check
+  whether the tag already exists just to avoid a spurious failure.
+- **`create --tag`:** repeatable, **best-effort on `youtrack`** — same footing as `create`'s existing
+  `type`/`owner` handling (ADR-0003 implementation notes): the issue already exists by the time tags
+  are applied, so a rejected tag (rare, but tags can in principle be restricted by workflow) must warn
+  and continue, never roll back an already-committed create. On `local`, tags always succeed (no
+  server-side restriction to reject against).
+- **Read-back:** `youtrack`'s `tags[]` is **reserved-filtered** — a `runner:<id>`/`heartbeat:<ts>` tag
+  written by the claiming protocol must never leak into the user-facing `tags` field (it isn't a tag a
+  human or command added, it's protocol plumbing). `local` has no reserved tags to filter (the
+  claiming protocol is a no-op there), so its existing `tags: data.get("tags")` read only needs the
+  **`None → []` normalization** this addendum requires everywhere.
+
+#### `list` filters
+
+- **`--tag` (repeatable) is AND:** an item must carry **every** named tag to match — the natural
+  reading of "items tagged X and Y", and the one that supports the motivating dedup use case (find
+  items already tagged `needs:feedback` **and** `security`) without a second client-side pass.
+- **`--type` / `--sprint` / `--priority`:** exact-match client-side filters, both backends — same
+  shape as the existing `--status`/`--owner` filters (`item["priority"] != priority` excludes; an
+  unset field on the item never matches a given filter value). No partial/prefix matching, no
+  filter-value validation against the vocabulary (a typo'd `--priority Crit` simply matches nothing,
+  same non-validating behaviour `--status`/`--owner` already have).
+- **`--query` is `youtrack`-only, project-scoped:** passed through verbatim to YouTrack's own query
+  language (`GET /api/issues?query=project: <PROJ> <user_query>&...`), prefixing `project: <PROJ> `
+  so a query can never accidentally (or deliberately) leak results from another project the token
+  happens to have read access to. `local` has no server-side query language to pass through to, so it
+  raises `WorkItemError` ("the local backend does not support --query — use --tag/--type/--sprint/
+  --priority/--status/--owner filters instead") rather than silently ignoring the flag or
+  approximating it with a client-side text search, either of which would give a caller a false sense
+  that the same query semantics work identically on both backends.
+
+#### Planning custom-fields: `sprint`, `priority`, `estimate`
+
+All three follow `set_type`'s existing shape (validate → Command API by-name write → hard-fail on
+rejection), but differ in exactly **what** gets validated and **which** field name is fixed vs.
+configurable — worth spelling out because the differences are deliberate, not incidental:
+
+- **`sprint`:** field name is **fixed**, literally `"Sprint"` — a **setup precondition** (the project
+  must have this Enum custom field, and the Agile Board configured field-based on it), the same class
+  of precondition ADR-0003 already documents for project team membership. **Single-valued**: a second
+  `set-sprint` overwrites, it never accumulates — an item is in exactly one sprint at a time, so there
+  is no move-choreography to design (no "remove from sprint N, add to sprint N+1" dance). No
+  value-mapping is needed: the sprint value the caller passes (e.g. `"4"`) **is** the Enum value name
+  the admin configured — there's no CCPR-side vocabulary to translate, unlike `status`. Read is via
+  `value(name)`, already covered by the existing `_ISSUE_FIELDS` selector (same shape as `Type`).
+  **Hard-fails** on rejection (unknown value / field missing) — same rationale as `set_type`: a
+  dedicated call with nothing else to protect via atomicity, and a rejection the caller needs to see.
+- **`priority`:** field name is fixed, `"Priority"` (a standard YouTrack field, present by default).
+  **Closed CCPR vocabulary**: `{Critical, High, Medium, Low}`, validated on **both** backends — this
+  is a deliberate departure from `type`'s local behaviour (freeform there). `type` is freeform on
+  `local` because CCPR's own suggested type vocabulary (`feat/fix/refactor/docs/chore`) is explicitly
+  **not** meant to constrain a project's own YouTrack `Type` bundle (`Bug`/`Feature`/`Task`, ...), so
+  `local` must not be stricter than the actual remote target. `priority` has no such tension: CCPR
+  defines the four values itself, there is no legitimate reason for a project to extend the set, and
+  `list --priority` needs a **closed, shared** vocabulary on both backends to be meaningfully
+  consistent (an arbitrary local priority string would make the filter, and any future `migrate`, silently
+  lossy). Validated with a `WorkItemError` on both backends for anything outside the four values.
+  `workitems.youtrack.priorityMap` (optional, default: identity/pass-through) maps a canonical value to
+  the project's own `Priority` bundle name when it doesn't literally use CCPR's four words — the exact
+  same escape hatch `stateMap` already provides for `status`, with the same absent-by-default posture
+  (no invented default mapping, since a project's actual bundle values are unknowable in advance).
+- **`estimate`:** an **Integer**, non-negative (`>= 0`), rejecting non-integer or negative input on
+  both backends with `WorkItemError` — deliberately **not** restricted to a Fibonacci-like subset
+  (`1/2/3/5/8`); that sequence is a *usage convention* documented for `/p4-backlog`, not a data-integrity
+  constraint the contract should enforce (a project using a different point scale isn't violating
+  anything). Unlike `sprint`/`priority`, the custom field's **name is not fixed** and has **no
+  default** — `State`/`Type`/`Priority`/`Assignee` are standard YouTrack fields present on every
+  instance, but a "story points" field is always a project-specific addition with no universal name
+  across installations, so `workitems.youtrack.estimateField` **must** be configured; `set_estimate`
+  raises immediately (before any API call) if it is absent, rather than guessing a plausible-sounding
+  default name that might not exist on a given instance. Once configured, the write goes through the
+  same Command API pattern as the other three (`"<estimateField> <points>"`), so all four field ops
+  share one mechanism — only the **read** side differs: `sprint`/`priority`/`type` are Enum fields
+  (`value(name)`), `estimate` is the one field whose YouTrack value is a bare **scalar** number, so
+  `_ISSUE_FIELDS` and `_item_from_issue` need to handle that shape distinctly from the Enum fields
+  (flagged here as an implementation detail to resolve and report against a live instance, in the same
+  spirit as ADR-0003's own "Implementation notes" section — the exact field-selection query shape for
+  a scalar custom field isn't something this design pass can verify without one).
+  `local`: `estimate` is a plain integer frontmatter value, same validation, no field-name concept to
+  configure (there is only ever the one `estimate:` key).
+
+### Error semantics (new ops)
+
+- `add-tag`/`remove-tag`/`set-sprint`/`set-priority`/`set-estimate` on a **non-existent id** →
+  `WorkItemError`, same as every other dedicated mutation in this contract.
+- `add-tag`/`remove-tag` with a tag violating the charset, or carrying a reserved prefix, →
+  `WorkItemError` — charset checked first (a structural violation), reserved-prefix checked second.
+- `set-priority` with a value outside `{Critical, High, Medium, Low}` → `WorkItemError`, on **both**
+  backends (see above).
+- `set-estimate` with a non-integer or negative value → `WorkItemError`, on **both** backends. `0` is
+  accepted (a legitimately "trivial/no-op" item is not an error condition).
+- `set-estimate` when `workitems.youtrack.estimateField` isn't configured → `WorkItemError`, raised
+  before any network call.
+- `set-sprint`/`set-priority`/`set-estimate` rejected by the YouTrack Command API (unknown value,
+  missing field) → `WorkItemError`, surfaced from the same HTTP-400-to-exception path `set_type`
+  already uses — atomic reject, issue left unchanged.
+- `list --query` on `local` → `WorkItemError` (see above).
+
+### Backend mapping
+
+| Operation | `youtrack` | `local` |
+|---|---|---|
+| `add-tag` / `remove-tag` | Command API `tag <name>` / `remove tag <name>` — checks the current tag list first (a GET) so a redundant call is skipped rather than relying on the Command API's own idempotence | rewrite the `tags` frontmatter list |
+| `create --tag` | best-effort `tag <name>` per tag, after the POST (parity with `type`/`owner`) | always succeeds; seeds `tags` frontmatter |
+| `list --tag/--type/--sprint/--priority` | client-side filter over the full project list (same GET `list()` already does) | client-side filter over the frontmatter fields |
+| `list --query` | `GET /api/issues?query=project: <PROJ> <user_query>` | raises `WorkItemError` |
+| `set-sprint` | Command API `Sprint <n>` (fixed field name; fails hard) | rewrite the `sprint` frontmatter field |
+| `set-priority` | Command API `Priority <mapped-name>` (fails hard; `priorityMap` optional) | rewrite the `priority` frontmatter field (validated against the same closed vocabulary) |
+| `set-estimate` | Command API `"<estimateField> <points>"` (fails hard; `estimateField` required, no default) | rewrite the `estimate` frontmatter field (integer) |
+
+### Alternatives considered
+
+- **CCPR code against YouTrack's Agile Board API (`/api/agiles`)** for sprint membership: rejected —
+  out of scope per ADR-0003 (a work-item store, not a board renderer); the field-based board
+  configuration gets the same board functionality without a second write path or a second API client.
+- **`type`-style freeform `priority` on `local`**: rejected — unlike `type`, `priority` is a genuinely
+  closed CCPR-defined vocabulary with no legitimate project-specific extension, and `list --priority`
+  needs both backends to agree on the same finite set to stay meaningful (see above).
+- **A default `estimateField` name** (e.g. guessing "Story Points"): rejected — no YouTrack instance
+  ships a story-point-like field by default the way it ships `State`/`Priority`/`Type`/`Assignee`;
+  inventing a plausible default risks a silent field-name mismatch that only surfaces as a confusing
+  400 at write time instead of an immediate, actionable "not configured" error.
+- **Single generic `set-field <id> <field> <value>`** instead of three dedicated ops: rejected for the
+  same reason ADR-0002's first addendum rejected it for `description`/`title`/`type` — different
+  validation rules and different config-key needs (`priorityMap`, `estimateField`) per field would
+  either get lost in a generic op or need an internal field-keyed branch, at the same code cost with a
+  worse, stringly-typed call site.
+
+### Consequences
+
+- **Contract fixture grows by five new ops × two backends**, plus the `list` filter extensions and the
+  `create --tag` extension.
+- **`local`'s frontmatter gains three more optional keys** (`sprint`, `priority`, `estimate`) and
+  formalizes `tags` as a first-class, writable core-model field (previously present but not part of
+  the documented core model) — all absent-key-safe (`None`/`[]` defaults), no migration needed for
+  existing item files.
+- **Two new provider-config keys** (`workitems.youtrack.priorityMap`, `workitems.youtrack.estimateField`),
+  following `stateMap`'s existing precedent for the former and introducing a **required, no-default**
+  config key for the latter (a first for this contract — every other backend config key so far has had
+  a usable default).
+- **Setup precondition**: a project adopting `sprint` must create the `Sprint` Enum field (and,
+  separately, configure its Agile Board field-based on it) — documented alongside ADR-0003's existing
+  Prerequisites, not new backend code.

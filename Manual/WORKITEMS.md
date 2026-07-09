@@ -17,8 +17,8 @@ operations plus four item-maintenance operations (added 09.07.2026 — see below
 
 | Operation | CLI | Meaning |
 |---|---|---|
-| create | `workitems create --title T [--type X] [--owner O] [--description D]` | create a new item; the backend assigns a stable `id` (JSON) |
-| list | `workitems list [--status S] [--owner O]` | enumerate items (JSON array) |
+| create | `workitems create --title T [--type X] [--owner O] [--description D] [--tag T ...]` | create a new item; the backend assigns a stable `id` (JSON) |
+| list | `workitems list [--status S] [--owner O] [--tag T ...] [--type X] [--sprint N] [--priority P] [--query Q]` | enumerate items (JSON array) |
 | get | `workitems get <id>` | fetch one item (JSON) |
 | claim | `workitems claim <id> [--owner O] [--runner R]` | take ownership / mark active |
 | set-status | `workitems set-status <id> <status>` | move an item through its lifecycle |
@@ -27,6 +27,11 @@ operations plus four item-maintenance operations (added 09.07.2026 — see below
 | set-description | `workitems set-description <id> <text>` | replace the description in full (empty string clears it) |
 | set-title | `workitems set-title <id> <text>` | replace the title (non-empty) |
 | set-type | `workitems set-type <id> <type>` | replace/set the `type` extension field (non-empty; fails hard on rejection — see ADR-0002 addendum) |
+| add-tag / remove-tag | `workitems add-tag <id> <tag>` / `workitems remove-tag <id> <tag>` | attach/detach a tag (idempotent; rejects the reserved `runner:`/`heartbeat:` namespace — ADR-0002 2nd addendum) |
+| set-sprint | `workitems set-sprint <id> <n>` | set the `Sprint` field (single-valued, overwrites; fails hard on rejection) |
+| set-priority | `workitems set-priority <id> <priority>` | set `priority`, closed vocabulary `{Critical, High, Medium, Low}` on **both** backends |
+| set-estimate | `workitems set-estimate <id> <points>` | set `estimate`, a non-negative integer (story points) |
+| add-link / remove-link | `workitems add-link <id> <type> <target-id>` / `workitems remove-link <id> <type> <target-id>` | create/remove a typed edge (`depends-on`/`blocks`/`relates-to`/`subtask-of`; idempotent — see ADR-0008) |
 
 `create` assigns the `id` — callers never supply one (the `local` backend hands out the next
 monotonic `WI-NNNN`; a remote backend returns the tracker's id). `lift` (ADR-0004) is bulk creation;
@@ -37,6 +42,11 @@ corrections**, not part of the status-transition write-loop (§7/§8) — they e
 already in flight (a stale description block, a plain note, a corrected type), not for driving the
 lifecycle. See ADR-0002's addendum for the full rationale, the `comment`/`append-result` channel split,
 and the error semantics per operation.
+
+The tag/planning ops (`add-tag`/`remove-tag`, `set-sprint`, `set-priority`, `set-estimate`,
+`add-link`/`remove-link`) are the **planning-field write path** — see ADR-0002's second addendum
+(sprint/priority/estimate/tags) and ADR-0008 (typed links) for the full rationale, config keys, and
+error semantics.
 
 The helper (`scripts/workitems.py`) reads `workitems.provider` from the project's `.claude/settings.json` and dispatches to
 the provider implementation under `scripts/lib/workitems/<provider>.py`. `list` and `get` print JSON so
@@ -57,6 +67,11 @@ fields, or the public framework acquires a silent tool-lock-in):
 | `result-link` | optional; where the delivered work lives — **accumulates** (`append-result` adds refs; an item may hold several PR/commit links) |
 | `comments` | optional; `List[str]` of plain human comment texts — **a separate channel from `result-link`**, never overlapping with it (see ADR-0002 addendum); accumulates via `comment` |
 | `owner` | the responsible human; optional while unclaimed |
+| `tags` | `List[str]`, default `[]` (never absent/`None`) — writable via `add-tag`/`remove-tag`/`create --tag`; the reserved `runner:`/`heartbeat:` namespace never appears here (ADR-0002 2nd addendum) |
+| `sprint` | optional (`None` when unset); the `Sprint` field value, single-valued — set via `set-sprint` |
+| `priority` | optional (`None` when unset); one of `{Critical, High, Medium, Low}` on **both** backends — set via `set-priority` |
+| `estimate` | optional (`None` when unset); non-negative integer story points — set via `set-estimate` |
+| `links` | `List[{"type": ..., "target": ...}]`, default `[]` (never absent); typed edges — set via `add-link`/`remove-link` (ADR-0008) |
 
 ### Status vocabulary
 
@@ -77,7 +92,11 @@ plus **`Parked`**, **`Blocked`**, and **`Cancelled`** crosscutting (the two gate
   "youtrack": {
     "baseUrl": "https://tracker.example.org",
     "project": "PROJ",
-    "tokenEnv": "YOUTRACK_TOKEN"
+    "tokenEnv": "YOUTRACK_TOKEN",
+    "stateMap": { "Backlog": "Open" },
+    "priorityMap": { "Critical": "Show-stopper" },
+    "linkTypeMap": { "depends-on": "depends on", "relates-to": "relates to", "subtask-of": "subtask of" },
+    "estimateField": "Story Points"
   },
   "claiming": {
     "staleAfter": "2h",
@@ -92,6 +111,18 @@ plus **`Parked`**, **`Blocked`**, and **`Cancelled`** crosscutting (the two gate
 - `claiming` (remote backends only): `staleAfter` is how long without a heartbeat before `sweep`
   moves a claimed item to `Parked`; `heartbeatInterval` is advisory for whatever refreshes a runner's
   heartbeat. Durations accept `45s` / `5m` / `2h` / `1d` or a bare number of seconds. See §6 and ADR-0005.
+- `priorityMap` (optional, `youtrack` only): canonical `{Critical, High, Medium, Low}` → the project's
+  own `Priority` bundle name, same by-name-mapping shape as `stateMap`; default is identity pass-through
+  (ADR-0002 2nd addendum).
+- `linkTypeMap` (optional, `youtrack` only): canonical link verb (`depends-on`/`relates-to`/
+  `subtask-of`) → the instance's actual link-type name; default is the verb with hyphens replaced by
+  spaces (`"depends on"`/`"relates to"`/`"subtask of"`) — a mechanical starting point, not an assertion
+  about any instance's actual configuration (ADR-0008).
+- `estimateField` (**required** if `set-estimate` is used, `youtrack` only, no default): the name of a
+  numeric custom field for story-point estimates. Unlike `State`/`Priority`/`Type`/`Assignee`, no
+  YouTrack instance ships this by default, so it must be configured explicitly (ADR-0002 2nd addendum).
+- A project adopting `sprint` needs a `Sprint` Enum custom field (fixed name, no config key) —
+  a one-time, UI-side setup step, same class of precondition as ADR-0003's team-membership setup.
 
 ## 4. The `local` backend
 
@@ -109,7 +140,11 @@ status: In Progress
 type: feat            # feat | fix | refactor | docs | chore (optional)
 owner: alice          # optional until claimed
 refs: [ADR-0011]      # optional cross-references
-tags: [security]      # optional
+tags: [security, needs:feedback]         # optional; writable via add-tag/remove-tag/create --tag
+sprint: 4             # optional; the Sprint field value (single-valued)
+priority: High         # optional; one of Critical | High | Medium | Low
+estimate: 3            # optional; non-negative integer story points
+links: [depends-on:WI-0003, blocks:WI-0005]   # optional; type:target string list (ADR-0008)
 created: 2026-07-08   # optional, ISO date
 ---
 
@@ -133,6 +168,13 @@ The login / refresh / API-key endpoints have no rate limiting. Add a limiter …
   before the first `## ` heading (empty string clears it); `set-type` rewrites the `type` frontmatter
   field (always succeeds — `local` has no `Type` bundle to validate against); `comment` appends to the
   `## Comments` section, structurally separate from `## Result` from the start (no marker needed).
+- `add-tag`/`remove-tag` rewrite the `tags` list (idempotent, reserved-namespace rejected — ADR-0002
+  2nd addendum); `set-sprint`/`set-estimate` rewrite their frontmatter field freely; `set-priority`
+  **validates** against `{Critical, High, Medium, Low}` (unlike `type`, which is freeform on `local` —
+  see the 2nd addendum for why priority is a closed vocabulary on both backends).
+- `add-link`/`remove-link` rewrite the `links` list, encoded as flat `type:target` strings (not nested
+  objects — `frontmatter.py` has no object representation); `remove-link` is a no-op if the exact
+  `{type, target}` edge isn't present (ADR-0008).
 - A description or comment line that reads exactly like a section heading (e.g. a comment containing
   the literal line `## Comments`) is transparently escaped on write and un-escaped on read, so it can
   never be mistaken for a real section boundary. This is internal to the local backend — the item dict
@@ -155,6 +197,18 @@ On the `youtrack` backend, `set-title`/`set-description` are direct field writes
 Command API (`Type <name>`) and — unlike `create`'s best-effort type-setting — **fails hard** on a
 rejected command; `comment` posts to the same comments endpoint `append-result` uses, just without the
 `<!-- ccpr:result -->` marker. Full rationale: ADR-0002's addendum.
+
+`add-tag`/`remove-tag` go through the Command API (`tag <name>` / `remove tag <name>`), checking the
+current tag list first so a redundant call is skipped rather than relying on the API's own idempotence;
+`tags[]` on read is filtered of the reserved `runner:`/`heartbeat:` namespace (ADR-0005/ADR-0003).
+`set-sprint`/`set-priority`/`set-estimate` are Command API writes against a fixed (`Sprint`/`Priority`)
+or configured (`estimateField`) field name and **fail hard** on rejection, same as `set-type`; only
+`estimate`'s read is a bare scalar rather than an Enum `value(name)`. `add-link`/`remove-link` use the
+Command API with the type name resolved via `linkTypeMap` (default: the verb dehyphenated); reads
+extend `_ISSUE_FIELDS` with `links(direction,linkType(name),issues(idReadable))` and normalize
+direction into the canonical `{type, target}` shape (a `depends-on` edge read from the blocked side
+becomes `blocks`). Full rationale, the direction-normalization rule, and the `linkTypeMap` default:
+ADR-0008.
 
 **One active backend per project — no bidirectional sync.** Moving solo→team is the one-time
 `ccpr workitems migrate` (ADR-0004), not a continuous sync (which would create merge conflicts in a
@@ -262,4 +316,4 @@ silently diverge. A new backend passes iff it satisfies the fixture.
 ---
 
 *Design decisions and rationale: ADR-0002. Remote backend: ADR-0003. `lift`/`migrate`: ADR-0004.
-Claiming/runner protocol: ADR-0005.*
+Claiming/runner protocol: ADR-0005. Typed links: ADR-0008.*
