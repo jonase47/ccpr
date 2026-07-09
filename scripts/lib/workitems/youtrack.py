@@ -229,7 +229,8 @@ class YouTrackBackend:
         undo a create() whose mandatory initial state could not be set."""
         self._request("DELETE", f"/api/issues/{item_id}")
 
-    def list(self, status=None, owner=None, tags=None, item_type=None, query=None):
+    def list(self, status=None, owner=None, tags=None, item_type=None, query=None,
+             sprint=None):
         # $top=-1 disables pagination explicitly — without it, some YouTrack versions
         # cap /api/issues to a default page size, silently truncating a large project.
         # `query` is passed through verbatim to YouTrack's own query language, always
@@ -251,6 +252,8 @@ class YouTrackBackend:
             items = [item for item in items if set(tags).issubset(item["tags"])]
         if item_type is not None:
             items = [item for item in items if item["type"] == item_type]
+        if sprint is not None:
+            items = [item for item in items if item["sprint"] == sprint]
         return items
 
     def get(self, item_id):
@@ -421,6 +424,16 @@ class YouTrackBackend:
         if not item_type:
             raise WorkItemError("type is required")
         self._run_command(item_id, f"Type {item_type}")
+        return self.get(item_id)
+
+    def set_sprint(self, item_id, sprint):
+        """Sets the `Sprint` Enum custom field (fixed name, a setup precondition --
+        ADR-0002 2nd addendum), single-valued (a later call overwrites, never
+        accumulates). No value-mapping: the caller-supplied value IS the Enum value
+        name the project's admin configured. Fails hard on rejection, same as
+        `set_type` -- a dedicated call with nothing else to protect via atomicity."""
+        validate_item_id(item_id)
+        self._run_command(item_id, f"Sprint {sprint}")
         return self.get(item_id)
 
     def add_tag(self, item_id, tag):
@@ -608,6 +621,9 @@ class YouTrackBackend:
         type_value = custom_fields.get("Type")
         item_type = type_value.get("name") if isinstance(type_value, dict) else None
 
+        sprint_value = custom_fields.get("Sprint")
+        sprint = sprint_value.get("name") if isinstance(sprint_value, dict) else None
+
         # comment() and append_result() share the SAME comments stream (both POST to
         # /api/issues/<id>/comments); the marker is the only thing that tells them
         # apart on read-back -- a hard either/or partition, never both (ADR-0002
@@ -644,6 +660,7 @@ class YouTrackBackend:
             "owner": owner,
             "type": item_type,
             "tags": tags,
+            "sprint": sprint,
             "links": self._parse_links(issue.get("links", [])),
             "runner": runner,
             "heartbeat": heartbeat,

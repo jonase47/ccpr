@@ -10,7 +10,7 @@ is narrow enough that a full YAML library would be a heavy dependency for what i
 import re
 
 FRONTMATTER_KEY_ORDER = (
-    "id", "title", "status", "type", "owner", "refs", "tags", "links", "created",
+    "id", "title", "status", "type", "owner", "refs", "tags", "sprint", "links", "created",
 )
 
 # A scalar is an inline list only if the ENTIRE trimmed value is bracketed —

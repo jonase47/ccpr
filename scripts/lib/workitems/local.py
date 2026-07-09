@@ -116,7 +116,8 @@ class LocalBackend:
                     highest = max(highest, int(match.group(1)))
         return f"WI-{highest + 1:04d}"
 
-    def list(self, status=None, owner=None, tags=None, item_type=None, query=None):
+    def list(self, status=None, owner=None, tags=None, item_type=None, query=None,
+             sprint=None):
         if query:
             # local has no server-side query language to pass through to
             # (ADR-0002 2nd addendum) -- raise rather than silently ignoring the
@@ -140,6 +141,8 @@ class LocalBackend:
             if tags and not set(tags).issubset(item["tags"]):
                 continue
             if item_type is not None and item["type"] != item_type:
+                continue
+            if sprint is not None and item["sprint"] != sprint:
                 continue
             items.append(item)
         return items
@@ -238,6 +241,16 @@ class LocalBackend:
         self._write(path, data, body)
         return self._item_from_data(data, body)
 
+    def set_sprint(self, item_id, sprint):
+        """Rewrites the `sprint` frontmatter field freely (ADR-0002 2nd addendum):
+        single-valued, a later set overwrites, never accumulates -- no bundle to
+        validate against on `local` (the caller-supplied value is the value, same as
+        `set_type`'s freeform behaviour)."""
+        path, data, body = self._read(item_id)
+        data["sprint"] = sprint
+        self._write(path, data, body)
+        return self._item_from_data(data, body)
+
     def add_link(self, item_id, link_type, target_id):
         """Creates a typed edge from `item_id` to `target_id` (ADR-0008), idempotent
         (an already-present edge is a no-op). `blocks` is pure sugar for the inverse
@@ -329,6 +342,7 @@ class LocalBackend:
             # Never None, on either backend (ADR-0002 2nd addendum): an unset field
             # reads as an empty list, not a missing/None value.
             "tags": data.get("tags") or [],
+            "sprint": data.get("sprint"),
             # links[] never None (ADR-0008), same discipline as tags/comments.
             "links": _parse_links(data.get("links") or []),
             "created": data.get("created"),

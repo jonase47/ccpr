@@ -12,7 +12,7 @@ Usage:
   workitems.py create --title T [--type X] [--owner O] [--description D]
                        [--tag T ...] [--project DIR]
   workitems.py list [--status STATUS] [--owner OWNER] [--tag T ...] [--type X]
-                     [--query Q] [--project DIR]
+                     [--sprint N] [--query Q] [--project DIR]
   workitems.py get <id> [--project DIR]
   workitems.py claim <id> [--owner OWNER] [--runner R] [--project DIR]
   workitems.py heartbeat <id> --runner R [--project DIR]
@@ -26,6 +26,7 @@ Usage:
   workitems.py remove-tag <id> <tag> [--project DIR]
   workitems.py add-link <id> <type> <target-id> [--project DIR]
   workitems.py remove-link <id> <type> <target-id> [--project DIR]
+  workitems.py set-sprint <id> <n> [--project DIR]
   workitems.py migrate --to <provider> [--project DIR]
   workitems.py lift <source-file...> [--apply] [--exclude PATTERN=REASON ...] [--project DIR]
   workitems.py sweep [--project DIR]
@@ -44,6 +45,10 @@ abandoned claims into Parked based on `workitems.claiming.staleAfter` in `.claud
 Typed links (ADR-0008): <type> is one of depends-on/blocks/relates-to/subtask-of.
 `blocks` is client-side sugar for the inverse of depends-on (delegates to
 `add-link <target-id> depends-on <id>`); add-link/remove-link are idempotent.
+
+Planning fields (ADR-0002 2nd addendum): set-sprint is single-valued (a later set
+overwrites); set-priority/set-estimate follow in a later increment. `--sprint` on
+`list` is a client-side exact-match filter, both backends.
 """
 
 import argparse
@@ -194,6 +199,7 @@ def build_parser():
         help="Filter by tag (repeatable; AND semantics)",
     )
     p_list.add_argument("--type", dest="type")
+    p_list.add_argument("--sprint", help="Filter by the Sprint field (exact match)")
     p_list.add_argument(
         "--query", help="YouTrack-only passthrough query (rejected by the local backend)",
     )
@@ -271,6 +277,13 @@ def build_parser():
     p_remove_link.add_argument("type")
     p_remove_link.add_argument("target")
 
+    p_set_sprint = sub.add_parser(
+        "set-sprint", help="Set the Sprint field (single-valued; fails hard on rejection)",
+        parents=[project_arg],
+    )
+    p_set_sprint.add_argument("id")
+    p_set_sprint.add_argument("sprint")
+
     p_migrate = sub.add_parser(
         "migrate", help="Move items to a target backend, once, reversibly (ADR-0004)",
         parents=[project_arg],
@@ -305,7 +318,7 @@ def dispatch(backend, args):
     if args.operation == "list":
         return backend.list(
             status=args.status, owner=args.owner, tags=args.tags, item_type=args.type,
-            query=args.query,
+            query=args.query, sprint=args.sprint,
         )
     if args.operation == "get":
         return backend.get(args.id)
@@ -333,6 +346,8 @@ def dispatch(backend, args):
         return backend.add_link(args.id, args.type, args.target)
     if args.operation == "remove-link":
         return backend.remove_link(args.id, args.type, args.target)
+    if args.operation == "set-sprint":
+        return backend.set_sprint(args.id, args.sprint)
     raise ValueError(f"Unknown operation: {args.operation}")
 
 

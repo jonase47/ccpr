@@ -770,6 +770,34 @@ class YouTrackQueryTest(unittest.TestCase):
         self.assertEqual(self.transport.list_queries_received[-1], "project: TEST")
 
 
+class YouTrackSetSprintHardFailTest(unittest.TestCase):
+    """Unlike create()'s best-effort field handling, set-sprint is a dedicated call
+    with nothing else to protect via atomicity -- it fails hard on an unmappable
+    Sprint value, same as set_type (ADR-0002 2nd addendum)."""
+
+    def setUp(self):
+        self.transport = FakeYouTrackTransport(
+            project_short_name="TEST", known_sprints={"3", "4"},
+        )
+        self.backend = youtrack.YouTrackBackend(
+            base_url="https://faketrack.example.org", project="TEST",
+            token="fake-token", transport=self.transport,
+        )
+
+    def test_set_sprint_with_unknown_value_raises(self):
+        item = self.backend.create(title="New feature")
+
+        with self.assertRaises(WorkItemError):
+            self.backend.set_sprint(item["id"], "99")
+
+    def test_set_sprint_with_known_value_succeeds(self):
+        item = self.backend.create(title="New feature")
+
+        updated = self.backend.set_sprint(item["id"], "4")
+
+        self.assertEqual(updated["sprint"], "4")
+
+
 class YouTrackLinksDirectionTest(unittest.TestCase):
     """Direction normalization (ADR-0008, the load-bearing rule): a single shared
     link record reads differently depending on which linked issue you look from --

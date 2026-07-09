@@ -613,6 +613,63 @@ class WorkItemsContractTestCase:
         with self.assertRaises(Exception):
             self.backend.remove_link("WI-9999", "depends-on", "WI-9998")
 
+    # --- set-sprint / list --sprint ---
+    #
+    # `sprint` is an Enum custom-field-shaped, single-valued planning field (ADR-0002
+    # 2nd addendum): a later set overwrites, it never accumulates -- an item is in
+    # exactly one sprint at a time.
+
+    def test_fresh_item_has_no_sprint(self):
+        item_id = self.create_item()
+
+        self.assertIsNone(self.backend.get(item_id)["sprint"])
+
+    def test_set_sprint_sets_and_reads_back(self):
+        item_id = self.create_item()
+
+        item = self.backend.set_sprint(item_id, "4")
+
+        self.assertEqual(item["sprint"], "4")
+        self.assertEqual(self.backend.get(item_id)["sprint"], "4")
+
+    def test_set_sprint_overwrites_the_previous_value(self):
+        item_id = self.create_item()
+        self.backend.set_sprint(item_id, "4")
+
+        item = self.backend.set_sprint(item_id, "5")
+
+        self.assertEqual(item["sprint"], "5")
+        self.assertEqual(self.backend.get(item_id)["sprint"], "5")
+
+    def test_set_sprint_unknown_id_raises(self):
+        with self.assertRaises(Exception):
+            self.backend.set_sprint("WI-9999", "4")
+
+    def test_list_filters_by_sprint(self):
+        self.create_item()
+        sprinted_id = self.create_item()
+        self.backend.set_sprint(sprinted_id, "4")
+
+        items = self.backend.list(sprint="4")
+
+        self.assertEqual([item["id"] for item in items], [sprinted_id])
+
+    def test_list_by_sprint_after_a_change_matches_only_the_new_value(self):
+        item_id = self.create_item()
+        self.backend.set_sprint(item_id, "4")
+
+        self.backend.set_sprint(item_id, "5")
+
+        self.assertEqual([i["id"] for i in self.backend.list(sprint="4")], [])
+        self.assertEqual([i["id"] for i in self.backend.list(sprint="5")], [item_id])
+
+    def test_list_by_sprint_with_no_match_returns_empty_list(self):
+        self.create_item()
+
+        items = self.backend.list(sprint="does-not-exist")
+
+        self.assertEqual(items, [])
+
     # --- id validation / path traversal ---
     #
     # Ids may end up in filesystem paths (local) today and in `ticket/<id>` branch
@@ -637,6 +694,7 @@ class WorkItemsContractTestCase:
             "remove_tag": (item_id, "security"),
             "add_link": (item_id, "depends-on", "WI-9999"),
             "remove_link": (item_id, "depends-on", "WI-9999"),
+            "set_sprint": (item_id, "4"),
         }[op]
         return getattr(self.backend, op)(*args)
 
@@ -644,7 +702,7 @@ class WorkItemsContractTestCase:
         ops = (
             "get", "set_status", "append_result",
             "comment", "set_description", "set_title", "set_type",
-            "add_tag", "remove_tag", "add_link", "remove_link",
+            "add_tag", "remove_tag", "add_link", "remove_link", "set_sprint",
         )
         for malicious_id in ("../../x", "/etc/x", "a/b", "a.md"):
             for op in ops:
@@ -664,7 +722,7 @@ class WorkItemsContractTestCase:
         ops = (
             "get", "append_result",
             "comment", "set_description", "set_title", "set_type",
-            "add_tag", "remove_tag", "add_link", "remove_link",
+            "add_tag", "remove_tag", "add_link", "remove_link", "set_sprint",
         )
         for op in ops:
             with self.subTest(op=op):
