@@ -69,9 +69,12 @@ class LocalBackend:
     def __init__(self, workitems_dir):
         self.workitems_dir = Path(workitems_dir)
 
-    def create(self, title, item_type=None, owner=None, description=None):
+    def create(self, title, item_type=None, owner=None, description=None, tags=None):
         if not title:
             raise WorkItemError("title is required")
+        tags = list(tags or [])
+        for tag in tags:
+            validate_tag(tag)
 
         self.workitems_dir.mkdir(parents=True, exist_ok=True)
         body = _new_item_body(description)
@@ -92,6 +95,8 @@ class LocalBackend:
                 data["type"] = item_type
             if owner:
                 data["owner"] = owner
+            if tags:
+                data["tags"] = tags
             data["created"] = datetime.date.today().isoformat()
             text = frontmatter.render(data, body)
             try:

@@ -117,9 +117,17 @@ class YouTrackBackend:
             else DEFAULT_STALE_AFTER_SECONDS
         )
 
-    def create(self, title, item_type=None, owner=None, description=None):
+    def create(self, title, item_type=None, owner=None, description=None, tags=None):
         if not title:
             raise WorkItemError("title is required")
+        # Charset/reserved-namespace violations are structural client-side errors,
+        # not a server-side rejection -- validated upfront, before POST /api/issues,
+        # so a malformed tag never creates an issue at all (unlike an unmappable-but-
+        # well-formed tag, which is a real "rejected by this project's workflow"
+        # case handled best-effort below, after the issue already exists).
+        tags = list(tags or [])
+        for tag in tags:
+            validate_tag(tag)
 
         project_id = self._resolve_project_id()
         body = {"project": {"id": project_id}, "summary": title, "description": description or ""}
@@ -157,6 +165,8 @@ class YouTrackBackend:
             self._apply_optional_create_field(item_id, f"Type {item_type}", "type", item_type)
         if owner:
             self._apply_optional_create_field(item_id, f"for {owner}", "owner", owner)
+        for tag in tags:
+            self._apply_optional_create_field(item_id, f"tag {tag}", "tag", tag)
 
         return self.get(item_id)
 

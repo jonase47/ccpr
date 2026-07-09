@@ -15,7 +15,7 @@ class FakeYouTrackTransport:
     real `_HttpTransport`, so YouTrackBackend cannot tell the difference."""
 
     def __init__(self, project_short_name="TEST", page_size_cap=None,
-                 known_states=None, known_users=None, known_types=None):
+                 known_states=None, known_users=None, known_types=None, known_tags=None):
         self.project_short_name = project_short_name
         self.project_internal_id = "0-0"
         self.commands_received = []  # for tests asserting on the exact command string
@@ -45,6 +45,10 @@ class FakeYouTrackTransport:
         # caused a live orphaned-issue bug (create() raised on the rejected `Type`
         # command AFTER the issue already existed via POST /api/issues).
         self.known_types = known_types
+        # Same idea, for a workflow that restricts which tags may be applied --
+        # exercises create()'s best-effort tag handling (a rejected tag must warn
+        # and continue, never orphan the already-committed issue).
+        self.known_tags = known_tags
 
     def request(self, method, url, token, body=None):
         parsed = urllib.parse.urlparse(url)
@@ -138,6 +142,8 @@ class FakeYouTrackTransport:
                     issue["tags"].remove(tag_name)
             elif query.startswith("tag "):
                 tag_name = query[len("tag "):]
+                if self.known_tags is not None and tag_name not in self.known_tags:
+                    raise WorkItemError(f"YouTrack command rejected (HTTP 400): tag not permitted: {tag_name}")
                 if tag_name not in issue["tags"]:
                     issue["tags"].append(tag_name)
             elif query.startswith("Type "):

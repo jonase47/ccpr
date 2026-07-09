@@ -93,6 +93,27 @@ class WorkItemsContractTestCase:
         with self.assertRaises(Exception):
             self.backend.create(title="")
 
+    def test_create_with_tags_surfaces_them(self):
+        item = self.backend.create(title="New feature", tags=["security", "needs:feedback"])
+
+        self.assertEqual(set(item["tags"]), {"security", "needs:feedback"})
+        self.assertEqual(
+            set(self.backend.get(item["id"])["tags"]), {"security", "needs:feedback"},
+        )
+
+    def test_create_without_tags_defaults_to_an_empty_list(self):
+        item = self.backend.create(title="New feature")
+
+        self.assertEqual(item["tags"], [])
+
+    def test_create_rejects_a_reserved_tag(self):
+        with self.assertRaises(Exception):
+            self.backend.create(title="New feature", tags=["runner:agent-1"])
+
+    def test_create_rejects_an_invalid_tag_charset(self):
+        with self.assertRaises(Exception):
+            self.backend.create(title="New feature", tags=["has space"])
+
     # --- list ---
 
     def test_list_returns_all_items(self):

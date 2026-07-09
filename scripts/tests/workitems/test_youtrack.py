@@ -181,6 +181,37 @@ class YouTrackCreateOptionalFieldTest(unittest.TestCase):
         self.assertEqual(len(self.transport._issues), 1)
 
 
+class YouTrackCreateTagsTest(unittest.TestCase):
+    """`create --tag` is best-effort on youtrack, same footing as `create`'s existing
+    `type`/`owner` handling (ADR-0002 2nd addendum, 09.07.2026): the issue already
+    exists by the time tags are applied, so a rejected tag must warn and continue,
+    never roll back an already-committed create."""
+
+    def setUp(self):
+        self.transport = FakeYouTrackTransport(
+            project_short_name="TEST", known_tags={"security"},
+        )
+        self.backend = youtrack.YouTrackBackend(
+            base_url="https://faketrack.example.org", project="TEST",
+            token="fake-token", transport=self.transport,
+        )
+
+    def test_create_with_known_tags_sets_them(self):
+        item = self.backend.create(title="New feature", tags=["security"])
+
+        self.assertEqual(item["tags"], ["security"])
+
+    def test_create_with_an_unmappable_tag_succeeds_and_leaves_no_orphan(self):
+        captured_stderr = io.StringIO()
+        with contextlib.redirect_stderr(captured_stderr):
+            item = self.backend.create(title="New feature", tags=["security", "not-allowed"])
+
+        self.assertEqual(item["tags"], ["security"])
+        self.assertIn("not-allowed", captured_stderr.getvalue())
+        # Exactly one issue exists -- not zero-and-raise, not a duplicate on retry.
+        self.assertEqual(len(self.transport._issues), 1)
+
+
 class YouTrackSetTypeHardFailTest(unittest.TestCase):
     """Unlike create()'s best-effort type-setting (warn + continue on a rejected
     Type command), a dedicated set-type call has no atomicity to protect (nothing

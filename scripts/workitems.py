@@ -9,8 +9,10 @@ not a repo-root settings.json -- see load_settings()'s docstring for the exact
 precedence, including the `.claude/settings.local.json` dev override.
 
 Usage:
-  workitems.py create --title T [--type X] [--owner O] [--description D] [--project DIR]
-  workitems.py list [--status STATUS] [--owner OWNER] [--project DIR]
+  workitems.py create --title T [--type X] [--owner O] [--description D]
+                       [--tag T ...] [--project DIR]
+  workitems.py list [--status STATUS] [--owner OWNER] [--tag T ...] [--type X]
+                     [--query Q] [--project DIR]
   workitems.py get <id> [--project DIR]
   workitems.py claim <id> [--owner OWNER] [--runner R] [--project DIR]
   workitems.py heartbeat <id> --runner R [--project DIR]
@@ -27,6 +29,11 @@ Usage:
   workitems.py sweep [--project DIR]
 
 Output: JSON on stdout for every operation (a list for `list`, an object otherwise).
+
+Tags (ADR-0002 2nd addendum): --tag is repeatable everywhere it appears; on `list` it
+is AND semantics (an item must carry every named tag to match). --query is a
+project-scoped passthrough to the youtrack backend's own query language; the local
+backend raises on --query (no server-side query language to pass through to).
 
 Claiming (ADR-0005): --runner records the runner:<id> signal + a heartbeat and sets
 In Progress; mandatory for remote backends, a no-op for `local`. `sweep` reconciles
@@ -168,6 +175,10 @@ def build_parser():
     p_create.add_argument("--type", dest="type")
     p_create.add_argument("--owner")
     p_create.add_argument("--description")
+    p_create.add_argument(
+        "--tag", dest="tags", action="append", default=[],
+        help="Attach a tag (repeatable)",
+    )
 
     p_list = sub.add_parser("list", help="Enumerate work items (JSON array)", parents=[project_arg])
     p_list.add_argument("--status")
@@ -269,7 +280,7 @@ def dispatch(backend, args):
     if args.operation == "create":
         return backend.create(
             title=args.title, item_type=args.type, owner=args.owner,
-            description=args.description,
+            description=args.description, tags=args.tags,
         )
     if args.operation == "list":
         return backend.list(
