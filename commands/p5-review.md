@@ -10,19 +10,26 @@ SPRINT.md and asking, if the project is still on prose).
 
 ## 0. Work-item adoption guard (ADR-0002 §8)
 
-Run `python3 ~/.claude/scripts/workitems.py list`.
-- **Non-empty array** → the project uses the structured store. Use the CLI for all item state below:
+Run `python3 ~/.claude/scripts/workitems.py list` **and** explicitly check whether the
+`docs/workitems/` directory exists (e.g. `ls docs/workitems/`). Both signals are required — `list`
+returns the identical `[]` for an adopted-but-empty store and a never-adopted project; only the
+directory's existence tells them apart.
+- **Non-empty list** → the project uses the structured store. Use the CLI for all item state below:
   - No `$ARGUMENTS`: resolve the story via `workitems list --status "In Review"`, pick the first
     item in the returned array, ask for confirmation.
   - `$ARGUMENTS` provided: resolve `<id>` by matching `$ARGUMENTS` against a story's title, or
     directly if it looks like a `Work-Item` id (`WI-NNNN`) from BACKLOG.md/SPRINT.md, then confirm
     the resolved item with the user before proceeding.
-- **`[]` and no `docs/workitems/` directory** → still on prose. Read SPRINT.md to find/ask which
-  story is next, as before. Emit one line: *"Tip: run `lift` to adopt the structured work-item store."*
-- **`[]` but `docs/workitems/` exists** → adopted store, just empty right now (e.g. between
-  sprints). Treat as adopted: use the CLI, not the prose fallback.
+- **Empty list, but `docs/workitems/` exists** → the store is adopted; an empty `In Review` list is
+  a real result — nothing is currently awaiting code review (not an error, not a reason to search
+  prose instead). If no `$ARGUMENTS` was given either, say so explicitly and ask the user which
+  story to review, rather than silently falling back to SPRINT.md.
+- **Empty list and no `docs/workitems/` directory** → not adopted, still on prose. Read SPRINT.md to
+  find/ask which story is next, as before. Emit one line: *"Tip: run `lift` to adopt the structured
+  work-item store."*
 
-See Manual/WORKITEMS.md §8 for the full guard rationale and the status-verb mapping.
+See Manual/WORKITEMS.md §8 for the full guard rationale, the directory-check requirement, and the
+status-verb mapping.
 
 ## Flow
 
