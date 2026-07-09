@@ -14,6 +14,9 @@ Run `python3 ~/.claude/scripts/workitems.py list`.
 - **Non-empty array** → the project uses the structured store. Use the CLI for all item state below:
   - No `$ARGUMENTS`: resolve the next story via `workitems list --status "Ready"`, pick the first
     item in the returned array, ask for confirmation.
+  - `$ARGUMENTS` provided: resolve `<id>` by matching `$ARGUMENTS` against a story's title, or
+    directly if it looks like a `Work-Item` id (`WI-NNNN`) from BACKLOG.md/SPRINT.md, then confirm
+    the resolved item with the user before claiming it.
   - Claim + start: `workitems claim <id> --owner <who>` then `workitems set-status <id> "In Progress"`.
     Resolve `<who>` from `git config user.name`; if that is unset, ask the user.
 - **`[]` and no `docs/workitems/` directory** → still on prose. Read SPRINT.md to find/ask which
