@@ -13,7 +13,7 @@ Gate commands do not accept arguments. They always check the complete current sp
 Before evaluating the gate, ensure the whole-sprint code review exists and is current, then feed its findings into the gate.
 
 **Resolve scope + freshness guard:**
-1. Determine the current sprint number `<n>` and its `base_commit` from `docs/planning/SPRINT.md` (or the active `sprint/SPRINT-NN.md` if SPRINT.md is a sub-index).
+1. Determine the current sprint number `<n>` from `docs/planning/SPRINT.md`'s frontmatter field `sprint: <n>` (or the active `sprint/SPRINT-NN.md`'s `sprint: NN` field, if SPRINT.md is a sub-index) — the same file the `base_commit` below already comes from. Also read `base_commit` from that same frontmatter.
 2. A report `docs/reviews/SPRINT-<n>-review.md` is **current** if it exists AND its recorded `reviewed_head` equals the current `git rev-parse HEAD`.
 3. **Current** → reuse it; do not re-run (opus is not spent again).
 4. **Missing or stale** (HEAD moved since it was written, e.g. after a `/p5-bugfix`) → **run `/p5-review-sprint` now**. That command invokes the `code-reviewer` agent on **opus** — the agent default is `sonnet`, so the opus model is passed explicitly via the command's `**Model**: opus` — scoped to `git diff <base_commit>..HEAD`, and writes/refreshes the report. Invoked as a sub-step here: use its findings; ignore its standalone next-step recommendations (we are already in the gate).
@@ -87,14 +87,16 @@ Delegate the sprint gate check to the **project-planner** agent with a focused p
 >
 > **Per-story verdict table (structured-store projects only, per the §0a guard):** the criteria
 > above are judged at the sprint level, but the write-back in step 3 needs a per-story decision.
-> Read each story's `Work-Item` id directly from SPRINT.md's Sprint Table (`/p4-sprint` carries it
-> forward from BACKLOG.md's `**Work-Item:**` line into that table's Work-Item column) — do not
-> fuzzy-match on the story title. If a story's Sprint Table row has no Work-Item id (an
-> older/unmigrated sprint plan predating this column), fall back to matching its title against
-> `workitems list` and flag it so the id gets backfilled. Output one row per story:
-> `Story | Work-Item id | Verdict (Done / Backlog)`. A story is `Done` only if it individually meets
-> criteria 2 and 5 above; otherwise `Backlog` (deferred). This table, not fuzzy title matching, is
-> what step 3 below applies `set-status` against.
+> Resolve sprint membership via `workitems list --sprint <n>` (`<n>` resolved in step 0.1 above,
+> from SPRINT.md's frontmatter — the same place `base_commit` already comes from) — every item in
+> that result is a sprint member; use its id and title directly, no fuzzy title-matching against
+> SPRINT.md's Sprint Table needed. If SPRINT.md (or the active sprint detail file) carries no
+> `sprint:` frontmatter yet (an older sprint plan predating this convention), fall back to reading
+> ids from the Sprint Table's Work-Item column instead — the title-matching fallback is removed; a
+> Sprint Table row with no Work-Item id must be backfilled before the gate can score it. Output one
+> row per story: `Story | Work-Item id | Verdict (Done / Backlog)`. A story is `Done` only if it
+> individually meets criteria 2 and 5 above; otherwise `Backlog` (deferred). This table, resolved
+> via the sprint field, is what step 3 below applies `set-status` against.
 
 ### 3. Create Gate Protocol
 
