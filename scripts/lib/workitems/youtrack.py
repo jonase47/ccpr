@@ -52,7 +52,8 @@ from workitems import (
 # (unverified against a live instance, flagged here per the architect's note; the
 # read-side in _item_from_issue handles both a dict and a bare scalar defensively).
 _ISSUE_FIELDS = (
-    "idReadable,summary,description,customFields(name,value(name,login)),"
+    "idReadable,summary,description,project(shortName),"
+    "customFields(name,value(name,login)),"
     "comments(text),tags(name),links(direction,linkType(name),issues(idReadable))"
 )
 
@@ -243,15 +244,25 @@ class YouTrackBackend:
         # $top=-1 disables pagination explicitly — without it, some YouTrack versions
         # cap /api/issues to a default page size, silently truncating a large project.
         # `query` is passed through verbatim to YouTrack's own query language, always
-        # prefixed with `project: <PROJ> ` so a query can never leak results from
-        # another project the token happens to have read access to (ADR-0002 2nd
-        # addendum).
+        # prefixed with `project: <PROJ> ` (ADR-0002 2nd addendum). That textual
+        # prefix alone is NOT a reliable scoping guarantee, though: a caller-supplied
+        # query containing its own `project:` clause joined with `or` (or unbalanced
+        # parens) can defeat it server-side -- the guarantee this backend actually
+        # promises must not depend on YouTrack's query-language boolean semantics.
+        # So the result is ALSO post-filtered client-side below, structurally, against
+        # the `project(shortName)` field _ISSUE_FIELDS now requests: fail-closed (an
+        # issue with unexpectedly missing/mismatched project info is dropped, never
+        # leaked) and independent of whatever the query string happened to say.
         scoped_query = f"project: {self.project}"
         if query:
             scoped_query = f"{scoped_query} {query}"
         issues = self._request(
             "GET", "/api/issues", fields=_ISSUE_FIELDS, query=scoped_query, top=-1,
         )
+        issues = [
+            issue for issue in issues
+            if (issue.get("project") or {}).get("shortName") == self.project
+        ]
         items = [self._item_from_issue(issue) for issue in issues]
         if status is not None:
             items = [item for item in items if item["status"] == status]

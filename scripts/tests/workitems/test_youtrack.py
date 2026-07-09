@@ -775,6 +775,20 @@ class YouTrackQueryTest(unittest.TestCase):
 
         self.assertEqual(self.transport.list_queries_received[-1], "project: TEST")
 
+    def test_query_cannot_leak_results_from_a_different_project(self):
+        """A caller-supplied query containing its own `project:` clause (joined with
+        `or`) defeats the plain `f"project: {self.project} {query}"` textual prefix
+        server-side -- the guarantee must not depend on the query string's boolean
+        semantics, so the backend post-filters the result client-side instead."""
+        own_item = self.backend.create(title="Own item")
+        self.transport.seed_foreign_issue("OTHER-1", "OTHER", summary="Foreign item")
+
+        items = self.backend.list(query="or project: OTHER")
+
+        ids = [item["id"] for item in items]
+        self.assertIn(own_item["id"], ids)
+        self.assertNotIn("OTHER-1", ids)
+
 
 class YouTrackPriorityMapTest(unittest.TestCase):
     """priorityMap lets a project whose Priority bundle doesn't name its values to

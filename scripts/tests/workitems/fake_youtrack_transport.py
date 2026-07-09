@@ -5,6 +5,7 @@ commands, comments) for YouTrackBackend to be exercised end-to-end against the s
 contract fixture and dedicated youtrack tests, per ADR-0003's operation mapping.
 """
 
+import re
 import urllib.parse
 
 from workitems import WorkItemError
@@ -80,8 +81,12 @@ class FakeYouTrackTransport:
             return self._create_issue(body)
 
         if method == "GET" and path == "/api/issues":
-            self.list_queries_received.append(query_params.get("query"))
-            all_issues = [self._render_issue(issue) for issue in self._issues.values()]
+            query = query_params.get("query")
+            self.list_queries_received.append(query)
+            matching_issues = [
+                issue for issue in self._issues.values() if self._matches_query(issue, query)
+            ]
+            all_issues = [self._render_issue(issue) for issue in matching_issues]
             if self.page_size_cap is not None and query_params.get("$top") != "-1":
                 return all_issues[:self.page_size_cap]
             return all_issues
@@ -116,6 +121,42 @@ class FakeYouTrackTransport:
 
         raise AssertionError(f"FakeYouTrackTransport: unhandled request {method} {path}")
 
+    def _matches_query(self, issue, query):
+        """Naive stand-in for YouTrack's own query language: collects every
+        `project: <NAME>` token mentioned anywhere in `query` (however it got there --
+        including via an `or` a caller-supplied query string injects) and matches if
+        the issue's project is one of them. This is deliberately loose (no real
+        boolean-operator handling) -- its only job is to reproduce, in-memory, that a
+        naive `f"project: {self.project} {query}"` prefix does NOT reliably scope
+        results server-side once the passed-through query contains its own `project:`
+        clause (the leak this backend's client-side post-filter guards against)."""
+        if not query:
+            return True
+        mentioned_projects = set(re.findall(r"project:\s*(\S+)", query, re.IGNORECASE))
+        if not mentioned_projects:
+            return True
+        return issue["project"] in mentioned_projects
+
+    def seed_foreign_issue(self, item_id, project_short_name, summary="Foreign issue"):
+        """Test helper: injects an issue belonging to a DIFFERENT project directly,
+        bypassing backend.create() (which always creates issues in the configured
+        project). Used to prove `--query` cannot leak results across a project
+        boundary (ADR-0002 2nd addendum)."""
+        self._issues[item_id] = {
+            "idReadable": item_id,
+            "summary": summary,
+            "description": "",
+            "state": None,
+            "assignee_login": None,
+            "type": None,
+            "sprint": None,
+            "priority": None,
+            "estimate": None,
+            "comments": [],
+            "tags": [],
+            "project": project_short_name,
+        }
+
     def _require_issue(self, item_id):
         issue = self._issues.get(item_id)
         if issue is None:
@@ -137,6 +178,7 @@ class FakeYouTrackTransport:
             "estimate": None,
             "comments": [],
             "tags": [],
+            "project": self.project_short_name,
         }
         return {"idReadable": item_id}
 
@@ -245,6 +287,7 @@ class FakeYouTrackTransport:
             "idReadable": issue["idReadable"],
             "summary": issue["summary"],
             "description": issue["description"],
+            "project": {"shortName": issue["project"]},
             "customFields": custom_fields,
             "comments": issue["comments"],
             "tags": [{"name": t} for t in issue["tags"]],
