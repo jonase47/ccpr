@@ -18,15 +18,16 @@ recommendation, and disambiguation for unclear requests.
    **and** explicitly check whether the `docs/workitems/` directory exists (e.g. `ls
    docs/workitems/`) — both signals are required, `list` returns the identical `[]` for an
    adopted-but-empty store and a never-adopted project.
-   - **Non-empty list** → the project uses the structured store. **The work-item model has no
-     sprint field — a bare `list --status "Ready"/"In Progress"/"Done"` returns PROJECT-WIDE
-     totals across every sprint, not this sprint's.** Scope it: read the current sprint's
-     `**Work-Item:** WI-NNNN` ids from SPRINT.md's Sprint Table (the Work-Item column), then count
-     status only among those ids from the `list` result (or `get <id>` per id). Report the scoped
-     counts as "this sprint" (e.g. "6/10 Done, 2 In Progress, 2 Ready — this sprint"). If SPRINT.md
-     has no Sprint Table yet, or none of its rows carry a Work-Item id (an older sprint plan
-     predating that column), scoping isn't possible — report the unscoped `list`/`--status` counts
-     but label them explicitly **"project-wide"**, never "this sprint".
+   - **Non-empty list** → the project uses the structured store. **A bare `list
+     --status "Ready"/"In Progress"/"Done"` returns PROJECT-WIDE totals across every sprint, not
+     this sprint's.** Scope it: read the current sprint number `<N>` from `docs/planning/SPRINT.md`'s
+     frontmatter `sprint: <N>` (or the active `docs/planning/sprint/SPRINT-NN.md`'s `sprint: NN`
+     field, for the sub-index layout), then run `workitems list --sprint <N>` and count status
+     directly among that result. Report the scoped counts as "this sprint" (e.g. "6/10 Done, 2 In
+     Progress, 2 Ready — this sprint"). If SPRINT.md (or the active sprint detail file) carries no
+     `sprint:` frontmatter yet (a sprint plan predating this convention, or before the project's
+     first `/p4-sprint` run under it), scoping isn't possible — report the unscoped `list`/`--status`
+     counts but label them explicitly **"project-wide"**, never "this sprint".
    - **Empty list, but `docs/workitems/` exists** → the store is adopted, just empty right now (or
      genuinely zero items). Report it as such (e.g. "0 items adopted yet" or "0 in this sprint"),
      don't fall back to prose.

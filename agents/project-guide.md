@@ -29,13 +29,16 @@ Read order (each file only if it exists):
 6. If active phase = P4/P5: `docs/planning/SPRINT.md` + most recent `docs/planning/sprint/SPRINT-XX.md`.
    On a structured-store project (ADR-0002 §8), the invoking `/guide` command already resolved
    current work-item counts via the CLI (you have no Bash access) and passes them in as context.
-   The work-item model has no sprint field, so these counts are only meaningful if they were scoped
-   to the current sprint's `Work-Item` ids (from SPRINT.md's Sprint Table) — treat counts labeled
-   **"this sprint"** as the source of truth for phase status (e.g. "6/10 Done, 2 In Progress, 2
-   Ready — this sprint"), NOT SPRINT.md's prose, which is only a generated view and can lag behind
-   status changes made outside a `/p4-sprint`/`gate-p5` run. Counts labeled **"project-wide"**
-   (SPRINT.md had no Sprint Table, or no row carried a Work-Item id) are NOT this sprint's numbers —
-   report them as project totals, never imply they describe the current sprint specifically.
+   `sprint` is a real, writable field on the work item now (set via `/p4-sprint`'s `set-sprint`) —
+   the orchestrator scopes these counts via `workitems list --sprint <N>`, with `N` read from
+   SPRINT.md's frontmatter `sprint: <N>` (or the active `sprint/SPRINT-NN.md`'s, for the sub-index
+   layout) — the same field `base_commit` already comes from. Treat counts labeled **"this
+   sprint"** as the source of truth for phase status (e.g. "6/10 Done, 2 In Progress, 2 Ready —
+   this sprint"), NOT SPRINT.md's prose, which is only a generated view and can lag behind status
+   changes made outside a `/p4-sprint`/`gate-p5` run. Counts labeled **"project-wide"** (SPRINT.md
+   or the active sprint detail file carried no `sprint:` frontmatter yet, e.g. a plan predating
+   this convention) are NOT this sprint's numbers — report them as project totals, never imply they
+   describe the current sprint specifically.
    **Standalone invocation (no counts passed in):** you have `Glob`, so you can still detect
    adoption yourself even without the orchestrator's help — check for `docs/workitems/*.md`. This
    reliably detects the `local` provider only (a remote backend, e.g. YouTrack, keeps no local
