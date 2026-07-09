@@ -71,19 +71,34 @@ Before creating anything, check which store already exists:
   `python3 ~/.claude/scripts/workitems.py lift docs/planning/BACKLOG.md` first, then re-run
   `/p4-backlog` once the store is adopted.
 - `docs/workitems/` already exists (structured store adopted, whether via a prior `/p4-backlog` run
-  or via `lift`) → proceed below; this is a same-store re-run (e.g. a focus-epic pass) and is safe.
+  or via `lift`) → proceed below; this is a same-store re-run (e.g. a focus-epic pass) and is safe
+  **only if the focus epic itself is already adopted** — check the next bullet before proceeding.
+- **Partial migration within the same store**: `docs/workitems/` existing does not guarantee EVERY
+  prose epic/story was carried over — a project can adopt the store via one epic's `lift` while
+  other epics still sit only in prose. Before proceeding on a focus epic (`$ARGUMENTS`), check
+  whether that epic's prose stories in `docs/planning/BACKLOG.md`/`backlog/E-0X-*.md` already carry
+  a `**Work-Item:**` line. If any story in the focus epic has **no** such line, that epic itself is
+  still unadopted — recommend `python3 ~/.claude/scripts/workitems.py lift <that epic's source
+  file>` for it before continuing, rather than silently `create`-ing fresh items for it (which would
+  orphan the epic's existing prose instead of lifting it).
 
 #### 4b. Idempotent creation
 For every user story from step 2/3, instead of authoring it as BACKLOG.md prose, create it as a
 work item — but first check it doesn't already exist, so re-running `/p4-backlog` (e.g. to add a
-newly-scoped epic) never duplicates a story that a previous run already created:
+newly-scoped epic) never duplicates a story that a previous run already created. Query the FULL,
+**unfiltered** list — a story already claimed, in review, or done by the time of a re-run is just
+as real a duplicate as one still sitting in Backlog, and an `--status "Backlog"` filter would miss
+exactly the stories a re-run is most likely to encounter:
 
 ```
-python3 ~/.claude/scripts/workitems.py list --status "Backlog"
+python3 ~/.claude/scripts/workitems.py list
 ```
 
 If an item with a matching title is already present in the returned array, skip creating it and
-reuse its `id`. Otherwise create it:
+reuse its `id`. Match case- and whitespace-insensitively (trim, then compare case-folded) so a
+trivial formatting difference doesn't cause a false duplicate or a false miss — this does not catch
+a genuinely *renamed* story (it recreates rather than updates in that case, which is an acceptable
+edge case for this minimal guard). Otherwise create it:
 
 ```
 python3 ~/.claude/scripts/workitems.py create --title "<story title>" --type feat --description "<story text + acceptance criteria>"
