@@ -127,6 +127,23 @@ def safe_parse_datetime(value, parser):
     except (ValueError, TypeError):
         return None
 
+# Typed work-item links (ADR-0008). `blocks` is pure client-side sugar for the
+# inverse of `depends-on` -- never stored as its own edge (see add_link/remove_link
+# in local.py/youtrack.py, which swap id/target and delegate to "depends-on" for it).
+# It is still part of the vocabulary a caller may pass to add-link/remove-link.
+LINK_TYPES = ("depends-on", "blocks", "relates-to", "subtask-of")
+
+
+def validate_link_type(link_type):
+    """Reject anything outside the closed link-verb vocabulary (ADR-0008), on both
+    backends -- same shape as validate_tag's charset guard, but a closed set rather
+    than a pattern."""
+    if link_type not in LINK_TYPES:
+        raise WorkItemError(
+            f"Unknown link type {link_type!r}. Valid values: {', '.join(LINK_TYPES)}"
+        )
+
+
 _DURATION_PATTERN = re.compile(r"^(\d+(?:\.\d+)?)\s*(s|m|h|d)?$")
 _DURATION_UNIT_SECONDS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
 

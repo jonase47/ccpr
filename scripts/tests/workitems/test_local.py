@@ -286,5 +286,38 @@ class LocalBackendCreateTest(unittest.TestCase):
         self.assertEqual(item["result-link"], [])
 
 
+class LocalBackendLinksEncodingTest(unittest.TestCase):
+    """`links` is stored as a flat `type:target` string list, not nested objects
+    (ADR-0008) -- these tests prove the on-disk shape and a full parse-from-disk
+    round-trip, not just the in-memory return value."""
+
+    def setUp(self):
+        self.tmp_dir = tempfile.mkdtemp(prefix="ccpr-workitems-links-")
+        self.addCleanup(shutil.rmtree, self.tmp_dir, ignore_errors=True)
+        self.backend = local.create({"workitems_dir": self.tmp_dir})
+
+    def test_links_are_written_as_type_target_strings_in_frontmatter(self):
+        item = self.backend.create(title="First")
+        target = self.backend.create(title="Second")
+
+        self.backend.add_link(item["id"], "depends-on", target["id"])
+
+        path = Path(self.tmp_dir) / f"{item['id']}.md"
+        text = path.read_text(encoding="utf-8")
+        self.assertIn(f"links: [depends-on:{target['id']}]", text)
+
+    def test_links_round_trip_after_a_fresh_parse_from_disk(self):
+        item = self.backend.create(title="First")
+        target = self.backend.create(title="Second")
+        self.backend.add_link(item["id"], "depends-on", target["id"])
+
+        reloaded = local.create({"workitems_dir": self.tmp_dir})
+        fetched = reloaded.get(item["id"])
+
+        self.assertEqual(
+            fetched["links"], [{"type": "depends-on", "target": target["id"]}],
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -770,6 +770,98 @@ class YouTrackQueryTest(unittest.TestCase):
         self.assertEqual(self.transport.list_queries_received[-1], "project: TEST")
 
 
+class YouTrackLinksDirectionTest(unittest.TestCase):
+    """Direction normalization (ADR-0008, the load-bearing rule): a single shared
+    link record reads differently depending on which linked issue you look from --
+    this is youtrack-only (local has no cross-file direction concept to normalize)."""
+
+    def setUp(self):
+        self.transport = FakeYouTrackTransport(project_short_name="TEST")
+        self.backend = youtrack.YouTrackBackend(
+            base_url="https://faketrack.example.org", project="TEST",
+            token="fake-token", transport=self.transport,
+        )
+
+    def test_reading_the_target_side_of_a_depends_on_edge_shows_blocks(self):
+        item = self.backend.create(title="Dependent")
+        target = self.backend.create(title="Dependency")
+
+        self.backend.add_link(item["id"], "depends-on", target["id"])
+
+        blocked_side = self.backend.get(target["id"])
+        self.assertIn({"type": "blocks", "target": item["id"]}, blocked_side["links"])
+
+    def test_removing_a_depends_on_edge_removes_it_from_both_sides(self):
+        item = self.backend.create(title="Dependent")
+        target = self.backend.create(title="Dependency")
+        self.backend.add_link(item["id"], "depends-on", target["id"])
+
+        self.backend.remove_link(item["id"], "depends-on", target["id"])
+
+        self.assertEqual(self.backend.get(item["id"])["links"], [])
+        self.assertEqual(self.backend.get(target["id"])["links"], [])
+
+    def test_relates_to_is_symmetric_from_both_sides(self):
+        item = self.backend.create(title="A")
+        other = self.backend.create(title="B")
+
+        self.backend.add_link(item["id"], "relates-to", other["id"])
+
+        self.assertIn(
+            {"type": "relates-to", "target": other["id"]}, self.backend.get(item["id"])["links"],
+        )
+        self.assertIn(
+            {"type": "relates-to", "target": item["id"]}, self.backend.get(other["id"])["links"],
+        )
+
+    def test_subtask_of_is_only_surfaced_on_the_child_side(self):
+        """Regression test for the documented gap (ADR-0008): the parent-looking-down
+        view has no canonical verb and must never be surfaced."""
+        child = self.backend.create(title="Child")
+        parent = self.backend.create(title="Parent")
+
+        self.backend.add_link(child["id"], "subtask-of", parent["id"])
+
+        self.assertIn(
+            {"type": "subtask-of", "target": parent["id"]}, self.backend.get(child["id"])["links"],
+        )
+        self.assertEqual(self.backend.get(parent["id"])["links"], [])
+
+
+class YouTrackLinkTypeMapTest(unittest.TestCase):
+    """linkTypeMap (ADR-0008) ships a mechanical default (the verb dehyphenated),
+    unlike stateMap/priorityMap's identity default -- and is overridable per project."""
+
+    def test_default_link_type_map_sends_the_dehyphenated_verb(self):
+        transport = FakeYouTrackTransport(project_short_name="TEST")
+        backend = youtrack.YouTrackBackend(
+            base_url="https://faketrack.example.org", project="TEST",
+            token="fake-token", transport=transport,
+        )
+        item = backend.create(title="A")
+        target = backend.create(title="B")
+
+        backend.add_link(item["id"], "depends-on", target["id"])
+
+        self.assertIn(f"depends on {target['id']}", transport.commands_received)
+
+    def test_overridden_link_type_map_sends_the_configured_name(self):
+        transport = FakeYouTrackTransport(project_short_name="TEST")
+        backend = youtrack.YouTrackBackend(
+            base_url="https://faketrack.example.org", project="TEST",
+            token="fake-token", transport=transport,
+            link_type_map={"depends-on": "requires"},
+        )
+        item = backend.create(title="A")
+        target = backend.create(title="B")
+
+        backend.add_link(item["id"], "depends-on", target["id"])
+
+        self.assertIn(f"requires {target['id']}", transport.commands_received)
+        fetched = backend.get(item["id"])
+        self.assertIn({"type": "depends-on", "target": target["id"]}, fetched["links"])
+
+
 class HttpTransportTest(unittest.TestCase):
     """Direct urllib-level tests for the real transport (mocking urllib.request.urlopen,
     per the reviewer's alternative to the fake-transport approach above) — the fake

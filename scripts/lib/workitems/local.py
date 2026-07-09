@@ -12,7 +12,7 @@ from pathlib import Path
 
 from workitems import (
     STATUS_VALUES, WorkItemError, frontmatter, reject_result_marker, validate_item_id,
-    validate_tag,
+    validate_link_type, validate_tag,
 )
 
 RESULT_HEADING = "## Result"
@@ -238,6 +238,46 @@ class LocalBackend:
         self._write(path, data, body)
         return self._item_from_data(data, body)
 
+    def add_link(self, item_id, link_type, target_id):
+        """Creates a typed edge from `item_id` to `target_id` (ADR-0008), idempotent
+        (an already-present edge is a no-op). `blocks` is pure sugar for the inverse
+        of `depends-on`: id/target are swapped and the edge is written on the
+        TARGET's own file, never as a literal "blocks:" entry -- `local` has no
+        cross-file direction concept to normalize on read (unlike `youtrack`), so the
+        canonical verb actually stored is always one of depends-on/relates-to/
+        subtask-of. Both ids are validated to exist BEFORE any swap, so an unknown
+        source or target raises regardless of which link type was requested."""
+        validate_link_type(link_type)
+        self._path_for(item_id)
+        self._path_for(target_id)
+        if link_type == "blocks":
+            item_id, target_id, link_type = target_id, item_id, "depends-on"
+        path, data, body = self._read(item_id)
+        links = list(data.get("links") or [])
+        entry = f"{link_type}:{target_id}"
+        if entry not in links:
+            links.append(entry)
+            data["links"] = links
+        self._write(path, data, body)
+        return self._item_from_data(data, body)
+
+    def remove_link(self, item_id, link_type, target_id):
+        """Removes an exact `{type, target}` edge (ADR-0008); a no-op if it isn't
+        present. Same blocks-delegation and existence checks as add_link."""
+        validate_link_type(link_type)
+        self._path_for(item_id)
+        self._path_for(target_id)
+        if link_type == "blocks":
+            item_id, target_id, link_type = target_id, item_id, "depends-on"
+        path, data, body = self._read(item_id)
+        links = list(data.get("links") or [])
+        entry = f"{link_type}:{target_id}"
+        if entry in links:
+            links.remove(entry)
+            data["links"] = links
+        self._write(path, data, body)
+        return self._item_from_data(data, body)
+
     def _path_for(self, item_id):
         validate_item_id(item_id)  # primary defense: reject anything but a bare id
 
@@ -289,12 +329,25 @@ class LocalBackend:
             # Never None, on either backend (ADR-0002 2nd addendum): an unset field
             # reads as an empty list, not a missing/None value.
             "tags": data.get("tags") or [],
+            # links[] never None (ADR-0008), same discipline as tags/comments.
+            "links": _parse_links(data.get("links") or []),
             "created": data.get("created"),
             # Claiming / branch-runner protocol (ADR-0005): local never tracks these
             # (no runner concept, nothing to lock) -- always None, on every item.
             "runner": None,
             "heartbeat": None,
         }
+
+
+def _parse_links(raw_links):
+    """`links` frontmatter entries are flat `type:target` strings (ADR-0008) -- split
+    once on `:`, safe because work-item ids never contain `:` (ID_PATTERN)."""
+    links = []
+    for entry in raw_links:
+        link_type, _, target = entry.partition(":")
+        if target:
+            links.append({"type": link_type, "target": target})
+    return links
 
 
 def _new_item_body(description):

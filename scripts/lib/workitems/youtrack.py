@@ -41,13 +41,29 @@ import urllib.request
 from workitems import (
     DEFAULT_STALE_AFTER_SECONDS, RESULT_MARKER, STATUS_VALUES, WorkItemError,
     is_reserved_tag, reject_result_marker, safe_parse_datetime, validate_item_id,
-    validate_tag,
+    validate_link_type, validate_tag,
 )
 
+# `links(direction,linkType(name),issues(idReadable))` (ADR-0008) lets _item_from_issue
+# normalize each link relative to the issue being read. The customFields selector's
+# nested `value(name,login)` is the shape every EXISTING enum/user field (State, Type,
+# Assignee) needs; a scalar (non-bundle) custom field -- the one `estimateField` points
+# at -- is expected to come back as a bare number regardless of that nested selection
+# (unverified against a live instance, flagged here per the architect's note; the
+# read-side in _item_from_issue handles both a dict and a bare scalar defensively).
 _ISSUE_FIELDS = (
     "idReadable,summary,description,customFields(name,value(name,login)),"
-    "comments(text),tags(name)"
+    "comments(text),tags(name),links(direction,linkType(name),issues(idReadable))"
 )
+
+# Typed-link Command API phrases (ADR-0008): the canonical verb, hyphens replaced by
+# spaces, is the MECHANICAL default `linkTypeMap` falls back to when a project's
+# instance doesn't override it -- unlike stateMap/priorityMap's identity default,
+# because a link verb's dehyphenated form is a reasonable, testable starting point
+# (see the ADR's "Alternatives considered" for why this one config key gets a default
+# and its siblings don't). `blocks` never appears here -- it's swapped/delegated to
+# `depends-on` before a Command API phrase is ever resolved (see add_link/remove_link).
+_STORED_LINK_VERBS = ("depends-on", "relates-to", "subtask-of")
 
 # Claiming / branch-runner protocol (ADR-0005). ADR-0003 doesn't specify a concrete
 # mechanism for the runner+heartbeat signals ("a concrete heartbeat implementation
@@ -95,17 +111,20 @@ def create(config):
     return YouTrackBackend(
         base_url, project, token, state_map=config.get("stateMap"),
         stale_after_seconds=config.get("stale_after_seconds"),
+        link_type_map=config.get("linkTypeMap"),
     )
 
 
 class YouTrackBackend:
     def __init__(self, base_url, project, token, state_map=None, transport=None,
-                 clock=None, stale_after_seconds=None):
+                 clock=None, stale_after_seconds=None, link_type_map=None):
         self.base_url = base_url.rstrip("/")
         self.project = project
         self.token = token
         self.state_map = state_map or {}
         self._reverse_state_map = {v: k for k, v in self.state_map.items()}
+        self.link_type_map = link_type_map or {}
+        self._reverse_link_type_map = {v: k for k, v in self.link_type_map.items()}
         self.transport = transport or _HttpTransport()
         self._project_id = None
         # Claiming (ADR-0005): clock is injected (zero-arg callable -> datetime),
@@ -427,6 +446,39 @@ class YouTrackBackend:
         self._run_command(item_id, f"remove tag {tag}")
         return self.get(item_id)
 
+    def add_link(self, item_id, link_type, target_id):
+        """Creates a typed edge (ADR-0008), idempotent (checks the current, already
+        direction-normalized links[] first, same pattern as add_tag). `blocks` is
+        pure sugar: id/target are swapped and delegated to `depends-on` -- there is
+        no separate `blocks` Command API phrase, only the three real verbs ever
+        appear in `linkTypeMap`."""
+        validate_link_type(link_type)
+        validate_item_id(item_id)
+        validate_item_id(target_id)
+        if link_type == "blocks":
+            item_id, target_id, link_type = target_id, item_id, "depends-on"
+        current = self.get(item_id)
+        if {"type": link_type, "target": target_id} in current["links"]:
+            return current
+        mapped = self._map_link_type(link_type)
+        self._run_command(item_id, f"{mapped} {target_id}")
+        return self.get(item_id)
+
+    def remove_link(self, item_id, link_type, target_id):
+        """Removes an exact `{type, target}` edge; a no-op if it isn't present
+        (checked via a `get` first, same idempotence rule as remove_tag)."""
+        validate_link_type(link_type)
+        validate_item_id(item_id)
+        validate_item_id(target_id)
+        if link_type == "blocks":
+            item_id, target_id, link_type = target_id, item_id, "depends-on"
+        current = self.get(item_id)
+        if {"type": link_type, "target": target_id} not in current["links"]:
+            return current
+        mapped = self._map_link_type(link_type)
+        self._run_command(item_id, f"remove {mapped} {target_id}")
+        return self.get(item_id)
+
     def _resolve_project_id(self):
         if self._project_id is not None:
             return self._project_id
@@ -477,6 +529,56 @@ class YouTrackBackend:
         if project_state_name is None:
             return None
         return self._reverse_state_map.get(project_state_name, project_state_name)
+
+    def _map_link_type(self, canonical_verb):
+        """Canonical verb -> the instance's actual YouTrack link-type name. Unlike
+        _map_state's identity default, this falls back to the MECHANICAL dehyphenated
+        form (ADR-0008) rather than the bare verb itself."""
+        return self.link_type_map.get(canonical_verb, canonical_verb.replace("-", " "))
+
+    def _unmap_link_type(self, project_link_type_name):
+        """The instance's link-type name -> a canonical verb, or None if it can't be
+        resolved (an unrelated link type present on the issue -- skipped on read,
+        never surfaced as a made-up verb)."""
+        if project_link_type_name in self._reverse_link_type_map:
+            return self._reverse_link_type_map[project_link_type_name]
+        mechanical_candidate = project_link_type_name.replace(" ", "-")
+        if mechanical_candidate in _STORED_LINK_VERBS:
+            return mechanical_candidate
+        return None
+
+    def _parse_links(self, raw_links):
+        """Normalizes YouTrack's per-issue direction into the canonical {type,
+        target} shape (ADR-0008, the load-bearing rule):
+
+        - depends-on, OUTWARD (this item is the dependent)   -> depends-on
+        - depends-on, INWARD  (this item is depended upon)   -> blocks
+        - relates-to, any direction (symmetric)              -> relates-to
+        - subtask-of, INWARD  (this item is the child)       -> subtask-of
+        - subtask-of, OUTWARD (this item is the parent)      -> not surfaced
+          (documented, intentional gap -- no "has-subtask" verb exists yet)
+        """
+        links = []
+        for link in raw_links:
+            link_type_name = (link.get("linkType") or {}).get("name")
+            canonical = self._unmap_link_type(link_type_name)
+            if canonical is None:
+                continue
+            direction = link.get("direction")
+            for linked_issue in link.get("issues", []):
+                target = linked_issue.get("idReadable")
+                if not target:
+                    continue
+                if canonical == "depends-on":
+                    if direction == "OUTWARD":
+                        links.append({"type": "depends-on", "target": target})
+                    elif direction == "INWARD":
+                        links.append({"type": "blocks", "target": target})
+                elif canonical == "relates-to":
+                    links.append({"type": "relates-to", "target": target})
+                elif canonical == "subtask-of" and direction == "INWARD":
+                    links.append({"type": "subtask-of", "target": target})
+        return links
 
     def _item_from_issue(self, issue):
         custom_fields = {f["name"]: f.get("value") for f in issue.get("customFields", [])}
@@ -542,6 +644,7 @@ class YouTrackBackend:
             "owner": owner,
             "type": item_type,
             "tags": tags,
+            "links": self._parse_links(issue.get("links", [])),
             "runner": runner,
             "heartbeat": heartbeat,
         }

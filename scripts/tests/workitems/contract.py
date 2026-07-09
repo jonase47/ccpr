@@ -499,6 +499,120 @@ class WorkItemsContractTestCase:
 
         self.assertEqual(items, [])
 
+    # --- add-link / remove-link ---
+    #
+    # `links[]` is a writable core-model field (ADR-0008): typed edges between items.
+    # `blocks` is pure client-side sugar for the inverse of `depends-on` (delegates to
+    # `add-link <target> depends-on <id>` -- see the ADR) -- its own-side delegation
+    # behaviour is backend-neutral and covered here; the youtrack-only direction
+    # normalization (reading the TARGET side of a depends-on edge as `blocks`) and the
+    # `relates-to`/`subtask-of` direction subtleties live in test_youtrack.py, since
+    # `local` has no cross-file direction concept to normalize (ADR-0008).
+
+    def test_fresh_item_has_an_empty_links_list(self):
+        item_id = self.create_item()
+
+        item = self.backend.get(item_id)
+
+        self.assertEqual(item["links"], [])
+
+    def test_add_link_creates_a_typed_edge_visible_on_the_source_side(self):
+        item_id = self.create_item()
+        target_id = self.create_item()
+
+        item = self.backend.add_link(item_id, "depends-on", target_id)
+
+        self.assertIn({"type": "depends-on", "target": target_id}, item["links"])
+        self.assertIn(
+            {"type": "depends-on", "target": target_id},
+            self.backend.get(item_id)["links"],
+        )
+
+    def test_add_link_on_an_already_present_edge_is_a_no_op(self):
+        item_id = self.create_item()
+        target_id = self.create_item()
+        self.backend.add_link(item_id, "depends-on", target_id)
+
+        item = self.backend.add_link(item_id, "depends-on", target_id)
+
+        self.assertEqual(
+            item["links"].count({"type": "depends-on", "target": target_id}), 1,
+        )
+
+    def test_remove_link_removes_the_exact_edge(self):
+        item_id = self.create_item()
+        target_id = self.create_item()
+        self.backend.add_link(item_id, "depends-on", target_id)
+
+        item = self.backend.remove_link(item_id, "depends-on", target_id)
+
+        self.assertNotIn({"type": "depends-on", "target": target_id}, item["links"])
+        self.assertNotIn(
+            {"type": "depends-on", "target": target_id},
+            self.backend.get(item_id)["links"],
+        )
+
+    def test_remove_link_on_an_absent_edge_is_a_no_op(self):
+        item_id = self.create_item()
+        target_id = self.create_item()
+
+        item = self.backend.remove_link(item_id, "depends-on", target_id)
+
+        self.assertEqual(item["links"], [])
+
+    def test_add_link_with_blocks_delegates_to_the_targets_depends_on(self):
+        item_id = self.create_item()
+        target_id = self.create_item()
+
+        self.backend.add_link(item_id, "blocks", target_id)
+
+        self.assertIn(
+            {"type": "depends-on", "target": item_id},
+            self.backend.get(target_id)["links"],
+        )
+
+    def test_remove_link_with_blocks_delegates_to_the_targets_depends_on(self):
+        item_id = self.create_item()
+        target_id = self.create_item()
+        self.backend.add_link(item_id, "blocks", target_id)
+
+        self.backend.remove_link(item_id, "blocks", target_id)
+
+        self.assertNotIn(
+            {"type": "depends-on", "target": item_id},
+            self.backend.get(target_id)["links"],
+        )
+
+    def test_add_link_rejects_an_invalid_type(self):
+        item_id = self.create_item()
+        target_id = self.create_item()
+
+        with self.assertRaises(Exception):
+            self.backend.add_link(item_id, "not-a-real-type", target_id)
+
+    def test_remove_link_rejects_an_invalid_type(self):
+        item_id = self.create_item()
+        target_id = self.create_item()
+
+        with self.assertRaises(Exception):
+            self.backend.remove_link(item_id, "not-a-real-type", target_id)
+
+    def test_add_link_unknown_source_id_raises(self):
+        target_id = self.create_item()
+
+        with self.assertRaises(Exception):
+            self.backend.add_link("WI-9999", "depends-on", target_id)
+
+    def test_add_link_unknown_target_id_raises(self):
+        item_id = self.create_item()
+
+        with self.assertRaises(Exception):
+            self.backend.add_link(item_id, "depends-on", "WI-9999")
+
+    def test_remove_link_unknown_id_raises(self):
+        with self.assertRaises(Exception):
+            self.backend.remove_link("WI-9999", "depends-on", "WI-9998")
+
     # --- id validation / path traversal ---
     #
     # Ids may end up in filesystem paths (local) today and in `ticket/<id>` branch
@@ -521,6 +635,8 @@ class WorkItemsContractTestCase:
             "set_type": (item_id, "bug"),
             "add_tag": (item_id, "security"),
             "remove_tag": (item_id, "security"),
+            "add_link": (item_id, "depends-on", "WI-9999"),
+            "remove_link": (item_id, "depends-on", "WI-9999"),
         }[op]
         return getattr(self.backend, op)(*args)
 
@@ -528,7 +644,7 @@ class WorkItemsContractTestCase:
         ops = (
             "get", "set_status", "append_result",
             "comment", "set_description", "set_title", "set_type",
-            "add_tag", "remove_tag",
+            "add_tag", "remove_tag", "add_link", "remove_link",
         )
         for malicious_id in ("../../x", "/etc/x", "a/b", "a.md"):
             for op in ops:
@@ -548,7 +664,7 @@ class WorkItemsContractTestCase:
         ops = (
             "get", "append_result",
             "comment", "set_description", "set_title", "set_type",
-            "add_tag", "remove_tag",
+            "add_tag", "remove_tag", "add_link", "remove_link",
         )
         for op in ops:
             with self.subTest(op=op):

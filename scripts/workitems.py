@@ -24,6 +24,8 @@ Usage:
   workitems.py set-type <id> <type> [--project DIR]
   workitems.py add-tag <id> <tag> [--project DIR]
   workitems.py remove-tag <id> <tag> [--project DIR]
+  workitems.py add-link <id> <type> <target-id> [--project DIR]
+  workitems.py remove-link <id> <type> <target-id> [--project DIR]
   workitems.py migrate --to <provider> [--project DIR]
   workitems.py lift <source-file...> [--apply] [--exclude PATTERN=REASON ...] [--project DIR]
   workitems.py sweep [--project DIR]
@@ -38,6 +40,10 @@ backend raises on --query (no server-side query language to pass through to).
 Claiming (ADR-0005): --runner records the runner:<id> signal + a heartbeat and sets
 In Progress; mandatory for remote backends, a no-op for `local`. `sweep` reconciles
 abandoned claims into Parked based on `workitems.claiming.staleAfter` in `.claude/settings.json`.
+
+Typed links (ADR-0008): <type> is one of depends-on/blocks/relates-to/subtask-of.
+`blocks` is client-side sugar for the inverse of depends-on (delegates to
+`add-link <target-id> depends-on <id>`); add-link/remove-link are idempotent.
 """
 
 import argparse
@@ -251,6 +257,20 @@ def build_parser():
     p_remove_tag.add_argument("id")
     p_remove_tag.add_argument("tag")
 
+    p_add_link = sub.add_parser(
+        "add-link", help="Create a typed edge to another item (idempotent)", parents=[project_arg],
+    )
+    p_add_link.add_argument("id")
+    p_add_link.add_argument("type")
+    p_add_link.add_argument("target")
+
+    p_remove_link = sub.add_parser(
+        "remove-link", help="Remove an exact typed edge (idempotent)", parents=[project_arg],
+    )
+    p_remove_link.add_argument("id")
+    p_remove_link.add_argument("type")
+    p_remove_link.add_argument("target")
+
     p_migrate = sub.add_parser(
         "migrate", help="Move items to a target backend, once, reversibly (ADR-0004)",
         parents=[project_arg],
@@ -309,6 +329,10 @@ def dispatch(backend, args):
         return backend.add_tag(args.id, args.tag)
     if args.operation == "remove-tag":
         return backend.remove_tag(args.id, args.tag)
+    if args.operation == "add-link":
+        return backend.add_link(args.id, args.type, args.target)
+    if args.operation == "remove-link":
+        return backend.remove_link(args.id, args.type, args.target)
     raise ValueError(f"Unknown operation: {args.operation}")
 
 

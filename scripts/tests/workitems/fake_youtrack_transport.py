@@ -15,7 +15,8 @@ class FakeYouTrackTransport:
     real `_HttpTransport`, so YouTrackBackend cannot tell the difference."""
 
     def __init__(self, project_short_name="TEST", page_size_cap=None,
-                 known_states=None, known_users=None, known_types=None, known_tags=None):
+                 known_states=None, known_users=None, known_types=None, known_tags=None,
+                 known_sprints=None, estimate_field_name=None, child_side_link_names=None):
         self.project_short_name = project_short_name
         self.project_internal_id = "0-0"
         self.commands_received = []  # for tests asserting on the exact command string
@@ -49,6 +50,23 @@ class FakeYouTrackTransport:
         # exercises create()'s best-effort tag handling (a rejected tag must warn
         # and continue, never orphan the already-committed issue).
         self.known_tags = known_tags
+        # Same idea, for the Sprint enum bundle -- restrictive only in a dedicated
+        # hard-fail test (mirrors known_states/known_types).
+        self.known_sprints = known_sprints
+        # The (project-specific, configurable) custom field name set-estimate writes
+        # to -- None means the fake never recognises an estimate command (matching a
+        # project that hasn't configured workitems.youtrack.estimateField).
+        self.estimate_field_name = estimate_field_name
+        # Typed links (ADR-0008): a shared, undirected edge list -- one edge is
+        # visible from BOTH linked issues (with an opposite `direction`), matching how
+        # a real YouTrack link record works. `child_side_link_names` models the one
+        # link type (by default "subtask of", the mechanical default name) whose
+        # ISSUER side reads back as INWARD rather than OUTWARD -- see _links_for.
+        self._links = []
+        self._child_side_link_names = (
+            child_side_link_names if child_side_link_names is not None
+            else {"subtask of"}
+        )
 
     def request(self, method, url, token, body=None):
         parsed = urllib.parse.urlparse(url)
@@ -114,6 +132,9 @@ class FakeYouTrackTransport:
             "state": None,
             "assignee_login": None,
             "type": None,
+            "sprint": None,
+            "priority": None,
+            "estimate": None,
             "comments": [],
             "tags": [],
         }
@@ -123,7 +144,8 @@ class FakeYouTrackTransport:
         query = body["query"]
         self.commands_received.append(query)
         for ref in body["issues"]:
-            issue = self._require_issue(ref["idReadable"])
+            item_id = ref["idReadable"]
+            issue = self._require_issue(item_id)
             if query.startswith("State "):
                 value = query[len("State "):]
                 if self.known_states is not None and value not in self.known_states:
@@ -154,7 +176,52 @@ class FakeYouTrackTransport:
                     # project's actual Type bundle (e.g. Bug/Feature/Task) verbatim.
                     raise WorkItemError(f"YouTrack command rejected (HTTP 400): Type expected: {value}")
                 issue["type"] = value
+            elif query.startswith("Sprint "):
+                value = query[len("Sprint "):]
+                if self.known_sprints is not None and value not in self.known_sprints:
+                    raise WorkItemError(f"YouTrack command rejected (HTTP 400): Sprint expected: {value}")
+                issue["sprint"] = value
+            elif query.startswith("Priority "):
+                issue["priority"] = query[len("Priority "):]
+            elif self.estimate_field_name and query.startswith(f"{self.estimate_field_name} "):
+                issue["estimate"] = query[len(self.estimate_field_name) + 1:]
+            elif query.startswith("remove "):
+                self._apply_remove_link_command(item_id, query[len("remove "):])
+            else:
+                self._apply_add_link_command(item_id, query)
         return {}
+
+    def _apply_add_link_command(self, from_id, query):
+        # Splitting on the LAST space works regardless of the (possibly multi-word,
+        # possibly linkTypeMap-overridden) link-type name, since a work-item id never
+        # contains a space -- no need to know the recognised name set up front.
+        name, _, target_id = query.rpartition(" ")
+        self._require_issue(target_id)
+        edge = (name, from_id, target_id)
+        if edge not in self._links:
+            self._links.append(edge)
+
+    def _apply_remove_link_command(self, from_id, query):
+        name, _, target_id = query.rpartition(" ")
+        edge = (name, from_id, target_id)
+        if edge in self._links:
+            self._links.remove(edge)
+
+    def _links_for(self, issue_id):
+        links = []
+        for name, from_id, to_id in self._links:
+            child_side = name in self._child_side_link_names
+            if issue_id == from_id:
+                other, direction = to_id, ("INWARD" if child_side else "OUTWARD")
+            elif issue_id == to_id:
+                other, direction = from_id, ("OUTWARD" if child_side else "INWARD")
+            else:
+                continue
+            links.append({
+                "direction": direction, "linkType": {"name": name},
+                "issues": [{"idReadable": other}],
+            })
+        return links
 
     def _render_issue(self, issue):
         custom_fields = []
@@ -164,6 +231,16 @@ class FakeYouTrackTransport:
             custom_fields.append({"name": "Assignee", "value": {"login": issue["assignee_login"]}})
         if issue["type"] is not None:
             custom_fields.append({"name": "Type", "value": {"name": issue["type"]}})
+        if issue["sprint"] is not None:
+            custom_fields.append({"name": "Sprint", "value": {"name": issue["sprint"]}})
+        if issue["priority"] is not None:
+            custom_fields.append({"name": "Priority", "value": {"name": issue["priority"]}})
+        if issue["estimate"] is not None and self.estimate_field_name:
+            # Simulates a scalar (non-bundle) custom field: `value` is the raw number
+            # itself, not a nested {"name": ...} object -- the plausible shape for a
+            # Simple/Integer field type (unverified against a live instance, see the
+            # architect's note in ADR-0002's 2nd addendum).
+            custom_fields.append({"name": self.estimate_field_name, "value": int(issue["estimate"])})
         return {
             "idReadable": issue["idReadable"],
             "summary": issue["summary"],
@@ -171,4 +248,5 @@ class FakeYouTrackTransport:
             "customFields": custom_fields,
             "comments": issue["comments"],
             "tags": [{"name": t} for t in issue["tags"]],
+            "links": self._links_for(issue["idReadable"]),
         }
