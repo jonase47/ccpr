@@ -12,11 +12,14 @@ reading SPRINT.md and asking, if the project is still on prose).
 
 Run `python3 ~/.claude/scripts/workitems.py list`.
 - **Non-empty array** → the project uses the structured store. Use the CLI for all item state below:
-  - No `$ARGUMENTS`: resolve the next story via `workitems list --status "Ready"`, pick the top
-    item, ask for confirmation.
+  - No `$ARGUMENTS`: resolve the next story via `workitems list --status "Ready"`, pick the first
+    item in the returned array, ask for confirmation.
   - Claim + start: `workitems claim <id> --owner <who>` then `workitems set-status <id> "In Progress"`.
+    Resolve `<who>` from `git config user.name`; if that is unset, ask the user.
 - **`[]` and no `docs/workitems/` directory** → still on prose. Read SPRINT.md to find/ask which
   story is next, as before. Emit one line: *"Tip: run `lift` to adopt the structured work-item store."*
+- **`[]` but `docs/workitems/` exists** → adopted store, just empty right now (e.g. between
+  sprints). Treat as adopted: use the CLI, not the prose fallback.
 
 See Manual/WORKITEMS.md §8 for the full guard rationale and the status-verb mapping.
 
@@ -35,7 +38,7 @@ See Manual/WORKITEMS.md §8 for the full guard rationale and the status-verb map
 - Execute each step individually and check the result before the next one starts
 - If errors occur in GREEN: go back to RED and review/adjust tests
 - On completion, using the same guard result from step 0:
-  - Structured store: `workitems set-status <id> "Waiting for Approval"` then
+  - Structured store: `workitems set-status <id> "In Review"` then
     `workitems append-result <id> <PR-link>`.
   - Prose fallback: update SPRINT.md — mark story as "In Review".
 - Once wired, item status is never hand-edited in SPRINT.md/BACKLOG.md — those are planning views
