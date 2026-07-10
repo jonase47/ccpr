@@ -103,8 +103,8 @@ def create(config):
     """Factory used by the CLI dispatcher (scripts/workitems.py)."""
     base_url = config.get("baseUrl")
     project = config.get("project")
-    token_env = config.get("tokenEnv")
-    token_file = config.get("tokenFile")
+    token_env = (config.get("tokenEnv") or "").strip() or None
+    token_file = (config.get("tokenFile") or "").strip() or None
     missing = [
         name for name, value in (("baseUrl", base_url), ("project", project)) if not value
     ]
@@ -132,7 +132,7 @@ def _resolve_token(token_env, token_file):
     """Resolves the YouTrack auth token (ADR-0002/ADR-0003): the token VALUE must
     never live in settings.json, but its SOURCE does -- either an env var name
     (`tokenEnv`) or a file path (`tokenFile`) pointing at a 600-permission file
-    outside the repo. Never logs the token value itself, only "read" vs. "not read".
+    outside the repo.
 
     Resolution order:
     1. `tokenEnv` set AND the named env var is non-empty -- env wins (CI / an
@@ -142,12 +142,12 @@ def _resolve_token(token_env, token_file):
     3. Neither resolves to a non-empty token -- WorkItemError naming both options.
     """
     if token_env:
-        env_token = os.environ.get(token_env)
+        env_token = (os.environ.get(token_env) or "").strip()
         if env_token:
             return env_token
 
     if token_file:
-        path = os.path.expanduser(os.path.expandvars(token_file))
+        path = os.path.expanduser(token_file)
         try:
             with open(path, "r") as handle:
                 file_token = handle.read().strip()

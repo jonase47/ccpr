@@ -812,6 +812,47 @@ class YouTrackCreateFactoryTest(unittest.TestCase):
         with self.assertRaises(WorkItemError):
             youtrack.create(config)
 
+    def test_env_token_with_trailing_newline_is_stripped(self):
+        env_var = "CCPR_TEST_YOUTRACK_TOKEN_TRAILING_NEWLINE"
+        os.environ[env_var] = "env-secret\n"
+        self.addCleanup(os.environ.pop, env_var, None)
+        config = {
+            "baseUrl": "https://faketrack.example.org", "project": "TEST",
+            "tokenEnv": env_var,
+        }
+
+        backend = youtrack.create(config)
+
+        self.assertEqual(backend.token, "env-secret")
+
+    def test_whitespace_only_token_env_and_token_file_raises_naming_both_options(self):
+        config = {
+            "baseUrl": "https://faketrack.example.org", "project": "TEST",
+            "tokenEnv": "   ",
+        }
+
+        with self.assertRaises(WorkItemError) as ctx:
+            youtrack.create(config)
+
+        message = str(ctx.exception)
+        self.assertIn("tokenEnv", message)
+        self.assertIn("tokenFile", message)
+
+    def test_token_file_does_not_expand_environment_variables(self):
+        token_file = self._write_token_file("file-secret\n")
+        env_var = "CCPR_TEST_YOUTRACK_TOKEN_FILE_EXPANDVARS"
+        os.environ[env_var] = "should-not-be-expanded"
+        self.addCleanup(os.environ.pop, env_var, None)
+        config = {
+            "baseUrl": "https://faketrack.example.org", "project": "TEST",
+            "tokenFile": f"${env_var}",
+        }
+
+        with self.assertRaises(WorkItemError) as ctx:
+            youtrack.create(config)
+
+        self.assertIn(f"${env_var}", str(ctx.exception))
+
 
 class YouTrackTagsTest(unittest.TestCase):
     """Tags beyond the backend-neutral contract suite: the reserved runner:/
