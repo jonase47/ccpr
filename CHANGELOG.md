@@ -6,6 +6,12 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+### Fixed
+- **Instincts are now actually loaded at session start.** CLAUDE.md claimed the index was "loaded at
+  session start", but Claude Code does not auto-inject `~/.claude/instincts.md` — it injects CLAUDE.md
+  files and imports. Added an `@instincts.md` import to the shipped CLAUDE.md so the slim index (native
+  + shared org-tier bullets) is really pulled into context each session; theme files stay on-demand.
+
 ### Changed
 - **`memory-sync.sh pull` now lists the shared instincts in the autoloaded index.** The `{ORG}`-tier
   index block previously held only a pointer to the overlay topic file, so a session-start reader saw

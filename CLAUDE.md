@@ -121,7 +121,9 @@ If a project has `docs/BASELINE.md` AND the project CLAUDE.md contains a "Baseli
 
 Global instincts are split into a **slim autoloaded index** plus thematic topic files plus a postmortem archive:
 
-- `~/.claude/instincts.md` — index with one-liner + confidence per instinct, grouped by theme. Loaded at session start.
+@instincts.md
+
+- `~/.claude/instincts.md` — index with one-liner + confidence per instinct, grouped by theme. **Loaded at session start via the `@instincts.md` import above** — Claude Code injects `@`-referenced files into context (the bare filename resolves relative to this CLAUDE.md). Without that import the index is NOT auto-injected, only a read-on-demand reference. (Single-file adopters using `templates/STARTER_INSTINCTS.md` instead of `instincts.md` should point the import at their chosen file.)
 - `~/.claude/instincts/{agents,files,workflow,shell-git,external}.md` — full Rule + Why + How to apply per theme. Load the relevant topic file on demand when a pattern from that domain is triggered.
 - `~/.claude/instincts-archive/HISTORY.md` — rolling postmortem history + long-form decay narratives. Not autoloaded; read only for retrospective analysis. Each `/postmortem` appends one block to the Header-Snapshot code box (newest on top, the previous `Last updated:` shifts to `Previous:`).
 
