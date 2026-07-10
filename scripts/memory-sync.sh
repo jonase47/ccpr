@@ -161,17 +161,53 @@ backup_if_exists() {
 }
 
 ensure_index_block() {
-  # Add an autoload pointer block to the instincts index if the overlay exists and
-  # the block is not present yet. Idempotent.
+  # Refresh the autoloaded index block: heading + note + one-liner bullets generated from the
+  # overlay's `### <ID>: <headline>` entries, so the shared set is VISIBLE at session start (not
+  # just a pointer). Delimited + regenerated each pull so it self-updates; migrates a prior
+  # undelimited pointer block in place.
   [[ -f "$INSTINCTS_INDEX" ]] || return 0
   [[ -f "$INSTINCTS_TARGET" ]] || return 0
   local rel="instincts/$(basename "$INSTINCTS_TARGET")"
-  local marker="## ${INDEX_BLOCK_TITLE} → ${rel}"
-  if ! grep -qF "$marker" "$INSTINCTS_INDEX"; then
-    { printf '\n%s\n' "$marker";
-      printf '%s\n' "_Synced from ${REPO_URL} via memory-sync.sh (namespace ${NS}-). Read-only overlay — edit in the shared repo, not here._"; } >> "$INSTINCTS_INDEX"
-    note "index block added to $INSTINCTS_INDEX"
-  fi
+  python3 - "$INSTINCTS_INDEX" "$INSTINCTS_TARGET" "$rel" "$INDEX_BLOCK_TITLE" "$REPO_URL" "$NS" <<'PY'
+import sys, re
+index_path, topic_path, rel, title, repo, ns = sys.argv[1:7]
+start, end = f"<!-- memory-sync:{title}:start -->", f"<!-- memory-sync:{title}:end -->"
+lines = open(topic_path, encoding="utf-8").read().splitlines()
+entries = []
+for i, ln in enumerate(lines):
+    m = re.match(r'^###\s+([A-Z]{2}-(?:[A-Z]{2}-)?G-\d+):\s*(.+)$', ln)
+    if not m:
+        continue
+    conf = ""
+    for j in range(i+1, min(i+4, len(lines))):
+        cm = re.search(r'\*\*Confidence[^:]*:\s*([0-9.]+)\*\*', lines[j])
+        if cm:
+            conf = cm.group(1); break
+    entries.append((m.group(1), conf, m.group(2).strip()))
+body = [start, f"## {title} → {rel}",
+        f"_Synced from {repo} via memory-sync.sh (namespace {ns}-). Read-only overlay — edit in the shared repo, not here._", ""]
+for idn, conf, head in entries:
+    body.append(f"- {idn}" + (f" [{conf}]" if conf else "") + f" {head}")
+block = "\n".join(body + [end])
+txt = open(index_path, encoding="utf-8").read()
+if start in txt and end in txt:
+    txt = re.sub(re.escape(start) + r".*?" + re.escape(end), lambda _: block, txt, flags=re.S)
+else:
+    # migrate a prior undelimited pointer block (heading + its `_..._` note line), then append.
+    heading = f"## {title} → {rel}"
+    keep, rows, k = [], txt.splitlines(), 0
+    while k < len(rows):
+        if rows[k].strip() == heading:
+            k += 1
+            while k < len(rows) and rows[k].startswith('_'):
+                k += 1
+            continue
+        keep.append(rows[k]); k += 1
+    txt = "\n".join(keep).rstrip() + "\n\n" + block + "\n"
+open(index_path, "w", encoding="utf-8").write(txt)
+print(len(entries))
+PY
+  note "index block refreshed in $INSTINCTS_INDEX (${INDEX_BLOCK_TITLE})"
 }
 
 ensure_memory_pointer() {

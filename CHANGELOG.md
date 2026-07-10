@@ -6,6 +6,13 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+### Changed
+- **`memory-sync.sh pull` now lists the shared instincts in the autoloaded index.** The `{ORG}`-tier
+  index block previously held only a pointer to the overlay topic file, so a session-start reader saw
+  *that* a shared set exists but not *what's in it* — no trigger to load it. `pull` now generates a
+  one-liner bullet per `### <ID>: <headline>` (with confidence) into a delimited, self-updating block,
+  matching the visibility of native/imported instinct sections. Migrates a prior undelimited block in place.
+
 ## [0.2.0-beta] - 2026-07-10
 
 ### Added
