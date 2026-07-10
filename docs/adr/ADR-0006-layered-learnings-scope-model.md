@@ -1,8 +1,8 @@
 ---
 kind: adr
 adr_id: ADR-0006
-status: proposed
-last_updated: 08.07.2026
+status: accepted
+last_updated: 10.07.2026
 related:
   - ADR-0007-shared-vault-storage.md
   - ADR-0002-workitem-backend-contract.md
@@ -11,8 +11,14 @@ related:
 
 # ADR-0006: Layered learnings / instincts scope model
 
-**Status:** Proposed (08.07.2026)
+**Status:** Accepted (10.07.2026) — scope model realized
 **Decision-makers:** Repo owner (Jonas), early tester (Olli, @OlArtTro)
+
+> **Implementation (10.07.2026):** The scope model ships via the namespace convention
+> (`templates/MEMORY_SCHEMA.md` → "Instinct ID namespaces": native `G-`, imported `{SRC}-`, shared
+> org-tier `{ORG}-`) and the org-tier sync tool `scripts/memory-sync.sh` (down-auto materialization as a
+> read-only overlay; up-promotion via a de-personalization/secret gate). Physical storage + scaling are
+> in ADR-0007.
 
 ## Context
 

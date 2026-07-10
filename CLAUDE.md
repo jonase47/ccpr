@@ -131,6 +131,12 @@ Instincts are short rules with confidence scores (0.3-0.9) derived from session 
 - Split structure (recommended once your instincts.md grows past ~25 KB): the CCPR-shipped `instincts.md` + `instincts/` + `instincts-archive/` already model the layout. Copy them as-is to `~/.claude/` and let `/postmortem` extend them.
 - Single-file alternative: `~/.claude/templates/STARTER_INSTINCTS.md` ships the same 13 generic instincts as one file. Use this if you prefer a single flat list and your instincts.md stays well under the 25 KB Read-token cap.
 
+**Sharing instincts/memory across a team (org tier).** When several people run CCPR against a shared setup, promote team-/platform-relevant instincts and memories into a **shared org-tier repo** (ADR-0006/0007) instead of re-learning them per person — while personal knowledge stays local. `scripts/memory-sync.sh` implements it:
+- **`memory-sync.sh pull`** clones/fetches the shared repo and materializes a **read-only overlay**: shared instincts → `~/.claude/instincts/<shared>.md` (autoloaded via an index block), shared persona instincts → `~/.claude/memory/{agent}/<shared>.md`, shared facts → `~/.claude/memory/<ns>/`.
+- **`memory-sync.sh promote <file> <repo-path>`** shares a local entry (direct-push). A **discipline gate** blocks the push if it finds secrets (token blobs, connection strings, private keys), personal data (home paths, emails, session hashes, `type: user`), non-allowlisted IPs, or work-item/TODO markers — memory holds durable knowledge, work-items belong in your tracker. The gate is a client-side best-effort lint (not server-enforced); add a CI/pre-receive backstop before a large contributor circle.
+- All deployment specifics (repo URL, token file, namespace, overlay paths, IP allowlist) live in a **personal, non-distributed** `~/.claude/memory-sync.json` — copy `templates/memory-sync.example.json` and add it plus `~/.claude/.memory-sync/` to your sync exclusions. The script itself stays generic.
+- **Namespaces** keep sources from colliding and re-syncs idempotent: native `G-NNN`/`{XX}-G-NNN`; **imported** foreign-contributor overlays `{SRC}-G-NNN` (e.g. a teammate's `OL-`), externally maintained; **shared org-tier** `{ORG}-G-NNN`, team-maintained by push (not by your own `/postmortem` decay). See `templates/MEMORY_SCHEMA.md` → "Instinct ID namespaces".
+
 ## Project Memory (Two-tier × two scopes)
 
 Memory is organised in two tiers, each with a global and a project scope. The

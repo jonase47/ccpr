@@ -1,0 +1,19 @@
+{
+  "_comment": "Template for scripts/memory-sync.sh. Copy to ~/.claude/memory-sync.json, fill in your shared org-tier repo, and add ~/.claude/memory-sync.json + ~/.claude/.memory-sync/ to your sync exclusions (never distribute this filled copy). See CLAUDE.md, 'Sharing instincts/memory across a team (org tier)'.",
+  "repo": "<org>/<repo>",
+  "repoUrl": "https://<your-git-host>/<org>/<repo>.git",
+  "apiBase": "https://<your-git-host>/api/v1",
+  "tokenFile": "~/.<host>-token",
+  "clonePath": "~/.claude/.memory-sync/<repo>",
+  "namespace": "XX",
+  "gate": { "ipAllowlist": "" },
+  "overlay": {
+    "instinctsFileInRepo": "instincts/shared.md",
+    "instinctsTarget": "~/.claude/instincts/shared.md",
+    "instinctsIndex": "~/.claude/instincts.md",
+    "indexBlockTitle": "Shared (org)",
+    "personaTopicName": "shared.md",
+    "memoryNsDir": "~/.claude/memory/shared",
+    "memoryIndexPointer": ""
+  }
+}

@@ -34,6 +34,9 @@ DEST="${CCPR_DEST:-$HOME/.claude}"
 # FRAMEWORK : pure framework — always (re)installed.
 # INSTINCTS : ship a starter set, but mature on your machine via /postmortem —
 #             installed fresh, skipped on --update unless --with-instincts.
+#             NOTE: if you sync a shared org-tier overlay (scripts/memory-sync.sh), its
+#             materialized files under instincts/ are sync-managed and self-healing —
+#             re-run `memory-sync.sh pull` after --with-instincts to restore them.
 # PERSONAL  : you edit these after install — installed fresh, never touched by --update.
 FRAMEWORK=( agents commands docs hooks scripts templates )
 INSTINCTS=( instincts instincts-archive instincts.md )

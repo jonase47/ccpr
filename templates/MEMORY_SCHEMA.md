@@ -27,6 +27,26 @@
 - Tier 1 (cross-cutting): `docs/memory/{type}_{slug}.md` — e.g. `feedback_wording.md`, `project_watch_penetration.md`, `reference_apple_review_guidelines.md`.
 - Tier 2 (persona-specific): `docs/memory/{agent}/{topic}.md` — topic slug is freely chosen (e.g. `patterns.md`, `swiftdata-tdd-patterns.md`).
 
+## Instinct ID namespaces
+
+Instincts (behavioral rules, `confidence` field) carry a stable ID. The prefix encodes **scope and
+provenance** so IDs from different sources never collide and re-syncs stay idempotent:
+
+| Namespace | Scope | Maintained by |
+|---|---|---|
+| `G-NNN` | native global Tier-1 (all projects, all agents) | your own `/postmortem` decay/bump clock |
+| `{XX}-G-NNN` | native global Tier-2 persona silo (e.g. `SD-G-`, `DV-G-`, `SM-G-`) | your own clock, one persona |
+| `P-NNN` | project-scoped instinct | your own clock, one project |
+| `{SRC}-G-NNN` / `{SRC}-{XX}-G-NNN` | **imported foreign-contributor** overlay (e.g. `OL-` from a teammate's repo) | the source repo; **not** touched by your decay clock. Keeps the source's original number, confidence, date. Each imported file carries a Contributor Register + re-sync recipe in its header. |
+| `{ORG}-G-NNN` / `{ORG}-{XX}-G-NNN` | **shared org-tier** overlay — team-maintained knowledge synced from a shared repo (see `scripts/memory-sync.sh`) | the shared repo; updated by push, not by any single member's decay clock. |
+
+Rules:
+- Native and prefixed IDs **never collide by namespace** — the same number can mean different things
+  across sources (native `G-081` ≠ imported `OL-G-081`).
+- When you independently confirm an imported/shared pattern on your own stack, either add a
+  `confirmed:` note on the overlay entry, or adopt it as a fresh native `G-NNN` with `supersedes: {SRC}-G-NNN`.
+- Overlay files (imported + org-tier) are materialized read-only; edit them at the source, not in place.
+
 ## Body structure
 
 Recommended for `feedback` and `project` (described in `~/.claude/CLAUDE.md`):

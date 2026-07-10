@@ -1,8 +1,8 @@
 ---
 kind: adr
 adr_id: ADR-0007
-status: proposed
-last_updated: 08.07.2026
+status: partially-implemented
+last_updated: 10.07.2026
 related:
   - ADR-0006-layered-learnings-scope-model.md
   - ADR-0005-claiming-runner-protocol.md
@@ -10,8 +10,13 @@ related:
 
 # ADR-0007: Shared vault storage, scaling, and the runner registry
 
-**Status:** Proposed (08.07.2026)
+**Status:** Partially implemented (10.07.2026)
 **Decision-makers:** Repo owner (Jonas), early tester (Olli, @OlArtTro)
+
+> **Implementation (10.07.2026):** The `org:<name>` storage tier (a dedicated private Git vault repo on
+> the org's Git host) and its sync ship via `scripts/memory-sync.sh` (`pull`/`promote`, read-only
+> overlay, discipline gate). Still **proposed**: the scaling staircase (frontmatter-filter → index →
+> search), the tenant tier, and the runner registry.
 
 ## Context
 

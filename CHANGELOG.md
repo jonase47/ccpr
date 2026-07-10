@@ -7,6 +7,16 @@ All notable changes to this project are documented in this file. The format is b
 ## [Unreleased]
 
 ### Added
+- **Team setup — shared org-tier memory/instincts (`scripts/memory-sync.sh`).** First shipped surface of
+  the layered-learnings scope model (ADR-0006) and shared vault (ADR-0007), previously design-only: a
+  generic, config-driven sync tool that materializes a shared org-tier repo as a **read-only overlay**
+  in `~/.claude` (`pull`) and shares local entries with a **discipline gate** (`promote`) that blocks
+  secrets, personal data (home paths, emails, session hashes, `type: user`), non-allowlisted IPs, and
+  work-item/TODO markers. All deployment specifics live in a personal, non-distributed
+  `~/.claude/memory-sync.json` (template: `templates/memory-sync.example.json`); the script stays
+  generic. Namespaces (`{ORG}-G-NNN` shared, `{SRC}-G-NNN` imported, native `G-NNN`) documented in
+  `templates/MEMORY_SCHEMA.md`. Gate is a client-side best-effort lint — add a CI/pre-receive backstop
+  before a large contributor circle. See CLAUDE.md → "Sharing instincts/memory across a team (org tier)".
 - **`tokenFile` fallback for the YouTrack work-item backend** — `workitems.youtrack.tokenFile` names a
   file path (outside the repo, e.g. mode 600) the backend reads the token from when `tokenEnv` isn't
   set or its named environment variable is empty. Env still wins when both are configured and resolve.
