@@ -15,6 +15,7 @@ import datetime
 import io
 import os
 import sys
+import tempfile
 import unittest
 import urllib.error
 from pathlib import Path
@@ -705,6 +706,111 @@ class YouTrackCreateFactoryTest(unittest.TestCase):
 
         self.assertEqual(backend.token, "secret-value")
         self.assertNotIn("secret-value", repr(config))
+
+    def _write_token_file(self, contents):
+        fd, path = tempfile.mkstemp(prefix="ccpr-youtrack-token-")
+        with os.fdopen(fd, "w") as handle:
+            handle.write(contents)
+        self.addCleanup(os.remove, path)
+        return path
+
+    def test_env_wins_over_token_file_when_both_are_set(self):
+        env_var = "CCPR_TEST_YOUTRACK_TOKEN_ENV_WINS"
+        os.environ[env_var] = "env-secret"
+        self.addCleanup(os.environ.pop, env_var, None)
+        token_file = self._write_token_file("file-secret\n")
+        config = {
+            "baseUrl": "https://faketrack.example.org", "project": "TEST",
+            "tokenEnv": env_var, "tokenFile": token_file,
+        }
+
+        backend = youtrack.create(config)
+
+        self.assertEqual(backend.token, "env-secret")
+
+    def test_token_file_used_when_env_var_is_not_set(self):
+        env_var = "CCPR_TEST_YOUTRACK_TOKEN_FILE_FALLBACK"
+        os.environ.pop(env_var, None)
+        token_file = self._write_token_file("file-secret\n")
+        config = {
+            "baseUrl": "https://faketrack.example.org", "project": "TEST",
+            "tokenEnv": env_var, "tokenFile": token_file,
+        }
+
+        backend = youtrack.create(config)
+
+        self.assertEqual(backend.token, "file-secret")
+
+    def test_token_file_used_when_env_var_is_set_but_empty(self):
+        env_var = "CCPR_TEST_YOUTRACK_TOKEN_FILE_EMPTY_ENV"
+        os.environ[env_var] = ""
+        self.addCleanup(os.environ.pop, env_var, None)
+        token_file = self._write_token_file("file-secret\n")
+        config = {
+            "baseUrl": "https://faketrack.example.org", "project": "TEST",
+            "tokenEnv": env_var, "tokenFile": token_file,
+        }
+
+        backend = youtrack.create(config)
+
+        self.assertEqual(backend.token, "file-secret")
+
+    def test_token_file_supports_tilde_expansion(self):
+        token_file = self._write_token_file("file-secret\n")
+        home = os.path.dirname(token_file)
+        relative_to_home = os.path.basename(token_file)
+        config = {
+            "baseUrl": "https://faketrack.example.org", "project": "TEST",
+            "tokenFile": os.path.join("~", relative_to_home),
+        }
+
+        with mock.patch.dict(os.environ, {"HOME": home}):
+            backend = youtrack.create(config)
+
+        self.assertEqual(backend.token, "file-secret")
+
+    def test_missing_token_env_and_token_file_raises_naming_both_options(self):
+        config = {"baseUrl": "https://faketrack.example.org", "project": "TEST"}
+
+        with self.assertRaises(WorkItemError) as ctx:
+            youtrack.create(config)
+
+        message = str(ctx.exception)
+        self.assertIn("tokenEnv", message)
+        self.assertIn("tokenFile", message)
+
+    def test_missing_token_env_key_is_not_reported_when_token_file_is_present(self):
+        token_file = self._write_token_file("file-secret\n")
+        config = {
+            "baseUrl": "https://faketrack.example.org", "project": "TEST",
+            "tokenFile": token_file,
+        }
+
+        backend = youtrack.create(config)
+
+        self.assertEqual(backend.token, "file-secret")
+
+    def test_token_file_configured_but_missing_raises_naming_the_path(self):
+        missing_path = os.path.join(tempfile.gettempdir(), "ccpr-youtrack-token-does-not-exist")
+        config = {
+            "baseUrl": "https://faketrack.example.org", "project": "TEST",
+            "tokenFile": missing_path,
+        }
+
+        with self.assertRaises(WorkItemError) as ctx:
+            youtrack.create(config)
+
+        self.assertIn(missing_path, str(ctx.exception))
+
+    def test_token_file_configured_but_empty_raises(self):
+        token_file = self._write_token_file("   \n")
+        config = {
+            "baseUrl": "https://faketrack.example.org", "project": "TEST",
+            "tokenFile": token_file,
+        }
+
+        with self.assertRaises(WorkItemError):
+            youtrack.create(config)
 
 
 class YouTrackTagsTest(unittest.TestCase):

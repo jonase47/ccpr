@@ -8,8 +8,10 @@ Design points carried over from the ADR (see ADR-0003 for the full rationale):
   Reads ask for `customFields(name,value(name,login))` and locate values by their
   `name` (or `login`, for the Assignee user field); writes use the name-based Command
   API (`State <name>`, `for <user>`) rather than raw custom-field writes.
-- The token comes only from the environment variable named by `tokenEnv` — never from
-  settings.json (ADR-0002 §3).
+- The token VALUE never lives in settings.json (ADR-0002 §3) — only its SOURCE does,
+  either the name of an environment variable (`tokenEnv`) or a file path
+  (`tokenFile`, e.g. a 600-permission file outside the repo). `tokenEnv` wins when
+  both resolve to a non-empty value (see `_resolve_token`).
 - `claim`/`set-status` prefer the Command API (POST /api/commands) over direct field
   writes, per the ADR's explicit preference.
 
@@ -102,23 +104,19 @@ def create(config):
     base_url = config.get("baseUrl")
     project = config.get("project")
     token_env = config.get("tokenEnv")
+    token_file = config.get("tokenFile")
     missing = [
-        name for name, value in
-        (("baseUrl", base_url), ("project", project), ("tokenEnv", token_env))
-        if not value
+        name for name, value in (("baseUrl", base_url), ("project", project)) if not value
     ]
+    if not token_env and not token_file:
+        missing.append("tokenEnv or tokenFile")
     if missing:
         raise WorkItemError(
             "youtrack backend config is missing required key(s) in settings.json's "
             f"workitems.youtrack: {', '.join(missing)}"
         )
 
-    token = os.environ.get(token_env)
-    if not token:
-        raise WorkItemError(
-            f"environment variable {token_env!r} is not set — the YouTrack token must "
-            "come from the environment, never from settings.json"
-        )
+    token = _resolve_token(token_env, token_file)
 
     return YouTrackBackend(
         base_url, project, token, state_map=config.get("stateMap"),
@@ -127,6 +125,57 @@ def create(config):
         link_type_name_map=config.get("linkTypeNameMap"),
         priority_map=config.get("priorityMap"),
         estimate_field=config.get("estimateField"),
+    )
+
+
+def _resolve_token(token_env, token_file):
+    """Resolves the YouTrack auth token (ADR-0002/ADR-0003): the token VALUE must
+    never live in settings.json, but its SOURCE does -- either an env var name
+    (`tokenEnv`) or a file path (`tokenFile`) pointing at a 600-permission file
+    outside the repo. Never logs the token value itself, only "read" vs. "not read".
+
+    Resolution order:
+    1. `tokenEnv` set AND the named env var is non-empty -- env wins (CI / an
+       explicit session export takes precedence over a standing tokenFile).
+    2. Otherwise, `tokenFile` set -- read and strip it (a trailing newline from a
+       text editor/echo is the common case, not a token character).
+    3. Neither resolves to a non-empty token -- WorkItemError naming both options.
+    """
+    if token_env:
+        env_token = os.environ.get(token_env)
+        if env_token:
+            return env_token
+
+    if token_file:
+        path = os.path.expanduser(os.path.expandvars(token_file))
+        try:
+            with open(path, "r") as handle:
+                file_token = handle.read().strip()
+        except OSError as exc:
+            raise WorkItemError(
+                f"workitems.youtrack.tokenFile is configured ({path!r}) but could not "
+                f"be read: {exc.strerror or exc}"
+            ) from exc
+        if not file_token:
+            raise WorkItemError(
+                f"workitems.youtrack.tokenFile ({path!r}) is empty -- it must contain "
+                "the YouTrack token."
+            )
+        return file_token
+
+    # Reached only when tokenFile isn't configured at all (a configured tokenFile
+    # always either returns above or raises its own dedicated error) -- so if
+    # tokenEnv IS configured, name it, since that's the actionable detail here.
+    if token_env:
+        raise WorkItemError(
+            f"environment variable {token_env!r} is not set (or empty) -- set it, or "
+            "configure workitems.youtrack.tokenFile to read the token from a file "
+            "instead."
+        )
+    raise WorkItemError(
+        "no YouTrack token available: set the environment variable named by "
+        "workitems.youtrack.tokenEnv, or point workitems.youtrack.tokenFile at a "
+        "file (outside the repo, e.g. mode 600) containing the token."
     )
 
 
