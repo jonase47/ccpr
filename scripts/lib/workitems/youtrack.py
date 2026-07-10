@@ -99,12 +99,20 @@ _HEARTBEAT_TAG_PREFIX = "heartbeat:"
 _HEARTBEAT_TAG_FORMAT = "%Y%m%dT%H%M%SZ"
 
 
+def _stripped_or_none(value):
+    """Trims a config string and treats whitespace-only values as unset, so
+    e.g. `tokenEnv: "   "` is rejected as "not configured" rather than being
+    passed through as a (nonsensical) environment variable name to look up."""
+    stripped = (value or "").strip()
+    return stripped or None
+
+
 def create(config):
     """Factory used by the CLI dispatcher (scripts/workitems.py)."""
     base_url = config.get("baseUrl")
     project = config.get("project")
-    token_env = (config.get("tokenEnv") or "").strip() or None
-    token_file = (config.get("tokenFile") or "").strip() or None
+    token_env = _stripped_or_none(config.get("tokenEnv"))
+    token_file = _stripped_or_none(config.get("tokenFile"))
     missing = [
         name for name, value in (("baseUrl", base_url), ("project", project)) if not value
     ]
