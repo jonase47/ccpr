@@ -6,6 +6,8 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+## [0.2.0-beta] - 2026-07-10
+
 ### Added
 - **Team setup — shared org-tier memory/instincts (`scripts/memory-sync.sh`).** First shipped surface of
   the layered-learnings scope model (ADR-0006) and shared vault (ADR-0007), previously design-only: a
