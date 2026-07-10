@@ -2,7 +2,7 @@
 kind: adr
 adr_id: ADR-0003
 status: proposed
-last_updated: 08.07.2026
+last_updated: 10.07.2026
 related:
   - ADR-0002-workitem-backend-contract.md
   - ../../Manual/WORKITEMS.md
@@ -36,8 +36,10 @@ name-based) over raw field writes.
 ### Access
 
 - Base: `<baseUrl>/api` for issues/fields/commands; **auth is a permanent token** as
-  `Authorization: Bearer <token>`, read from the environment variable named by `tokenEnv`
-  (ADR-0002 / `WORKITEMS.md`) — never from the repo.
+  `Authorization: Bearer <token>`. The token itself never enters the repo (ADR-0002 / `WORKITEMS.md`):
+  it comes either from the environment variable named by `tokenEnv`, or — added 10.07.2026, so a
+  session doesn't need to export an env var by hand — from a file path named by `tokenFile` (a
+  600-permission file outside the repo). `tokenEnv` wins when both are configured and resolve.
 - **Direct REST, no MCP.**
 - Note the **YouTrack ↔ Hub split**: issues, custom fields, commands, and boards live under `/api`;
   users, groups, roles, and passwords live under `/hub/api/rest`. The work-item backend only needs

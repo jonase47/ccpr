@@ -1,7 +1,7 @@
 # Work Items — the backend-neutral work-state contract
 
 **Status:** Proposed (draft) — see [`docs/adr/ADR-0002-workitem-backend-contract.md`](../docs/adr/ADR-0002-workitem-backend-contract.md)
-**Date:** 09.07.2026
+**Date:** 10.07.2026
 
 > CCPR works **with or without a ticket system.** The default is local Markdown files in the repo —
 > no server, no token, no setup. A team can point the same commands at a remote tracker by changing
@@ -93,6 +93,7 @@ plus **`Parked`**, **`Blocked`**, and **`Cancelled`** crosscutting (the two gate
     "baseUrl": "https://tracker.example.org",
     "project": "PROJ",
     "tokenEnv": "YOUTRACK_TOKEN",
+    "tokenFile": "~/.config/ccpr/youtrack-token",
     "stateMap": { "Backlog": "Open" },
     "priorityMap": { "Critical": "Show-stopper" },
     "linkTypeMap": { "depends-on": "depends on", "relates-to": "relates to", "subtask-of": "subtask of" },
@@ -107,8 +108,15 @@ plus **`Parked`**, **`Blocked`**, and **`Cancelled`** crosscutting (the two gate
 ```
 
 - `provider` defaults to `local`. Set it per project.
-- Remote-backend **credentials come only from environment variables** (`tokenEnv` names the variable).
-  Never place a secret in `.claude/settings.json` or any tracked file.
+- Remote-backend **credentials never live in `.claude/settings.json` or any tracked file** — only the
+  token's *source* does. Two sources, resolved in this order (`youtrack` only, 10.07.2026):
+  1. `tokenEnv` names an environment variable; if it is set and non-empty, that value wins (CI, or an
+     explicit session export).
+  2. Otherwise `tokenFile` names a file path (`~` expanded) containing the token, stripped of
+     surrounding whitespace/newline — a 600-permission file living outside the repo, so no session
+     needs to export an env var by hand.
+  At least one of `tokenEnv`/`tokenFile` is required; both may be configured (env wins when both
+  resolve). The token value is never logged — only whether it was read.
 - `claiming` (remote backends only): `staleAfter` is how long without a heartbeat before `sweep`
   moves a claimed item to `Parked`; `heartbeatInterval` is advisory for whatever refreshes a runner's
   heartbeat. Durations accept `45s` / `5m` / `2h` / `1d` or a bare number of seconds. See §6 and ADR-0005.
