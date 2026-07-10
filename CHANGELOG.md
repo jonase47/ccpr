@@ -6,6 +6,8 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+## [0.2.1-beta] - 2026-07-10
+
 ### Fixed
 - **Instincts are now actually loaded at session start.** CLAUDE.md claimed the index was "loaded at
   session start", but Claude Code does not auto-inject `~/.claude/instincts.md` — it injects CLAUDE.md
@@ -59,5 +61,7 @@ Initial public release on GitHub. CCPR (Claude Code Project Runner) is a phase-b
 - **Safe installer** — `install.sh` with timestamped backup, overwrite preview, `--update` (framework-only, preserves personal files + matured instincts) and `--dry-run`; user-owned sub-paths preserved across wholesale replace. Windows guidance (WSL / Git Bash / PowerShell fallback) in the README.
 - **Open-source scaffolding** — `LICENSE` (MIT), `AUTHORS`, `CONTRIBUTING.md`, `SECURITY.md`, `BETA.md` (public-beta charter), and GitHub issue templates under `.github/ISSUE_TEMPLATE/` (bug / feedback / question).
 
-[Unreleased]: https://github.com/jonase47/ccpr/compare/v0.1.0-beta...HEAD
+[Unreleased]: https://github.com/jonase47/ccpr/compare/v0.2.1-beta...HEAD
+[0.2.1-beta]: https://github.com/jonase47/ccpr/compare/v0.2.0-beta...v0.2.1-beta
+[0.2.0-beta]: https://github.com/jonase47/ccpr/compare/v0.1.0-beta...v0.2.0-beta
 [v0.1.0-beta]: https://github.com/jonase47/ccpr/releases/tag/v0.1.0-beta
