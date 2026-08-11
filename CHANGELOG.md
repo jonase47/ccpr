@@ -6,6 +6,27 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+### Fixed
+- **`instinct-check.sh` now actually counts instincts.** It reported `Active instincts: 0` in every
+  project while hundreds existed. Three independent causes: (1) it counted `### ` headings in
+  `~/.claude/instincts.md`, but under the split layout the index holds only bullets — the entries live
+  in `instincts/{theme}.md`; (2) heading level is not uniform across the ecosystem (global topic files
+  use `### G-100`, project Tier-2 persona silos use `## BA-P-001`), so entries were invisible depending
+  on the layer — counting is now anchored on the instinct ID and accepts H2 and H3; (3) the script
+  aborted with `unbound variable` on bash 3.2 (the macOS default) whenever a glob matched nothing,
+  because `"${arr[@]}"` on an empty array trips `set -u`.
+- **`instinct-check.sh` reported a stale age.** File age came from the index mtime alone, so editing a
+  theme file without touching the index left the age unchanged. It now uses the newest mtime across
+  the index and all theme files.
+
+### Added
+- **`instinct-check.sh` takes an optional `<project-dir>`** and reports all four instinct layers
+  (global Tier-1 index + theme files, global Tier-2 persona silos, project Tier-1, project Tier-2)
+  instead of only the global index. It also reconciles the index against the theme files: IDs present
+  in a theme file but not listed in the index are reported as INFO (expected for frozen overlays such
+  as `imported-*.md`), while index bullets with no matching entry are a WARNING — the index pointing
+  at content that does not exist.
+
 ## [0.2.1-beta] - 2026-07-10
 
 ### Fixed
