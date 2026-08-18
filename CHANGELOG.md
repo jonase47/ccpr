@@ -7,6 +7,12 @@ All notable changes to this project are documented in this file. The format is b
 ## [Unreleased]
 
 ### Fixed
+- **`memory-lint.sh` gained exit code 3 for a configuration error.** The severity knob for the new
+  check was expanded in command position, so a typo aborted the run with `command not found`, exit
+  127 and no report at all — a caller testing for "non-zero" would have read a dead script as a
+  findings result. The value is now validated up front and findings are dispatched by `case`. The
+  contract at the top of the script, in `templates/MEMORY_SCHEMA.md` and in `/cleanup` now all name
+  the new code.
 - **`instinct-check.sh` now actually counts instincts.** It reported `Active instincts: 0` in every
   project while hundreds existed. Three independent causes: (1) it counted `### ` headings in
   `~/.claude/instincts.md`, but under the split layout the index holds only bullets — the entries live
@@ -20,6 +26,21 @@ All notable changes to this project are documented in this file. The format is b
   the index and all theme files.
 
 ### Added
+- **`memory-lint.sh` now validates the Tier-1 index's own links (check `n`).** The lint checked
+  cross-references in one direction only: it found memory files the index had forgotten (check `g`)
+  and `related:` entries pointing at nothing (check `f`), but a link *inside* `docs/memory/MEMORY.md`
+  whose target had been deleted passed silently — reported from the field, where a manual pass found
+  two such links in a live index. Reproduced before the fix: an index with two dead links produced
+  zero findings. The check skips images, HTML-commented entries, code-fence-free inline links, anchors
+  and external URLs, resolves root-absolute targets against the project root, and reports every dead
+  link on a line rather than the first. It ships at **warning** severity: the link extraction does not
+  yet see fenced/inline code examples or reference-style links, and erroring on an incomplete
+  extraction would claim a completeness that is not evidenced. Promotion to error is tracked
+  separately and is the SemVer-relevant step (ADR-0001).
+- **First test coverage for a shell script in this repo.** `scripts/tests/` was Python-only and
+  covered the work-item CLI; `scripts/tests/test_memory_lint.py` invokes `memory-lint.sh` as a
+  subprocess with `HOME` redirected to a temp directory, so the checks against `~/.claude/**` cannot
+  leak the developer's machine state into the result.
 - **State verification design (proposed) — `docs/adr/ADR-0009-anchored-state-verification.md`.**
   `/cross-check` compares Markdown to Markdown in all seven rules — R6 even names "Implementation" in
   its title and reads no code — so a fully self-consistent documentation set can be stale against the

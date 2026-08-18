@@ -88,4 +88,4 @@ Every text in ExampleApp — UI copy, onboarding, notifications, …
 
 ## Lint
 
-`bash ~/.claude/scripts/memory-lint.sh [<project-dir>]` validates this schema. Exit codes: 0 clean, 1 warnings, 2 errors. See report format in `MEMORY_LINT_REPORT_TEMPLATE.md`.
+`bash ~/.claude/scripts/memory-lint.sh [<project-dir>]` validates this schema. Exit codes: 0 clean, 1 warnings, 2 errors, 3 configuration error (the run produced no report). See report format in `MEMORY_LINT_REPORT_TEMPLATE.md`.

@@ -41,7 +41,7 @@ On decline: report the over-cap state and continue without archiving.
 ### 2. Memory lint (read-only)
 
 Run `bash ~/.claude/scripts/memory-lint.sh [projectdir]`. Show:
-- Exit code (0 clean / 1 warnings / 2 errors)
+- Exit code (0 clean / 1 warnings / 2 errors / 3 configuration error — no report was produced, treat as a run failure rather than a findings result)
 - Up to the first 10 issue lines from stdout (truncate the rest with a `… N more` note).
 
 Do not auto-fix. Lint-suggested actions (e.g. `status: stale`) belong to the user.

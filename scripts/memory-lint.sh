@@ -5,7 +5,13 @@
 # Usage:
 #   bash ~/.claude/scripts/memory-lint.sh [<project-dir>]
 #
-# Exit codes: 0 clean, 1 warnings, 2 errors.
+# Exit codes: 0 clean, 1 warnings, 2 errors, 3 configuration error.
+#
+# 3 is a *configuration* failure, not a findings result: the run never produced a
+# report, so its findings are unknown. It is deliberately distinct from 0/1/2 so a
+# caller cannot mistake a misconfigured script for a clean or a failing lint.
+# Currently raised by exactly one condition: MEMORY_INDEX_LINK_SEVERITY holds a
+# value outside {err,warn}.
 
 set -euo pipefail
 
@@ -35,6 +41,31 @@ TIER1_GLOBAL_ERR_KB=100
 # the theme further or migrating persona-specific entries to Tier-2-global.
 TIER1_TOPIC_WARN_KB=30
 TIER1_TOPIC_ERR_KB=50
+
+# Severity of check (n) — dead Markdown links in the Tier-1 index.
+# Ships as `warn`, not `err`, deliberately: check (f) errors on the same defect class
+# (a cross-reference to a non-existent file), but this check's link extraction still
+# has two known gaps — fenced/inline code examples are false positives, and
+# reference-style links are not seen at all. Erroring on an incomplete extraction
+# would be a bet on completeness that is not backed by evidence yet.
+# Promotion to `err` is tracked as its own work item and is the SemVer-relevant step
+# (ADR-0001): it rejects previously-accepted content, so it must be visible, not silent.
+# Overridable from the environment so both values can be exercised without editing
+# this file; the assignment below is the single place that decides the default.
+MEMORY_INDEX_LINK_SEVERITY="${MEMORY_INDEX_LINK_SEVERITY:-warn}"
+
+# Validate the knob before doing any work. The value used to be expanded in command
+# position (`"$MEMORY_INDEX_LINK_SEVERITY" "<message>"`), so a typo aborted the run
+# with `command not found` and exit 127 — no report, and indistinguishable from a
+# findings result for a caller that only checks "non-zero".
+case "$MEMORY_INDEX_LINK_SEVERITY" in
+    err|warn) ;;
+    *)
+        printf 'memory-lint.sh: MEMORY_INDEX_LINK_SEVERITY=%s is invalid — expected "err" or "warn".\n' \
+            "$MEMORY_INDEX_LINK_SEVERITY" >&2
+        exit 3
+        ;;
+esac
 
 # Skeleton-silo threshold: MEMORY.md with less than N bytes after frontmatter AND
 # no topic files in the same directory is treated as a likely skeleton.
@@ -297,6 +328,93 @@ if [[ -d "$TIER1_GLOBAL_TOPIC_DIR" ]]; then
     if [[ ! -f "$TIER1_GLOBAL_ARCHIVE" ]]; then
         info "~/.claude/instincts-archive/HISTORY.md missing in a split layout — /postmortem expects to append the verbose narrative there. Create it or accept that postmortem history will accumulate elsewhere."
     fi
+fi
+
+# (n) Dead links in the Tier-1 index — the reverse direction of (g).
+# (g) finds Tier-1 files the index forgot; this finds index entries whose target is gone.
+# Severity is MEMORY_INDEX_LINK_SEVERITY (top of file), mirroring check (f).
+if [[ -f "$TIER1_INDEX" ]]; then
+    while IFS= read -r target; do
+        [[ -n "$target" ]] || continue
+        # Trim whitespace around the target: `[x]( a.md )` addresses `a.md`.
+        target="${target#"${target%%[![:space:]]*}"}"
+        target="${target%"${target##*[![:space:]]}"}"
+        # A title after the target (`[x](a.md "Title")`) is not part of the path, but
+        # only a genuine quoted suffix is one — a bare space is no delimiter, so
+        # `[x](my file.md)` keeps its space instead of collapsing to `my`.
+        case "$target" in
+            *[[:space:]]\"*\") target="${target%[[:space:]]\"*}" ;;
+            *[[:space:]]\'*\') target="${target%[[:space:]]\'*}" ;;
+        esac
+        target="${target%"${target##*[![:space:]]}"}"
+        # Skip external schemes, in-page anchors and the angle-bracket form.
+        case "$target" in
+            http://*|https://*|mailto:*|\#*|\<*) continue ;;
+        esac
+        # `a.md#section` addresses the file a.md — drop the fragment before resolving.
+        target="${target%%#*}"
+        [[ -n "$target" ]] || continue
+        # Targets resolve relative to the index's own directory, as in check (f).
+        # Exception: a leading `/` is repo-root-relative — the usual convention in a
+        # docs tree rendered from the repository root. Chosen over "report as
+        # unsupported" because the form has a single unambiguous meaning inside a
+        # project and stays checkable. Treating it as a filesystem-absolute path
+        # would leave the project entirely; the previous concatenation produced a
+        # doubled path (`docs/memory//docs/memory/x.md`) that can never exist.
+        case "$target" in
+            /*) resolved="$PROJECT_DIR$target" ;;
+            *)  resolved="$MEMORY_DIR/$target" ;;
+        esac
+        # A trailing slash already forces directory semantics: POSIX pathname
+        # resolution rejects `regularfile/`, so `-e` is false for it and true for a
+        # directory. A separate `*/` → `-d` branch was therefore dead code — no test
+        # could distinguish it, which is exactly what the mutation run showed.
+        if [[ -e "$resolved" ]]; then
+            continue
+        fi
+        link_finding="docs/memory/MEMORY.md — link target '$target' does not exist ($resolved)"
+        # Dispatch by value — never expand the knob in command position (see the
+        # validation at the top of this file).
+        case "$MEMORY_INDEX_LINK_SEVERITY" in
+            err)  err  "$link_finding" ;;
+            warn) warn "$link_finding" ;;
+        esac
+    done < <(awk '
+        # Strip HTML-comment spans before extracting links: parking a retired entry
+        # in `<!-- ... -->` is ordinary index practice and must not be linted.
+        # in_comment carries the state across lines, so comment blocks work too.
+        function decomment(s,   a, b, out) {
+            out = ""
+            while (length(s) > 0) {
+                if (in_comment) {
+                    b = index(s, "-->")
+                    if (b == 0) return out
+                    s = substr(s, b + 3)
+                    in_comment = 0
+                } else {
+                    a = index(s, "<!--")
+                    if (a == 0) return out s
+                    out = out substr(s, 1, a - 1)
+                    s = substr(s, a + 4)
+                    in_comment = 1
+                }
+            }
+            return out
+        }
+        {
+            line = decomment($0)
+            prev = ""
+            while (match(line, /\[[^][]*\]\([^)]*\)/)) {
+                if (RSTART > 1) prev = substr(line, RSTART - 1, 1)
+                link = substr(line, RSTART, RLENGTH)
+                sep = index(link, "](")
+                # `![alt](src)` is an image, not an index entry.
+                if (prev != "!") print substr(link, sep + 2, length(link) - sep - 2)
+                line = substr(line, RSTART + RLENGTH)
+                prev = ")"
+            }
+        }
+    ' "$TIER1_INDEX")
 fi
 
 # Report
