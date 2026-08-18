@@ -31,6 +31,18 @@ All notable changes to this project are documented in this file. The format is b
   the index and all theme files.
 
 ### Added
+- **The HANDOVER size cap is now watched automatically.** The ≤5 KB / 150-line cap was documented in
+  the template and enforced by `/cleanup`, but nothing triggered it — the file drifted past its limit
+  unnoticed until someone happened to run the command, and `doc-volume-check.sh` does not cover it
+  (its thresholds start at 25 KB, five times the cap). `agent-monitor.py` now warns on session start
+  and after any HANDOVER write, at **80 %** of the cap as well as above it. The threshold is derived,
+  not chosen: one skill run was measured growing a HANDOVER by ~20 % of the cap, so a warning one
+  run's growth below the limit is the last moment at which it is still preventive. The warning names
+  the numbers and the remedy, and never blocks. `/cleanup` gained the matching level: at or above the
+  threshold it *offers* to archive the oldest block, since the file is still legal there and declining
+  is a valid answer. `/cleanup` reads the threshold from the hook rather than restating it, so the two
+  cannot drift apart — and with no hook installed it falls back to its previous two branches instead
+  of inventing a substitute value.
 - **The HANDOVER template carries an append-only inbox (`## Open Points`).** Agents working mid-task
   keep finding things outside their assignment — stale docs, a missing check, a worthwhile follow-up —
   and the template offered exactly one collection point, the Open Decisions table. With only a decision

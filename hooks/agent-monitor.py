@@ -21,6 +21,7 @@ Loop state:
 """
 
 import json
+import re
 import sys
 import os
 import time
@@ -56,6 +57,18 @@ STAGNATION_WINDOW_S = 900         # 15 min without Write/Edit -> stagnation warn
 
 # HANDOVER staleness check (run on SubagentStop / Stop)
 HANDOVER_STALENESS_TOLERANCE_S = 60  # docs/HANDOVER.md may lag this much behind newest docs/*.md
+
+# HANDOVER size cap check (run on SessionStart / PostToolUse of a HANDOVER write)
+HANDOVER_DEFAULT_CAP_BYTES = 5 * 1024   # templates/HANDOVER_TEMPLATE.md default (KB = 1024 B)
+HANDOVER_DEFAULT_CAP_LINES = 150        # ...and its line dimension
+HANDOVER_CAP_HEADER_LINES = 20          # only the header may declare a per-file cap
+# Warn at 80 % of the cap, not at 100 %. Measured in this repo on 18.08.2026: one skill run
+# grew docs/HANDOVER.md by 1021 B, i.e. ~20 % of the 5 KB cap. A threshold one run's growth
+# below the cap is therefore the last moment at which a warning is still preventive — at any
+# higher value the very next run breaches the cap without ever having been announced.
+HANDOVER_WARN_PCT = 80
+# Tools that can change the file's size. A Read does not, so it must not trigger a re-check.
+HANDOVER_WRITE_TOOLS = {"Write", "Edit", "MultiEdit", "NotebookEdit"}
 
 # Token tracking (approximate values)
 CHARS_PER_TOKEN = 4               # Rough average for DE/EN text
@@ -356,6 +369,161 @@ def check_handover_staleness(session_id: str, source_event: str):
         pass
 
 
+def parse_handover_cap(text: str) -> tuple:
+    """Reads the size cap the HANDOVER declares in its own header.
+
+    Mirrors what /cleanup §2 does: look for a line like `Size cap: ≤N KB` (the shipped
+    template wraps it in markdown, so match on the `≤N KB` part) plus its line dimension
+    `(~N lines)`. Falls back to the template default when the header declares neither.
+
+    Only the first HANDOVER_CAP_HEADER_LINES lines are scanned. A file's own cap is a
+    header statement; a threshold quoted somewhere in the body is prose about something
+    else and must not silently redefine the cap.
+
+    Returns (cap_bytes, cap_lines).
+    """
+    header = "\n".join(text.splitlines()[:HANDOVER_CAP_HEADER_LINES])
+
+    cap_bytes = HANDOVER_DEFAULT_CAP_BYTES
+    kb_match = re.search(r"[≤<]\s*=?\s*(\d+(?:[.,]\d+)?)\s*KB", header, re.IGNORECASE)
+    if kb_match:
+        cap_bytes = int(round(float(kb_match.group(1).replace(",", ".")) * 1024))
+
+    cap_lines = HANDOVER_DEFAULT_CAP_LINES
+    lines_match = re.search(r"(\d+)\s*lines", header, re.IGNORECASE)
+    if lines_match:
+        cap_lines = int(lines_match.group(1))
+
+    return cap_bytes, cap_lines
+
+
+def is_at_least_pct(count: int, cap: int, pct_of_cap: int) -> bool:
+    """True when count has reached pct_of_cap percent of cap, compared exactly.
+
+    Integer arithmetic on purpose: `100 * count >= pct * cap` is the same question as
+    `count / cap >= pct / 100` without ever building a float, so no boundary can be moved
+    by a rounding step. A cap of 0 or None is "no cap declared" and can never be reached.
+    """
+    return bool(cap) and 100 * count >= pct_of_cap * cap
+
+
+def is_handover_write(tool_name, tool_input) -> bool:
+    """True when a tool call just changed a HANDOVER.md, i.e. may have changed its size.
+
+    The gate that keeps check_handover_size off the other ~99 % of PostToolUse events. A
+    Read of the same file is excluded on purpose: it cannot move the file past its cap, so
+    re-measuring would only cost time and risk a duplicate warning.
+
+    Contains its own input, like its sibling check_handover_size does. A hook payload is
+    JSON produced by another process, so nothing guarantees the declared types: an
+    unhashable tool_name breaks the set lookup, a non-str file_path breaks
+    os.path.basename, and a tool_input that is not a mapping breaks .get. None of that
+    blocks — main()'s catch-all holds and the exit code stays 0 — but the check silently
+    does not run and the event is filed as a MonitorError, i.e. as a defect of the monitor
+    rather than as the malformed payload it is. A payload the gate cannot read is simply
+    not a HANDOVER write, so False is the honest answer.
+
+    The containment costs three isinstance checks on a path that runs on every PostToolUse
+    — nanoseconds against the ~20 ms process startup that dominates any hook invocation.
+    """
+    if not isinstance(tool_name, str) or tool_name not in HANDOVER_WRITE_TOOLS:
+        return False
+    if not isinstance(tool_input, dict):
+        return False
+    file_path = tool_input.get("file_path")
+    if not isinstance(file_path, str) or not file_path:
+        return False
+    return os.path.basename(file_path) == "HANDOVER.md"
+
+
+def check_handover_size(session_id: str, source_event: str):
+    """Soft warning when docs/HANDOVER.md approaches or exceeds its own size cap.
+
+    The cap is documented in templates/HANDOVER_TEMPLATE.md and enforced by /cleanup §2,
+    but nothing triggered it: a file drifts past 5 KB unnoticed until someone happens to
+    run the command. scripts/doc-volume-check.sh does not cover it — its thresholds start
+    at 25 KB, five times this cap.
+
+    Sibling of check_handover_staleness and follows the same discipline: logs an error
+    event and prints to stderr, NEVER blocks (no exit(2)), silent no-op when there is no
+    docs/HANDOVER.md in cwd (= not a project run).
+
+    Deduplication is per (session, source_event, level). Adding the level to the key is a
+    deliberate widening of the staleness check's (session, source_event): a file warned
+    about at "approaching" and later breaching the cap in the same session must still be
+    able to say so, and an escalation swallowed by its own predecessor is the failure mode
+    this check exists to remove. The bound stays small — two events x two levels.
+    """
+    try:
+        cwd = Path.cwd()
+        handover = cwd / "docs" / "HANDOVER.md"
+        if not handover.is_file():
+            return
+
+        raw = handover.read_bytes()
+        size_bytes = len(raw)
+        text = raw.decode("utf-8", errors="replace")
+        line_count = text.count("\n")
+        if text and not text.endswith("\n"):
+            line_count += 1
+
+        cap_bytes, cap_lines = parse_handover_cap(text)
+        byte_pct = round(100 * size_bytes / cap_bytes) if cap_bytes else 0
+        line_pct = round(100 * line_count / cap_lines) if cap_lines else 0
+        pct = max(byte_pct, line_pct)
+
+        # The level is decided on the exact counts, never on the rounded percentages
+        # above. Rounding is a presentation concern, and letting it pick the level moves
+        # both boundaries by half a percentage point: 5097 B against the 5120 B cap is
+        # 99.55 %, i.e. under the cap, yet rounds to 100 and was announced as a breach —
+        # while /cleanup section 2, computing the same percentage from the same numbers,
+        # calls that file approaching. Two checks disagreeing about one file is worse
+        # than either staying silent. The same error sits at the warn threshold, where
+        # 4071 B is 79.51 % and rounds onto 80. The reported numbers stay rounded.
+        if (is_at_least_pct(size_bytes, cap_bytes, 100)
+                or is_at_least_pct(line_count, cap_lines, 100)):
+            level = "over"
+        elif (is_at_least_pct(size_bytes, cap_bytes, HANDOVER_WARN_PCT)
+                or is_at_least_pct(line_count, cap_lines, HANDOVER_WARN_PCT)):
+            level = "approaching"
+        else:
+            return
+
+        state = load_loop_state(session_id)
+        warned_key = f"handover_size_warned_{source_event}_{level}"
+        if state.get(warned_key):
+            return
+        state[warned_key] = True
+        save_loop_state(session_id, state)
+
+        log_error(session_id, {
+            "ts": now_iso(),
+            "event": "HandoverSize",
+            "source": source_event,
+            "level": level,
+            "bytes": size_bytes,
+            "lines": line_count,
+            "cap_bytes": cap_bytes,
+            "cap_lines": cap_lines,
+            "pct_of_cap": pct,
+            "session": session_id,
+        })
+        verdict = (
+            "Over cap" if level == "over"
+            else f"Approaching the cap (warn at {HANDOVER_WARN_PCT} %)"
+        )
+        print(
+            f"HANDOVER size warning: docs/HANDOVER.md is "
+            f"{size_bytes / 1024:.1f} KB ({byte_pct} % of the {cap_bytes / 1024:g} KB cap) / "
+            f"{line_count} lines ({line_pct} % of {cap_lines}). "
+            f"{verdict} — run /cleanup to archive the oldest block.",
+            file=sys.stderr
+        )
+    except Exception:
+        # Never block the pipeline due to a check failure
+        pass
+
+
 def handle_session_start(data: dict, session_id: str):
     source = data.get("source", "unknown")
     log_activity(session_id, {
@@ -368,6 +536,10 @@ def handle_session_start(data: dict, session_id: str):
     state = load_loop_state(session_id)
     state["last_productive_ts"] = time.time()
     save_loop_state(session_id, state)
+
+    # Size cap before the writing starts: at session start the warning is still actionable
+    # (run /cleanup first), at session end it would arrive after the fact.
+    check_handover_size(session_id, "SessionStart")
 
 
 def handle_session_end(data: dict, session_id: str):
@@ -859,6 +1031,12 @@ def handle_post_tool_use(data: dict, session_id: str):
             "duration_ms": duration_ms,
             "session": session_id,
         })
+
+    # Size cap right after a HANDOVER write: this is the moment the file grows, and a full
+    # skill run can cross the cap between two SessionStarts. The gate keeps the cost of the
+    # check off every other tool call — a set lookup plus one basename comparison.
+    if is_handover_write(tool_name, data.get("tool_input", {})):
+        check_handover_size(session_id, "PostToolUse")
 
 
 def handle_post_tool_use_failure(data: dict, session_id: str):

@@ -5,6 +5,12 @@
 > "What Was Achieved" / "Last Action" / postmortem entry) to
 > `docs/.handover-archive/<YYYY-MM-DD>-<slug>.md` (one file per archived block).
 > The current file should always answer one question: **"Where do I pick up from here?"**
+>
+> **This is watched for you**: `~/.claude/hooks/agent-monitor.py` measures this file at session start
+> and after every write to it, and prints a warning as it approaches the cap and again once it is
+> over. The warning never blocks and never edits the file — run `/cleanup` to archive the oldest
+> block. Approaching the cap, `/cleanup` offers the archive and you may decline; over the cap it
+> archives on confirmation.
 
 **Last Updated**: [Date, Time]
 **Session ID**: [if known]

@@ -66,9 +66,39 @@ Determine the cap:
 - Parse the file's own header for a line like `Size cap: ≤N KB` or `≤N KB`.
 - If not present, fall back to the global Template default: **5 KB / 150 lines**.
 
+Express both dimensions as a percentage of their cap and carry the **higher** of the two — the size
+hook (see Notes) measures the same way, so a file it warned about is reported at the same level here.
+
+Determine the warn threshold — the percentage from which a file counts as *approaching* its cap.
+It is a single calibrated constant; read it instead of restating it:
+
+```
+grep -m1 '^HANDOVER_WARN_PCT' ~/.claude/hooks/agent-monitor.py
+```
+
+The comment above that constant carries the measurement behind the value: a threshold one skill
+run's growth below the cap is the last moment at which a warning is still preventive. If the grep
+finds nothing (no hook installed), `/cleanup` still runs — fall back to the two-branch behaviour
+below (under cap / over cap) and note in the report that the preventive branch was skipped for lack
+of a threshold. Do not invent one: the number is only meaningful because it was measured.
+
 Compare:
-- **Under cap** → report "HANDOVER under cap (X KB / Y lines)" and continue.
-- **Over cap** → identify the oldest archivable block. Heuristic, in order:
+- **Below the threshold** → report "HANDOVER under cap (X KB / Y lines, N % of cap)" and continue.
+- **At or above the threshold, but still under the cap** → report the percentage, then **offer** to
+  archive: name the oldest archivable block (see below) and ask whether to archive it now. The file
+  is still legal at this level, so the archive is preventive, not required — **nothing is archived
+  unless the user confirms**, and declining is a valid answer. On decline, report "approaching cap,
+  archive declined" and continue. On confirm, archive **one** block, re-measure and stop: the goal
+  is to leave the warning band, not to empty the file.
+- **Over cap** → same candidate, but here archiving is the expected outcome rather than an offer.
+  On confirm, re-measure and loop with the next-oldest candidate (re-confirm each time) until the
+  file is under cap. On decline, report the over-cap state and continue without archiving.
+  If the candidates run out before the file is under cap, stop and report exactly that — "over cap,
+  no archivable block left (X KB / Y lines, N % of cap)" — and continue. Do not widen the heuristic
+  to invent a new archive target: a file that is over cap with nothing left to archive is carrying
+  current content and needs the user to shorten it, not a bigger search.
+
+**Identifying the oldest archivable block.** Heuristic, in order:
   1. The earliest `## Postmortem-Epilogue (DD.MM.YYYY …)` section (datable session block).
   2. Failing that, the earliest top-level `## ` section that contains a date in its heading.
   3. Failing that, the oldest `## Last Action` / `## What Was Achieved` block (when the file uses the template structure).
@@ -78,14 +108,15 @@ marker pattern (`grep -c '^- INBOX [|]'` > 0) —
 a finding that was never triaged must not disappear into the archive. Once §1 has cleared it, the
 empty section costs a few bytes and stays in place.
 
+If no candidate matches, report that and continue — a young HANDOVER can reach the threshold before
+it has an archivable block, and there is nothing to offer.
+
 Show the user the candidate block (heading + first 5 lines) and **ask for confirmation** before archiving. Do **not** archive silently.
 
 On confirm:
 - Extract the block to `docs/.handover-archive/<YYYY-MM-DD>-<slug>.md`. Pick `<YYYY-MM-DD>` from the block's header date if present, else today. `<slug>` is a kebab-case derivation of the heading.
 - Remove the block from `docs/HANDOVER.md`.
-- Re-measure. If still over cap, loop with the next-oldest candidate (re-confirm each time).
-
-On decline: report the over-cap state and continue without archiving.
+- Re-measure (loop only in the over-cap branch, as described above).
 
 ### 3. Memory lint (read-only)
 
@@ -112,7 +143,7 @@ Drift Report — <project>
 | Check               | Status      | Action |
 |---|---|---|
 | HANDOVER inbox      | 0 entries | N entries | section absent | <triaged: N→backlog, N→decision, N kept, N dropped / none> |
-| HANDOVER cap        | ok | over | n/a  | <none / archived N blocks / suggested archive> |
+| HANDOVER cap        | ok | approaching | over | n/a | <none / archived N blocks / archive offered, declined / suggested archive> |
 | memory-lint         | clean | warn | error | <command to inspect> |
 | phase-docs-lint     | clean | warn | error | <command to inspect> |
 | doc-volume          | clean | warn | error | <top offender + split hint> |
@@ -129,6 +160,7 @@ Then offer 1–3 concrete next-step commands:
 Recommended triggers:
 - After a Gate has been passed (especially gates p4–p7 where phase docs accumulate)
 - When an agent reports "inbox full" or the inbox has collected entries over several sessions
+- When the size hook warns that `docs/HANDOVER.md` is approaching or over its cap (see Notes) — at the approaching level §2 offers the archive, so running it then is the preventive moment
 - When `project-guide` flags Cleanup-Awareness (HANDOVER size, inbox entries, stale memory, drift)
 - Before `/release-baseline` to surface remaining issues
 - Ad hoc between phases if the conversation feels "loud" with stale context
@@ -142,5 +174,6 @@ Recommended triggers:
 
 - Phase-freeze (setting `status: frozen` on phase detail files) is the responsibility of the **Gate skills**, not `/cleanup`. This skill only reports phase-doc status issues; it does not change them.
 - The HANDOVER archive convention (`docs/.handover-archive/<YYYY-MM-DD>-<slug>.md`) is already established in real-world projects. `/cleanup` keeps that filename pattern.
+- **The cap is watched automatically.** `~/.claude/hooks/agent-monitor.py` measures `docs/HANDOVER.md` at session start and after every write to that file, and prints one stderr warning when it reaches the warn threshold and another once it is over cap. The hook never blocks and never edits anything — it points here. `/cleanup` measures the file itself, so the skill works unchanged when the hook is absent; it must not assume a warning has already been shown.
 - The inbox is the receiving end of an existing flow, not a new one: `/p5-polish` already triages sprint TODOs into `polish-now | backlog | handover | drop` and appends its `handover` items to `docs/HANDOVER.md` under "Open Points" — in the same marker format (`commands/p5-polish.md` §6), with the POL-ID in the `ref` field, so they triage here without special-casing. `/p5-polish` runs once per sprint between `/gate-p5` and `/p4-sprint`; `/cleanup` runs any time, which is why the general inbox lives here.
 - `/cleanup` does not append to the inbox — it only triages. Appending is for agents that find something while working on something else.
