@@ -291,7 +291,7 @@ Behavioural rules for sequencing skills, holding gate preconditions, planning mu
 
 > **Rule**: When a requirement changes mid-project, immediately reconcile (or explicitly flag as stale) the acceptance criteria of all dependent / downstream stories — do not leave them to be re-discovered story-by-story at each story's start.
 >
-> **Why**: A mid-project change ripples through the backlog, but the dependent stories' ACs were written against the old assumption and look fine until you open them. In a productdata Sprint-2 session a login-model rework (Variante C) silently invalidated the ACs of three downstream stories (S05/S06/S07); each was only caught at its own start, forcing a stop-and-reshape conversation mid-build every time. Reconciling once, at the moment of the change, replaces three context-switches with one and prevents building against a stale AC before the mismatch is noticed.
+> **Why**: A mid-project change ripples through the backlog, but the dependent stories' ACs were written against the old assumption and look fine until you open them. In one project's Sprint-2 session a login-model rework (a late architecture variant) silently invalidated the ACs of three downstream stories; each was only caught at its own start, forcing a stop-and-reshape conversation mid-build every time. Reconciling once, at the moment of the change, replaces three context-switches with one and prevents building against a stale AC before the mismatch is noticed.
 >
 > **How to apply**:
 > 1. When a decision/ADR changes a foundational assumption, list the stories that depend on it (same epic + anything referencing the changed mechanism).
