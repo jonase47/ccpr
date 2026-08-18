@@ -30,6 +30,27 @@
 1. [Next concrete step]
 2. [After that]
 
+## Open Points (append-only inbox)
+> Findings made **outside** the current assignment (stale doc, missing check, follow-up idea).
+> Any agent **appends** one line; nobody rewrites or deletes another's line. `/cleanup` triages and
+> clears this section — the only place lines are removed, and only after you confirm. `/p5-polish`
+> lands its `handover`-triage items here. What the PO must decide belongs in **Open Decisions** above.
+> One line, ≤120 characters, no sub-bullets — detail goes in the file you reference, not here.
+> **Ceiling 10 entries (~1 KB)**: at the ceiling append anyway, then flag "inbox full → `/cleanup`".
+>
+> **Format** — five ` | `-separated fields, starting at column 1 with the marker `- INBOX`:
+> `- INBOX | DD.MM.YYYY | who noticed it | the finding, one line | file:line, POL-/WI-ID, or -`
+>
+> - `/cleanup` finds entries by that marker (`grep -c '^- INBOX [|]' docs/HANDOVER.md`), not by this
+>   heading — so a renamed heading still works, and this quoted example is **not** an entry: a fresh
+>   HANDOVER counts 0.
+> - No `|` inside the finding text — write `/` instead. The **last** field is always the reference.
+> - Placement is load-bearing: keep this section **below** the next-steps section.
+>   `scripts/lib/next_steps.py` takes the first match in the file, so an entry sitting above it
+>   would rewrite the project's allowed commands.
+
+<!-- append inbox entries below this line -->
+
 ## Modified Files (this session)
 | File | Action | Status |
 |---|---|---|

@@ -115,7 +115,18 @@ For each `polish-now` item, delegate to the **senior-developer** agent:
     the assigned `**Work-Item:** WI-NNNN` id in the POLISH file's "Moved to Backlog" list (§7) — the
     view references it, it never re-derives it from the title.
   - Prose fallback: append to `BACKLOG.md` as mini-stories with effort estimate, reference to POL-ID.
-- `handover` items: add to `docs/HANDOVER.md` under "Open Points" with POL-ID and reason for blocking.
+- `handover` items: **append** one line per item to the `## Open Points` section of
+  `docs/HANDOVER.md` — never rewrite or delete a line another agent put there. Use the section's
+  entry format exactly (see `templates/HANDOVER_TEMPLATE.md`), five ` | `-separated fields:
+
+  ```
+  - INBOX | <DD.MM.YYYY> | /p5-polish | <item + why it is blocked> | POL-NN-MM
+  ```
+
+  The POL-ID goes in the last field (`ref`), which is what makes the entry triageable by `/cleanup`
+  §1 without special-casing. One line, ≤120 characters, no sub-bullets — detail stays in the POLISH
+  file. No `|` inside the finding text (write `/` instead). If the section is missing (project on an
+  older template), append it below `## Next Steps` using the template's wording — never above it.
 - `drop` items: record in the POLISH file under "Dropped" with reason.
 
 ### 7. Write POLISH Detail File

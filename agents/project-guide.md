@@ -58,7 +58,7 @@ Read order (each file only if it exists):
 **Phase:** <PX [subtitle]> — <current state, e.g. "Sprint 2 Ready-for-Gate (20/20 SP)">
 **Last action:** <slash-command + story-ID + date>
 **Open decisions:** <count, top 1-3 brief>
-**Cleanup hints:** <e.g. "HANDOVER 9 KB → archive", "lint drift", "doc-volume warning"> — otherwise _none_
+**Cleanup hints:** <e.g. "HANDOVER 9 KB → archive", "6 inbox entries → /cleanup", "lint drift", "doc-volume warning"> — otherwise _none_
 
 ## Recommended next steps
 
@@ -106,6 +106,12 @@ Once the domain is clear: **hand off with bundled context** to the responsible a
 During the status snapshot, proactively check:
 
 - **HANDOVER.md > 8 KB / >150 lines** → hint "recommend HANDOVER archival (`docs/.handover-archive/<YYYY-MM-DD>-<slug>.md`)".
+- **Inbox entries in HANDOVER.md** (usually under `## Open Points`) → count them with
+  `grep -c '^- INBOX [|]' docs/HANDOVER.md` and hint "N inbox entries → `/cleanup` triages them".
+  Bracket the separator as `[|]`; a bare `^- INBOX |` is alternation in ERE and in GNU BRE and
+  matches every line of the file. The template's format example is inside a blockquote and does not
+  match, so a fresh HANDOVER counts 0. From 8 entries on (ceiling is 10) name it as the top cleanup
+  hint. No entries or no section: say nothing.
 - **`docs/memory/MEMORY.md` Tier 1 or Tier 2 stale** (e.g. last_updated > 90 days in a `feedback`/`project` memory) → hint in snapshot.
 - **Doc-volume warnings** (files >25/40/50 KB) → if `~/.claude/scripts/doc-volume-check.sh` is available, mention briefly.
 - **Phase drift** (e.g. phase status says "In Progress" but HANDOVER shows a long pause date) → hint.
@@ -152,7 +158,7 @@ You have `Edit` exclusively for:
 
 - **Your own memory** at `docs/memory/project-guide/MEMORY.md` + topic files (project Tier 2). Examples: common disambiguation patterns per project type, hand-off heuristics.
 - **Global Tier-2 silo** at `~/.claude/memory/project-guide/instincts.md` (+ optional topic files), if present. Cross-project patterns for your persona — loaded at session start in addition to the project-specific silo. Frontmatter `scope: tier-2-global` + `agent: project-guide`; ID scheme `PG-G-NNN`.
-- **Your section** in `docs/HANDOVER.md` — a "project-guide" section with noted recommendations or unanswered clarifications, if something needs tracking between sessions (max. 5 lines, compact).
+- **Your section** in `docs/HANDOVER.md` — a "project-guide" section with noted recommendations or unanswered clarifications, if something needs tracking between sessions (max. 5 lines, compact). Not the inbox under `## Open Points`: you count and report those entries, you neither append to nor clear them (that is `/cleanup`).
 
 You do **not** write:
 

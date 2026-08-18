@@ -7,6 +7,11 @@ All notable changes to this project are documented in this file. The format is b
 ## [Unreleased]
 
 ### Fixed
+- **`/p5-polish` wrote its `handover`-triage items into a section that did not exist.** It has always
+  instructed agents to record blocked items in `docs/HANDOVER.md` "under Open Points", but no shipped
+  template ever contained that heading — the flow dangled unless a project invented the section itself.
+  The inbox now provides the destination, and `/p5-polish` writes the same entry format the `/cleanup`
+  triage reads, so producer and consumer finally agree.
 - **`memory-lint.sh` gained exit code 3 for a configuration error.** The severity knob for the new
   check was expanded in command position, so a typo aborted the run with `command not found`, exit
   127 and no report at all — a caller testing for "non-zero" would have read a dead script as a
@@ -26,6 +31,16 @@ All notable changes to this project are documented in this file. The format is b
   the index and all theme files.
 
 ### Added
+- **The HANDOVER template carries an append-only inbox (`## Open Points`).** Agents working mid-task
+  keep finding things outside their assignment — stale docs, a missing check, a worthwhile follow-up —
+  and the template offered exactly one collection point, the Open Decisions table. With only a decision
+  table such findings either interrupt the task or are lost; this was reported from a productive
+  multi-agent setup that has run its own inbox since July. Entries are one greppable line
+  (`- INBOX | date | source | finding | ref`), triaged by a new `/cleanup` step into
+  `backlog | decision | keep | drop`, with backlog items routed through the work-item adoption guard so
+  a project with a ticket system gets a real item and a prose project gets a BACKLOG entry. Reaching
+  the ceiling flags rather than blocks: refusing an append would reintroduce the loss the inbox
+  prevents. `project-guide` surfaces the count; it may neither append nor clear.
 - **`memory-lint.sh` now validates the Tier-1 index's own links (check `n`).** The lint checked
   cross-references in one direction only: it found memory files the index had forgotten (check `g`)
   and `related:` entries pointing at nothing (check `f`), but a link *inside* `docs/memory/MEMORY.md`
