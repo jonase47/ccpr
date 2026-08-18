@@ -25,3 +25,12 @@ desktop.ini
 # Claude Code – machine-/user-local permission allowlist
 # (settings.json stays versioned for project-wide defaults)
 .claude/settings.local.json
+
+# Maintainer-local working state (CCPR dogfooding its own conventions).
+# The repo ships docs/ as framework content; these are session artefacts, not
+# distribution. Keeping them untracked also keeps tenant identifiers out of
+# shipped artefacts (Constitution, Inviolable "No personal or tenant data").
+# Decision drafts are extracted into a de-personalised ADR under docs/adr/.
+docs/HANDOVER.md
+docs/.handover-archive/
+docs/decisions/
