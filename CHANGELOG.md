@@ -20,6 +20,21 @@ All notable changes to this project are documented in this file. The format is b
   the index and all theme files.
 
 ### Added
+- **State verification design (proposed) — `docs/adr/ADR-0009-anchored-state-verification.md`.**
+  `/cross-check` compares Markdown to Markdown in all seven rules — R6 even names "Implementation" in
+  its title and reads no code — so a fully self-consistent documentation set can be stale against the
+  implementation while every gate passes. ADR-0009 introduces an **anchor**: an optional, flat
+  `anchor_commit` in phase-document frontmatter, one per scope by default with a lint-validated
+  `covers:` opt-in for document-exact resolution. The check is two-stage — a mechanical delta that is
+  never itself a verdict, then a scoped evaluation of whether the delta invalidates a claim — with
+  severity keyed to the document's `status` (`living` info, `active` warning + work item, `frozen`
+  error). Clearing drift is a dedicated `anchor ack` verb that renders the delta before it clears it
+  and distinguishes a human assertion from an evidenced update; acknowledgement statistics ship as part
+  of every check run so the mechanism turning into ceremony stays visible. Escalation goes through the
+  existing work-item contract (ADR-0002) with `local` as default — **no contract change**, and no
+  hosted service, so the check runs on a local git comparison. The field is optional by design: no
+  existing project artifact becomes invalid. **Design only — no shipped surface changes yet;
+  implementation follows.**
 - **`instinct-check.sh` takes an optional `<project-dir>`** and reports all four instinct layers
   (global Tier-1 index + theme files, global Tier-2 persona silos, project Tier-1, project Tier-2)
   instead of only the global index. It also reconciles the index against the theme files: IDs present
