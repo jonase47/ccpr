@@ -67,10 +67,20 @@ GATE_RE_SECRET_KV='(token|secret|password|passwd|bearer|api[_-]?key)["'"'"']?[[:
 #      to "Authorization", and "Bearer" is followed by whitespace, not `:` or
 #      `=`, so the header falls through 1a unless the token happens to be
 #      hex/JWT/padded base64 and lands in GATE_RE_SECRET_BLOB instead. This is
-#      new detection, not a repair of 1a — a separate, keyword-specific rule
-#      rather than widening 1a to accept whitespace, which would turn ordinary
-#      prose like "the bearer of this token was notified" into a finding the
-#      moment a long identifier followed within the same sentence.
+#      new detection, not a repair of 1a — a separate, keyword-specific rule.
+#      "bearer" is ordinary English vocabulary (a legal term, a courier, a
+#      person carrying something), so the rule needs its own anchor, or it
+#      lands in exactly the false-positive class the generic 40-character rule
+#      was retired for: a long identifier following a trigger word, not a
+#      credential — "the bearer token_handling_and_refresh_strategy section"
+#      fires on nothing but a snake_case doc heading. A first version of this
+#      pattern shipped WITHOUT that anchor (required nothing before "bearer"
+#      but whitespace and the value), and it did exactly that on ordinary
+#      prose. The fix is the same shape GATE_RE_SECRET_KV already carries: the
+#      trigger must sit immediately after `[:=]` (optional whitespace, optional
+#      quote), the way a real header or an env-var assignment actually reads
+#      — `Authorization: Bearer …` or `AUTH_HEADER="Bearer …`. A bare "bearer"
+#      with no `:`/`=` in front of it is prose, not a header, and stays silent.
 #      The value shape mirrors 1a's on purpose: same alphabet, same {15,}
 #      floor, so a bearer token is held to the same bar as any other
 #      credential assignment. No separate placeholder filter is layered on
@@ -79,7 +89,7 @@ GATE_RE_SECRET_KV='(token|secret|password|passwd|bearer|api[_-]?key)["'"'"']?[[:
 #      character outside `[A-Za-z0-9+]`, so the value's own start-of-match
 #      class already excludes all of them — a second filter here would be
 #      unreachable code, not a second guard.
-GATE_RE_SECRET_BEARER='bearer[[:space:]]+[A-Za-z0-9+][A-Za-z0-9._/+=-]{15,}'   # gate-pattern-source
+GATE_RE_SECRET_BEARER='[:=][[:space:]]*["'"'"']?bearer[[:space:]]+[A-Za-z0-9+][A-Za-z0-9._/+=-]{15,}'   # gate-pattern-source
 
 # 1b) vendor-prefixed credentials — short, unambiguous, no length heuristic.
 GATE_RE_SECRET_VENDOR='(perm-[A-Za-z0-9._-]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16})'   # gate-pattern-source

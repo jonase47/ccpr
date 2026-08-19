@@ -80,6 +80,11 @@ RESERVED_PREFIX_EMAIL = leak("person@example.com.", "attacker.io")
 # cannot see it) nor written as keyword[:=]value (so GATE_RE_SECRET_KV cannot
 # see it either) -- the exact shape only GATE_RE_SECRET_BEARER catches.
 BEARER_TOKEN = leak("Authorization: Bearer ", "9Kx2QmZ7vB4nR8jH1pL6wA3cF5tY0dE9r")
+# The env-var assignment form of the same header: the anchor that makes
+# GATE_RE_SECRET_BEARER require `[:=]` immediately before "bearer" must accept
+# `=` and a quote, not just the `Authorization:` colon form above -- otherwise
+# the anchor would silently narrow the check to one of its two real shapes.
+BEARER_ENV_VAR = leak('AUTH_HEADER="Bearer ', '9Kx2QmZ7vB4nR8jH1pL6wA3cF5tY0dE9r"')
 IPV4 = leak("198.51.", "100.7")
 ALLOWLISTED_IPV4 = leak("192.0.", "2.5")
 CONNECTION_STRING = leak("postgres:/", "/admin:s3cr3tpassphrase@db.example/app")
@@ -329,6 +334,18 @@ class FalsePositiveCorpusTest(GateTestBase):
             "sample.sh",
         )
 
+    def test_fp_bearer_used_as_an_ordinary_noun_is_not_a_token_header(self):
+        # "bearer" is ordinary English vocabulary. An unanchored "bearer <word>"
+        # match lands in exactly the false-positive class the 40-character rule
+        # was retired for in WI-0004 -- a long identifier following a trigger
+        # word, not a credential. None of these three sentences carries a `:`
+        # or `=` before "bearer", so the anchored pattern must stay silent.
+        self.assert_silent(
+            "The bearer authentication_mechanism_documented_below is standard.\n"
+            "See the bearer token_handling_and_refresh_strategy section.\n"
+            "A bearer instrument_transfers_ownership_on_delivery in finance.\n"
+        )
+
     def test_a_real_connection_string_still_fires(self):
         self.assert_fires("db = '" + CONNECTION_STRING + "'\n", "secret")
 
@@ -441,6 +458,13 @@ class KeywordAssignmentBackstopTest(GateTestBase):
 class BearerTokenTest(GateTestBase):
     def test_a_bearer_header_with_an_opaque_token_fires_as_secret(self):
         self.assert_fires(BEARER_TOKEN + "\n", "secret")
+
+    def test_a_bearer_env_var_assignment_still_fires_as_secret(self):
+        # The colon form above is not the only real shape: an env-var
+        # assignment anchors on `=` and a quote instead of `:`. If the anchor
+        # narrowed to `:` only, this would go silent and the check would have
+        # traded one false-positive class for a false-negative one.
+        self.assert_fires(BEARER_ENV_VAR + "\n", "secret", "sample.sh")
 
     def test_a_bearer_token_too_short_to_reach_the_floor_stays_silent(self):
         self.assert_silent("Authorization: Bearer short-lived\n")
@@ -748,10 +772,12 @@ class PatternSourceExemptionIsLoadBearingTest(GateTestBase):
         self.assertEqual(len(finding_lines), 3, r.stdout)
         # Line numbers as of this test, not the {95, 96, 104} the work item
         # names: adding the bearer-token pattern block (WI-0013 point 1)
-        # earlier in the file shifted these three comment lines down by 20.
-        self.assertIn(":115:", r.stdout)
-        self.assertIn(":116:", r.stdout)
-        self.assertIn(":124:", r.stdout)
+        # shifted these three comment lines down by 20, and anchoring
+        # GATE_RE_SECRET_BEARER against prose (WI-0013 blocker follow-up)
+        # shifted them another 10.
+        self.assertIn(":125:", r.stdout)
+        self.assertIn(":126:", r.stdout)
+        self.assertIn(":134:", r.stdout)
         self.assertEqual(self.categories(r), {"secret"})
 
     def test_the_original_pattern_source_suppresses_those_same_findings(self):
