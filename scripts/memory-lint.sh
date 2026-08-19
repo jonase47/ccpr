@@ -418,21 +418,66 @@ if [[ -f "$TIER1_INDEX" ]]; then
             }
             return out
         }
-        # Strip single-backtick inline code spans (`code`): a span never crosses a
-        # line in Markdown, so unlike decomment() this needs no state across
-        # records. An index documenting its own link syntax inline
+        # Strip inline code spans (`code`, ``code with a ` in it``): a span never
+        # crosses a line in Markdown, so unlike decomment() this needs no state
+        # across records. An index documenting its own link syntax inline
         # (`` `[x](dead.md)` ``) illustrates the syntax; it is not an entry.
-        function strip_inline_code(s,   out, a, b) {
+        #
+        # CommonMark pairs by *run length*, not by position: a code span opens
+        # with a backtick run of length N and closes at the next run of exactly
+        # length N — a run of a different length is skipped over as content, and
+        # a run with no same-length partner anywhere ahead is literal text, not
+        # an opener (mirrors the fence rule above, except a fence closes on
+        # length >= opener while a code span closes on length == opener). A
+        # naive 1st-backtick-pairs-with-2nd-backtick scan gets this wrong in two
+        # ways: it can pair mismatched run lengths (misreading a lone backtick
+        # inside a double-backtick span as that spans closer), and, chained from
+        # that, later runs on the same line inherit the wrong offset.
+        function strip_inline_code(s,   out, i, n, run_start, run_len, c, j, close_len, found) {
             out = ""
-            while (length(s) > 0) {
-                a = index(s, "`")
-                if (a == 0) return out s
-                b = index(substr(s, a + 1), "`")
-                if (b == 0) return out s   # unpaired backtick — CommonMark treats it
-                                            # as literal text, not a span opener; keep
-                                            # the rest of the line instead of dropping it.
-                out = out substr(s, 1, a - 1)
-                s = substr(s, a + 1 + b)
+            n = length(s)
+            i = 1
+            while (i <= n) {
+                c = substr(s, i, 1)
+                if (c != "`") {
+                    out = out c
+                    i++
+                    continue
+                }
+                run_start = i
+                run_len = 0
+                while (i <= n && substr(s, i, 1) == "`") {
+                    run_len++
+                    i++
+                }
+                found = 0
+                j = i
+                while (j <= n) {
+                    if (substr(s, j, 1) != "`") {
+                        j++
+                        continue
+                    }
+                    close_len = 0
+                    while (j <= n && substr(s, j, 1) == "`") {
+                        close_len++
+                        j++
+                    }
+                    if (close_len == run_len) {
+                        found = 1
+                        break
+                    }
+                    # A run of a different length is content — not a closer for
+                    # this opener, and not a new opener either (that only
+                    # happens once we return to the outer loop). Keep scanning
+                    # forward for a same-length run without advancing `i`.
+                }
+                if (found) {
+                    i = j   # discard opener..closer, resume right after the closer
+                } else {
+                    out = out substr(s, run_start, run_len)   # unpaired run — literal
+                    # `i` already sits right after the opening run; resume there
+                    # instead of dropping the rest of the line (see fix 3, a838a1f).
+                }
             }
             return out
         }

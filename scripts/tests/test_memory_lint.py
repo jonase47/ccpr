@@ -626,6 +626,45 @@ class MemoryLintTest(unittest.TestCase):
 
         self.assertEqual(self.link_findings(self.run_lint().stdout), [])
 
+    # The two tests above already pin same-length open/close and delimiter-type
+    # mismatch; neither exercises the length inequality the fence regex encodes
+    # (`fence_char{fence_len,}` — closer length >= opener length, not ==).
+
+    def test_a_fence_closes_when_the_closing_run_is_longer_than_the_opener(self):
+        """CommonMark: a fence closes on a same-character run *at least* as long
+        as the opener — a 3-backtick opener closes on 4 backticks."""
+        self.write_index(
+            CLEAN_INDEX
+            + "```\n"
+            + "- [Example](dead_in_fence_3_4.md)\n"
+            + "````\n"
+            + "- [AfterFence](dead_after_fence_3_4.md)\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("dead_after_fence_3_4.md", findings[0])
+
+    def test_a_fence_does_not_close_when_the_closing_run_is_shorter_than_the_opener(self):
+        """A 4-backtick opener does not close on 3 backticks — the short run is
+        fence content, and everything after it stays fenced until a run of at
+        least 4 backticks is seen."""
+        self.write_index(
+            CLEAN_INDEX
+            + "````\n"
+            + "- [Example](dead_in_fence_4_3.md)\n"
+            + "```\n"
+            + "- [StillFenced](dead_still_fenced_4_3.md)\n"
+            + "````\n"
+            + "- [AfterFence](dead_after_fence_4_3.md)\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("dead_after_fence_4_3.md", findings[0])
+
     # --- WI-0005 round 2, fix 3: an unpaired backtick is literal text --------------
     # Regression introduced by a838a1f: `strip_inline_code()` dropped everything
     # after a stray backtick once it ran out of a second one, silently losing a
@@ -654,6 +693,50 @@ class MemoryLintTest(unittest.TestCase):
         )
 
         self.assertEqual(self.link_findings(self.run_lint().stdout), [])
+
+    # --- WI-0005 round 3, fix 4: pair backticks by run length, not position -------
+    # Position-based pairing (1st backtick with 2nd, 3rd with 4th) is not what
+    # CommonMark does: a code span opens with a backtick *run* of length N and
+    # closes at the next run of exactly length N — a run of a different length
+    # is content, not a closer. The double-backtick case below is the one this
+    # fix actually changes: pre-fix, the lone backtick inside the span could get
+    # paired with one of the span's own delimiters, breaking the pairing for the
+    # rest of the line.
+
+    def test_double_backtick_span_containing_a_single_backtick_is_not_reported(self):
+        """A run of length 2 closes only with another run of length 2 — a lone
+        backtick inside it is content, not a closer for either delimiter."""
+        self.write_index(CLEAN_INDEX + "``a ` b [x](dead_inside_double_span.md)``\n")
+
+        self.assertEqual(self.link_findings(self.run_lint().stdout), [])
+
+    def test_stray_backtick_before_a_paired_span_still_exposes_the_link(self):
+        """Not a regression pin for a fix — a documented finding.
+
+        Every backtick in this line is a run of length 1, so run-length pairing
+        and position-based pairing agree: the stray backtick (opener) pairs with
+        the backtick that precedes "[Example]" (the nearest same-length run),
+        consuming the text between them as a code span. The backtick that was
+        meant to close the illustration is then unpaired and, per fix 3
+        (a838a1f), kept as literal text — which leaves the illustration's own
+        link exposed as a live, non-code link. This is not a bug: it is verified
+        against a spec-compliant CommonMark implementation (commonmark.py 0.9.x)
+        — the identical input renders `<a href="dead_after_stray_tick.md">`, not
+        code. Reported 19.08.2026 against the assumption (WI-0005 round 3) that
+        run-length pairing alone would silence this case; it does not, because
+        the two algorithms only diverge when run lengths differ (see the
+        double-backtick test above), and every run here is length 1.
+        """
+        self.write_index(
+            CLEAN_INDEX
+            + "- Note: a stray ` mark, then an illustration "
+            + "`[Example](dead_after_stray_tick.md)` here.\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("dead_after_stray_tick.md", findings[0])
 
     def test_a_live_link_inside_a_table_cell_is_not_reported(self):
         self.write_index(
