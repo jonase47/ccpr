@@ -532,6 +532,18 @@ if [[ -f "$TIER1_INDEX" ]]; then
             if (match(d, /^\([^)]*\)[ \t]*$/)) return 1
             return 0
         }
+        # boundary only has a job while a link is being *found* — keeping two
+        # bits of decommented text from fusing into syntax the author never
+        # wrote (WI-0029). Once a destination has been isolated, the same byte
+        # is nothing but a comment-shaped hole inside it, and it must not reach
+        # the finding message. strip_boundary() runs on the two extraction
+        # results only (plain-link destination, reference-definition target) —
+        # never on `line` itself, so the character keeps doing its adjacency
+        # job for every match still ahead on that line.
+        function strip_boundary(s) {
+            gsub(boundary, "", s)
+            return s
+        }
         BEGIN { sq = sprintf("%c", 39); boundary = sprintf("%c", 1); fence_sentinel = sprintf("%c", 2) }
         {
             # A fenced code block (```…``` or ~~~…~~~, optionally indented up to 3
@@ -571,7 +583,7 @@ if [[ -f "$TIER1_INDEX" ]]; then
             if (match(line, /^[ ]{0,3}\[[^][]+\]:[ \t]*/)) {
                 rest = substr(line, RSTART + RLENGTH)
                 if (reference_definition_tail(rest)) {
-                    print rest
+                    print strip_boundary(rest)
                     next
                 }
                 # Not a valid reference definition — fall through so a real
@@ -584,7 +596,7 @@ if [[ -f "$TIER1_INDEX" ]]; then
                 link = substr(line, RSTART, RLENGTH)
                 sep = index(link, "](")
                 # `![alt](src)` is an image, not an index entry.
-                if (prev != "!") print substr(link, sep + 2, length(link) - sep - 2)
+                if (prev != "!") print strip_boundary(substr(link, sep + 2, length(link) - sep - 2))
                 line = substr(line, RSTART + RLENGTH)
                 prev = ")"
             }

@@ -489,6 +489,42 @@ class MemoryLintTest(unittest.TestCase):
         self.assertTrue(any("dead_one.md" in f for f in findings), findings)
         self.assertTrue(any("dead_two.md" in f for f in findings), findings)
 
+    def test_a_comment_inside_a_link_destination_does_not_leak_its_boundary_byte(self):
+        """decomment() replaces a closed comment with a boundary byte (chr(1),
+        WI-0029) so that text straddling the comment does not fuse into syntax the
+        author never wrote. That byte must stay internal to the check — once a
+        `[x](target)` destination has been extracted, a stray control byte inside
+        it must not reach the finding message. (Whether the comment should instead
+        make the checked path wrong is WI-0042 and out of scope here — the
+        baseline before this fix already checks the wrong path; this only makes
+        the reported text readable.) A plain `assertIn("dead.md", ...)` would pass
+        in both the leaking and the fixed state (`chr(1)` sits between `dead` and
+        `.md`, but `in` does not care about what is between two other substring
+        matches on the same string) — asserting the byte's absence and the exact
+        quoted target as one token is what actually discriminates the two states.
+        """
+        self.write_index(CLEAN_INDEX + "- [x](dead<!--c-->.md)\n")
+
+        output = self.run_lint().stdout
+        findings = self.link_findings(output)
+
+        self.assertEqual(len(findings), 1, findings)
+        self.assertNotIn("\x01", output, output)
+        self.assertIn("'dead.md'", findings[0])
+
+    def test_a_comment_inside_a_reference_definition_target_does_not_leak_its_boundary_byte(self):
+        """Same defect, the reference-definition path (`[id]: target`) instead of
+        the inline `[x](target)` form — the two paths extract the target
+        independently, so the leak has to be closed in both."""
+        self.write_index(CLEAN_INDEX + "[r]: refdead<!--c-->.md\n")
+
+        output = self.run_lint().stdout
+        findings = self.link_findings(output)
+
+        self.assertEqual(len(findings), 1, findings)
+        self.assertNotIn("\x01", output, output)
+        self.assertIn("'refdead.md'", findings[0])
+
     # --- WI-0005: code examples are not entries, reference-style links are ---------
 
     def test_a_dead_link_shown_inside_a_fenced_code_block_is_not_reported(self):
