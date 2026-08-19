@@ -34,3 +34,11 @@ desktop.ini
 docs/HANDOVER.md
 docs/.handover-archive/
 docs/decisions/
+
+# Project working state, not framework content. install.sh copies docs/ wholesale
+# into ~/.claude/docs/, so anything here reaches every installation: 17 work items
+# about CCPR's own defects and ~146 KB of persona review notes would arrive looking
+# like the user's own state. Framework docs that explain the design (adr/,
+# CONSTITUTION.md, PROJECT_PHASES.md, the flat Tier-1 memory files) stay tracked.
+docs/workitems/
+docs/memory/*/
