@@ -204,6 +204,62 @@ class MemoryLintTest(unittest.TestCase):
             )
 
     @staticmethod
+    def _run_known_dead_link_probe(script_path):
+        """Runs `script_path` against a minimal, known-answer fixture (WI-0044).
+
+        One index file, one dead link, one expected finding. Deliberately not a
+        report-shape check (WI-0037 already owns that) but a content check: a
+        script whose extraction awk silently degraded — e.g. the parity-preserving
+        apostrophe mutation, which still parses (`bash -n` green) and still prints
+        every report section — exits 0 and reports zero findings where one is due.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "probe-project"
+            (root / "docs" / "memory").mkdir(parents=True)
+            (root / "docs" / "memory" / "MEMORY.md").write_text(
+                "# Memory Index\n\n- [Dead](nonexistent.md) — a probe dead link.\n",
+                encoding="utf-8",
+            )
+            fake_home = Path(tmp) / "probe-home"
+            fake_home.mkdir()
+            return subprocess.run(
+                ["bash", str(script_path), str(root)],
+                capture_output=True, text=True,
+                env={"HOME": str(fake_home), "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"},
+            )
+
+    @classmethod
+    def _assert_known_dead_link_is_found(cls, script_path):
+        """WI-0044 precondition, run once per test class (see setUpClass below).
+
+        WI-0037's report-header precondition and the `bash -n` gate are both
+        blind to an awk program that gets silently split into positional
+        arguments — the script still runs to completion and prints a well-formed,
+        clean-looking report. The only way to tell that apart from an actually
+        clean run is to already know the answer: a fixture with a single, known
+        dead link. Deliberately not folded into `run_lint()` (which every one of
+        this class's ~600 tests calls) — one extra script invocation per test
+        would double the suite's ~60s runtime for no added coverage, since the
+        thing being checked (is the awk extraction intact at all) does not vary
+        per test. One run before any test in the class executes is exactly the
+        "must hold before any other assertion runs" semantics this precondition
+        needs, at negligible added cost.
+        """
+        result = cls._run_known_dead_link_probe(script_path)
+        found = result.stdout.count(LINK_FINDING_MARKER)
+        assert found == 1, (
+            f"known dead-link probe expected exactly one {LINK_FINDING_MARKER!r} "
+            f"finding, got {found} — the awk extraction may have silently degraded "
+            f"(e.g. a parity-preserving apostrophe inside its single-quoted bash "
+            f"string, WI-0044). returncode={result.returncode}, "
+            f"stdout={result.stdout!r}, stderr={result.stderr!r}"
+        )
+
+    @classmethod
+    def setUpClass(cls):
+        cls._assert_known_dead_link_is_found(SCRIPT_PATH)
+
+    @staticmethod
     def findings(output, heading):
         """Collect the bullet lines of one report section ('Errors' / 'Warnings' / 'Info')."""
         collected = []
@@ -1226,6 +1282,92 @@ class ScriptActuallyRanTest(unittest.TestCase):
             self.assertEqual(result.stdout, "", "fixture assumption: a parse error produces no stdout")
             with self.assertRaises(AssertionError):
                 MemoryLintTest._assert_script_actually_ran(result)
+
+    # WI-0044: both guards above (bash -n and the header precondition) are blind
+    # when the number of stray apostrophes inside the awk block is EVEN. Bash
+    # toggles quoting at each apostrophe, so an even count restores parity by the
+    # intended closing quote — bash -n parses it fine — but the unquoted middle
+    # section becomes separate positional arguments, and awk takes only the first,
+    # truncated fragment as its program text. That fails at awk *runtime*, not at
+    # bash parse time: the script still exits 0 and still prints every report
+    # section, it just silently drops findings. The two tests below pin both
+    # forms of the SAME mutation target, so the odd/even contrast is measured
+    # side by side rather than asserted from memory.
+
+    _EVEN_MUTATION_TARGET = "        # in_comment carries the state across lines, so comment blocks work too.\n"
+
+    def _build_mutated_script(self, mutated_line, expected_delta):
+        original = SCRIPT_PATH.read_text(encoding="utf-8")
+        self.assertIn(
+            self._EVEN_MUTATION_TARGET, original,
+            "fixture line moved — update the mutation target for this test",
+        )
+        broken = original.replace(self._EVEN_MUTATION_TARGET, mutated_line, 1)
+        self.assertNotEqual(broken, original, "mutation did not change the script")
+        self.assertEqual(
+            broken.count("'"), original.count("'") + expected_delta,
+            "fixture must add exactly the intended apostrophe count",
+        )
+        return broken
+
+    def test_odd_apostrophe_count_is_still_caught_by_bash_syntax_check(self):
+        """The already-shipped half of the contrast: ODD stays caught by bash -n."""
+        broken = self._build_mutated_script(
+            "        # in_comment carries the state's own across lines, so comment blocks work too.\n",
+            expected_delta=1,
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            broken_script = Path(tmp) / "memory-lint.sh"
+            broken_script.write_text(broken, encoding="utf-8")
+            result = subprocess.run(
+                ["bash", "-n", str(broken_script)], capture_output=True, text=True,
+            )
+            self.assertNotEqual(result.returncode, 0, "an odd apostrophe count must still fail bash -n")
+
+    def test_even_apostrophe_count_defeats_both_wi_0037_guards_but_not_the_known_dead_link_probe(self):
+        """WI-0044's own regression pin: EVEN defeats bash -n *and* the header
+        precondition, and only the new known-dead-link probe (MemoryLintTest
+        .setUpClass) notices.
+
+        Measured against this exact mutation shape (19.08.2026): a real run
+        against a probe carrying one dead link exits 0, prints every report
+        section, and reports zero findings where one is due.
+        """
+        broken = self._build_mutated_script(
+            "        # in_comment carries the state's own across lines, so this construct's comment blocks work too.\n",
+            expected_delta=2,
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            script_dir = Path(tmp) / "scriptdir"
+            shutil.copytree(SCRIPT_PATH.parent / "lib", script_dir / "lib")
+            broken_script = script_dir / "memory-lint.sh"
+            broken_script.write_text(broken, encoding="utf-8")
+
+            syntax = subprocess.run(
+                ["bash", "-n", str(broken_script)], capture_output=True, text=True,
+            )
+            self.assertEqual(
+                syntax.returncode, 0,
+                "fixture assumption: an even apostrophe count must still pass bash -n",
+            )
+
+            result = MemoryLintTest._run_known_dead_link_probe(broken_script)
+            self.assertEqual(
+                result.returncode, 0,
+                "fixture assumption: the mangled script still exits clean",
+            )
+            for heading in ("## Errors (", "## Warnings (", "## Info ("):
+                self.assertIn(
+                    heading, result.stdout,
+                    "fixture assumption: WI-0037's header precondition stays blind here too",
+                )
+            self.assertEqual(
+                result.stdout.count(LINK_FINDING_MARKER), 0,
+                "fixture assumption: the known dead link is silently dropped, not just misreported",
+            )
+
+            with self.assertRaises(AssertionError):
+                MemoryLintTest._assert_known_dead_link_is_found(broken_script)
 
 
 if __name__ == "__main__":
