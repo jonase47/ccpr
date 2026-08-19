@@ -1411,8 +1411,11 @@ class CiTemplateExecutionTest(GateTestBase):
 
     # --- the cheap floor: it must at least parse -----------------------------
     def test_the_template_is_syntactically_valid_posix_sh(self):
+        # env=self.env() even though `sh -n` only parses and never executes:
+        # every other subprocess in this class is HOME-sandboxed, and an
+        # unsandboxed one here would go unnoticed if `-n` were ever dropped.
         r = subprocess.run(["sh", "-n", str(CI_TEMPLATE)],
-                            capture_output=True, text=True)
+                            capture_output=True, text=True, env=self.env())
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
 
     # --- the honest one: does it actually gate? -------------------------------
