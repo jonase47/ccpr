@@ -690,6 +690,80 @@ class DenyListTest(GateTestBase):
 
 
 # ---------------------------------------------------------------------------
+# 3b. WI-0028 — gate_path_deny_index / gate_redact_path exercised through
+# artifact-gate.sh's own call site (artifact-gate.sh:159-160), including the
+# non-ASCII / NFC-NFD folding escalation (WI-0014's B2/B3).
+#
+# DenyListTest above already proves plain-ASCII path matching through this
+# entry point. The Unicode escalation shared with it (gate_path_deny_index /
+# gate_redact_path in lib/discipline_gate.sh) was, until this class, only
+# ever exercised through the OTHER caller -- memory-sync.sh promote's
+# destination check (test_memory_sync_promote.py, NonAsciiDenyNameTest). The
+# underlying function is unchanged and already proven correct there; what was
+# unverified is whether THIS call site invokes and redacts correctly, e.g. on
+# a repo file whose name carries a deny-listed name in NFD.
+#
+# The deny name is fictional and supplied only via CCPR_GATE_DENY_NAMES, per
+# the same isolation DenyListTest already uses -- never the real, personal
+# gate config.
+# ---------------------------------------------------------------------------
+class NonAsciiPathDenyTest(GateTestBase):
+    # Fictional, non-ASCII on purpose -- the same fixture shape as
+    # NonAsciiDenyNameTest in test_memory_sync_promote.py, which exercises the
+    # identical shared library function through the other entry point.
+    NAME = "Quüxcorp"
+
+    @staticmethod
+    def nfd(s):
+        import unicodedata
+        return unicodedata.normalize("NFD", s)
+
+    @staticmethod
+    def nfc(s):
+        import unicodedata
+        return unicodedata.normalize("NFC", s)
+
+    def test_a_decomposed_filename_matches_a_composed_deny_entry(self):
+        p = self.write(self.nfd(self.NAME) + "-notes.md", "clean prose\n")
+        r = self.run_gate(p, CCPR_GATE_DENY_NAMES=self.nfc(self.NAME))
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("denylist", self.categories(r))
+
+    def test_a_composed_filename_matches_a_decomposed_deny_entry(self):
+        # Both sides are normalised, not just the one the operator typed.
+        p = self.write(self.nfc(self.NAME) + "-notes.md", "clean prose\n")
+        r = self.run_gate(p, CCPR_GATE_DENY_NAMES=self.nfd(self.NAME))
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("denylist", self.categories(r))
+
+    def test_an_upper_cased_non_ascii_filename_is_reported(self):
+        # `grep -Fi` under LC_ALL=C folds ASCII case only; the upper-cased ü
+        # needs the python3 escalation to be recognised at all.
+        p = self.write(self.NAME.upper() + "-notes.md", "clean prose\n")
+        r = self.run_gate(p, CCPR_GATE_DENY_NAMES=self.NAME)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("denylist", self.categories(r))
+
+    def test_the_non_ascii_name_is_never_echoed_into_the_output(self):
+        # The matcher and the mask must agree: a matcher that folds more than
+        # the mask does turns every catch into a disclosure.
+        p = self.write(self.NAME.upper() + "-notes.md", "clean prose\n")
+        r = self.run_gate(p, CCPR_GATE_DENY_NAMES=self.NAME)
+        out = r.stdout + r.stderr
+        for spelling in (self.NAME, self.NAME.upper(), self.nfd(self.NAME),
+                         self.nfd(self.NAME).upper()):
+            self.assertNotIn(spelling.lower(), out.lower(), out)
+        self.assertIn("<redacted>", out, out)
+
+    def test_an_unrelated_non_ascii_filename_stays_clean(self):
+        # Folding wider must not mean matching wider: a diacritic is not a
+        # wildcard, and "grün" is not "Quüxcorp".
+        p = self.write("grün-notes.md", "clean prose\n")
+        r = self.run_gate(p, CCPR_GATE_DENY_NAMES=self.NAME)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+
+# ---------------------------------------------------------------------------
 # 4. The self-match case — the file that defines the patterns.
 # ---------------------------------------------------------------------------
 class SelfMatchTest(GateTestBase):
