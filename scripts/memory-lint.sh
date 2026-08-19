@@ -435,6 +435,23 @@ if [[ -f "$TIER1_INDEX" ]]; then
             }
             return out
         }
+        # A reference-style definition destination is either the bracketed
+        # `<...>` form (never contains unescaped whitespace) or a bare token that
+        # stops at the first whitespace and may not itself start with `<`
+        # (CommonMark link-destination grammar). Anything after it must be empty
+        # or a quoted title — otherwise the line is not a reference definition at
+        # all, just prose that happens to start with `[label]:`.
+        function reference_definition_tail(rest,   d) {
+            if (match(rest, /^<([^<>]|\\.)*>/)) return 1
+            if (!match(rest, /^[^ \t<][^ \t]*/)) return 0
+            d = substr(rest, RSTART + RLENGTH)
+            sub(/^[ \t]+/, "", d)
+            if (d == "") return 1
+            if (match(d, /^"[^"]*"[ \t]*$/)) return 1
+            if (match(d, "^" sq "[^" sq "]*" sq "[ \t]*$")) return 1
+            return 0
+        }
+        BEGIN { sq = sprintf("%c", 39) }
         {
             # A fenced code block (```…``` or ~~~…~~~, optionally indented up to 3
             # spaces per CommonMark) is skipped wholesale: an index illustrating its
@@ -453,10 +470,17 @@ if [[ -f "$TIER1_INDEX" ]]; then
             # `[x][id]` + a separate `[id]: target` definition line unseen — same
             # defect class, one syntax further. Target normalisation (whitespace,
             # quoted-title stripping) happens uniformly on the shell side below,
-            # so this only has to isolate the target-plus-optional-title substring.
+            # so this only has to isolate the target-plus-optional-title substring
+            # — after confirming the line really is a reference definition and not
+            # ordinary prose that starts with `[Label]:` (a glossary line, say).
             if (match(line, /^[ ]{0,3}\[[^][]+\]:[ \t]*/)) {
-                print substr(line, RSTART + RLENGTH)
-                next
+                rest = substr(line, RSTART + RLENGTH)
+                if (reference_definition_tail(rest)) {
+                    print rest
+                    next
+                }
+                # Not a valid reference definition — fall through so a real
+                # `[x](y)` link elsewhere on this line is still found below.
             }
 
             prev = ""

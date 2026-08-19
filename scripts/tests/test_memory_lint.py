@@ -518,6 +518,77 @@ class MemoryLintTest(unittest.TestCase):
 
         self.assertEqual(self.link_findings(self.run_lint().stdout), [])
 
+    # --- WI-0005 round 2, fix 1: a reference definition needs a real destination ---
+    # Regression introduced by a838a1f: the bare `^\[label\]:` prefix match swallowed
+    # the whole line as a target, misreading ordinary `[Label]: prose` glossary lines
+    # as dead links. Grouped with its own non-regression probes (title, angle
+    # brackets, the reference-style control) so this commit is self-contained.
+
+    def test_reference_definition_syntax_requires_a_real_destination(self):
+        """`[Label]: prose with spaces` is glossary prose, not a link reference
+        definition — CommonMark rejects a destination that contains an unescaped
+        space and is not wrapped in `<...>`. The bare `^\\[...\\]:` prefix match
+        used to swallow the whole line as a target regardless, misreading two
+        ordinary glossary entries as two dead links."""
+        self.write_index(
+            CLEAN_INDEX
+            + "[Confidence]: a float between 0.3 and 0.9\n"
+            + "[Tier]: cross-cutting versus persona-specific\n"
+        )
+
+        self.assertEqual(self.link_findings(self.run_lint().stdout), [])
+
+    def test_a_real_link_survives_on_a_line_that_fails_reference_definition_syntax(self):
+        """A line that starts like a reference definition but fails destination
+        syntax must fall through to the ordinary link scan, not be swallowed by
+        `next` — otherwise a real `[x](y)` link sharing the line is lost too."""
+        self.write_index(
+            CLEAN_INDEX
+            + "[Note]: this is prose with spaces, not a definition, "
+            + "but it has a [dead one](dead_after_prose.md) in it\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("target 'dead_after_prose.md'", findings[0])
+        self.assertNotIn("this is prose", findings[0])
+
+    def test_reference_style_definition_with_a_title_and_a_dead_target_is_reported(self):
+        self.write_index(CLEAN_INDEX + '[ref-titled-dead]: dead_titled.md "A Title"\n')
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("dead_titled.md", findings[0])
+
+    def test_reference_style_definition_with_a_title_and_a_live_target_is_not_reported(self):
+        self.write_index(CLEAN_INDEX + '[ref-titled-live]: project_alpha.md "A Title"\n')
+
+        self.assertEqual(self.link_findings(self.run_lint().stdout), [])
+
+    def test_reference_style_definition_in_angle_brackets_is_skipped(self):
+        """`[id]: <live.md>` — the escaped-destination form, same scope decision
+        as the inline `[x](<t.md>)` form pinned below."""
+        self.write_index(CLEAN_INDEX + "[ref-angle]: <project_alpha.md>\n")
+
+        self.assertEqual(self.link_findings(self.run_lint().stdout), [])
+
+    def test_a_dead_reference_link_still_fires_after_the_fix(self):
+        """Control probe: the reference-style path must still catch a genuine
+        dead reference after the destination-validity gate is added."""
+        self.write_index(
+            CLEAN_INDEX
+            + "See [C2][r3] for details.\n"
+            + "\n"
+            + "[r3]: also_dead.md\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("also_dead.md", findings[0])
+
     # --- Forms the check deliberately skips, and its scope -------------------------
 
     def test_angle_bracket_targets_are_skipped(self):
