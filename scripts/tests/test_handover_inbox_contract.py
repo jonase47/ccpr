@@ -98,6 +98,25 @@ def extract_blockquote_prefix(cleanup_text: str) -> str:
     return match.group(1)
 
 
+def extract_html_comment_prefix(cleanup_text: str) -> str:
+    """Pulls the literal HTML-comment-opening prefix out of cleanup.md's own prose.
+
+    cleanup.md's §1a sentence names two exclusion forms in one breath: "a blockquote line
+    (starts with `<prefix>`), an HTML comment (`<!-- ... -->`), ...". WI-0039 already made the
+    blockquote form derived (extract_blockquote_prefix above); the HTML-comment form stayed a
+    hardcoded `"<!--"` literal in find_unparseable_inbox_lines until WI-0046 closed the same
+    drift class for it. This extracts the backtick-quoted example's opening delimiter (the part
+    before the first space) instead of hardcoding a second copy of it in this test file.
+    """
+    match = re.search(r"HTML comment\s*\(`([^`]*)`\)", cleanup_text)
+    assert match, (
+        "commands/cleanup.md no longer documents the HTML-comment exclusion as "
+        "\"HTML comment (`<!-- ... -->`)\" — extraction target moved or was reworded"
+    )
+    example = match.group(1)
+    return example.split()[0]
+
+
 def find_section(text: str, heading_prefix: str):
     """Returns the lines strictly between the first heading starting with heading_prefix and
     the next top-level '## ' heading (or EOF). Returns None if no such heading exists.
@@ -122,17 +141,22 @@ def find_section(text: str, heading_prefix: str):
     return lines[start:end]
 
 
-def find_unparseable_inbox_lines(handover_text: str, marker_pattern: str, blockquote_prefix: str):
+def find_unparseable_inbox_lines(
+    handover_text: str, marker_pattern: str, blockquote_prefix: str, html_comment_prefix: str
+):
     """Reference mirror of the documented §1a pass: within '## Open Points', every non-blank,
     non-blockquote, non-comment line that does not match the inbox marker is unparseable.
 
     This function's *logic* is written here (prose cannot be executed), but its inputs
-    (the heading text, the marker pattern and the blockquote prefix) are the same ones the
-    doc-completeness checks below require cleanup.md to name explicitly — so a doc that
-    removes those specifics fails the presence checks before this mirror ever runs on a
-    fixture. blockquote_prefix in particular must come from cleanup.md itself (via
-    extract_blockquote_prefix), not a hardcoded literal — WI-0039 found the two disagreeing
-    by exactly the trailing space a hardcoded ">" silently tolerated.
+    (the heading text, the marker pattern, the blockquote prefix and the HTML-comment prefix)
+    are the same ones the doc-completeness checks below require cleanup.md to name explicitly —
+    so a doc that removes those specifics fails the presence checks before this mirror ever
+    runs on a fixture. blockquote_prefix and html_comment_prefix in particular must come from
+    cleanup.md itself (via extract_blockquote_prefix / extract_html_comment_prefix), not a
+    hardcoded literal — WI-0039 found the blockquote pair disagreeing by exactly the trailing
+    space a hardcoded ">" silently tolerated; WI-0046 closed the same drift class for the
+    HTML-comment form, which had stayed a hardcoded `"<!--"` after WI-0039 fixed only the
+    blockquote form named in the same prompt sentence.
     """
     section = find_section(handover_text, "## Open Points")
     if section is None:
@@ -145,7 +169,7 @@ def find_unparseable_inbox_lines(handover_text: str, marker_pattern: str, blockq
             continue
         if line.startswith(blockquote_prefix):
             continue
-        if stripped.startswith("<!--"):
+        if stripped.startswith(html_comment_prefix):
             continue
         if marker_re.match(line):
             continue
@@ -277,6 +301,7 @@ class UnparseableInboxLineTest(unittest.TestCase):
         cls.marker_pattern = extract_marker_pattern(cls.cleanup_text)
         cls.placement_comment = extract_inbox_placement_comment(cls.template_text)
         cls.blockquote_prefix = extract_blockquote_prefix(cls.cleanup_text)
+        cls.html_comment_prefix = extract_html_comment_prefix(cls.cleanup_text)
 
     def test_cleanup_documents_the_unparseable_line_mechanic(self):
         """RED before the fix: cleanup.md must name the report phrase and both exclusions."""
@@ -293,7 +318,9 @@ class UnparseableInboxLineTest(unittest.TestCase):
         prose_line = "- Note: consider revisiting the retry backoff (found while fixing WI-9999)"
         marker_line = "- INBOX | 06.01.2026 | tester | a real entry | ref-6"
         text = build_handover([marker_line, prose_line], self.template_text, self.placement_comment)
-        unparseable = find_unparseable_inbox_lines(text, self.marker_pattern, self.blockquote_prefix)
+        unparseable = find_unparseable_inbox_lines(
+            text, self.marker_pattern, self.blockquote_prefix, self.html_comment_prefix
+        )
         self.assertEqual([prose_line], unparseable)
 
     def test_fresh_template_has_no_unparseable_lines(self):
@@ -303,7 +330,42 @@ class UnparseableInboxLineTest(unittest.TestCase):
         derived from cleanup.md's own wording (WI-0039), against the real template.
         """
         unparseable = find_unparseable_inbox_lines(
-            self.template_text, self.marker_pattern, self.blockquote_prefix
+            self.template_text, self.marker_pattern, self.blockquote_prefix, self.html_comment_prefix
+        )
+        self.assertEqual([], unparseable)
+
+    def test_html_comment_exclusion_prefix_is_derived_from_the_prompt_not_hardcoded(self):
+        """WI-0046: closes the drift class WI-0039 closed for the blockquote form, for the
+        HTML-comment form named in the same §1a sentence.
+
+        Before the fix, find_unparseable_inbox_lines hardcoded the literal "<!--" instead of
+        deriving it from cleanup.md's own wording via an extractor — so a change to the
+        documented comment syntax in the prompt would silently stop being honoured, with no
+        test noticing. This builds a synthetic cleanup.md excerpt that documents a DIFFERENT
+        comment syntax, extracts the prefix from it, and shows the mirror follows that derived
+        value instead of the "<!--" this test file (and the real cleanup.md) happens to use
+        today — proving the value comes from the prompt, not from an assumption baked into
+        the mirror.
+        """
+        alternate_cleanup_text = (
+            "excluded from this pass — if it is blank, a blockquote line (starts with `>`), "
+            "an HTML comment (`{# ... #}`), or a line matching §1's marker pattern."
+        )
+        alternate_prefix = extract_html_comment_prefix(alternate_cleanup_text)
+        self.assertEqual("{#", alternate_prefix)
+
+        # A minimal fixture, not the real template — the real template's own placement
+        # comment is an "<!--" line, which would confound a test of a DIFFERENT prefix.
+        marker_line = "- INBOX | 06.01.2026 | tester | a real entry | ref-6"
+        alt_comment_line = "{# a note, alternate syntax #}"
+        text = (
+            "## Open Points (append-only inbox)\n"
+            f"{marker_line}\n"
+            f"{alt_comment_line}\n"
+            "\n## Modified Files\n"
+        )
+        unparseable = find_unparseable_inbox_lines(
+            text, self.marker_pattern, self.blockquote_prefix, alternate_prefix
         )
         self.assertEqual([], unparseable)
 
@@ -312,7 +374,9 @@ class UnparseableInboxLineTest(unittest.TestCase):
         produce a phantom finding — mirrors §1's own 'heading missing' branch."""
         text = "# Handover – Work State\n\n## Next Steps\n1. Do the thing.\n"
         self.assertIsNone(
-            find_unparseable_inbox_lines(text, self.marker_pattern, self.blockquote_prefix)
+            find_unparseable_inbox_lines(
+                text, self.marker_pattern, self.blockquote_prefix, self.html_comment_prefix
+            )
         )
 
 
