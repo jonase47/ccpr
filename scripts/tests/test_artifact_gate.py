@@ -55,6 +55,10 @@ def leak(*parts):
 # The leak shapes, each below its own detection threshold per fragment.
 CREDENTIAL = leak('api', '_key = "', 'A1b2C3d4E5f6G7h8I9j0K1l2M3"')
 HEX_DIGEST = leak("9f86d081884c7d659a2fea", "a0c55ad015a3bf4f1b2b0", "b822cd15d6c15b0f00a08")
+# The exact hex-length boundary GATE_RE_SECRET_BLOB's `{32,}` floor draws: 31
+# characters must stay silent, 32 must fire.
+HEX_31_CHARS = leak("9f86d081884c7d6", "59a2fea0c55ad015")
+HEX_32_CHARS = leak("9f86d081884c7d65", "9a2fea0c55ad015a")
 JWT = leak("eyJ", "hbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.", "eyJ", "zdWIiOiIxMjM0NTY3ODkwIn0.",
            "dBjftJeZ4CVPmB92K27uhbUJU1p1r_wW1gFWFOEjXk")
 BASE64_BLOB = leak("VGhpc0lzQVZlcnlMb25nQmFzZTY0", "RW5jb2RlZFNlY3JldFZhbHVlSGVyZQ==")
@@ -64,6 +68,11 @@ HOME_PATH = leak("/Us", "ers/somebody/Workspace/notes.md")
 SESSION_HASH = leak("session", "_a1b2c3d4e5")
 REAL_EMAIL = leak("firstname.lastname", "@somecompany.de")
 NEAR_RESERVED_EMAIL = leak("person", "@mytest.de")
+# A reserved domain used as a PREFIX, not as the whole domain -- the shape the
+# terminal `$` anchor on GATE_RE_EMAIL_RESERVED exists to reject. Without that
+# anchor, "@example.com" would match as a substring and this real,
+# attacker-controlled address would go silent.
+RESERVED_PREFIX_EMAIL = leak("person@example.com.", "attacker.io")
 IPV4 = leak("198.51.", "100.7")
 ALLOWLISTED_IPV4 = leak("192.0.", "2.5")
 CONNECTION_STRING = leak("postgres:/", "/admin:s3cr3tpassphrase@db.example/app")
@@ -205,6 +214,12 @@ class AdoptedCategoriesTest(GateTestBase):
     def test_a_hex_digest_fires_as_secret(self):
         self.assert_fires("digest " + HEX_DIGEST + "\n", "secret")
 
+    def test_a_31_character_hex_string_is_below_the_blob_floor(self):
+        self.assert_silent("checksum " + HEX_31_CHARS + "\n")
+
+    def test_a_32_character_hex_string_reaches_the_blob_floor(self):
+        self.assert_fires("checksum " + HEX_32_CHARS + "\n", "secret")
+
     def test_a_jwt_fires_as_secret(self):
         self.assert_fires("auth " + JWT + "\n", "secret")
 
@@ -307,6 +322,12 @@ class FalsePositiveCorpusTest(GateTestBase):
 
     def test_a_domain_that_merely_ends_in_test_is_still_a_real_address(self):
         self.assert_fires("mail " + NEAR_RESERVED_EMAIL + "\n", "personal")
+
+    def test_a_reserved_domain_used_as_a_prefix_is_still_a_real_address(self):
+        # GATE_RE_EMAIL_RESERVED anchors on `$`. Without it, "@example.com"
+        # would match as a substring of the extracted email and suppress a
+        # real, attacker-controlled address.
+        self.assert_fires("mail " + RESERVED_PREFIX_EMAIL + "\n", "personal")
 
 
 # ---------------------------------------------------------------------------
