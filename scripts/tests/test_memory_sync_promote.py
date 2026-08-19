@@ -867,6 +867,50 @@ class EmittedOutputMaskingTest(PromoteTestBase):
 
 
 # ---------------------------------------------------------------------------
+# 11. WI-0016 — a second, separate leak class: the operator's OS username via
+# $HOME. A deny-list entry never covers it (it is not a configured tenant/
+# project name), so it needs its own guard and its own test -- the existing
+# idiom for it already lives in this file, at `ensure_memory_pointer`
+# (`${MEM_NS_DIR/#$HOME/~}`).
+# ---------------------------------------------------------------------------
+class HomeDirectoryMaskingTest(PromoteTestBase):
+    def test_status_does_not_print_the_home_directory_path(self):
+        self.write_config(denyNames=[DENY_NAME])
+        r = self.run_sync("status")
+        self.assertEqual(r.returncode, 0, self.output(r))
+        self.assertNotIn(str(self.home), self.output(r), self.output(r))
+
+    def test_status_shortens_the_config_path_to_a_tilde(self):
+        self.write_config(denyNames=[DENY_NAME])
+        out = self.output(self.run_sync("status"))
+        self.assertIn("~/.claude/memory-sync.json", out, out)
+
+    def test_a_missing_config_error_does_not_print_the_home_directory_path(self):
+        # No config written at all: the deny-list is empty (nothing configured
+        # yet), so this measures the $HOME guard in isolation from the
+        # deny-list mask above it.
+        r = self.run_sync("status")
+        self.assertEqual(r.returncode, 2, self.output(r))
+        self.assertNotIn(str(self.home), self.output(r), self.output(r))
+        self.assertIn("~/.claude/memory-sync.json", self.output(r), self.output(r))
+
+    def test_the_deny_list_not_configured_note_does_not_print_the_home_path(self):
+        self.write_config(ipAllowlist="")  # no denyNames key at all
+        src = self.write_src()
+        r = self.run_sync("gate", src)
+        self.assertEqual(r.returncode, 0, self.output(r))
+        self.assertIn("deny-list NOT CONFIGURED", self.output(r), self.output(r))
+        self.assertNotIn(str(self.home), self.output(r), self.output(r))
+
+    def test_an_unusable_deny_list_entry_error_does_not_print_the_home_path(self):
+        self.write_config(denyNames=["", DENY_NAME])
+        src = self.write_src()
+        r = self.run_sync("gate", src)
+        self.assertEqual(r.returncode, 2, self.output(r))
+        self.assertNotIn(str(self.home), self.output(r), self.output(r))
+
+
+# ---------------------------------------------------------------------------
 # 12. WI-0016 — a config path itself carrying a configured deny-listed name,
 # on the one path where the config file that would have supplied the
 # deny-list is the very thing that is missing. The list has to come from the

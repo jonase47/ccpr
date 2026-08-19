@@ -45,14 +45,15 @@ CONFIG="$(gate_config_path)"
 # absence a few lines down.
 gate_load_config
 
-# Every line this tool emits goes through the deny-list mask — not just
-# promote's destination check. This is the path on which memory LEAVES the
-# machine, but `pull`/`status` print repo URLs, clone paths and config paths
-# too, and any of them can carry a configured tenant/project name into a
-# terminal, a shell history or a CI log wrapping this command. Same shape as
-# artifact-gate.sh's say()/warn()/die(), deliberately: a second,
-# differently-behaved copy of "how this tool prints" would be the same kind
-# of drift the shared discipline-gate library already exists to prevent.
+# Every line this tool emits goes through the deny-list mask AND a $HOME
+# shortener — not just promote's destination check. This is the path on which
+# memory LEAVES the machine, but `pull`/`status` print repo URLs, clone paths
+# and config paths too, and any of them can carry a configured tenant/project
+# name — or the operator's OS username, via $HOME — into a terminal, a shell
+# history or a CI log wrapping this command. Same shape as artifact-gate.sh's
+# say()/warn()/die(), deliberately: a second, differently-behaved copy of "how
+# this tool prints" would be the same kind of drift the shared discipline-gate
+# library already exists to prevent.
 #
 # The format string is always a literal at call sites that use say()/warn()
 # directly. die()/note() wrap every message in the literal '%s: %s' before it
@@ -60,7 +61,14 @@ gate_load_config
 # repo URL) is consumed as a %s ARGUMENT and never read as a directive.
 # shellcheck disable=SC2059
 say() {
-  printf '%s\n' "$(gate_redact_path "$(printf "$@")")"
+  local msg
+  msg="$(gate_redact_path "$(printf "$@")")"
+  # An empty $HOME would turn `${msg//$HOME/~}` into "insert ~ between every
+  # character" — bash's pattern substitution treats an empty pattern as
+  # matching everywhere. Not a real deployment, but guarding it costs one
+  # comparison.
+  if [[ -n "${HOME:-}" ]]; then msg="${msg//$HOME/~}"; fi
+  printf '%s\n' "$msg"
 }
 warn() { say "$@" >&2; }
 die()  { warn '%s: %s' "memory-sync" "$*"; exit 2; }
