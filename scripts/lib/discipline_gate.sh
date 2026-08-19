@@ -136,6 +136,18 @@ GATE_RE_CONTENT='(TODO[:(]|FIXME[:(]|^[[:space:]]*[-*][[:space:]]*\[[ xX]\]|^sta
 # Deployment- and tenant-specific values live in a personal, non-distributed
 # config — never in this repository. Putting a deny-list of tenant names into a
 # shipped file would leak exactly what the Inviolable protects.
+#
+# How a configured name is matched, and where that has limits:
+#   * in a PATH — case-insensitive over the full Unicode range, both spellings
+#     normalised to NFC (see "folding and normalisation" below). Simple case
+#     folding: `ß` does not match `ss`.
+#   * in FILE CONTENT — `grep -nFi`, i.e. case-insensitive over ASCII only and
+#     without normalisation. A file whose BYTES spell a configured name with a
+#     different case on a non-ASCII letter is not flagged. Left as it is
+#     knowingly: content matching runs per line of every scanned file, where the
+#     escalation used for paths would mean a helper process per file. Configure
+#     the spellings that matter, or expect the path check to be the stricter of
+#     the two.
 GATE_IP_ALLOWLIST=""
 GATE_DENY_NAMES=""
 GATE_DENY_SOURCE="none"
@@ -231,6 +243,105 @@ EOF
 # anything prints it. Both helpers are reporting-side: gate_scan_file reads
 # bytes, these two read the name.
 
+# --- folding and normalisation of a name comparison ---------------------------
+# `grep -Fi` and awk's tolower() fold ASCII and nothing else, so a destination
+# `QUÜXCORP-notes.md` walked straight past a configured `Quüxcorp`. And macOS hands
+# out decomposed (NFD) file names while the tree carries the composed (NFC)
+# spelling, so the two spellings of one name have to compare equal — the same
+# NFD-vs-NFC path-comparison trap this project already records as G-117.
+#
+# Both are answered in ONE place: when either the subject or the configured list
+# contains a non-ASCII byte, the comparison escalates to python3, which
+# normalises both sides to NFC and matches case-insensitively over the whole
+# Unicode range. The matcher and the mask escalate on the same condition and
+# share the same program — a mask that folds less than the matcher would print
+# in full the very name the matcher just caught.
+#
+# The ASCII fast path is not a cheaper approximation of that answer, it IS the
+# answer: over pure ASCII, NFC is the identity and `grep -Fi`'s folding is
+# complete. It exists because gate_path_deny_index runs once per file in
+# artifact-gate's repository sweep, where a python3 process per file would
+# dominate the run. A subject that merely LOOKS ASCII cannot slip through it:
+# the characters that fold or normalise INTO ASCII (KELVIN SIGN, LATIN SMALL
+# LETTER LONG S, the ligatures) are themselves non-ASCII, so their presence is
+# what triggers the escalation.
+#
+# KNOWN LIMITATION, accepted deliberately: matching uses SIMPLE case folding, so
+# `ß` and `ss` are not treated as the same name (nor `ﬁ` and `fi`). Full case
+# folding changes string length, and the mask below replaces in place — a
+# matcher that can find what the mask cannot cover is worse than one that
+# declines both. Configure such a name in the spelling it is written in.
+_GATE_ASCII_LO="$(printf '\001')"
+_GATE_ASCII_HI="$(printf '\177')"
+_GATE_UNICODE_WARNED=0
+
+# _gate_is_ascii <string> — no subprocess: this runs per file in a repo sweep.
+# LC_ALL=C is set as a LOCAL, because a glob range is collation-ordered rather
+# than byte-ordered in a UTF-8 locale, where `[!\001-\177]` matches a pure-ASCII
+# string as well and every subject would look non-ASCII.
+_gate_is_ascii() {
+  local LC_ALL=C
+  case "$1" in
+    *[!"$_GATE_ASCII_LO"-"$_GATE_ASCII_HI"]*) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+# _gate_needs_unicode <subject> — true when the comparison cannot be done by
+# ASCII folding alone AND the tool for it is present.
+_gate_needs_unicode() {
+  if _gate_is_ascii "$1" && _gate_is_ascii "$GATE_DENY_NAMES"; then return 1; fi
+  if command -v python3 >/dev/null 2>&1; then return 0; fi
+  # Announced, never silent: the ASCII matcher is about to answer a question it
+  # cannot answer completely. memory-sync.sh refuses to start without python3,
+  # so only an env-supplied list can reach this line. The flag dedupes within
+  # one shell only — both callers are usually invoked inside a command
+  # substitution, whose subshell resets it, so the warning repeats. Repeating a
+  # warning about an incomplete check is the harmless direction.
+  if [ "$_GATE_UNICODE_WARNED" -eq 0 ]; then
+    printf 'gate: python3 not found — non-ASCII names are folded as ASCII only\n' >&2
+    _GATE_UNICODE_WARNED=1
+  fi
+  return 1
+}
+
+# _gate_unicode_py <index|redact> <subject> — the shared Unicode implementation.
+# index:  print the 1-based index of the first matching name, exit 1 if none.
+# redact: print the subject with every match replaced by the mask.
+# Bytes travel through ENVIRON and are written back with surrogateescape, so a
+# path that is not valid UTF-8 comes out as the bytes that went in instead of
+# aborting the comparison.
+_gate_unicode_py() {
+  GATE_U_MODE="$1" GATE_U_SUBJECT="$2" GATE_U_NAMES="$GATE_DENY_NAMES" python3 - <<'PY'
+import os, re, sys, unicodedata
+
+def nfc(s):
+    return unicodedata.normalize("NFC", s)
+
+mode = os.environ["GATE_U_MODE"]
+subject = nfc(os.environ.get("GATE_U_SUBJECT", ""))
+idx = 0
+for name in os.environ.get("GATE_U_NAMES", "").split("\n"):
+    # A blank entry does not consume an index — the shell loop below skips it
+    # the same way, and a finding says "#<idx>" out loud, so the two counts
+    # have to agree.
+    if not name:
+        continue
+    idx += 1
+    pat = re.compile(re.escape(nfc(name)), re.IGNORECASE)
+    if mode == "index":
+        if pat.search(subject):
+            sys.stdout.write(str(idx))
+            sys.exit(0)
+    else:
+        subject = pat.sub("<redacted>", subject)
+
+if mode == "index":
+    sys.exit(1)
+sys.stdout.buffer.write(subject.encode("utf-8", "surrogateescape"))
+PY
+}
+
 # gate_path_deny_index <path> — print the 1-based index of the first configured
 # name occurring in <path>, or return 1 when none does. The name itself is never
 # printed, for the same reason a content finding never prints it: a CI log is a
@@ -238,6 +349,18 @@ EOF
 gate_path_deny_index() {
   [ -n "$GATE_DENY_NAMES" ] || return 1
   local idx=0 name
+  if _gate_needs_unicode "$1"; then
+    local uidx rc=0
+    uidx="$(_gate_unicode_py index "$1")" || rc=$?
+    case "$rc" in
+      0) printf '%s' "$uidx"; return 0 ;;
+      1) return 1 ;;
+      # Any other status means the comparison did not happen. Say so and let
+      # the ASCII matcher below answer what it can, rather than reporting a
+      # clean path because a helper crashed.
+      *) printf 'gate: unicode matcher failed (status %s) — falling back to ASCII folding\n' "$rc" >&2 ;;
+    esac
+  fi
   while IFS= read -r name; do
     [ -n "$name" ] || continue
     idx=$((idx + 1))
@@ -264,6 +387,15 @@ EOF
 # full. Failing open is not an option for this particular function.
 gate_redact_path() {
   if [ -z "$GATE_DENY_NAMES" ]; then printf '%s' "$1"; return 0; fi
+  # Same escalation condition as the matcher, on purpose: see the block above.
+  # The masked path comes back NFC-normalised, which is the spelling the tree
+  # would have carried anyway.
+  if _gate_needs_unicode "$1"; then
+    local masked rc=0
+    masked="$(_gate_unicode_py redact "$1")" || rc=$?
+    if [ "$rc" -eq 0 ]; then printf '%s' "$masked"; return 0; fi
+    printf 'gate: unicode masker failed (status %s) — falling back to ASCII folding\n' "$rc" >&2
+  fi
   GATE_RP_PATH="$1" GATE_RP_NAMES="$GATE_DENY_NAMES" LC_ALL=C awk '
     BEGIN {
       n = split(ENVIRON["GATE_RP_NAMES"], names, "\n")

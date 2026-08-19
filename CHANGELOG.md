@@ -7,6 +7,22 @@ All notable changes to this project are documented in this file. The format is b
 ## [Unreleased]
 
 ### Fixed
+- **`memory-sync.sh promote` published its destination path without checking it.** The discipline
+  gate examined the source file's *content* and then wrote the *destination* into a commit message
+  that was pushed — so a file with clean content could still carry a tenant name into the shared
+  repository through its filename, where it survives deleting the file and only a history rewrite
+  removes it. This was the one irreversible path in the tool; everything else the gate protects is
+  local. The destination is now checked against the same deny-list before anything is fetched,
+  copied, staged or committed, and a match **refuses** rather than warns. Review then found the check
+  was bypassable — a directory destination made `cp` append the source's own filename, so the string
+  checked and the string published were different strings. Directory destinations are rejected as a
+  usage error, which is what the documented contract always said, and that equality is now the reason
+  the guard exists. Also fixed with it: ASCII-only case folding, NFC/NFD normalisation on macOS, and
+  a missing `--` that let a destination named `--all` sweep unrelated files into the push.
+- **`memory-sync.sh` failed on macOS's bash in its own usage hint.** `promote` without a destination
+  printed `bad substitution` instead of the hint: the message interpolated a bash-4 lowercase
+  expansion, and macOS ships bash 3.2. The error path errored. A sweep over all 22 tracked shell
+  files found this as the only occurrence, and a regression test now guards everything a user runs.
 - **`/p5-polish` wrote its `handover`-triage items into a section that did not exist.** It has always
   instructed agents to record blocked items in `docs/HANDOVER.md` "under Open Points", but no shipped
   template ever contained that heading — the flow dangled unless a project invented the section itself.

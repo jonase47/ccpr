@@ -12,6 +12,8 @@
 #   pull                 Fetch the shared repo and materialize the local read-only overlay.
 #   promote <src> <dst>  Run the discipline gate on <src>, copy it into the clone at repo-
 #                        relative <dst>, commit + push. <dst> e.g. instincts/shared.md.
+#                        <dst> must be a FILE path, never a directory: what the checks
+#                        read has to be the name that ships (see require_file_destination).
 #   gate <file>          Run the discipline gate on <file> only (no side effects). Exit 0 = clean.
 #   status               Show config + clone state (no network mutation).
 #
@@ -107,6 +109,24 @@ ensure_clone() {
 }
 
 # --- discipline gate ----------------------------------------------------------
+# The shared library reports a configuration defect; refusing to run on it is
+# the entry point's job, and this one used to ignore the signal. That is the
+# worse half of the pair: artifact-gate reads files that are already here,
+# whereas this is the path on which memory LEAVES the machine. A deny-list
+# that quietly lost an entry would announce itself as active, check fewer
+# names than the operator configured, and push the file anyway. Refused
+# before any scan, so no verdict can be produced by the shortened list. The
+# entry is identified by position: naming it would put a tenant name into the
+# terminal, the shell history and any CI log wrapping this command.
+#
+# Its own function because the destination-path check below needs the same
+# guarantee before it trusts the list, and a second copy of the sentence would
+# be a second register.
+require_usable_deny_list() {
+  [[ -n "$GATE_DENY_UNUSABLE" ]] || return 0
+  die "deny-list entry $GATE_DENY_UNUSABLE is unusable (blank, or containing a line break) — fix gate.denyNames in $CONFIG. Refusing to run with a shorter list than configured."
+}
+
 # Returns 0 if clean, 1 if any finding. Prints findings. Used by promote + `gate`.
 # The checks themselves live in lib/discipline_gate.sh (profile "memory"); this
 # wrapper only renders them in the shape this script has always printed: one line
@@ -116,19 +136,7 @@ run_gate() {
   [[ -f "$f" ]] || { echo "  gate: file not found: $f" >&2; return 2; }
 
   gate_load_config
-
-  # The shared library reports a configuration defect; refusing to run on it is
-  # the entry point's job, and this one used to ignore the signal. That is the
-  # worse half of the pair: artifact-gate reads files that are already here,
-  # whereas this is the path on which memory LEAVES the machine. A deny-list
-  # that quietly lost an entry would announce itself as active, check fewer
-  # names than the operator configured, and push the file anyway. Refused
-  # before the scan, so no verdict can be produced by the shortened list. The
-  # entry is identified by position: naming it would put a tenant name into the
-  # terminal, the shell history and any CI log wrapping this command.
-  if [[ -n "$GATE_DENY_UNUSABLE" ]]; then
-    die "deny-list entry $GATE_DENY_UNUSABLE is unusable (blank, or containing a line break) — fix gate.denyNames in $CONFIG. Refusing to run with a shorter list than configured."
-  fi
+  require_usable_deny_list
 
   # An absent list is not an error, but silence about it is. The library leaves
   # "say so out loud" to the caller, and promote said nothing at all — so a
@@ -260,10 +268,111 @@ cmd_pull() {
   note "pull complete."
 }
 
+# The usage hint below used to lowercase the namespace with the bash 4
+# case-conversion operator inside the parameter expansion itself. The
+# interpreter that runs this script on macOS is /bin/bash 3.2.57, which answers
+# `bad substitution` — so the hint WAS the failure: the error path errored, and
+# exited 1 instead of this script's hard-error 2. `tr` works everywhere and
+# needs no version note. (The construct is deliberately not spelled out here:
+# the shipped-scripts scan in scripts/tests/ greps for the family, and quoting
+# one in a comment would make the comment a suppression surface.)
+ns_lower() { printf '%s' "$NS" | LC_ALL=C tr '[:upper:]' '[:lower:]'; }
+
+# --- the destination must name a FILE ----------------------------------------
+# WHY THIS GUARD EXISTS — read before "improving" it into directory support:
+#
+# Every check on this path reads the string the operator TYPES. What ships is
+# the string `cp` PRODUCES, and those two are the same string for exactly as
+# long as the destination is a file path. Point `cp` at a directory and it
+# appends `basename "$src"`, so the name that lands in the shared tree is one
+# no check here has ever looked at: `promote <src>/<tenant>-notes.md .`
+# published `<tenant>-notes.md` with a clean gate verdict and exit 0.
+#
+# A directory was never a supported destination — the header of this file says
+# "copy it into the clone at repo-relative destination", and CLAUDE.md calls
+# the argument <repo-path>. So the whole class is closed by refusing it, rather
+# than by teaching the deny check, the commit subject and every future check a
+# second string to look at. Supporting directories again means computing the
+# final path FIRST and moving every one of those checks onto it.
+#
+# It is a usage error, not a finding: nothing about the operator's intent was
+# suspicious, the tool simply cannot honour it safely.
+reject_directory_destination() {
+  # Redacted like every other line: the rejected destination can itself be the
+  # thing that must not travel, and a usage error is not an exception to that.
+  die "promote refused: the destination must be a FILE path inside the repo (e.g. instincts/$(ns_lower)-org.md), not a directory: $(gate_redact_path "$1")"
+}
+
+require_file_destination() {
+  local d="$1" part rest
+  # Three shapes are decided by the string alone — a trailing slash, and any
+  # `.` or `..` component (which covers a bare `.`, and `..`, whose copy lands
+  # OUTSIDE the clone entirely).
+  case "$d" in
+    */) reject_directory_destination "$d" ;;
+  esac
+  rest="$d"
+  while [ -n "$rest" ]; do
+    part="${rest%%/*}"
+    case "$part" in
+      .|..) reject_directory_destination "$d" ;;
+    esac
+    case "$rest" in
+      */*) rest="${rest#*/}" ;;
+      *)   rest="" ;;
+    esac
+  done
+  # The fourth shape is not in the string: `instincts` is an ordinary file path
+  # until the clone contains a directory of that name. That is why this
+  # function is called twice — once before the clone is touched at all, and
+  # once after it exists, which is the only moment this line can answer.
+  [ ! -d "$CLONE/$d" ] || reject_directory_destination "$d"
+}
+
 cmd_promote() {
   local src="$1" dst="${2:-}"
   [[ -n "$src" && -f "$src" ]] || die "promote: source file required and must exist"
-  [[ -n "$dst" ]] || die "promote: repo-relative destination required (e.g. instincts/${NS,,}-org.md)"
+  [[ -n "$dst" ]] || die "promote: repo-relative destination required (e.g. instincts/$(ns_lower)-org.md)"
+
+  # The destination path is checked BEFORE anything is copied, staged, committed
+  # or pushed — and unlike every other finding this tool produces, a hit here
+  # refuses rather than warns.
+  #
+  # Why this string and why so early: the gate ran on the source file's CONTENT
+  # and nothing ever looked at the destination, which is written into the
+  # repository tree AND into the commit subject (`memory: promote $(basename
+  # "$dst")`) that is then pushed. A file whose content is clean could carry a
+  # configured name into a shared repository through its own name. That name
+  # survives deleting the file, is visible to everyone with read access, and
+  # removing it means rewriting shared history. It is the only irreversible
+  # path in this tool; everything else the gate protects is local, which is why
+  # a warning is enough there and is not enough here.
+  #
+  # The whole repo-relative path is matched, not its basename: the commit
+  # subject carries only the basename, but the pushed TREE carries every
+  # component. Matching is the library's — `gate_path_deny_index` is the same
+  # deny-list, case-insensitive and literal, that artifact-gate.sh uses for its
+  # FILE PATH finding. No second matcher.
+  #
+  # The list is verified usable first, for the reason spelled out above
+  # require_usable_deny_list: checking a silently shortened list here would
+  # announce a check that did not happen on the path where it matters most.
+  gate_load_config
+  require_usable_deny_list
+  # Shape before content: a directory destination makes the deny check below
+  # meaningless, because it would be matching a string that is not the one
+  # that ships. The config is loaded first all the same — the refusal prints
+  # the destination, and the mask has nothing to mask with until then.
+  require_file_destination "$dst"
+  local dst_idx
+  dst_idx="$(gate_path_deny_index "$dst" || true)"
+  if [[ -n "$dst_idx" ]]; then
+    # Redacted like every finding line: the name is what must not travel, and a
+    # terminal, a shell history and a CI log are all places it would travel to.
+    # The path stays printed around the mask so the operator can still see
+    # which destination was rejected.
+    die "promote refused: destination path carries configured tenant/project name #$dst_idx (name redacted): $(gate_redact_path "$dst"). A push cannot be taken back — rename the destination."
+  fi
 
   echo "Running discipline gate on $src ..."
   if ! run_gate "$src"; then
@@ -272,13 +381,23 @@ cmd_promote() {
   echo "  gate clean."
 
   ensure_clone
-  mkdir -p "$CLONE/$(dirname "$dst")"
-  cp "$src" "$CLONE/$dst"
-  git -C "$CLONE" add "$dst"
+  # The second call, and the one that can see a directory the clone already
+  # carries — `instincts` names one as soon as anything was promoted below it.
+  require_file_destination "$dst"
+
+  # `--` on everything that receives the destination. Without it a leading dash
+  # is read as an option by the tool, not as a path by the repository:
+  # `git add --all` staged the whole clone into a push that cannot be taken
+  # back, `git add -n` staged nothing while the run reported success, and
+  # BSD `dirname`/`basename` abort outright on `-n`. The destination is a path
+  # in every one of these, so say so.
+  mkdir -p "$CLONE/$(dirname -- "$dst")"
+  cp -- "$src" "$CLONE/$dst"
+  git -C "$CLONE" add -- "$dst"
   if git -C "$CLONE" diff --cached --quiet; then
     note "no change to promote (already up to date)."; return 0
   fi
-  git -C "$CLONE" commit --quiet -m "memory: promote $(basename "$dst")"
+  git -C "$CLONE" commit --quiet -m "memory: promote $(basename -- "$dst")"
   git -C "$CLONE" push --quiet "$(authed_url)" HEAD:refs/heads/"$(git -C "$CLONE" rev-parse --abbrev-ref HEAD)"
   note "promoted $dst -> $REPO_URL"
 }
@@ -299,5 +418,5 @@ case "${1:-}" in
   promote) shift; cmd_promote "${1:-}" "${2:-}" ;;
   gate)    shift; run_gate "${1:-}" && echo "gate: clean" || { echo "gate: findings above"; exit 1; } ;;
   status)  cmd_status ;;
-  *) echo "usage: memory-sync.sh {pull|promote <src> <repo-dst>|gate <file>|status}" >&2; exit 2 ;;
+  *) echo "usage: memory-sync.sh {pull|promote <src> <repo-dst-file>|gate <file>|status}" >&2; exit 2 ;;
 esac
