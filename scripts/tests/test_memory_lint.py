@@ -165,10 +165,40 @@ class MemoryLintTest(unittest.TestCase):
         return env
 
     def run_lint(self, project_dir=None, **extra_env):
-        return subprocess.run(
+        result = subprocess.run(
             ["bash", str(SCRIPT_PATH), str(project_dir or self.project_dir)],
             capture_output=True, text=True, env=self.lint_env(**extra_env),
         )
+        self._assert_script_actually_ran(result)
+        return result
+
+    @staticmethod
+    def _assert_script_actually_ran(result):
+        """Precondition for every test in this module (WI-0037).
+
+        A negative-space assertion (`assertEqual(findings, [])`) cannot tell a clean
+        run apart from a script that produced no output at all — `[] == []` holds
+        either way. A bash parse error (e.g. an unbalanced quote inside the single-
+        quoted awk program) makes memory-lint.sh fail before it ever emits a single
+        line, and every negative-space test in this module would still report green.
+
+        Pin the one thing every completed run has, that a script which failed to
+        parse never reaches: the three report section headers. Checked here, in the
+        one shared invocation path, so no individual test can be blind to it.
+
+        Exit 3 is exempt: memory-lint.sh's own header comment documents it as a
+        *configuration* failure ("the run never produced a report, so its findings
+        are unknown") — a deliberate, reportless contract, not the accidental
+        parse failure this precondition guards against.
+        """
+        if result.returncode == 3:
+            return
+        for heading in ("## Errors (", "## Warnings (", "## Info ("):
+            assert heading in result.stdout, (
+                f"memory-lint.sh produced no report (missing {heading!r} section) — "
+                f"it likely failed to run at all. "
+                f"returncode={result.returncode}, stderr={result.stderr!r}"
+            )
 
     @staticmethod
     def findings(output, heading):
@@ -1033,6 +1063,69 @@ class MemoryLintTest(unittest.TestCase):
 
         self.assertFalse(canary.exists(), result.stderr)
         self.assertEqual(result.returncode, 3, (result.stdout, result.stderr))
+
+
+class ScriptActuallyRanTest(unittest.TestCase):
+    """WI-0037: a broken memory-lint.sh must not be able to pass its own tests.
+
+    lines ~421-556 of memory-lint.sh are a single, single-quoted awk program. An
+    apostrophe slipped into a comment inside it unbalances the quote and takes the
+    whole file down with a bash parse error — before a single line of output is
+    produced. Every negative-space test in MemoryLintTest (`assertEqual(x, [])`)
+    stayed green against that broken script, because `[] == []` cannot tell "found
+    nothing" apart from "ran nothing". These tests pin the fix at two levels: a
+    cheap static syntax gate, and a regression test for the dynamic precondition
+    now built into MemoryLintTest.run_lint() itself.
+    """
+
+    def test_memory_lint_sh_has_valid_bash_syntax(self):
+        """Cheapest gate: `bash -n` parses the whole file without running it.
+
+        Catches exactly the WI-0037 defect class (an unbalanced quote breaks
+        parsing of the entire script) immediately and independently of any
+        project fixture.
+        """
+        result = subprocess.run(
+            ["bash", "-n", str(SCRIPT_PATH)], capture_output=True, text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_run_lint_precondition_fails_loudly_on_a_script_that_cannot_parse(self):
+        """Regression test for MemoryLintTest._assert_script_actually_ran.
+
+        Reproduces the WI-0037 mutation shape programmatically (an apostrophe in a
+        comment inside the awk program's single-quoted string) against a scratch
+        copy of the real script, so the precondition's own correctness does not
+        depend on someone hand-mutating the shipped script to prove it. Asserts
+        the precondition raises — i.e. the harness notices — rather than silently
+        accepting an empty, script-never-ran report.
+        """
+        original = SCRIPT_PATH.read_text(encoding="utf-8")
+        target = "forward for a same-length run without advancing `i`.\n"
+        self.assertIn(
+            target, original,
+            "fixture line moved — update the mutation target for this test",
+        )
+        broken = original.replace(target, "forward for a same-length run — don't stop here.\n", 1)
+        self.assertNotEqual(broken, original, "mutation did not change the script")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            broken_script = Path(tmp) / "memory-lint.sh"
+            broken_script.write_text(broken, encoding="utf-8")
+            project_dir = Path(tmp) / "project"
+            (project_dir / "docs" / "memory").mkdir(parents=True)
+            fake_home = Path(tmp) / "home"
+            fake_home.mkdir()
+
+            result = subprocess.run(
+                ["bash", str(broken_script), str(project_dir)],
+                capture_output=True, text=True,
+                env={"HOME": str(fake_home), "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"},
+            )
+
+            self.assertEqual(result.stdout, "", "fixture assumption: a parse error produces no stdout")
+            with self.assertRaises(AssertionError):
+                MemoryLintTest._assert_script_actually_ran(result)
 
 
 if __name__ == "__main__":
