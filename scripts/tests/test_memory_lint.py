@@ -583,6 +583,25 @@ class MemoryLintTest(unittest.TestCase):
 
         self.assertEqual(self.link_findings(self.run_lint().stdout), [])
 
+    def test_reference_style_definition_with_a_parenthesised_title_and_a_dead_target_is_reported(self):
+        """`[id]: target (Title)` — CommonMark's third title delimiter, alongside
+        `"..."` and `'...'` (WI-0034). A reference definition written this way
+        used to be missed entirely, so its dead target was never checked."""
+        self.write_index(CLEAN_INDEX + "[ref-paren-dead]: dead_paren.md (A Title)\n")
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("dead_paren.md", findings[0])
+
+    def test_reference_style_definition_with_a_parenthesised_title_and_a_live_target_is_not_reported(self):
+        """The live-target control for the parenthesised-title form: the title
+        text itself must be stripped from the checked target, not carried along
+        as part of the path (which would falsely report a live file as dead)."""
+        self.write_index(CLEAN_INDEX + '[ref-paren-live]: project_alpha.md (A Title)\n')
+
+        self.assertEqual(self.link_findings(self.run_lint().stdout), [])
+
     def test_reference_style_definition_in_angle_brackets_is_skipped(self):
         """`[id]: <live.md>` — the escaped-destination form, same scope decision
         as the inline `[x](<t.md>)` form pinned below."""

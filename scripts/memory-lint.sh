@@ -362,10 +362,17 @@ if [[ -f "$TIER1_INDEX" ]]; then
         target="${target%"${target##*[![:space:]]}"}"
         # A title after the target (`[x](a.md "Title")`) is not part of the path, but
         # only a genuine quoted suffix is one — a bare space is no delimiter, so
-        # `[x](my file.md)` keeps its space instead of collapsing to `my`.
+        # `[x](my file.md)` keeps its space instead of collapsing to `my`. All three
+        # CommonMark title delimiters are stripped here (WI-0034): double quotes,
+        # single quotes and parentheses. This case must stay in agreement with
+        # reference_definition_tail() above — recognising a parenthesised title as
+        # a valid reference definition without also stripping it here would leave
+        # the title text glued to the checked target, turning a live file into a
+        # reported-dead one.
         case "$target" in
             *[[:space:]]\"*\") target="${target%[[:space:]]\"*}" ;;
             *[[:space:]]\'*\') target="${target%[[:space:]]\'*}" ;;
+            *[[:space:]]\(*\)) target="${target%[[:space:]]\(*}" ;;
         esac
         target="${target%"${target##*[![:space:]]}"}"
         # Skip external schemes, in-page anchors and the angle-bracket form.
@@ -511,6 +518,7 @@ if [[ -f "$TIER1_INDEX" ]]; then
             if (d == "") return 1
             if (match(d, /^"[^"]*"[ \t]*$/)) return 1
             if (match(d, "^" sq "[^" sq "]*" sq "[ \t]*$")) return 1
+            if (match(d, /^\([^)]*\)[ \t]*$/)) return 1
             return 0
         }
         BEGIN { sq = sprintf("%c", 39); boundary = sprintf("%c", 1) }
