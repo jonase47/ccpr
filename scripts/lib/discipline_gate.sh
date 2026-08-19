@@ -61,6 +61,26 @@ GATE_EXEMPT_MARKER='gate-pattern-source'   # gate-pattern-source
 #     `[:=]` would match ordinary prose like "the token was rotated: see below".
 GATE_RE_SECRET_KV='(token|secret|password|passwd|bearer|api[_-]?key)["'"'"']?[[:space:]]*[:=][[:space:]]*["'"'"']?[A-Za-z0-9+][A-Za-z0-9._/+=-]{15,}'   # gate-pattern-source
 
+# 1a') bearer-token headers. "bearer" is already a keyword in GATE_RE_SECRET_KV
+#      above, but that check requires the keyword immediately before `[:=]`.
+#      An HTTP header writes `Authorization: Bearer <token>`: the colon belongs
+#      to "Authorization", and "Bearer" is followed by whitespace, not `:` or
+#      `=`, so the header falls through 1a unless the token happens to be
+#      hex/JWT/padded base64 and lands in GATE_RE_SECRET_BLOB instead. This is
+#      new detection, not a repair of 1a — a separate, keyword-specific rule
+#      rather than widening 1a to accept whitespace, which would turn ordinary
+#      prose like "the bearer of this token was notified" into a finding the
+#      moment a long identifier followed within the same sentence.
+#      The value shape mirrors 1a's on purpose: same alphabet, same {15,}
+#      floor, so a bearer token is held to the same bar as any other
+#      credential assignment. No separate placeholder filter is layered on
+#      top of it: every shape GATE_RE_PLACEHOLDER_SLOT enumerates (`${...}`,
+#      `$VAR`, `<...>`, `{{...}}`, a `%`-format slot, `***`) opens with a
+#      character outside `[A-Za-z0-9+]`, so the value's own start-of-match
+#      class already excludes all of them — a second filter here would be
+#      unreachable code, not a second guard.
+GATE_RE_SECRET_BEARER='bearer[[:space:]]+[A-Za-z0-9+][A-Za-z0-9._/+=-]{15,}'   # gate-pattern-source
+
 # 1b) vendor-prefixed credentials — short, unambiguous, no length heuristic.
 GATE_RE_SECRET_VENDOR='(perm-[A-Za-z0-9._-]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16})'   # gate-pattern-source
 
@@ -457,6 +477,15 @@ gate_scan_file() {
   while IFS= read -r line; do
     [ -n "$line" ] || continue
     _gate_emit "${line%%:*}" secret "possible credential assignment (keyword = <value>)"
+    found=1
+  done <<EOF
+$hits
+EOF
+
+  hits="$(_gate_hits "$content" -nEi -e "$GATE_RE_SECRET_BEARER")"
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    _gate_emit "${line%%:*}" secret "bearer token header — verify it is not a real credential"
     found=1
   done <<EOF
 $hits

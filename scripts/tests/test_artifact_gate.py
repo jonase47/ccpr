@@ -76,6 +76,10 @@ NEAR_RESERVED_EMAIL = leak("person", "@mytest.de")
 # anchor, "@example.com" would match as a substring and this real,
 # attacker-controlled address would go silent.
 RESERVED_PREFIX_EMAIL = leak("person@example.com.", "attacker.io")
+# A bearer token that is neither hex/JWT/padded-base64 (so GATE_RE_SECRET_BLOB
+# cannot see it) nor written as keyword[:=]value (so GATE_RE_SECRET_KV cannot
+# see it either) -- the exact shape only GATE_RE_SECRET_BEARER catches.
+BEARER_TOKEN = leak("Authorization: Bearer ", "9Kx2QmZ7vB4nR8jH1pL6wA3cF5tY0dE9r")
 IPV4 = leak("198.51.", "100.7")
 ALLOWLISTED_IPV4 = leak("192.0.", "2.5")
 CONNECTION_STRING = leak("postgres:/", "/admin:s3cr3tpassphrase@db.example/app")
@@ -422,6 +426,48 @@ class KeywordAssignmentBackstopTest(GateTestBase):
 
     def test_a_quoted_key_naming_a_file_is_not_an_assignment(self):
         self.assert_silent('{ "tokenFile": "somewhere/under/a/long/path/x" }\n', "config.json")
+
+
+# ---------------------------------------------------------------------------
+# 2d. Bearer-token headers (WI-0013 point 1).
+#
+# "bearer" is already a keyword in check 1a's alternation, but 1a requires the
+# keyword immediately before `[:=]`. An HTTP header writes
+# `Authorization: Bearer <token>` -- the colon belongs to "Authorization", and
+# "Bearer" is followed by whitespace, not `:` or `=` -- so the header falls
+# through 1a unless the token happens to be hex/JWT/padded base64 and lands in
+# check 1b' instead. This is new detection, not a repair of 1a.
+# ---------------------------------------------------------------------------
+class BearerTokenTest(GateTestBase):
+    def test_a_bearer_header_with_an_opaque_token_fires_as_secret(self):
+        self.assert_fires(BEARER_TOKEN + "\n", "secret")
+
+    def test_a_bearer_token_too_short_to_reach_the_floor_stays_silent(self):
+        self.assert_silent("Authorization: Bearer short-lived\n")
+
+    # --- placeholder shapes must stay silent, same vocabulary as check 1c ---
+    def test_a_bearer_angle_placeholder_is_still_a_template(self):
+        self.assert_silent("Authorization: Bearer <token>\n")
+
+    def test_a_bearer_shell_variable_is_still_a_template(self):
+        self.assert_silent('auth = "Bearer $TOKEN"\n', "sample.sh")
+
+    def test_a_bearer_braced_shell_variable_is_still_a_template(self):
+        self.assert_silent('auth = "Bearer ${TOKEN}"\n', "sample.sh")
+
+    def test_a_bearer_python_fstring_slot_is_still_a_template(self):
+        self.assert_silent(
+            'req.add_header("Authorization", f"Bearer {token}")\n', "sample.py"
+        )
+
+    def test_a_bearer_mustache_slot_is_still_a_template(self):
+        self.assert_silent('auth = "Bearer {{TOKEN}}"\n')
+
+    def test_a_bearer_printf_format_slot_is_still_a_template(self):
+        self.assert_silent('printf "Bearer %s" "$tok"\n', "sample.sh")
+
+    def test_a_bearer_masked_slot_is_still_a_template(self):
+        self.assert_silent("log: Bearer ****************\n")
 
 
 # ---------------------------------------------------------------------------
