@@ -43,20 +43,24 @@ TIER1_TOPIC_WARN_KB=30
 TIER1_TOPIC_ERR_KB=50
 
 # Severity of check (n) — dead Markdown links in the Tier-1 index.
-# Ships as `err`, matching check (f), which errors on the same defect class (a
-# cross-reference to a non-existent file). This check's extraction used to have
-# two known gaps — fenced/inline code examples were false positives, and
-# reference-style links were not seen at all — which is why the default started
-# at `warn`: erroring on an incomplete extraction would have been a bet on
-# completeness that was not backed by evidence. Both gaps are closed (a838a1f),
-# so the promotion to `err` is the SemVer-relevant step (ADR-0001): it rejects
-# previously-accepted content (a dead index link that used to pass with a
-# warning now fails the run), so it must be visible, not silent.
+# Ships as `warn`. This check's extraction used to have two known gaps —
+# fenced/inline code examples were false positives, and reference-style links
+# were not seen at all — which is why the default started at `warn`: erroring
+# on an incomplete extraction would have been a bet on completeness that was
+# not backed by evidence. Both named gaps were closed (a838a1f), and the
+# default was promoted to `err` on that basis (e241ae3, WI-0005, ADR-0001).
+# The promotion was reverted (WI-0005 round 3, 19.08.2026): closing those two
+# gaps did not converge on completeness — three further extraction gaps
+# surfaced or were found while closing them (WI-0029, WI-0032, WI-0034) plus
+# one false positive found and fixed in the same round (backtick pairing by
+# run length, not position). The evidence for completeness is weaker now than
+# at promotion time, not stronger. Re-promote once WI-0029/WI-0032/WI-0034 are
+# closed and no new gap has surfaced in the round that closes them.
 # Overridable from the environment so both values can be exercised without editing
-# this file, and as a transitional escape hatch (MEMORY_INDEX_LINK_SEVERITY=warn)
-# for callers not yet ready to treat a dead index link as a hard failure; the
-# assignment below is the single place that decides the default.
-MEMORY_INDEX_LINK_SEVERITY="${MEMORY_INDEX_LINK_SEVERITY:-err}"
+# this file, and to let a caller opt into treating a dead index link as a hard
+# failure ahead of the default flip; the assignment below is the single place
+# that decides the default.
+MEMORY_INDEX_LINK_SEVERITY="${MEMORY_INDEX_LINK_SEVERITY:-warn}"
 
 # Validate the knob before doing any work. The value used to be expanded in command
 # position (`"$MEMORY_INDEX_LINK_SEVERITY" "<message>"`), so a typo aborted the run

@@ -806,26 +806,27 @@ class MemoryLintTest(unittest.TestCase):
     # below set the knob deliberately; the pin asserts the shipped value. Changing
     # the default must turn exactly one of them red.
 
-    def test_the_shipped_default_severity_is_err(self):
-        """The default with no override: a dead link is an error, exit 2.
+    def test_the_shipped_default_severity_is_warn(self):
+        """The default with no override: a dead link is a warning, exit 1.
 
         This is the assertion whose absence let a default flip pass silently. It
-        makes the promotion to `err` (WI-0005, ADR-0001) a deliberate red test —
-        one failure, here, with the reason written on it — instead of a behaviour
-        change that only shows up as an exit code somewhere in CI. Before the
-        promotion this pinned `warn`/exit 1; flipping the production default
-        without touching this assertion is exactly what turned it red.
+        makes any future change to the shipped default a deliberate red test —
+        one failure, here, with the reason written on it — instead of a
+        behaviour change that only shows up as an exit code somewhere in CI.
+        The promotion to `err` (WI-0005, ADR-0001) was reverted (WI-0005 round
+        3, 19.08.2026): see the comment above MEMORY_INDEX_LINK_SEVERITY's
+        assignment in memory-lint.sh for why.
         """
         self.assertNotIn(SEVERITY_VAR, self.lint_env(), "the base env must not preset the knob")
         self.write_index(CLEAN_INDEX + "- [Ghost](project_deleted.md) — dead link\n")
 
         result = self.run_lint()
 
-        errors = self.findings(result.stdout, "Errors")
-        self.assertEqual(len(errors), 1, result.stdout)
-        self.assertIn("project_deleted.md", errors[0])
-        self.assertEqual(self.findings(result.stdout, "Warnings"), [], result.stdout)
-        self.assertEqual(result.returncode, 2, result.stdout)
+        warnings = self.findings(result.stdout, "Warnings")
+        self.assertEqual(len(warnings), 1, result.stdout)
+        self.assertIn("project_deleted.md", warnings[0])
+        self.assertEqual(self.findings(result.stdout, "Errors"), [], result.stdout)
+        self.assertEqual(result.returncode, 1, result.stdout)
 
     def test_severity_err_reports_a_dead_link_as_an_error(self):
         """Pins the `err` half of the knob so the default value is a one-line change."""
