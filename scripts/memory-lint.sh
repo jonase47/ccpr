@@ -427,11 +427,12 @@ if [[ -f "$TIER1_INDEX" ]]; then
             while (length(s) > 0) {
                 a = index(s, "`")
                 if (a == 0) return out s
+                b = index(substr(s, a + 1), "`")
+                if (b == 0) return out s   # unpaired backtick — CommonMark treats it
+                                            # as literal text, not a span opener; keep
+                                            # the rest of the line instead of dropping it.
                 out = out substr(s, 1, a - 1)
-                s = substr(s, a + 1)
-                b = index(s, "`")
-                if (b == 0) return out   # unterminated backtick — drop the remainder
-                s = substr(s, b + 1)
+                s = substr(s, a + 1 + b)
             }
             return out
         }

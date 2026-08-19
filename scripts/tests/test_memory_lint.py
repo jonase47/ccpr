@@ -626,6 +626,60 @@ class MemoryLintTest(unittest.TestCase):
 
         self.assertEqual(self.link_findings(self.run_lint().stdout), [])
 
+    # --- WI-0005 round 2, fix 3: an unpaired backtick is literal text --------------
+    # Regression introduced by a838a1f: `strip_inline_code()` dropped everything
+    # after a stray backtick once it ran out of a second one, silently losing a
+    # real link that followed on the same line — CommonMark treats an unpaired
+    # backtick as literal text, not a code-span opener.
+
+    def test_unpaired_backtick_does_not_swallow_the_rest_of_the_line(self):
+        """A single stray backtick is not a code-span opener without a matching
+        closer — CommonMark leaves it as literal text."""
+        self.write_index(
+            CLEAN_INDEX
+            + "- Note ` unterminated then [Real](dead_after_tick.md)\n"
+            + "- Control [Plain](dead_plain.md)\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 2, findings)
+        joined = " ".join(findings)
+        self.assertIn("dead_after_tick.md", joined)
+        self.assertIn("dead_plain.md", joined)
+
+    def test_dead_link_inside_nested_double_backticks_is_not_reported(self):
+        self.write_index(
+            CLEAN_INDEX + "Example: `` a ` b [x](dead_nested_backticks.md) ` `` in prose.\n"
+        )
+
+        self.assertEqual(self.link_findings(self.run_lint().stdout), [])
+
+    def test_a_live_link_inside_a_table_cell_is_not_reported(self):
+        self.write_index(
+            CLEAN_INDEX
+            + "| Name | Link |\n"
+            + "| --- | --- |\n"
+            + "| Alpha | [Alpha](project_alpha.md) |\n"
+        )
+
+        self.assertEqual(self.link_findings(self.run_lint().stdout), [])
+
+    def test_a_line_with_an_odd_backtick_count_and_no_link_stays_silent(self):
+        self.write_index(CLEAN_INDEX + "- Just an odd backtick ` here, no link at all.\n")
+
+        self.assertEqual(self.link_findings(self.run_lint().stdout), [])
+
+    def test_a_simple_dead_link_still_fires_after_the_fix(self):
+        """Control probe: the plain-link path this check exists for must be
+        untouched by any of the three fixes above."""
+        self.write_index(CLEAN_INDEX + "- [Ghost](dead_plain_control.md)\n")
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("dead_plain_control.md", findings[0])
+
     # --- Forms the check deliberately skips, and its scope -------------------------
 
     def test_angle_bracket_targets_are_skipped(self):
