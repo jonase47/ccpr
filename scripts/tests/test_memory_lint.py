@@ -83,6 +83,42 @@ last_updated: 01.01.2026
 - [patterns.md](patterns.md) — conventions.
 """
 
+TIER2_TOPIC_TEXT_TYPE_PATTERNS = f"""---
+name: senior-developer conventions
+description: A Tier-2 topic file using type 'patterns', the value the Tier-1 enum has no slot for (WI-0008).
+type: patterns
+last_updated: {TODAY}
+---
+
+# Conventions
+
+Body.
+"""
+
+TIER2_TOPIC_TEXT_TYPE_UNKNOWN = f"""---
+name: senior-developer notes
+description: A Tier-2 topic file using a type value that is in neither enum.
+type: freeform-notes
+last_updated: {TODAY}
+---
+
+# Notes
+
+Body.
+"""
+
+TIER1_FILE_TEXT_TYPE_PATTERNS = f"""---
+name: bad Tier-1 file
+description: A Tier-1 file borrowing the Tier-2-only 'patterns' value — must still error.
+type: patterns
+last_updated: {TODAY}
+---
+
+# Bad
+
+Body.
+"""
+
 # Links that must never be flagged: valid relative file, anchored link into a valid
 # file, directory link, external schemes, and a pure in-page anchor.
 CLEAN_INDEX = """# Memory Index
@@ -159,6 +195,58 @@ class MemoryLintTest(unittest.TestCase):
             for finding in cls.findings(output, "Errors") + cls.findings(output, "Warnings")
             if LINK_FINDING_MARKER in finding
         ]
+
+    # --- Tier-aware type enum (WI-0008): Tier-1 and Tier-2 do not share a vocabulary ---
+    # Check (c) used to apply the Tier-1 content-type enum to every file under
+    # docs/memory/, including Tier-2 persona topic files, which the schema never gave
+    # a fitting value. These three tests pin the split: Tier-2 gets its own, looser
+    # enum (adds 'patterns', unrecognised values only warn); Tier-1 stays a hard error.
+
+    def test_tier2_topic_file_with_type_patterns_is_not_an_error(self):
+        """'patterns' is the value two personas independently reached for (WI-0008).
+
+        It must not appear in the Errors section of the report at all.
+        """
+        self.write_index(CLEAN_INDEX)
+        (self.memory_dir / "senior-developer" / "conventions.md").write_text(
+            TIER2_TOPIC_TEXT_TYPE_PATTERNS, encoding="utf-8"
+        )
+
+        result = self.run_lint()
+
+        self.assertEqual(self.findings(result.stdout, "Errors"), [], result.stdout)
+
+    def test_tier1_file_with_type_patterns_still_errors(self):
+        """The Tier-1 enum stays closed — 'patterns' is a Tier-2-only allowance."""
+        self.write_index(CLEAN_INDEX)
+        (self.memory_dir / "project_bad.md").write_text(
+            TIER1_FILE_TEXT_TYPE_PATTERNS, encoding="utf-8"
+        )
+
+        result = self.run_lint()
+
+        errors = self.findings(result.stdout, "Errors")
+        self.assertTrue(
+            any("project_bad.md" in e and "type='patterns'" in e for e in errors), errors
+        )
+
+    def test_tier2_topic_file_with_an_unrecognised_type_only_warns(self):
+        """A Tier-2 value outside both enums is a warning, not an error.
+
+        The schema does not close the Tier-2 vocabulary (WI-0008); rejecting an
+        unforeseen value outright would repeat the defect this item fixes.
+        """
+        self.write_index(CLEAN_INDEX)
+        (self.memory_dir / "senior-developer" / "notes.md").write_text(
+            TIER2_TOPIC_TEXT_TYPE_UNKNOWN, encoding="utf-8"
+        )
+
+        result = self.run_lint()
+
+        errors = self.findings(result.stdout, "Errors")
+        self.assertFalse(any("type='freeform-notes'" in e for e in errors), errors)
+        warnings = self.findings(result.stdout, "Warnings")
+        self.assertTrue(any("type='freeform-notes'" in w for w in warnings), warnings)
 
     # --- Regression pin for the pre-existing behaviour being extended --------------
 

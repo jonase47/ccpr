@@ -11,7 +11,7 @@
 |---|---|---|
 | `name` | free text (1 line) | Human-readable title — also visible in the index. |
 | `description` | free text (1 line) | One-sentence summary. Used for relevance decisions. |
-| `type` | `feedback` \| `project` \| `reference` \| `user` | Memory category (see `~/.claude/CLAUDE.md`). `user` stays global, not pushable. |
+| `type` | Tier 1: `feedback` \| `project` \| `reference` \| `user`. Tier 2: the same set, plus `patterns` (a persona's general working conventions, not tied to one project fact). | Memory category (see `~/.claude/CLAUDE.md`). `user` stays global, not pushable. The Tier-2 vocabulary is deliberately open: `bash ~/.claude/scripts/memory-lint.sh` only warns — never errors — on a Tier-2 `type` value outside this set, so a persona reaching for a value the schema has not yet named does not fail the lint. Tier 1 keeps the closed enum and errors on drift. |
 | `last_updated` | `DD.MM.YYYY` | Date of last substantive change. |
 
 ## Optional fields

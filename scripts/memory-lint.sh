@@ -127,15 +127,28 @@ for file in "${FILES[@]:-}"; do
         done <<< "$missing"
     fi
 
-    # (c) type enum
+    # (c) type enum — tier-aware. Tier 1 (docs/memory/{type}_{slug}.md) keeps the
+    # closed content-type enum and errors on drift. Tier-2 persona topic files
+    # (docs/memory/{agent}/{topic}.md) have no defined vocabulary in the schema
+    # (WI-0008): two personas independently reached for "patterns", a value the
+    # Tier-1 enum does not offer, so it is added there. The Tier-2 set stays open —
+    # an unrecognised value is a warning, not an error, so an unforeseen but
+    # legitimate persona-specific label does not repeat the defect this fixes.
+    parent_dir="$(basename "$(dirname "$file")")"
     type_val="$(fm_field "$file" type || true)"
-    case "$type_val" in
-        feedback|project|reference|user|"") ;;
-        *) err "$rel — type='$type_val' is not in {feedback,project,reference,user}" ;;
-    esac
+    if [[ "$parent_dir" == "memory" ]]; then
+        case "$type_val" in
+            feedback|project|reference|user|"") ;;
+            *) err "$rel — type='$type_val' is not in {feedback,project,reference,user}" ;;
+        esac
+    else
+        case "$type_val" in
+            feedback|project|reference|user|patterns|"") ;;
+            *) warn "$rel — type='$type_val' is not in the Tier-2 topic-file enum {feedback,project,reference,user,patterns}" ;;
+        esac
+    fi
 
     # (d) Tier 1 naming convention: {type}_{slug}.md
-    parent_dir="$(basename "$(dirname "$file")")"
     if [[ "$parent_dir" == "memory" ]]; then
         # Tier 1 — filename must start with type_
         basename_file="$(basename "$file")"
