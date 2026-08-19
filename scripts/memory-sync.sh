@@ -171,7 +171,7 @@ require_usable_deny_list() {
 # per distinct finding kind, regardless of how many times it occurs in the file.
 run_gate() {
   local f="$1" out
-  [[ -f "$f" ]] || { warn "  gate: file not found: $f"; return 2; }
+  [[ -f "$f" ]] || { warn '  gate: file not found: %s' "$f"; return 2; }
 
   # gate_load_config already ran once, at the top of this script (see the
   # comment there) — a second call here would only re-read the same config.

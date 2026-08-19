@@ -769,6 +769,15 @@ class UnusableDenyListRefusesPromoteTest(PromoteTestBase):
         self.assertIn("#2", out, out)
         self.assertNotIn(DENY_NAME.lower(), out.lower(), out)
 
+    # No further "the message never contains a deny name, for ANY deny-list
+    # shape" test lives here on purpose: `_gate_read_config` in
+    # lib/discipline_gate.sh only ever emits `BADNAME\t<position>` for an
+    # unusable entry — the name is structurally never in the string it
+    # builds. A test asserting that absence stays green under every mutation
+    # that would remove a masking step, because there is no masking step to
+    # remove: nothing here ever puts the name in reach of one. Untestable by
+    # construction, not merely untested — do not re-add it.
+
     def test_a_usable_deny_list_of_the_same_shape_still_promotes(self):
         # Separates "refuses on an unusable entry" from "refuses on any list".
         self.write_config(denyNames=[DENY_NAME, "Blorptech"])
@@ -930,6 +939,25 @@ class MissingConfigPathMaskingTest(PromoteTestBase):
         self.assertEqual(r.returncode, 2, self.output(r))
         self.assertNotIn(DENY_NAME.lower(), self.output(r).lower(), self.output(r))
         self.assertIn("<redacted>", self.output(r), self.output(r))
+
+
+# ---------------------------------------------------------------------------
+# 13. WI-0016 review — a `%` in a MISSING file's name is a printf directive
+# at run_gate's :174 call site, not a literal. `warn "  gate: file not
+# found: $f"` interpolates $f straight into say()'s printf FORMAT STRING
+# (SC2059 territory), so a name like "100%d-notes.md" is measured to print
+# as "1000-notes.md" -- a file the user never typed. The header comment at
+# :58-61 claims every warn()/say() call site is a literal at the call site;
+# this one was not. DENY_NAME ("Quuxcorp") has no `%` in it, so none of the
+# masking tests above exercised this path.
+# ---------------------------------------------------------------------------
+class FormatStringInMissingFileNameTest(PromoteTestBase):
+    def test_a_percent_sign_in_a_missing_file_name_is_not_a_printf_directive(self):
+        self.write_config(denyNames=[DENY_NAME])
+        missing = self.work / "100%d-notes.md"  # never written
+        r = self.run_sync("gate", missing)
+        self.assertEqual(r.returncode, 1, self.output(r))
+        self.assertIn(str(missing), self.output(r), self.output(r))
 
 
 if __name__ == "__main__":  # pragma: no cover
