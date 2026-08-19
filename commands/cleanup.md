@@ -128,11 +128,6 @@ Compare:
   2. Failing that, the earliest top-level `## ` section that contains a date in its heading.
   3. Failing that, the oldest `## Last Action` / `## What Was Achieved` block (when the file uses the template structure).
 
-**Never** pick the inbox section as an archive candidate while it still holds lines matching §1's
-marker pattern (`grep -c '^- INBOX [|]'` > 0) —
-a finding that was never triaged must not disappear into the archive. Once §1 has cleared it, the
-empty section costs a few bytes and stays in place.
-
 If no candidate matches, report that and continue — a young HANDOVER can reach the threshold before
 it has an archivable block, and there is nothing to offer.
 
