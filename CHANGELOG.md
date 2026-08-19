@@ -7,6 +7,18 @@ All notable changes to this project are documented in this file. The format is b
 ## [Unreleased]
 
 ### Fixed
+- **`artifact-gate.sh` reported its own pattern definitions as secrets when run from an
+  installation.** The self-exemption that keeps the gate from flagging its own credential-shaped
+  pattern definitions is bound to the *resolved path* of the file that defines them
+  (`scripts/lib/discipline_gate.sh`), by design — the marker line-comment that grants the exemption
+  is honoured only in that one file, so it cannot be used as a suppression backdoor anywhere else. An
+  installed copy of the gate (e.g. `~/.claude/scripts/artifact-gate.sh`) scanning a *different*
+  checkout therefore meets a `discipline_gate.sh` that is not its own, and reported three genuine
+  false positives with no context. Widening the exemption to recognise a foreign copy by name or
+  location would reopen exactly the backdoor it exists to close, so the fix does not touch the
+  exemption: a finding whose line still carries the exemption marker now names it and says the file
+  was not recognised as the pattern source, so a maintainer reads the reason instead of triaging
+  three unexplained "secret" findings.
 - **`/cleanup`'s unparseable-inbox-line rule rejected the shipped template's own blockquote
   lines.** §1a excluded blockquote lines from the check by requiring a trailing space after `>`,
   but `templates/HANDOVER_TEMPLATE.md` uses bare `>` lines (no trailing space) as paragraph

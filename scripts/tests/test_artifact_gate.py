@@ -850,6 +850,39 @@ class PatternSourceExemptionIsLoadBearingTest(GateTestBase):
         self.assertIn(":134:", r.stdout)
         self.assertEqual(self.categories(r), {"secret"})
 
+    # -----------------------------------------------------------------------
+    # WI-0023: an INSTALLED copy of artifact-gate.sh (its own
+    # _GATE_PATTERN_SOURCE bound to ~/.claude/scripts/lib/discipline_gate.sh)
+    # sees a scanned repository's discipline_gate.sh as exactly this "foreign
+    # copy" case -- the three findings above, unexplained. Widening the
+    # exemption's file-identity check to recognise it would reopen the
+    # "any file could then carry the marker under that name" hole the
+    # line-scoped-AND-file-scoped design exists to close (see
+    # test_the_exemption_marker_does_not_work_in_an_ordinary_file above), so
+    # the finding itself must stay. What closes WI-0023 is a hint on it: a
+    # human sees the marker named and understands why, instead of triaging a
+    # secret finding that turns out to be the gate's own vocabulary.
+    # -----------------------------------------------------------------------
+    def test_an_unexempted_copy_names_the_marker_as_a_hint_not_a_silent_pass(self):
+        copy = self.write("discipline_gate_copy.sh", LIB.read_text(encoding="utf-8"))
+        r = self.run_gate(copy)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn(EXEMPT_MARKER, r.stdout)
+        self.assertIn("not recognised as the pattern-source file", r.stdout)
+
+    def test_a_finding_with_no_marker_on_its_line_carries_no_hint(self):
+        # The hint is keyed on the SPECIFIC finding line, not on "this file
+        # happens to contain the marker somewhere" -- a real secret sitting
+        # next to unrelated marker lines must not be talked out of looking
+        # like one.
+        copy = self.write(
+            "mixed.sh",
+            "# " + EXEMPT_MARKER + "\n" + CREDENTIAL + "\n",
+        )
+        r = self.run_gate(copy)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertNotIn("not recognised as the pattern-source file", r.stdout)
+
     def test_the_original_pattern_source_suppresses_those_same_findings(self):
         r = self.run_gate(LIB)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)

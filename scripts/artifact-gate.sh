@@ -209,6 +209,17 @@ while IFS= read -r f; do
     rest="${rec#*	}"
     cat_="${rest%%	*}"
     msg="${rest#*	}"
+    # WI-0023: this file was not recognised as THE pattern-source file (the
+    # self-exemption is bound to a resolved path, see lib/discipline_gate.sh),
+    # but the specific line that fired still carries the self-exemption
+    # marker. That happens for an installed gate scanning a checkout's own
+    # copy of lib/discipline_gate.sh, or a byte-identical copy at any other
+    # path. Widening the exemption to recognise it would let any file under
+    # that name carry the marker as a suppression backdoor -- the finding
+    # stays, only the message gains the context a human needs to triage it.
+    if LC_ALL=C sed -n "${ln}p" "$f" 2>/dev/null | LC_ALL=C grep -qF "$GATE_EXEMPT_MARKER"; then
+      msg="$msg -- this line carries the gate's own '$GATE_EXEMPT_MARKER' marker but $rel was not recognised as the pattern-source file; verify it is a foreign or differently-resolved copy of scripts/lib/discipline_gate.sh before treating it as a leak"
+    fi
     say '%s:%s: [%s] %s' "$rel" "$ln" "$cat_" "$msg"
     findings=$((findings + 1))
   done <<EOF
