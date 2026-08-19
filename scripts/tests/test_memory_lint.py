@@ -375,6 +375,23 @@ class MemoryLintTest(unittest.TestCase):
         self.assertIn("'project_deleted.md'", findings[0])
         self.assertNotIn("A Title", findings[0])
 
+    def test_a_single_quoted_title_is_stripped_from_a_dead_target(self):
+        """The single-quote title form (`](target 'Title')`) strips the same way.
+
+        WI-0026: the double-quote case above is a dedicated dead-target pin; the
+        single-quote strip arm (memory-lint.sh) was previously only exercised
+        indirectly through CLEAN_INDEX's live 'Single' entry — dropping that arm
+        was caught only as a side effect of an unrelated fixture line. This gives
+        it its own pin, independent of CLEAN_INDEX.
+        """
+        self.write_index(CLEAN_INDEX + "- [Titled](project_deleted.md 'A Title') — dead\n")
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("'project_deleted.md'", findings[0])
+        self.assertNotIn("A Title", findings[0])
+
     # --- Root-absolute targets resolve against the project root --------------------
 
     def test_root_absolute_target_resolves_against_the_project_root(self):
@@ -436,6 +453,20 @@ class MemoryLintTest(unittest.TestCase):
             + "-->\n"
             + "- [Ghost](gone.md) — live entry after the comment block\n"
         )
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("gone.md", findings[0])
+
+    def test_an_image_inside_a_single_line_html_comment_is_skipped(self):
+        """Both skip mechanisms — comment-stripping and the image exclusion — are
+        covered separately elsewhere; this exercises them combined on one line
+        (WI-0026). decomment() runs before the image/link distinction, so an
+        image markup that sits entirely inside a comment must vanish before
+        that distinction is ever made.
+        """
+        self.write_index(CLEAN_INDEX + "<!-- ![Diagram](dead_diagram.md) --> - [Ghost](gone.md)\n")
 
         findings = self.link_findings(self.run_lint().stdout)
 
