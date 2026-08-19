@@ -334,6 +334,100 @@ class DeclaredCapTest(HandoverSizeHookTestCase):
         self.assertEqual(DEFAULT_CAP_BYTES, entry.get("cap_bytes"))
 
 
+class CapParserToleranceTest(HandoverSizeHookTestCase):
+    """parse_handover_cap was deliberately given tolerances every other fixture in this
+    file happens not to exercise, because they all use the canonical header shape. Each
+    test here departs from that shape on exactly the one dimension it pins.
+    """
+
+    def test_a_cap_declared_past_a_narrower_header_window_is_still_honoured(self):
+        """The header window is 20 lines; a longer preamble must not push the
+        declaration out of it. Only the *lower* bound of that window (a regression to
+        e.g. 5 lines) is at risk — a widening is already caught by the deep-body test
+        above — so the preamble here is built to land the declaration on line 8: past a
+        5-line window, comfortably inside the real 20-line one.
+        """
+        header = (
+            "# Handover – Work State\n"
+            "\n"
+            "## Context\n"
+            "Preamble line 1.\n"
+            "Preamble line 2.\n"
+            "Preamble line 3.\n"
+            "\n"
+            "> **Size cap**: keep it ≤2 KB (~40 lines).\n"
+            "\n"
+        )
+        cap_line_index = [i for i, line in enumerate(header.splitlines()) if "Size cap" in line][0]
+        self.assertGreaterEqual(cap_line_index, 5,
+                                "fixture must place the declaration past a 5-line window")
+        self.assertLess(cap_line_index, 20,
+                        "fixture must still land inside the real 20-line window")
+        # 2.5 KB: over the declared 2 KB cap, well under the 5 KB default fallback.
+        self.write_handover(handover_of_size(2560, header=header))
+        result = self.run_hook("SessionStart", source="startup")
+        self.assertEqual(1, len(self.size_warnings(result)), result.stderr)
+        entry = [e for e in self.error_events() if e.get("event") == "HandoverSize"][0]
+        self.assertEqual(2 * 1024, entry.get("cap_bytes"))
+
+    def test_the_kb_unit_is_matched_case_insensitively(self):
+        """The shipped template writes "KB"; the parser must not silently stop
+        recognising a header that writes "kb" instead."""
+        header = (
+            "# Handover – Work State\n"
+            "\n"
+            "> **Size cap**: keep it ≤2 kb (~40 lines).\n"
+            "\n"
+        )
+        # 2.5 KB: over the declared 2 KB cap, well under the 5 KB default fallback.
+        self.write_handover(handover_of_size(2560, header=header))
+        result = self.run_hook("SessionStart", source="startup")
+        self.assertEqual(1, len(self.size_warnings(result)), result.stderr)
+        entry = [e for e in self.error_events() if e.get("event") == "HandoverSize"][0]
+        self.assertEqual(2 * 1024, entry.get("cap_bytes"))
+
+    def test_a_handover_with_invalid_utf8_bytes_still_gets_size_checked(self):
+        """The decode guard (errors="replace") must not be removable.
+
+        Without it, an undecodable HANDOVER would raise inside check_handover_size's own
+        try/except, which silently swallows the exception -- the exit code is 0 either
+        way, so only the warning going missing tells the two states apart. The invalid
+        lead bytes below decode to U+FFFD replacement characters and do not match any
+        cap-declaration pattern, so this exercises the fallback-to-default path together
+        with the guard.
+        """
+        raw = b"\xff\xfe" + b"x" * (DEFAULT_CAP_BYTES + 600)
+        (self.project / "docs" / "HANDOVER.md").write_bytes(raw)
+        result = self.run_hook("SessionStart", source="startup")
+        self.assertEqual(0, result.returncode)
+        self.assertEqual(1, len(self.size_warnings(result)), result.stderr)
+
+    def test_a_file_missing_its_trailing_newline_still_crosses_its_line_cap(self):
+        """The trailing-partial-line increment in the line count must not be dropped.
+
+        A file whose last line has no terminating newline has one fewer "\\n" than its
+        true line count; without the +1 correction a 200-line file would report 199 and
+        read as "approaching" instead of "over" its declared 200-line cap.
+        """
+        header = (
+            "# Handover – Work State\n"
+            "\n"
+            f"> **Size cap**: keep it ≤5 KB (~{DECLARED_LINE_CAP} lines).\n"
+            "\n"
+        )
+        text = handover_of_lines(DECLARED_LINE_CAP - header.count("\n"), header=header)
+        self.assertEqual(DECLARED_LINE_CAP, text.count("\n"),
+                         "fixture must land on the exact declared line cap")
+        text = text[:-1]  # strip the final line's trailing newline
+        self.assertFalse(text.endswith("\n"))
+        self.assertLess(len(text.encode("utf-8")), DEFAULT_CAP_BYTES,
+                        "fixture must isolate the line dimension")
+        self.write_handover(text)
+        result = self.run_hook("SessionStart", source="startup")
+        entry = [e for e in self.error_events() if e.get("event") == "HandoverSize"][0]
+        self.assertEqual("over", entry.get("level"), result.stderr)
+
+
 # === Does it stay quiet when it must? ============================================
 
 class SilenceTest(HandoverSizeHookTestCase):
@@ -741,6 +835,19 @@ class RoundingBoundaryTest(HandoverSizeHookTestCase):
         self.write_handover_of_lines(DECLARED_LINE_CAP)
         result = self.run_hook("SessionStart", source="startup")
         self.assert_level(result, "over")
+
+    def test_the_line_dimensions_reported_percentage_is_also_rounded(self):
+        """The byte dimension's rounding is pinned above; the line dimension's is not.
+
+        199 of 200 lines is 99.5 % exactly. round(99.5) is 100 (round-half-to-even
+        picks the even neighbour); int(99.5) truncates to 99. Both give "approaching"
+        as the level (decided on the exact ratio, not on this field), so only a direct
+        assertion on pct_of_cap tells the two implementations apart.
+        """
+        self.write_handover_of_lines(DECLARED_LINE_CAP - 1)
+        result = self.run_hook("SessionStart", source="startup")
+        entry = self.assert_level(result, "approaching")
+        self.assertEqual(100, entry.get("pct_of_cap"))
 
 
 @unittest.skipUnless(hasattr(os, "mkfifo"), "platform has no FIFOs")
