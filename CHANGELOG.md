@@ -65,6 +65,12 @@ All notable changes to this project are documented in this file. The format is b
   Tier-1 memory dir, so a persona index's target file is checked in the right place. Deliberately a
   floor, not a full fix: it catches a target file that no longer exists, not a wrong anchor into a file
   that still does — anchor resolution needs heading-to-slug modelling and is a separate, unbuilt item.
+- **An unclosed HTML comment silently switched check (n) off for everything below it, with no
+  warning.** Correct behaviour per CommonMark — a block comment opened at the start of a line and
+  never closed swallows the rest of the document as raw HTML, so no link there was ever missed — but
+  the failure mode was silent, same class as the unclosed-fence case above. The check now emits a
+  warning naming the line where the comment opened, reusing the same end-of-input sentinel mechanism,
+  independent of `MEMORY_INDEX_LINK_SEVERITY`.
 
 ### Added
 - **CCPR can now gate its own shipped artifacts (`scripts/artifact-gate.sh`).** The Constitution

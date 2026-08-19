@@ -378,14 +378,20 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
 
     while IFS= read -r target; do
         [[ -n "$target" ]] || continue
-        # The awk program's END block reports an unclosed fence as its own
-        # sentinel line, not as a dead-target candidate (WI-0032) — a control
-        # character no real link target can start with marks it. Report it as a
+        # The awk program's END block reports an unclosed fence (WI-0032) or an
+        # unclosed HTML comment (WI-0043) as its own sentinel line, not as a
+        # dead-target candidate — a control character no real link target can
+        # start with marks each one, and the two are distinct so the report names
+        # which construct actually swallowed the rest of the file. Report it as a
         # warning and move on before any of the target-normalisation logic below
         # runs on it.
         case "$target" in
             $'\x02'*)
                 warn "$index_rel — line ${target#?} opens a code fence that is never closed; link checking stopped there for the rest of the file"
+                continue
+                ;;
+            $'\x04'*)
+                warn "$index_rel — line ${target#?} opens an HTML comment that is never closed; link checking stopped there for the rest of the file"
                 continue
                 ;;
         esac
@@ -599,6 +605,7 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
             boundary = sprintf("%c", 1)
             fence_sentinel = sprintf("%c", 2)
             dest_mark = sprintf("%c", 3)
+            html_comment_sentinel = sprintf("%c", 4)
         }
         {
             # A fenced code block (```…``` or ~~~…~~~, optionally indented up to 3
@@ -634,16 +641,26 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
             # which only ever runs on a comment that does NOT open its line.
             # Checked here, before decomment() runs, so a link written on the
             # closing line of the block is never even offered to the
-            # extractor — mirrors the fence handling one block up. A block comment that
-            # never closes swallows the rest of the file exactly like an
-            # unclosed fence (the WI-0032 mechanism) but is not yet reported as
-            # its own warning; left open, not fixed here.
+            # extractor — mirrors the fence handling one block up. A block comment
+            # that never closes swallows the rest of the file exactly like an
+            # unclosed fence (the WI-0032 mechanism); html_comment_open_line feeds
+            # the same end-of-input sentinel reporting that gives (WI-0043). Fence
+            # and HTML-comment states can never both be open at once: whichever one
+            # opens first makes every following line take the `next` in that same
+            # branch, above, before detection of the other construct is ever
+            # reached — so there is exactly one sentinel to report, not two.
+            # NOTE: no apostrophes in this awk block — memory-lint.sh embeds it as
+            # one single-quoted bash string, and an unescaped apostrophe silently
+            # truncates the program (WI-0005 round 3; see awk-scripting.md).
             if (in_html_comment) {
                 if ($0 ~ /-->/) in_html_comment = 0
                 next
             }
             if (match($0, /^[ ]{0,3}<!--/)) {
-                if ($0 !~ /-->/) in_html_comment = 1
+                if ($0 !~ /-->/) {
+                    in_html_comment = 1
+                    html_comment_open_line = NR
+                }
                 next
             }
 
@@ -686,15 +703,19 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
                 prev = ")"
             }
         }
-        # A fence still open at end-of-input runs to end-of-document — correct
-        # CommonMark (WI-0032), so the skip itself is unchanged. What was silent is
-        # the failure MODE: a stray fence opener disables link checking for the
-        # whole remainder of the file with nothing said. Emit one sentinel line,
-        # marked with a control character no real link target can start with, so
-        # the shell side can tell it apart from an ordinary dead-target finding and
-        # report it as its own warning instead.
+        # A fence or an HTML comment still open at end-of-input runs to
+        # end-of-document — correct CommonMark (WI-0032 for the fence, WI-0041 for
+        # the comment), so the skip itself is unchanged in either case. What was
+        # silent is the failure MODE: a stray opener disables link checking for the
+        # whole remainder of the file with nothing said (WI-0043 for the comment
+        # case). Emit one sentinel line, marked with a control character no real
+        # link target can start with, so the shell side can tell it apart from an
+        # ordinary dead-target finding and report it as its own warning instead. The
+        # two states can never both be open at end-of-input (see the comment at the
+        # html_comment_open_line assignment above), so at most one of these fires.
         END {
             if (in_fence) print fence_sentinel fence_open_line
+            if (in_html_comment) print html_comment_sentinel html_comment_open_line
         }
     ' "$INDEX_FILE")
 done

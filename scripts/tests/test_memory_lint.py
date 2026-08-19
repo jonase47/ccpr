@@ -854,6 +854,53 @@ class MemoryLintTest(unittest.TestCase):
         warnings = self.findings(result.stdout, "Warnings")
         self.assertFalse(any("never closed" in w for w in warnings), warnings)
 
+    # --- WI-0043: an unclosed HTML comment silently switches the check off too -----
+    # Same defect class as the unclosed-fence case above, one construct over: an
+    # HTML comment block opened at the start of a line and never closed swallows
+    # every remaining line as raw HTML per CommonMark (WI-0041) — correct, and no
+    # link there is ever missed. What was silent is the failure MODE: the check's
+    # scope shrinks to nothing with no word said. Reuses the same end-of-input
+    # sentinel mechanism WI-0032 built for the fence case.
+
+    def test_an_unclosed_html_comment_warns_and_names_its_opening_line(self):
+        """A block-level HTML comment opened and never closed swallows every
+        remaining line — link checking stops there. That must now be visible."""
+        self.write_index(
+            CLEAN_INDEX
+            + "<!--\n"
+            + "- [Example](dead_after_unclosed_comment.md)\n"
+        )
+
+        result = self.run_lint()
+
+        self.assertEqual(self.link_findings(result.stdout), [])
+        warnings = self.findings(result.stdout, "Warnings")
+        # CLEAN_INDEX is 12 lines; the comment opens on the next line, 13.
+        self.assertTrue(
+            any("13" in w and "never closed" in w for w in warnings), warnings
+        )
+
+    def test_a_closed_html_comment_does_not_warn_about_an_unclosed_one(self):
+        """Control: a comment block that closes before end-of-file must not
+        trigger the new warning at all."""
+        self.write_index(CLEAN_INDEX + "<!--\n- [Example](dead_commented.md)\n-->\n")
+
+        result = self.run_lint()
+
+        warnings = self.findings(result.stdout, "Warnings")
+        self.assertFalse(any("never closed" in w for w in warnings), warnings)
+
+    def test_the_unclosed_comment_warning_names_its_own_construct(self):
+        """Both mechanisms report 'never closed' — the message must still say
+        WHICH construct opened, so a report reader is not left guessing."""
+        self.write_index(CLEAN_INDEX + "<!--\n- [Example](dead_after_unclosed_comment.md)\n")
+
+        warnings = self.findings(self.run_lint().stdout, "Warnings")
+
+        matching = [w for w in warnings if "never closed" in w]
+        self.assertEqual(len(matching), 1, matching)
+        self.assertIn("HTML comment", matching[0])
+
     # --- WI-0005 round 2, fix 3: an unpaired backtick is literal text --------------
     # Regression introduced by a838a1f: `strip_inline_code()` dropped everything
     # after a stray backtick once it ran out of a second one, silently losing a
