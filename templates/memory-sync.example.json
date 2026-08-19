@@ -6,7 +6,11 @@
   "tokenFile": "~/.<host>-token",
   "clonePath": "~/.claude/.memory-sync/<repo>",
   "namespace": "XX",
-  "gate": { "ipAllowlist": "" },
+  "gate": {
+    "_comment": "Shared by scripts/memory-sync.sh (promote path) and scripts/artifact-gate.sh (shipped-artifact sweep). ipAllowlist is a regex of IPv4 prefixes that are NOT reported, e.g. an internal VPN net. denyNames is the list of tenant and project names that must never appear in a shipped artifact or in promoted memory; it is matched case-insensitively as a literal substring, and the names themselves are never echoed into gate output. Keep this file out of every repository -- putting the names into a tracked file would leak exactly what the check protects. A CI job that cannot read this file can pass the same list via the CCPR_GATE_DENY_NAMES environment variable (newline- or comma-separated) from its secret store.",
+    "ipAllowlist": "",
+    "denyNames": ["<tenant-or-client-name>", "<internal-project-codename>"]
+  },
   "overlay": {
     "instinctsFileInRepo": "instincts/shared.md",
     "instinctsTarget": "~/.claude/instincts/shared.md",

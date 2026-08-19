@@ -31,6 +31,20 @@ All notable changes to this project are documented in this file. The format is b
   the index and all theme files.
 
 ### Added
+- **CCPR can now gate its own shipped artifacts (`scripts/artifact-gate.sh`).** The Constitution
+  forbids personal or tenant data in shipped artifacts, and that Inviolable was breached — a tenant
+  project name sat in an instinct's rationale while the file's own header claimed such details were
+  anonymised. Hand sweeps are what let it through. The existing memory gate could not simply be
+  pointed at the repo: swept over 273 files it produced 77 files with findings and **zero** true
+  positives, and it would not have caught the actual breach, because it has no concept of a tenant
+  *name*. The gate is now split into a pattern library used by both entry points, with profiles
+  selecting which checks run rather than what a pattern means. The generic 40-character rule — the
+  source of every false positive — was replaced with shapes machine-generated credentials actually
+  have. A deny-list of tenant and project names closes the real gap; it is read from personal config
+  or an environment variable, never from the repository, and matches are reported with file and line
+  while the name itself is redacted from every emitted line, because a CI log is a shipped artifact
+  too. An unconfigured deny-list says so loudly instead of passing silently. Ships with a dormant CI
+  template that names no forge. The repo currently scans clean: 275 files, 0 findings.
 - **The HANDOVER size cap is now watched automatically.** The ≤5 KB / 150-line cap was documented in
   the template and enforced by `/cleanup`, but nothing triggered it — the file drifted past its limit
   unnoticed until someone happened to run the command, and `doc-volume-check.sh` does not cover it

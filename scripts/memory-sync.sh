@@ -22,7 +22,14 @@
 
 set -euo pipefail
 
-CONFIG="${MEMORY_SYNC_CONFIG:-$HOME/.claude/memory-sync.json}"
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+# The discipline-gate patterns are defined ONCE, in the shared library, and are
+# reused by scripts/artifact-gate.sh with a different profile. Do not inline a
+# second copy here — a second register drifts.
+# shellcheck source=lib/discipline_gate.sh
+. "$HERE/lib/discipline_gate.sh"
+
+CONFIG="$(gate_config_path)"
 
 die() { echo "memory-sync: $*" >&2; exit 2; }
 note() { echo "memory-sync: $*"; }
@@ -61,8 +68,6 @@ INDEX_BLOCK_TITLE="$(cfg overlay.indexBlockTitle)"
 PERSONA_TOPIC="$(cfg overlay.personaTopicName)"
 MEM_NS_DIR="$(expand "$(cfg overlay.memoryNsDir)")"
 MEM_INDEX_PTR="$(expand "$(cfg overlay.memoryIndexPointer)")"
-# Optional gate config: a regex of IPv4 prefixes to allow (e.g. an internal VPN net); empty = flag all.
-IP_ALLOWLIST="$(cfg gate.ipAllowlist)"
 
 [[ -n "$REPO_URL" ]] || die "config: repoUrl missing"
 [[ -n "$NS" ]] || die "config: namespace missing"
@@ -103,52 +108,45 @@ ensure_clone() {
 
 # --- discipline gate ----------------------------------------------------------
 # Returns 0 if clean, 1 if any finding. Prints findings. Used by promote + `gate`.
+# The checks themselves live in lib/discipline_gate.sh (profile "memory"); this
+# wrapper only renders them in the shape this script has always printed: one line
+# per distinct finding kind, regardless of how many times it occurs in the file.
 run_gate() {
-  local f="$1" findings=0
+  local f="$1" out
   [[ -f "$f" ]] || { echo "  gate: file not found: $f" >&2; return 2; }
 
-  # 1) Secrets.
-  # 1a) keyword = <value> — but NOT when the value is a filesystem path (a location, not a secret):
-  #     value must start with an alnum/+ char, so `token: ~/.x` or `token: /root/.x` won't match.
-  if grep -nEi '(token|secret|password|passwd|bearer|api[_-]?key)[[:space:]]*[:=][[:space:]]*["'"'"']?[A-Za-z0-9+][A-Za-z0-9._/+=-]{15,}' "$f" >/dev/null; then
-    echo "  [secret] possible credential assignment (keyword = <value>)"; findings=1
-  fi
-  # 1b) high-entropy / known token blobs: hex, base64, base64url, perm-, vendor prefixes.
-  if grep -nE '(perm-[A-Za-z0-9._-]{20,}|[A-Fa-f0-9]{40,}|[A-Za-z0-9+/]{40,}={0,2}|[A-Za-z0-9_-]{40,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16})' "$f" >/dev/null; then
-    echo "  [secret] long token-like string — verify it is a name/path, not a value"; findings=1
-  fi
-  # 1c) private keys + credential-bearing connection strings (user:pass@host).
-  if grep -nE '(-----BEGIN[A-Z ]*PRIVATE KEY-----|://[^/[:space:]:]+:[^/[:space:]@]+@)' "$f" >/dev/null; then
-    echo "  [secret] private key block or credential-bearing connection string"; findings=1
+  gate_load_config
+
+  # The shared library reports a configuration defect; refusing to run on it is
+  # the entry point's job, and this one used to ignore the signal. That is the
+  # worse half of the pair: artifact-gate reads files that are already here,
+  # whereas this is the path on which memory LEAVES the machine. A deny-list
+  # that quietly lost an entry would announce itself as active, check fewer
+  # names than the operator configured, and push the file anyway. Refused
+  # before the scan, so no verdict can be produced by the shortened list. The
+  # entry is identified by position: naming it would put a tenant name into the
+  # terminal, the shell history and any CI log wrapping this command.
+  if [[ -n "$GATE_DENY_UNUSABLE" ]]; then
+    die "deny-list entry $GATE_DENY_UNUSABLE is unusable (blank, or containing a line break) — fix gate.denyNames in $CONFIG. Refusing to run with a shorter list than configured."
   fi
 
-  # 2) Personal data — session hashes, home paths, emails, type:user, personal-context markers.
-  if grep -nEi '(claude\.ai/code/session|session[ _-][0-9a-f]{6,}|/Users/[A-Za-z0-9._-]+/|/home/[A-Za-z0-9._-]+/|Rot-Grün|red-green|Accessibility-Familien)' "$f" >/dev/null; then
-    echo "  [personal] session hash / home path / personal-context marker"; findings=1
-  fi
-  if grep -nE '[[:alnum:]._%+-]+@[[:alnum:]]([[:alnum:].-]*[[:alnum:]])?\.[[:alpha:]]{2,}' "$f" >/dev/null; then
-    echo "  [personal] email address — remove or generalize"; findings=1
-  fi
-  if grep -nE '^type:[[:space:]]*user' "$f" >/dev/null; then
-    echo "  [personal] type: user is personal-only, never shared"; findings=1
+  # An absent list is not an error, but silence about it is. The library leaves
+  # "say so out loud" to the caller, and promote said nothing at all — so a
+  # clean verdict looked identical whether the tenant names had been checked or
+  # had never been configured.
+  if [[ "$GATE_DENY_SOURCE" == "none" ]]; then
+    note "deny-list NOT CONFIGURED — no tenant/project names were checked. Set gate.denyNames in $CONFIG, or pass CCPR_GATE_DENY_NAMES."
   fi
 
-  # 3) Network — IPv4 literals not in the configured allowlist (gate.ipAllowlist, e.g. an internal VPN net).
-  local ips
-  ips="$(grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' "$f" || true)"
-  if [[ -n "$IP_ALLOWLIST" && -n "$ips" ]]; then ips="$(printf '%s\n' "$ips" | grep -vE "$IP_ALLOWLIST" || true)"; fi
-  if [[ -n "$(printf '%s' "$ips" | tr -d '[:space:]')" ]]; then
-    echo "  [network] IPv4 literal not in the configured allowlist — verify it is not a third-party/public address"; findings=1
-  fi
+  out="$(gate_scan_file "$f" memory || true)"
+  [[ -n "$out" ]] || return 0
 
-  # 4) Content-type — no work-items/TODOs in shared memory (belongs in the tracker).
-  # Match work-item SHAPES (TODO:/TODO(, FIXME:, checkbox items, open-status, next-steps headings),
-  # not the bare word in prose (a rule may legitimately discuss TODOs, or name a "Cancelled" state).
-  if grep -nE '(TODO[:(]|FIXME[:(]|^[[:space:]]*[-*][[:space:]]*\[[ xX]\]|^status:[[:space:]]*(open|offen|cancelled|gecancelt|wip)([[:space:]]|$)|^#{1,6}[[:space:]]*(Next Steps|Nächste Schritte|Offene Punkte|TODO)\b)' "$f" >/dev/null; then
-    echo "  [content] work-item marker (TODO:/FIXME:/checkbox/open-status/next-steps heading) — track in the ticket system, not in shared memory"; findings=1
-  fi
-
-  return "$findings"
+  local rendered
+  rendered="$(printf '%s\n' "$out" \
+    | awk -F'\t' '$2 != "_exempt" && !seen[$2 FS $3]++ { printf "  [%s] %s\n", $2, $3 }')"
+  [[ -n "$rendered" ]] || return 0
+  printf '%s\n' "$rendered"
+  return 1
 }
 
 # --- verbs -------------------------------------------------------------------
