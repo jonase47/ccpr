@@ -589,6 +589,43 @@ class MemoryLintTest(unittest.TestCase):
         self.assertEqual(len(findings), 1, findings)
         self.assertIn("also_dead.md", findings[0])
 
+    # --- WI-0005 round 2, fix 2: a fence closes only with its own delimiter type ---
+    # Regression introduced by a838a1f: the untyped `in_fence` boolean toggled on
+    # any fence-looking line, so a `~~~` inside an open backtick fence both hid
+    # real content after the actual close (false negative) and re-opened scanning
+    # one line too early on the mismatched delimiter (false positive).
+
+    def test_fence_only_closes_with_its_own_delimiter_type(self):
+        """A `~~~` line inside an open backtick fence is fence *content*, not a
+        close — CommonMark closes a fence only with the same character, at least
+        as long as the opener."""
+        self.write_index(
+            CLEAN_INDEX
+            + "```markdown\n"
+            + "- [Example](dead_in_fence.md)\n"
+            + "~~~\n"
+            + "- [Example2](dead_after_mismatched_close.md)\n"
+            + "```\n"
+            + "- [AfterFence](dead_after_fence.md)\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("dead_after_fence.md", findings[0])
+
+    def test_dead_link_inside_a_tilde_fence_is_not_reported(self):
+        self.write_index(CLEAN_INDEX + "~~~\n- [Example](dead_tilde_fence.md)\n~~~\n")
+
+        self.assertEqual(self.link_findings(self.run_lint().stdout), [])
+
+    def test_dead_link_inside_a_backtick_fence_with_an_info_string_is_not_reported(self):
+        self.write_index(
+            CLEAN_INDEX + "```markdown\n- [Example](dead_info_string.md)\n```\n"
+        )
+
+        self.assertEqual(self.link_findings(self.run_lint().stdout), [])
+
     # --- Forms the check deliberately skips, and its scope -------------------------
 
     def test_angle_bracket_targets_are_skipped(self):

@@ -456,12 +456,25 @@ if [[ -f "$TIER1_INDEX" ]]; then
             # A fenced code block (```…``` or ~~~…~~~, optionally indented up to 3
             # spaces per CommonMark) is skipped wholesale: an index illustrating its
             # own link syntax inside a fenced example is not a set of live entries.
-            # in_fence carries the toggle across lines, same shape as in_comment.
-            if (match($0, /^[ ]{0,3}(```+|~~~+)/)) {
-                in_fence = !in_fence
+            # A fence only closes with its own delimiter character, at least as long
+            # as the opener — fence_char/fence_len carry that across lines, so a
+            # `~~~` inside an open backtick fence stays content, not a close.
+            if (in_fence) {
+                if (match($0, "^[ ]{0,3}" fence_char "{" fence_len ",}[ \t]*$")) {
+                    in_fence = 0
+                    fence_char = ""
+                    fence_len = 0
+                }
                 next
             }
-            if (in_fence) next
+            if (match($0, /^[ ]{0,3}(```+|~~~+)/)) {
+                opener = substr($0, RSTART, RLENGTH)
+                sub(/^[ ]{0,3}/, "", opener)
+                fence_char = substr(opener, 1, 1)
+                fence_len = length(opener)
+                in_fence = 1
+                next
+            }
 
             line = strip_inline_code(decomment($0))
 
