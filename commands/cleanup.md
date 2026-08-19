@@ -67,7 +67,7 @@ to change the count.
 Search for a line starting with the heading `## Open Points` (any suffix, e.g. the shipped
 `## Open Points (append-only inbox)`). If found, collect every line from there up to (not including)
 the next `## ` heading or end of file. Within that block, a line is **structure, not a finding** —
-excluded from this pass — if it is blank, a blockquote line (starts with `> `), an HTML comment
+excluded from this pass — if it is blank, a blockquote line (starts with `>`), an HTML comment
 (`<!-- ... -->`), or a line matching §1's marker pattern. The template's own format example lives
 entirely inside the blockquote, so a fresh `project-init` HANDOVER must report **zero** unparseable
 lines here — if your count is not zero on an untouched template, the exclusion list above is wrong,

@@ -76,6 +76,28 @@ def extract_inbox_placement_comment(template_text: str) -> str:
     return match.group(0)
 
 
+def extract_blockquote_prefix(cleanup_text: str) -> str:
+    """Pulls the literal blockquote-line prefix out of cleanup.md's own prose.
+
+    cleanup.md documents a structure line as one that "is blank, a blockquote
+    line (starts with `<prefix>`), ..." -- this extracts the backtick-quoted
+    prefix instead of hardcoding a second copy of it in this test file, the
+    same pattern extract_marker_pattern already uses for the inbox marker
+    (WI-0039). A change to the rule in the prompt is then what breaks this
+    test, not a maintainer forgetting to update a duplicate -- the exact
+    failure shape WI-0039 found: the two had drifted by one character
+    (the mirror hardcoded ">" while the prompt required "> ", a trailing
+    space the shipped template's own blank blockquote lines do not have).
+    """
+    match = re.search(r"blockquote line \(starts with `([^`]*)`\)", cleanup_text)
+    assert match, (
+        "commands/cleanup.md no longer documents the blockquote-line exclusion as "
+        "\"blockquote line (starts with `<prefix>`)\" — extraction target moved or "
+        "was reworded"
+    )
+    return match.group(1)
+
+
 def find_section(text: str, heading_prefix: str):
     """Returns the lines strictly between the first heading starting with heading_prefix and
     the next top-level '## ' heading (or EOF). Returns None if no such heading exists.
@@ -100,14 +122,17 @@ def find_section(text: str, heading_prefix: str):
     return lines[start:end]
 
 
-def find_unparseable_inbox_lines(handover_text: str, marker_pattern: str):
+def find_unparseable_inbox_lines(handover_text: str, marker_pattern: str, blockquote_prefix: str):
     """Reference mirror of the documented §1a pass: within '## Open Points', every non-blank,
     non-blockquote, non-comment line that does not match the inbox marker is unparseable.
 
     This function's *logic* is written here (prose cannot be executed), but its inputs
-    (the heading text and the marker pattern) are the same ones the doc-completeness checks
-    below require cleanup.md to name explicitly — so a doc that removes those specifics fails
-    the presence checks before this mirror ever runs on a fixture.
+    (the heading text, the marker pattern and the blockquote prefix) are the same ones the
+    doc-completeness checks below require cleanup.md to name explicitly — so a doc that
+    removes those specifics fails the presence checks before this mirror ever runs on a
+    fixture. blockquote_prefix in particular must come from cleanup.md itself (via
+    extract_blockquote_prefix), not a hardcoded literal — WI-0039 found the two disagreeing
+    by exactly the trailing space a hardcoded ">" silently tolerated.
     """
     section = find_section(handover_text, "## Open Points")
     if section is None:
@@ -118,7 +143,7 @@ def find_unparseable_inbox_lines(handover_text: str, marker_pattern: str):
         stripped = line.strip()
         if not stripped:
             continue
-        if line.startswith(">"):
+        if line.startswith(blockquote_prefix):
             continue
         if stripped.startswith("<!--"):
             continue
@@ -251,6 +276,7 @@ class UnparseableInboxLineTest(unittest.TestCase):
         cls.template_text = read(TEMPLATE_PATH)
         cls.marker_pattern = extract_marker_pattern(cls.cleanup_text)
         cls.placement_comment = extract_inbox_placement_comment(cls.template_text)
+        cls.blockquote_prefix = extract_blockquote_prefix(cls.cleanup_text)
 
     def test_cleanup_documents_the_unparseable_line_mechanic(self):
         """RED before the fix: cleanup.md must name the report phrase and both exclusions."""
@@ -267,22 +293,27 @@ class UnparseableInboxLineTest(unittest.TestCase):
         prose_line = "- Note: consider revisiting the retry backoff (found while fixing WI-9999)"
         marker_line = "- INBOX | 06.01.2026 | tester | a real entry | ref-6"
         text = build_handover([marker_line, prose_line], self.template_text, self.placement_comment)
-        unparseable = find_unparseable_inbox_lines(text, self.marker_pattern)
+        unparseable = find_unparseable_inbox_lines(text, self.marker_pattern, self.blockquote_prefix)
         self.assertEqual([prose_line], unparseable)
 
     def test_fresh_template_has_no_unparseable_lines(self):
         """Regression pin: the template's own format example lives inside a blockquote and
         must not be flagged — this is the false-positive the task calls out explicitly.
-        Independent of the doc-completeness gate: it verifies this file's own exclusion rules
-        against the real template, not the prose."""
-        unparseable = find_unparseable_inbox_lines(self.template_text, self.marker_pattern)
+        Independent of the doc-completeness gate: it verifies this file's own exclusion rules,
+        derived from cleanup.md's own wording (WI-0039), against the real template.
+        """
+        unparseable = find_unparseable_inbox_lines(
+            self.template_text, self.marker_pattern, self.blockquote_prefix
+        )
         self.assertEqual([], unparseable)
 
     def test_missing_heading_is_not_an_error(self):
         """A HANDOVER without an '## Open Points' heading (older template) must not crash or
         produce a phantom finding — mirrors §1's own 'heading missing' branch."""
         text = "# Handover – Work State\n\n## Next Steps\n1. Do the thing.\n"
-        self.assertIsNone(find_unparseable_inbox_lines(text, self.marker_pattern))
+        self.assertIsNone(
+            find_unparseable_inbox_lines(text, self.marker_pattern, self.blockquote_prefix)
+        )
 
 
 class ReleaseBaselineInboxCarryTest(unittest.TestCase):

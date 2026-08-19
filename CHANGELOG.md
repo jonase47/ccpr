@@ -7,6 +7,13 @@ All notable changes to this project are documented in this file. The format is b
 ## [Unreleased]
 
 ### Fixed
+- **`/cleanup`'s unparseable-inbox-line rule rejected the shipped template's own blockquote
+  lines.** §1a excluded blockquote lines from the check by requiring a trailing space after `>`,
+  but `templates/HANDOVER_TEMPLATE.md` uses bare `>` lines (no trailing space) as paragraph
+  separators inside the Open Points blockquote — two of them. An agent following the prompt
+  literally would report a false positive on a freshly initialised HANDOVER. Fixed the rule to
+  match a bare `>`, and the test mirror now derives the exclusion prefix from cleanup.md's own
+  wording instead of a hardcoded literal, so the two cannot drift apart again undetected.
 - **`memory-sync.sh promote` published its destination path without checking it.** The discipline
   gate examined the source file's *content* and then wrote the *destination* into a commit message
   that was pushed — so a file with clean content could still carry a tenant name into the shared
