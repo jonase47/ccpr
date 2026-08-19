@@ -15,9 +15,9 @@
 #   1. Copy this file into your repository, e.g. to ci/artifact-gate.sh, and
 #      make it executable.
 #   2. Add a job to your CI configuration whose only command is that script,
-#      running from the repository root with the full history checked out
-#      (the sweep uses `git ls-files`, so a source archive without a .git
-#      directory will not work).
+#      running from the repository root. A shallow checkout is fine -- the
+#      sweep only reads `git ls-files`, not history -- but it does need a git
+#      working tree: a source archive without a .git directory will not work.
 #   3. Optional but recommended: expose the deny-list of tenant / project names
 #      from your CI secret store as CCPR_GATE_DENY_NAMES (newline- or
 #      comma-separated) and set REQUIRE_DENYLIST=1 below. Without it the run

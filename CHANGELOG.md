@@ -7,6 +7,15 @@ All notable changes to this project are documented in this file. The format is b
 ## [Unreleased]
 
 ### Fixed
+- **`templates/ci/artifact-gate.ci.sh` shipped without any execution check.** Nothing ran the
+  template — not even a syntax check — so the first team to activate it in CI would have been the
+  first to discover whether it actually worked. Added a `sh -n` syntax test plus a fixture-repo
+  invocation that copies the real gate into a throwaway git repo and asserts the template fails a
+  repo carrying a planted finding, passes a clean one, exits 2 with its own message when the gate
+  is not installed at `$REPO_ROOT`, and passes `REQUIRE_DENYLIST=1` through to the gate as
+  `--require-denylist`. Also corrected the template's Activation note: the sweep reads only
+  `git ls-files`, not history, so a shallow checkout is fine — what it actually needs is a `.git`
+  working tree, not full history as the note previously said.
 - **`artifact-gate.sh` reported its own pattern definitions as secrets when run from an
   installation.** The self-exemption that keeps the gate from flagging its own credential-shaped
   pattern definitions is bound to the *resolved path* of the file that defines them

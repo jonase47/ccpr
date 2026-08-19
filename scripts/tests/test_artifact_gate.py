@@ -119,6 +119,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 GATE = REPO_ROOT / "scripts" / "artifact-gate.sh"
 MEMORY_SYNC = REPO_ROOT / "scripts" / "memory-sync.sh"
 LIB = REPO_ROOT / "scripts" / "lib" / "discipline_gate.sh"
+CI_TEMPLATE = REPO_ROOT / "templates" / "ci" / "artifact-gate.ci.sh"
 
 # A file body that must never produce a finding: ordinary prose plus the two
 # structural shapes (heading, checkbox) that the memory profile flags and the
@@ -1362,6 +1363,99 @@ class UnreadableFileTest(GateTestBase):
         locked.chmod(0o000)
         r = self.run_gate("--repo", repo)
         self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+
+
+# ---------------------------------------------------------------------------
+# 9. templates/ci/artifact-gate.ci.sh (WI-0027) — the dormant CI template.
+#    Unlike GATE and LIB, nothing else in this suite ever runs it: it is
+#    shipped as a starting point for teams to copy into their own CI config,
+#    not executed as part of this repository's own checks. These tests give
+#    it its first execution: a syntax check plus a fixture-repo invocation
+#    that proves it actually fails a dirty repo and passes a clean one.
+# ---------------------------------------------------------------------------
+class CiTemplateExecutionTest(GateTestBase):
+    def make_fixture_repo(self):
+        """A git repo carrying its own copy of the real gate.
+
+        The template resolves `$REPO_ROOT/scripts/artifact-gate.sh` and that
+        script in turn sources `scripts/lib/discipline_gate.sh` relative to
+        its OWN location, not $REPO_ROOT -- so pointing REPO_ROOT at this
+        suite's own checkout would not exercise the template's guard for "the
+        gate is not installed here" at all. Copying the two real scripts into
+        the fixture at the same relative paths lets REPO_ROOT drive a genuine,
+        working gate invocation instead of a stub.
+        """
+        repo = self.work / "fixture-repo"
+        (repo / "scripts" / "lib").mkdir(parents=True)
+        gate_copy = repo / "scripts" / "artifact-gate.sh"
+        shutil.copy2(GATE, gate_copy)
+        gate_copy.chmod(gate_copy.stat().st_mode | 0o111)
+        shutil.copy2(LIB, repo / "scripts" / "lib" / "discipline_gate.sh")
+        subprocess.run(["git", "init", "-q"], cwd=repo, check=True, env=self.env())
+        return repo
+
+    def commit_all(self, repo):
+        env = self.env(GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@host.invalid",
+                       GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@host.invalid")
+        subprocess.run(["git", "add", "-A"], cwd=repo, check=True, env=env)
+        subprocess.run(["git", "commit", "-qm", "x"], cwd=repo, check=True, env=env)
+
+    def run_template(self, repo_root, template=CI_TEMPLATE, **extra_env):
+        # REPO_ROOT is passed explicitly so the template never falls back to
+        # `git rev-parse --show-toplevel` on this suite's own working tree.
+        return subprocess.run(
+            ["sh", str(template)],
+            capture_output=True, text=True,
+            env=self.env(REPO_ROOT=str(repo_root), **extra_env),
+        )
+
+    # --- the cheap floor: it must at least parse -----------------------------
+    def test_the_template_is_syntactically_valid_posix_sh(self):
+        r = subprocess.run(["sh", "-n", str(CI_TEMPLATE)],
+                            capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    # --- the honest one: does it actually gate? -------------------------------
+    def test_a_clean_fixture_repo_passes_through_the_template(self):
+        fixture = self.make_fixture_repo()
+        (fixture / "clean.md").write_text(CLEAN_TEXT, encoding="utf-8")
+        self.commit_all(fixture)
+        r = self.run_template(fixture)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_a_planted_finding_fails_through_the_template(self):
+        fixture = self.make_fixture_repo()
+        (fixture / "bad.md").write_text("leak " + HOME_PATH + "\n", encoding="utf-8")
+        self.commit_all(fixture)
+        r = self.run_template(fixture)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("bad.md", r.stdout + r.stderr)
+
+    # --- the guard nobody has ever tripped ------------------------------------
+    def test_a_missing_gate_installation_exits_2_with_its_own_message(self):
+        not_ccpr = self.work / "not-a-ccpr-repo"
+        not_ccpr.mkdir()
+        r = self.run_template(not_ccpr)
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertIn("not found", r.stdout + r.stderr)
+
+    # --- the branch nobody has ever tripped -----------------------------------
+    def test_require_denylist_1_reaches_the_gate_as_the_require_denylist_flag(self):
+        # An unconfigured deny-list only fails the run when --require-denylist
+        # reaches the underlying gate -- so toggling REQUIRE_DENYLIST over the
+        # same clean fixture, with no config written, is what makes the flag's
+        # passthrough observable rather than merely read.
+        fixture = self.make_fixture_repo()
+        (fixture / "clean.md").write_text(CLEAN_TEXT, encoding="utf-8")
+        self.commit_all(fixture)
+
+        default_run = self.run_template(fixture)
+        self.assertEqual(default_run.returncode, 0,
+                          default_run.stdout + default_run.stderr)
+
+        required_run = self.run_template(fixture, REQUIRE_DENYLIST="1")
+        self.assertEqual(required_run.returncode, 1,
+                          required_run.stdout + required_run.stderr)
 
 
 if __name__ == "__main__":
