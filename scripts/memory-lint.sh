@@ -357,6 +357,17 @@ fi
 if [[ -f "$TIER1_INDEX" ]]; then
     while IFS= read -r target; do
         [[ -n "$target" ]] || continue
+        # The awk program's END block reports an unclosed fence as its own
+        # sentinel line, not as a dead-target candidate (WI-0032) — a control
+        # character no real link target can start with marks it. Report it as a
+        # warning and move on before any of the target-normalisation logic below
+        # runs on it.
+        case "$target" in
+            $'\x02'*)
+                warn "docs/memory/MEMORY.md — line ${target#?} opens a code fence that is never closed; link checking stopped there for the rest of the file"
+                continue
+                ;;
+        esac
         # Trim whitespace around the target: `[x]( a.md )` addresses `a.md`.
         target="${target#"${target%%[![:space:]]*}"}"
         target="${target%"${target##*[![:space:]]}"}"
@@ -521,7 +532,7 @@ if [[ -f "$TIER1_INDEX" ]]; then
             if (match(d, /^\([^)]*\)[ \t]*$/)) return 1
             return 0
         }
-        BEGIN { sq = sprintf("%c", 39); boundary = sprintf("%c", 1) }
+        BEGIN { sq = sprintf("%c", 39); boundary = sprintf("%c", 1); fence_sentinel = sprintf("%c", 2) }
         {
             # A fenced code block (```…``` or ~~~…~~~, optionally indented up to 3
             # spaces per CommonMark) is skipped wholesale: an index illustrating its
@@ -543,6 +554,7 @@ if [[ -f "$TIER1_INDEX" ]]; then
                 fence_char = substr(opener, 1, 1)
                 fence_len = length(opener)
                 in_fence = 1
+                fence_open_line = NR
                 next
             }
 
@@ -576,6 +588,16 @@ if [[ -f "$TIER1_INDEX" ]]; then
                 line = substr(line, RSTART + RLENGTH)
                 prev = ")"
             }
+        }
+        # A fence still open at end-of-input runs to end-of-document — correct
+        # CommonMark (WI-0032), so the skip itself is unchanged. What was silent is
+        # the failure MODE: a stray fence opener disables link checking for the
+        # whole remainder of the file with nothing said. Emit one sentinel line,
+        # marked with a control character no real link target can start with, so
+        # the shell side can tell it apart from an ordinary dead-target finding and
+        # report it as its own warning instead.
+        END {
+            if (in_fence) print fence_sentinel fence_open_line
         }
     ' "$TIER1_INDEX")
 fi

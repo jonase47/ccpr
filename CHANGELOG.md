@@ -45,6 +45,11 @@ All notable changes to this project are documented in this file. The format is b
 - **`instinct-check.sh` reported a stale age.** File age came from the index mtime alone, so editing a
   theme file without touching the index left the age unchanged. It now uses the newest mtime across
   the index and all theme files.
+- **`memory-lint.sh` check (n) dropped the rest of the file when a code fence was never closed —
+  silently.** An unclosed fence running to end-of-document is correct CommonMark, so the skip itself
+  was right; nothing said the scope had shrunk, so a single stray triple-backtick could disable dead-link
+  checking for everything below it without any indication in the report. The check now emits a warning
+  naming the line where the fence opened, independent of `MEMORY_INDEX_LINK_SEVERITY`.
 
 ### Added
 - **CCPR can now gate its own shipped artifacts (`scripts/artifact-gate.sh`).** The Constitution

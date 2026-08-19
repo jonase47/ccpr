@@ -700,6 +700,41 @@ class MemoryLintTest(unittest.TestCase):
         self.assertEqual(len(findings), 1, findings)
         self.assertIn("dead_after_fence_4_3.md", findings[0])
 
+    # --- WI-0032: an unclosed fence silently drops the rest of the file ------------
+    # An unclosed fence running to end-of-document is correct CommonMark — confirmed
+    # against a reference implementation, the link after it really does render
+    # inside <pre><code>, not as a link — so the skip itself stays. What was silent
+    # is the failure MODE: nothing said the scope had shrunk. These two tests pin a
+    # warning naming the opening line, not a change to what gets checked.
+
+    def test_an_unclosed_fence_warns_and_names_its_opening_line(self):
+        """A fence opened and never closed swallows every remaining line — link
+        checking stops there. That must now be visible, not silent."""
+        self.write_index(
+            CLEAN_INDEX
+            + "```\n"
+            + "- [Example](dead_after_unclosed_fence.md)\n"
+        )
+
+        result = self.run_lint()
+
+        self.assertEqual(self.link_findings(result.stdout), [])
+        warnings = self.findings(result.stdout, "Warnings")
+        # CLEAN_INDEX is 12 lines; the fence opens on the next line, 13.
+        self.assertTrue(
+            any("13" in w and "never closed" in w for w in warnings), warnings
+        )
+
+    def test_a_closed_fence_does_not_warn_about_an_unclosed_one(self):
+        """Control: a fence that closes before end-of-file must not trigger the
+        new warning at all."""
+        self.write_index(CLEAN_INDEX + "```\n- [Example](dead_fenced.md)\n```\n")
+
+        result = self.run_lint()
+
+        warnings = self.findings(result.stdout, "Warnings")
+        self.assertFalse(any("never closed" in w for w in warnings), warnings)
+
     # --- WI-0005 round 2, fix 3: an unpaired backtick is literal text --------------
     # Regression introduced by a838a1f: `strip_inline_code()` dropped everything
     # after a stray backtick once it ran out of a second one, silently losing a
