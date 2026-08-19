@@ -66,6 +66,16 @@ Add a "Baseline" section after "Current Phase" (before "Project goals"):
 If a Baseline section already exists: update it (version, date, status).
 
 ### 4. Reset HANDOVER.md
+
+Before creating the fresh file, scan the **current** `docs/HANDOVER.md` for inbox entries: lines
+matching `commands/cleanup.md` §1's marker pattern (`grep -c '^- INBOX [|]' docs/HANDOVER.md`).
+`baseline.sh` already copies the whole file into the archive (see prep report), so this step is not
+the rescue — it is what keeps an untriaged finding in the **triage loop** instead of letting it go
+quiet inside the archive: a release cut is not a triage decision and must not silently drop the
+finding on the reader's behalf. A blocking guard would not help here either (the file is archived
+either way, and a guard that holds up a release just gets bypassed) — carry the entries forward
+instead.
+
 Create a fresh HANDOVER.md according to the template (`~/.claude/templates/HANDOVER_TEMPLATE.md`):
 
 - **Current phase**: P8 – Operations & Evolution
@@ -73,6 +83,13 @@ Create a fresh HANDOVER.md according to the template (`~/.claude/templates/HANDO
 - **What was achieved**: Take HANDOVER summary from prep report (compact)
 - **Next steps**: `/p8-ops` or `/p8-iteration` depending on context
 - **Context for next session**: Take HANDOVER summary from prep report
+- **Open Points (append-only inbox)**: carry every matched line from the old file into the new
+  file's `## Open Points` section **verbatim** — same text, same order, appended below the
+  `<!-- append inbox entries below this line -->` marker. Do not triage, reword, or drop any of
+  them; that stays `/cleanup`'s job, not this skill's.
+
+Report the carried count as its own loud line, even when it is zero:
+`HANDOVER reset: N inbox entries carried over untouched`.
 
 ### 5. Present result
 Show the user:
@@ -80,6 +97,7 @@ Show the user:
 - Created BASELINE.md (brief summary)
 - Changed CLAUDE.md (Frozen/Active Docs)
 - Reset HANDOVER.md
+- `HANDOVER reset: N inbox entries carried over untouched` (§4)
 
 ## Handover Epilogue
 Update `docs/HANDOVER.md` with the result of this command.
