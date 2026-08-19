@@ -622,7 +622,15 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
                 }
                 next
             }
-            if (match($0, /^[ ]{0,3}(```+|~~~+)/)) {
+            # Gated on !in_html_comment (WI-0045): a line that merely LOOKS like a
+            # fence opener while an HTML comment is already open must not set
+            # in_fence — otherwise the comments own closing line is caught by the
+            # in_fence branch above on the NEXT record and never reaches the
+            # comment-close check below, leaving in_html_comment set forever. The
+            # reverse direction needs no such gate: `if (in_fence)` above already
+            # runs first and unconditionally `next`s, so nothing inside a real
+            # fence is ever offered to the comment-opener check.
+            if (!in_html_comment && match($0, /^[ ]{0,3}(```+|~~~+)/)) {
                 opener = substr($0, RSTART, RLENGTH)
                 sub(/^[ ]{0,3}/, "", opener)
                 fence_char = substr(opener, 1, 1)
@@ -645,10 +653,12 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
             # that never closes swallows the rest of the file exactly like an
             # unclosed fence (the WI-0032 mechanism); html_comment_open_line feeds
             # the same end-of-input sentinel reporting that gives (WI-0043). Fence
-            # and HTML-comment states can never both be open at once: whichever one
-            # opens first makes every following line take the `next` in that same
-            # branch, above, before detection of the other construct is ever
-            # reached — so there is exactly one sentinel to report, not two.
+            # and HTML-comment states cannot both be open at the same time: the
+            # fence-opener check just above is gated on !in_html_comment, and the
+            # in_fence branch above THAT already runs first and unconditionally
+            # `next`s once a fence is open — so there is exactly one sentinel to
+            # report, not two. That is a property this gate establishes, not one
+            # that held on its own.
             # NOTE: no apostrophes in this awk block — memory-lint.sh embeds it as
             # one single-quoted bash string, and an unescaped apostrophe silently
             # truncates the program (WI-0005 round 3; see awk-scripting.md).
@@ -711,8 +721,9 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
         # case). Emit one sentinel line, marked with a control character no real
         # link target can start with, so the shell side can tell it apart from an
         # ordinary dead-target finding and report it as its own warning instead. The
-        # two states can never both be open at end-of-input (see the comment at the
-        # html_comment_open_line assignment above), so at most one of these fires.
+        # two states can never both be open at end-of-input (the fence-opener check
+        # above is gated on !in_html_comment, see that comment for why), so at most
+        # one of these fires.
         END {
             if (in_fence) print fence_sentinel fence_open_line
             if (in_html_comment) print html_comment_sentinel html_comment_open_line

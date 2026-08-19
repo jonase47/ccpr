@@ -957,6 +957,63 @@ class MemoryLintTest(unittest.TestCase):
         self.assertEqual(len(matching), 1, matching)
         self.assertIn("HTML comment", matching[0])
 
+    # --- WI-0045: a fence look-alike inside an open comment must not set in_fence --
+    # The fence-opener check ran unconditionally, not gated on in_html_comment (the
+    # reverse direction already was: `if (in_fence)` runs first and unconditionally
+    # `next`s, so nothing inside a real fence can ever be misread as a comment
+    # opener). A line that merely LOOKS like a fence opener while a comment is open
+    # set in_fence anyway, and the comment's own closing line was then swallowed by
+    # the in_fence branch before it ever reached the comment-close check —
+    # in_html_comment stayed set forever. Both repros measured against the
+    # CommonMark reference implementation before writing these tests.
+
+    def test_a_fence_look_alike_inside_an_open_comment_does_not_block_it_from_closing(self):
+        """A bare fence marker inside an open HTML comment must not set in_fence —
+        otherwise the comments own closing line is swallowed by the fence branch
+        and the comment never closes. Reference-confirmed: the comment does close
+        and the link after it is live, so it must be reported dead."""
+        self.write_index(
+            CLEAN_INDEX
+            + "<!--\n"
+            + "```\n"
+            + "-->\n"
+            + "[real link](nope.md)\n"
+        )
+
+        result = self.run_lint()
+
+        warnings = self.findings(result.stdout, "Warnings")
+        self.assertFalse(any("never closed" in w for w in warnings), warnings)
+        findings = self.link_findings(result.stdout)
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("nope.md", findings[0])
+
+    def test_a_fence_look_alike_inside_a_closed_comment_does_not_hide_a_later_real_fence(self):
+        """Second measured repro: once the fence look-alike no longer sets in_fence,
+        the comment closes normally, the link between the comment and a REAL fence
+        opened afterward is checked (and is dead), and the link inside that real,
+        still-open fence stays unreported — matching the reference render exactly."""
+        self.write_index(
+            CLEAN_INDEX
+            + "<!--\n"
+            + "```\n"
+            + "-->\n"
+            + "[between](between.md)\n"
+            + "```\n"
+            + "[after](after.md)\n"
+        )
+
+        result = self.run_lint()
+
+        warnings = self.findings(result.stdout, "Warnings")
+        self.assertFalse(any("HTML comment" in w for w in warnings), warnings)
+        matching = [w for w in warnings if "never closed" in w]
+        self.assertEqual(len(matching), 1, matching)
+        self.assertIn("code fence", matching[0])
+        findings = self.link_findings(result.stdout)
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("between.md", findings[0])
+
     # --- WI-0005 round 2, fix 3: an unpaired backtick is literal text --------------
     # Regression introduced by a838a1f: `strip_inline_code()` dropped everything
     # after a stray backtick once it ran out of a second one, silently losing a
