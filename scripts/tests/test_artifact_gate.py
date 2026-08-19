@@ -27,6 +27,7 @@ never again be achieved by weakening a pattern into uselessness.
 
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -676,6 +677,43 @@ class ScanFileReturnContractTest(GateTestBase):
         p = self.write("dirty.md", CREDENTIAL + "\n")
         r = self.call_gate_scan_file(p)
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+
+
+# ---------------------------------------------------------------------------
+# 4c. The pattern-source exemption suppresses something today (WI-0013 pt. 3).
+#
+# WI-0014 planted three connection-string-shaped examples into this file's own
+# comments (documenting why the placeholder-slot rule must test "is" and not
+# "contains" -- see the lines around GATE_RE_PLACEHOLDER_SLOT). Those comments
+# are what make the exemption load-bearing: a byte-identical copy of this file
+# at an unexempted path must report them, or the exemption has never been
+# proven to suppress anything at all.
+# ---------------------------------------------------------------------------
+class PatternSourceExemptionIsLoadBearingTest(GateTestBase):
+    def test_an_unexempted_copy_of_the_pattern_source_reports_findings(self):
+        copy = self.write("discipline_gate_copy.sh", LIB.read_text(encoding="utf-8"))
+        r = self.run_gate(copy)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        # Measured, not assumed: this count tracks the current comment body of
+        # discipline_gate.sh, not a fixed contract of the gate itself.
+        finding_lines = [
+            line for line in r.stdout.splitlines() if "] " in line and "[" in line
+        ]
+        self.assertEqual(len(finding_lines), 3, r.stdout)
+        # Line numbers as of this test, not the {95, 96, 104} the work item
+        # names: adding the bearer-token pattern block (WI-0013 point 1)
+        # earlier in the file shifted these three comment lines down by 20.
+        self.assertIn(":115:", r.stdout)
+        self.assertIn(":116:", r.stdout)
+        self.assertIn(":124:", r.stdout)
+        self.assertEqual(self.categories(r), {"secret"})
+
+    def test_the_original_pattern_source_suppresses_those_same_findings(self):
+        r = self.run_gate(LIB)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        match = re.search(r": (\d+) pattern-source lines exempted", r.stdout)
+        self.assertIsNotNone(match, r.stdout)
+        self.assertGreater(int(match.group(1)), 0)
 
 
 # ---------------------------------------------------------------------------
