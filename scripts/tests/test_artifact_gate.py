@@ -27,6 +27,7 @@ never again be achieved by weakening a pattern into uselessness.
 
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -65,6 +66,7 @@ BASE64_BLOB = leak("VGhpc0lzQVZlcnlMb25nQmFzZTY0", "RW5jb2RlZFNlY3JldFZhbHVlSGVy
 VENDOR_TOKEN = leak("ghp", "_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8")
 PRIVATE_KEY = leak("-----BEGIN RSA ", "PRIVATE KEY-----")
 HOME_PATH = leak("/Us", "ers/somebody/Workspace/notes.md")
+LINUX_HOME_PATH = leak("/ho", "me/alice/Workspace/notes.md")
 SESSION_HASH = leak("session", "_a1b2c3d4e5")
 REAL_EMAIL = leak("firstname.lastname", "@somecompany.de")
 NEAR_RESERVED_EMAIL = leak("person", "@mytest.de")
@@ -234,6 +236,11 @@ class AdoptedCategoriesTest(GateTestBase):
 
     def test_a_real_home_path_fires_as_personal(self):
         self.assert_fires("see " + HOME_PATH + "\n", "personal")
+
+    def test_a_linux_home_path_fires_as_personal_too(self):
+        # GATE_RE_PERSONAL covers both /Users/... and /home/...; only the
+        # /Users/ arm had a fixture before this test.
+        self.assert_fires("see " + LINUX_HOME_PATH + "\n", "personal")
 
     def test_a_session_hash_fires_as_personal(self):
         self.assert_fires("resumed from " + SESSION_HASH + "\n", "personal")
@@ -637,6 +644,38 @@ class SelfMatchTest(GateTestBase):
         self.assert_fires(
             "leak = '" + HOME_PATH + "'  # " + EXEMPT_MARKER + "\n", "personal", "sample.py"
         )
+
+
+# ---------------------------------------------------------------------------
+# 4b. gate_scan_file's own return-code contract (WI-0013 point 2).
+#
+# Neither entry point reads this value: artifact-gate.sh and memory-sync.sh
+# both capture the function's stdout with `|| true` and derive their own exit
+# code by parsing the emitted records instead. The contract the header
+# comment documents -- "returns 1 when there was at least one [finding], 0
+# otherwise" -- is therefore only observable by calling the function directly,
+# which is what this test does; it cannot be pinned through either shell
+# entry point's exit code.
+# ---------------------------------------------------------------------------
+class ScanFileReturnContractTest(GateTestBase):
+    def call_gate_scan_file(self, path, profile="artifact"):
+        script = (
+            f"source {shlex.quote(str(LIB))}; "
+            f"gate_scan_file {shlex.quote(str(path))} {shlex.quote(profile)} >/dev/null"
+        )
+        return subprocess.run(
+            ["bash", "-c", script], capture_output=True, text=True, env=self.env()
+        )
+
+    def test_a_clean_scan_returns_zero(self):
+        p = self.write("clean.md", CLEAN_TEXT)
+        r = self.call_gate_scan_file(p)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_a_dirty_scan_returns_one(self):
+        p = self.write("dirty.md", CREDENTIAL + "\n")
+        r = self.call_gate_scan_file(p)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
 
 
 # ---------------------------------------------------------------------------
