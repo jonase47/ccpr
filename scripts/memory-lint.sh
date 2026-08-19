@@ -354,7 +354,28 @@ fi
 # (n) Dead links in the Tier-1 index — the reverse direction of (g).
 # (g) finds Tier-1 files the index forgot; this finds index entries whose target is gone.
 # Severity is MEMORY_INDEX_LINK_SEVERITY (top of file), mirroring check (f).
+#
+# Scope (WI-0040): the Tier-1 index plus every Tier-2 persona index
+# (docs/memory/{agent}/MEMORY.md). A persona index carries far more links than
+# the Tier-1 one — deep anchors into topic files, one per review/implementation
+# round — and nothing validated those before this. This is the floor only: it
+# catches a target FILE that does not exist, not a wrong anchor into a file that
+# does (that needs heading-to-slug modelling and is a separate, unbuilt item).
+INDEX_FILES=()
 if [[ -f "$TIER1_INDEX" ]]; then
+    INDEX_FILES+=("$TIER1_INDEX")
+fi
+if [[ -d "$MEMORY_DIR" ]]; then
+    while IFS= read -r persona_index; do
+        INDEX_FILES+=("$persona_index")
+    done < <(find "$MEMORY_DIR" -mindepth 2 -maxdepth 2 -type f -name "MEMORY.md" | sort)
+fi
+
+for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
+    [[ -n "$INDEX_FILE" ]] || continue
+    index_rel="${INDEX_FILE#$PROJECT_DIR/}"
+    index_dir="$(dirname "$INDEX_FILE")"
+
     while IFS= read -r target; do
         [[ -n "$target" ]] || continue
         # The awk program's END block reports an unclosed fence as its own
@@ -364,7 +385,7 @@ if [[ -f "$TIER1_INDEX" ]]; then
         # runs on it.
         case "$target" in
             $'\x02'*)
-                warn "docs/memory/MEMORY.md — line ${target#?} opens a code fence that is never closed; link checking stopped there for the rest of the file"
+                warn "$index_rel — line ${target#?} opens a code fence that is never closed; link checking stopped there for the rest of the file"
                 continue
                 ;;
         esac
@@ -393,16 +414,18 @@ if [[ -f "$TIER1_INDEX" ]]; then
         # `a.md#section` addresses the file a.md — drop the fragment before resolving.
         target="${target%%#*}"
         [[ -n "$target" ]] || continue
-        # Targets resolve relative to the index's own directory, as in check (f).
-        # Exception: a leading `/` is repo-root-relative — the usual convention in a
-        # docs tree rendered from the repository root. Chosen over "report as
-        # unsupported" because the form has a single unambiguous meaning inside a
-        # project and stays checkable. Treating it as a filesystem-absolute path
-        # would leave the project entirely; the previous concatenation produced a
-        # doubled path (`docs/memory//docs/memory/x.md`) that can never exist.
+        # Targets resolve relative to the CURRENT index's own directory, as in check
+        # (f) — a persona index's relative links address its own silo, not the Tier-1
+        # memory dir (WI-0040). Exception: a leading `/` is repo-root-relative — the
+        # usual convention in a docs tree rendered from the repository root. Chosen
+        # over "report as unsupported" because the form has a single unambiguous
+        # meaning inside a project and stays checkable. Treating it as a
+        # filesystem-absolute path would leave the project entirely; the previous
+        # concatenation produced a doubled path (`docs/memory//docs/memory/x.md`)
+        # that can never exist.
         case "$target" in
             /*) resolved="$PROJECT_DIR$target" ;;
-            *)  resolved="$MEMORY_DIR/$target" ;;
+            *)  resolved="$index_dir/$target" ;;
         esac
         # A trailing slash already forces directory semantics: POSIX pathname
         # resolution rejects `regularfile/`, so `-e` is false for it and true for a
@@ -411,7 +434,7 @@ if [[ -f "$TIER1_INDEX" ]]; then
         if [[ -e "$resolved" ]]; then
             continue
         fi
-        link_finding="docs/memory/MEMORY.md — link target '$target' does not exist ($resolved)"
+        link_finding="$index_rel — link target '$target' does not exist ($resolved)"
         # Dispatch by value — never expand the knob in command position (see the
         # validation at the top of this file).
         case "$MEMORY_INDEX_LINK_SEVERITY" in
@@ -673,8 +696,8 @@ if [[ -f "$TIER1_INDEX" ]]; then
         END {
             if (in_fence) print fence_sentinel fence_open_line
         }
-    ' "$TIER1_INDEX")
-fi
+    ' "$INDEX_FILE")
+done
 
 # Report
 NOW="$(date '+%d.%m.%Y %H:%M')"

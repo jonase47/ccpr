@@ -154,6 +154,9 @@ class MemoryLintTest(unittest.TestCase):
     def write_index(self, text):
         (self.memory_dir / "MEMORY.md").write_text(text, encoding="utf-8")
 
+    def write_persona_index(self, text, agent="senior-developer"):
+        (self.memory_dir / agent / "MEMORY.md").write_text(text, encoding="utf-8")
+
     def lint_env(self, **extra_env):
         """The environment of a lint run — built from scratch, never inherited.
 
@@ -986,6 +989,56 @@ class MemoryLintTest(unittest.TestCase):
         self.write_index(CLEAN_INDEX + "- see [A](gone_a.md) and [B](gone_b.md)\n")
 
         self.assertEqual(len(self.link_findings(self.run_lint().stdout)), 2)
+
+    # --- Tier-2 persona indexes are in scope too (WI-0040) -------------------------
+    # Check (n) used to look only at the Tier-1 index (docs/memory/MEMORY.md).
+    # A persona index (docs/memory/{agent}/MEMORY.md) carries far more links — deep
+    # anchors into topic files, one per review/implementation round — and nothing
+    # validated those. This is the floor shape only: it catches a missing FILE, not
+    # a wrong anchor into a file that does exist (see the dedicated test below).
+
+    def test_dead_link_in_a_persona_index_is_reported(self):
+        self.write_persona_index(TIER2_INDEX_TEXT + "- [Ghost](missing.md) — dead link\n")
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("missing.md", findings[0])
+        self.assertIn("senior-developer/MEMORY.md", findings[0])
+
+    def test_a_live_link_in_a_persona_index_is_not_reported(self):
+        """Also pins that a persona-index target resolves relative to the persona
+        index's OWN directory, not the Tier-1 memory dir: patterns.md only exists
+        inside senior-developer/, not at docs/memory/ root."""
+        self.write_persona_index(TIER2_INDEX_TEXT)  # unchanged fixture: [patterns.md](patterns.md), live
+
+        self.assertEqual(self.link_findings(self.run_lint().stdout), [])
+
+    def test_a_wrong_anchor_into_an_existing_persona_file_is_not_reported(self):
+        """Acceptance (a), the floor: a missing FILE is caught, a wrong anchor into
+        a file that does exist is not — anchor resolution needs heading-to-slug
+        modelling and is deliberately out of scope for this fix (WI-0040)."""
+        self.write_persona_index(
+            TIER2_INDEX_TEXT + "- [Ghost](patterns.md#section-that-does-not-exist) — live file, dead anchor\n"
+        )
+
+        self.assertEqual(self.link_findings(self.run_lint().stdout), [])
+
+    def test_every_persona_index_is_scanned_not_only_the_first(self):
+        """A second persona directory, with its own dead link, must be found too —
+        and named by its own path, not folded into another index's finding."""
+        other_dir = self.memory_dir / "code-reviewer"
+        other_dir.mkdir()
+        (other_dir / "MEMORY.md").write_text(
+            "# Code-Reviewer Memory\n\n- [Ghost](nonexistent_topic.md) — dead\n",
+            encoding="utf-8",
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("code-reviewer/MEMORY.md", findings[0])
+        self.assertIn("nonexistent_topic.md", findings[0])
 
     # --- The severity knob: the only tests that may notice the default ------------
     # Everything above asserts extraction and is blind to severity. The four tests

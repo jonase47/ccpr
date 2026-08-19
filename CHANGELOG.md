@@ -57,6 +57,14 @@ All notable changes to this project are documented in this file. The format is b
   was right; nothing said the scope had shrunk, so a single stray triple-backtick could disable dead-link
   checking for everything below it without any indication in the report. The check now emits a warning
   naming the line where the fence opened, independent of `MEMORY_INDEX_LINK_SEVERITY`.
+- **`memory-lint.sh` check (n) validated the Tier-1 index only — nothing checked a persona (Tier-2)
+  index's links.** `docs/memory/{agent}/MEMORY.md` carries far more links than the Tier-1 index (deep
+  anchors into topic files, one per review/implementation round), and splitting a persona silo found
+  three already-dead entries that nothing had noticed. The check now scans every persona index too, in
+  addition to the Tier-1 one — a relative target resolves against its own index's directory, not the
+  Tier-1 memory dir, so a persona index's target file is checked in the right place. Deliberately a
+  floor, not a full fix: it catches a target file that no longer exists, not a wrong anchor into a file
+  that still does — anchor resolution needs heading-to-slug modelling and is a separate, unbuilt item.
 
 ### Added
 - **CCPR can now gate its own shipped artifacts (`scripts/artifact-gate.sh`).** The Constitution
