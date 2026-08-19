@@ -43,16 +43,20 @@ TIER1_TOPIC_WARN_KB=30
 TIER1_TOPIC_ERR_KB=50
 
 # Severity of check (n) — dead Markdown links in the Tier-1 index.
-# Ships as `warn`, not `err`, deliberately: check (f) errors on the same defect class
-# (a cross-reference to a non-existent file), but this check's link extraction still
-# has two known gaps — fenced/inline code examples are false positives, and
-# reference-style links are not seen at all. Erroring on an incomplete extraction
-# would be a bet on completeness that is not backed by evidence yet.
-# Promotion to `err` is tracked as its own work item and is the SemVer-relevant step
-# (ADR-0001): it rejects previously-accepted content, so it must be visible, not silent.
+# Ships as `err`, matching check (f), which errors on the same defect class (a
+# cross-reference to a non-existent file). This check's extraction used to have
+# two known gaps — fenced/inline code examples were false positives, and
+# reference-style links were not seen at all — which is why the default started
+# at `warn`: erroring on an incomplete extraction would have been a bet on
+# completeness that was not backed by evidence. Both gaps are closed (a838a1f),
+# so the promotion to `err` is the SemVer-relevant step (ADR-0001): it rejects
+# previously-accepted content (a dead index link that used to pass with a
+# warning now fails the run), so it must be visible, not silent.
 # Overridable from the environment so both values can be exercised without editing
-# this file; the assignment below is the single place that decides the default.
-MEMORY_INDEX_LINK_SEVERITY="${MEMORY_INDEX_LINK_SEVERITY:-warn}"
+# this file, and as a transitional escape hatch (MEMORY_INDEX_LINK_SEVERITY=warn)
+# for callers not yet ready to treat a dead index link as a hard failure; the
+# assignment below is the single place that decides the default.
+MEMORY_INDEX_LINK_SEVERITY="${MEMORY_INDEX_LINK_SEVERITY:-err}"
 
 # Validate the knob before doing any work. The value used to be expanded in command
 # position (`"$MEMORY_INDEX_LINK_SEVERITY" "<message>"`), so a typo aborted the run

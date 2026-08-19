@@ -120,6 +120,17 @@ All notable changes to this project are documented in this file. The format is b
   as `imported-*.md`), while index bullets with no matching entry are a WARNING — the index pointing
   at content that does not exist.
 
+### Changed
+- **`memory-lint.sh`'s Tier-1 index link check (`n`) is now an error by default, not a warning
+  (WI-0005).** It shipped at warning severity because its link extraction had two known gaps —
+  fenced/inline code examples were false positives, and reference-style links were invisible — and
+  erroring on an incomplete extraction would have bet on completeness that was not evidenced. Both
+  gaps are closed. This rejects content the lint used to accept: a dead link in the Tier-1 index
+  (`docs/memory/MEMORY.md`) now fails the run (exit 2) where it previously only warned (exit 1) —
+  the SemVer-relevant step named in the original entry, per ADR-0001. **If this breaks your run:**
+  remove the dead link or restore the file it points at; `MEMORY_INDEX_LINK_SEVERITY=warn` is
+  available as a transitional override for callers not yet ready to treat it as a hard failure.
+
 ## [0.2.1-beta] - 2026-07-10
 
 ### Fixed
