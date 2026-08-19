@@ -80,7 +80,13 @@ def extract_phase_from_handover(project_dir: str) -> dict:
 
     # Extract next steps – try inline field first, then ## section
     # Inline: "**Next Steps:** Fulfill requirements, then /p3-architecture"
-    inline_next = re.search(r"\*{0,2}Next Steps?\*{0,2}:?\*{0,2}\s*(.+)", content)
+    # Anchored to line start (heading hashes / bold markers only) so an unrelated
+    # occurrence of the words "Next Steps" inside prose elsewhere in the document
+    # (e.g. an inbox finding text) is never mistaken for the field or heading —
+    # placement of the inbox section relative to this one stops mattering (WI-0024).
+    inline_next = re.search(
+        r"^#{0,6}\s*\*{0,2}Next Steps?\*{0,2}:?\*{0,2}\s*(.+)", content, re.MULTILINE
+    )
     if inline_next:
         line = re.sub(r"\*", "", inline_next.group(1)).strip()
         cmd_match = re.search(r"/([a-z0-9-]+)", line)
