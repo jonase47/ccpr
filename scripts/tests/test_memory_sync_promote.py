@@ -93,18 +93,29 @@ class PromoteTestBase(unittest.TestCase):
 
     def _init_remote(self):
         """A bare repo with one commit on `main` — a plausible shared repo."""
-        r = self._git("init", "--quiet", "--bare", "--initial-branch=main", self.remote)
+        self._seed_bare_repo(self.remote, seed_name="seed")
+
+    def _seed_bare_repo(self, remote_path, seed_name):
+        """Init a bare repo at `remote_path` with one commit on `main`.
+
+        Factored out of `_init_remote` so a test can stand up a SECOND bare
+        repo whose path itself is the fixture under test (e.g. a repoUrl that
+        carries a configured deny-listed name), without duplicating the
+        seed/push/cleanup dance.
+        """
+        r = self._git("init", "--quiet", "--bare", "--initial-branch=main", remote_path)
         self.assertEqual(r.returncode, 0, r.stderr)
-        seed = self.tmp / "seed"
+        seed = self.tmp / seed_name
         self.assertEqual(
             self._git("init", "--quiet", "--initial-branch=main", seed).returncode, 0
         )
         (seed / "README.md").write_text("# shared\n", encoding="utf-8")
         self.assertEqual(self._git("add", "README.md", cwd=seed).returncode, 0)
         self.assertEqual(self._git("commit", "--quiet", "-m", "init", cwd=seed).returncode, 0)
-        r = self._git("push", "--quiet", self.remote, "main", cwd=seed)
+        r = self._git("push", "--quiet", remote_path, "main", cwd=seed)
         self.assertEqual(r.returncode, 0, r.stderr)
         shutil.rmtree(seed)
+        return remote_path
 
     def env(self, **extra):
         e = {
@@ -139,11 +150,11 @@ class PromoteTestBase(unittest.TestCase):
         return p
 
     # --- driving the entry point ----------------------------------------
-    def run_sync(self, *args, bash=None):
+    def run_sync(self, *args, bash=None, extra_env=None):
         """Run memory-sync.sh as a subprocess. Exit code measured directly."""
         return subprocess.run(
             [bash or "bash", str(MEMORY_SYNC), *[str(a) for a in args]],
-            capture_output=True, text=True, env=self.env(),
+            capture_output=True, text=True, env=self.env(**(extra_env or {})),
         )
 
     def promote(self, src, dst, bash=None):
@@ -764,6 +775,117 @@ class UnusableDenyListRefusesPromoteTest(PromoteTestBase):
         r = self.promote(self.write_src(), "instincts/xx-org.md")
         self.assertEqual(r.returncode, 0, self.output(r))
         self.assertIn("instincts/xx-org.md", self.remote_tree())
+
+
+# ---------------------------------------------------------------------------
+# 10. WI-0016 — every line this tool emits goes through the same mask
+# `promote`'s destination check already applies to itself.
+#
+# `artifact-gate.sh` routes every emitted line through `gate_redact_path` (see
+# its `say()`/`warn()`/`die()`). `memory-sync.sh`'s `die()`/`note()` were a
+# bare `echo` — the same tool that REFUSES a destination for carrying a
+# configured name PRINTED that identical class of name everywhere else it
+# appears: the repoUrl on `pull`/`status`, a missing file's own path on
+# `gate`, the config path in an unusable-deny-list error, a promoted source's
+# own path in the progress line.
+# ---------------------------------------------------------------------------
+class EmittedOutputMaskingTest(PromoteTestBase):
+    def deny_named_remote_config(self):
+        """A repoUrl that itself carries the configured deny-listed name.
+
+        A REAL, clonable bare repo — not just a string — so `git clone`/
+        `fetch` succeed and nothing about the assertions below is muddied by
+        git's own (unmasked) error output on a failed transport.
+        """
+        remote = self._seed_bare_repo(
+            self.tmp / ("%s-shared.git" % DENY_NAME), seed_name="deny-seed"
+        )
+        cfg = {
+            "repoUrl": str(remote),
+            "namespace": "XX",
+            "tokenFile": str(self.token),
+            "clonePath": str(self.clone),
+            "gate": {"denyNames": [DENY_NAME]},
+        }
+        (self.home / ".claude" / "memory-sync.json").write_text(
+            json.dumps(cfg), encoding="utf-8"
+        )
+        return remote
+
+    def test_status_does_not_print_a_configured_name_from_the_repo_url(self):
+        self.deny_named_remote_config()
+        r = self.run_sync("status")
+        self.assertEqual(r.returncode, 0, self.output(r))
+        self.assertNotIn(DENY_NAME.lower(), self.output(r).lower(), self.output(r))
+
+    def test_pull_does_not_print_a_configured_name_from_the_repo_url(self):
+        self.deny_named_remote_config()
+        r = self.run_sync("pull")
+        self.assertEqual(r.returncode, 0, self.output(r))
+        self.assertNotIn(DENY_NAME.lower(), self.output(r).lower(), self.output(r))
+
+    def test_pull_reports_progress_with_the_name_redacted_not_silenced(self):
+        # Masking, not silence -- the same shape `promote`'s destination
+        # refusal already uses.
+        self.deny_named_remote_config()
+        out = self.output(self.run_sync("pull"))
+        self.assertIn("<redacted>", out, out)
+
+    def test_a_second_pull_against_an_existing_clone_is_masked_too(self):
+        # `ensure_clone`'s `fetch` branch (a clone already present) is a
+        # SEPARATE code path from the first `git clone` -- both print the
+        # repo URL.
+        self.deny_named_remote_config()
+        first = self.run_sync("pull")
+        self.assertEqual(first.returncode, 0, self.output(first))
+        r = self.run_sync("pull")
+        self.assertEqual(r.returncode, 0, self.output(r))
+        self.assertNotIn(DENY_NAME.lower(), self.output(r).lower(), self.output(r))
+
+    def test_a_missing_gate_target_carrying_a_configured_name_is_masked(self):
+        self.write_config(denyNames=[DENY_NAME])
+        missing = self.work / ("%s-notes.md" % DENY_NAME)  # never written
+        r = self.run_sync("gate", missing)
+        # The `gate` dispatch collapses run_gate's own 1 (findings) and 2
+        # (usage/setup defect) into a flat exit 1 -- a pre-existing shape of
+        # `case ... && note ... || { note ...; exit 1; }`, unrelated to the
+        # masking this test measures.
+        self.assertEqual(r.returncode, 1, self.output(r))
+        self.assertNotIn(DENY_NAME.lower(), self.output(r).lower(), self.output(r))
+        self.assertIn("<redacted>", self.output(r), self.output(r))
+
+    def test_the_promote_progress_message_masks_a_configured_name_in_the_source_path(self):
+        # The DESTINATION is clean here -- only the SOURCE path carries the
+        # name, so the destination-deny check has nothing to refuse and the
+        # progress line ("Running discipline gate on $src ...") is reached.
+        self.write_config(denyNames=[DENY_NAME])
+        src = self.write_src(name="%s-local-notes.md" % DENY_NAME)
+        r = self.promote(src, "instincts/xx-org.md")
+        self.assertEqual(r.returncode, 0, self.output(r))
+        self.assertNotIn(DENY_NAME.lower(), self.output(r).lower(), self.output(r))
+        self.assertIn("<redacted>", self.output(r), self.output(r))
+
+
+# ---------------------------------------------------------------------------
+# 12. WI-0016 — a config path itself carrying a configured deny-listed name,
+# on the one path where the config file that would have supplied the
+# deny-list is the very thing that is missing. The list has to come from the
+# environment instead -- CCPR_GATE_DENY_NAMES, which `gate_load_config` reads
+# before it ever looks at the (absent) config file.
+# ---------------------------------------------------------------------------
+class MissingConfigPathMaskingTest(PromoteTestBase):
+    def test_a_missing_config_path_carrying_a_configured_name_is_masked(self):
+        cfg_path = self.home / ".claude" / ("%s-memory-sync.json" % DENY_NAME)
+        r = self.run_sync(
+            "status",
+            extra_env={
+                "MEMORY_SYNC_CONFIG": str(cfg_path),
+                "CCPR_GATE_DENY_NAMES": DENY_NAME,
+            },
+        )
+        self.assertEqual(r.returncode, 2, self.output(r))
+        self.assertNotIn(DENY_NAME.lower(), self.output(r).lower(), self.output(r))
+        self.assertIn("<redacted>", self.output(r), self.output(r))
 
 
 if __name__ == "__main__":  # pragma: no cover

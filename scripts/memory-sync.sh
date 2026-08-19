@@ -33,8 +33,38 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 
 CONFIG="$(gate_config_path)"
 
-die() { echo "memory-sync: $*" >&2; exit 2; }
-note() { echo "memory-sync: $*"; }
+# Loaded before anything is printed, and before the config-existence check
+# below: die()/note() route every message through the same deny-list mask
+# artifact-gate.sh's say()/warn()/die() use, and that mask can only redact a
+# configured name once the deny-list is known. This mirrors artifact-gate.sh's
+# "Loaded before the arguments are parsed" placement — the same argument holds
+# here even though this script has no argument-parsing loop of its own, it
+# dispatches on $1 further down. An absent config is not an error for this
+# call: gate_load_config leaves GATE_DENY_NAMES empty and returns 0, which is
+# exactly the state die() needs to be able to run under to report that very
+# absence a few lines down.
+gate_load_config
+
+# Every line this tool emits goes through the deny-list mask — not just
+# promote's destination check. This is the path on which memory LEAVES the
+# machine, but `pull`/`status` print repo URLs, clone paths and config paths
+# too, and any of them can carry a configured tenant/project name into a
+# terminal, a shell history or a CI log wrapping this command. Same shape as
+# artifact-gate.sh's say()/warn()/die(), deliberately: a second,
+# differently-behaved copy of "how this tool prints" would be the same kind
+# of drift the shared discipline-gate library already exists to prevent.
+#
+# The format string is always a literal at call sites that use say()/warn()
+# directly. die()/note() wrap every message in the literal '%s: %s' before it
+# reaches printf, so a '%' already interpolated into a message (e.g. inside a
+# repo URL) is consumed as a %s ARGUMENT and never read as a directive.
+# shellcheck disable=SC2059
+say() {
+  printf '%s\n' "$(gate_redact_path "$(printf "$@")")"
+}
+warn() { say "$@" >&2; }
+die()  { warn '%s: %s' "memory-sync" "$*"; exit 2; }
+note() { say '%s: %s' "memory-sync" "$*"; }
 
 [[ -f "$CONFIG" ]] || die "config not found: $CONFIG"
 command -v git   >/dev/null || die "git not found"
@@ -133,9 +163,10 @@ require_usable_deny_list() {
 # per distinct finding kind, regardless of how many times it occurs in the file.
 run_gate() {
   local f="$1" out
-  [[ -f "$f" ]] || { echo "  gate: file not found: $f" >&2; return 2; }
+  [[ -f "$f" ]] || { warn "  gate: file not found: $f"; return 2; }
 
-  gate_load_config
+  # gate_load_config already ran once, at the top of this script (see the
+  # comment there) — a second call here would only re-read the same config.
   require_usable_deny_list
 
   # An absent list is not an error, but silence about it is. The library leaves
@@ -300,7 +331,10 @@ ns_lower() { printf '%s' "$NS" | LC_ALL=C tr '[:upper:]' '[:lower:]'; }
 reject_directory_destination() {
   # Redacted like every other line: the rejected destination can itself be the
   # thing that must not travel, and a usage error is not an exception to that.
-  die "promote refused: the destination must be a FILE path inside the repo (e.g. instincts/$(ns_lower)-org.md), not a directory: $(gate_redact_path "$1")"
+  # The masking is die()'s job now, applied to the finished line — not a
+  # manual call here, which is exactly the shape that let other lines in this
+  # script ship unmasked (see the comment at the top of this file).
+  die "promote refused: the destination must be a FILE path inside the repo (e.g. instincts/$(ns_lower)-org.md), not a directory: $1"
 }
 
 require_file_destination() {
@@ -357,28 +391,29 @@ cmd_promote() {
   # The list is verified usable first, for the reason spelled out above
   # require_usable_deny_list: checking a silently shortened list here would
   # announce a check that did not happen on the path where it matters most.
-  gate_load_config
+  # gate_load_config already ran once, at the top of this script — a second
+  # call here would only re-read the same config.
   require_usable_deny_list
   # Shape before content: a directory destination makes the deny check below
   # meaningless, because it would be matching a string that is not the one
-  # that ships. The config is loaded first all the same — the refusal prints
-  # the destination, and the mask has nothing to mask with until then.
+  # that ships.
   require_file_destination "$dst"
   local dst_idx
   dst_idx="$(gate_path_deny_index "$dst" || true)"
   if [[ -n "$dst_idx" ]]; then
     # Redacted like every finding line: the name is what must not travel, and a
     # terminal, a shell history and a CI log are all places it would travel to.
-    # The path stays printed around the mask so the operator can still see
-    # which destination was rejected.
-    die "promote refused: destination path carries configured tenant/project name #$dst_idx (name redacted): $(gate_redact_path "$dst"). A push cannot be taken back — rename the destination."
+    # The masking is die()'s job now (see the comment at the top of this
+    # file), not a manual call here — the path stays printed around the mask
+    # so the operator can still see which destination was rejected.
+    die "promote refused: destination path carries configured tenant/project name #$dst_idx (name redacted): $dst. A push cannot be taken back — rename the destination."
   fi
 
-  echo "Running discipline gate on $src ..."
+  note "Running discipline gate on $src ..."
   if ! run_gate "$src"; then
     die "promote blocked by discipline gate — resolve the findings above (or de-personalize) before sharing."
   fi
-  echo "  gate clean."
+  note "  gate clean."
 
   ensure_clone
   # The second call, and the one that can see a directory the clone already
@@ -403,20 +438,26 @@ cmd_promote() {
 }
 
 cmd_status() {
-  echo "config:        $CONFIG"
-  echo "repo:          $(cfg repo)  ($REPO_URL)"
-  echo "namespace:     ${NS}-"
-  echo "clone:         $CLONE  ($([[ -d "$CLONE/.git" ]] && echo present || echo absent))"
-  echo "token file:    $TOKEN_FILE  ($([[ -f "$TOKEN_FILE" ]] && echo ok || echo MISSING))"
-  echo "instincts ->   $INSTINCTS_TARGET  ($([[ -f "$INSTINCTS_TARGET" ]] && echo materialized || echo not-yet))"
-  echo "memory ns  ->  $MEM_NS_DIR"
+  # Called directly (not via die()/note()), so the format string here is the
+  # literal at the call site and every dynamic part travels as its own %s
+  # argument — this is the largest surface in the script for both leak
+  # classes the mask covers: $CONFIG, $CLONE, $TOKEN_FILE and $INSTINCTS_TARGET
+  # all normally sit under $HOME, and $REPO_URL is exactly the value a
+  # deny-listed name would appear in.
+  say 'config:        %s' "$CONFIG"
+  say 'repo:          %s  (%s)' "$(cfg repo)" "$REPO_URL"
+  say 'namespace:     %s-' "$NS"
+  say 'clone:         %s  (%s)' "$CLONE" "$([[ -d "$CLONE/.git" ]] && echo present || echo absent)"
+  say 'token file:    %s  (%s)' "$TOKEN_FILE" "$([[ -f "$TOKEN_FILE" ]] && echo ok || echo MISSING)"
+  say 'instincts ->   %s  (%s)' "$INSTINCTS_TARGET" "$([[ -f "$INSTINCTS_TARGET" ]] && echo materialized || echo not-yet)"
+  say 'memory ns  ->  %s' "$MEM_NS_DIR"
 }
 
 # --- dispatch ----------------------------------------------------------------
 case "${1:-}" in
   pull)    cmd_pull ;;
   promote) shift; cmd_promote "${1:-}" "${2:-}" ;;
-  gate)    shift; run_gate "${1:-}" && echo "gate: clean" || { echo "gate: findings above"; exit 1; } ;;
+  gate)    shift; run_gate "${1:-}" && note "gate: clean" || { note "gate: findings above"; exit 1; } ;;
   status)  cmd_status ;;
-  *) echo "usage: memory-sync.sh {pull|promote <src> <repo-dst-file>|gate <file>|status}" >&2; exit 2 ;;
+  *) warn "usage: memory-sync.sh {pull|promote <src> <repo-dst-file>|gate <file>|status}"; exit 2 ;;
 esac
