@@ -404,6 +404,17 @@ if [[ -f "$TIER1_INDEX" ]]; then
         # Strip HTML-comment spans before extracting links: parking a retired entry
         # in `<!-- ... -->` is ordinary index practice and must not be linted.
         # in_comment carries the state across lines, so comment blocks work too.
+        #
+        # A closed comment is replaced by one `boundary` character rather than by
+        # nothing (WI-0029). CommonMark treats an inline HTML comment as its own
+        # node in the inline sequence: it does not fuse the text before it with
+        # the text after it. Concatenating the two sides directly used to forge
+        # syntax the author never wrote — text ending in `!` immediately before a
+        # comment, immediately followed by `[`, collapsed into a literal `![`
+        # image marker, and the link after it was skipped as an image and never
+        # checked. `boundary` is inert for every other regex in this script (not
+        # `[`, `]`, `(`, `)`, a backtick, `!`, a quote or whitespace), so it only
+        # ever breaks an accidental adjacency — it does not introduce one.
         function decomment(s,   a, b, out) {
             out = ""
             while (length(s) > 0) {
@@ -412,6 +423,7 @@ if [[ -f "$TIER1_INDEX" ]]; then
                     if (b == 0) return out
                     s = substr(s, b + 3)
                     in_comment = 0
+                    out = out boundary
                 } else {
                     a = index(s, "<!--")
                     if (a == 0) return out s
@@ -501,7 +513,7 @@ if [[ -f "$TIER1_INDEX" ]]; then
             if (match(d, "^" sq "[^" sq "]*" sq "[ \t]*$")) return 1
             return 0
         }
-        BEGIN { sq = sprintf("%c", 39) }
+        BEGIN { sq = sprintf("%c", 39); boundary = sprintf("%c", 1) }
         {
             # A fenced code block (```…``` or ~~~…~~~, optionally indented up to 3
             # spaces per CommonMark) is skipped wholesale: an index illustrating its

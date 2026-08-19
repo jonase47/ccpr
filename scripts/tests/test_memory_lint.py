@@ -473,6 +473,22 @@ class MemoryLintTest(unittest.TestCase):
         self.assertEqual(len(findings), 1, findings)
         self.assertIn("gone.md", findings[0])
 
+    def test_a_bang_before_a_comment_does_not_forge_an_image_marker(self):
+        """`!<!--c-->[x](dead.md)` — `decomment()` used to run before the image
+        test, so the removed comment fused the `!` and the `[` into a literal
+        `![`, and the resulting "image" was skipped without ever being checked
+        (WI-0029). A CommonMark reference implementation renders
+        `!<!--c--><a href="dead_one.md">x</a>` for this input — the `!` and the
+        link are two separate inline nodes, not an image marker, so this is a
+        real link and its dead target must be reported."""
+        self.write_index(CLEAN_INDEX + "- !<!--c-->[x](dead_one.md)\n- [y](dead_two.md)\n")
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 2, findings)
+        self.assertTrue(any("dead_one.md" in f for f in findings), findings)
+        self.assertTrue(any("dead_two.md" in f for f in findings), findings)
+
     # --- WI-0005: code examples are not entries, reference-style links are ---------
 
     def test_a_dead_link_shown_inside_a_fenced_code_block_is_not_reported(self):
