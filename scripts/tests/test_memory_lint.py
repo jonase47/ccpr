@@ -442,6 +442,51 @@ class MemoryLintTest(unittest.TestCase):
         self.assertEqual(len(findings), 1, findings)
         self.assertIn("gone.md", findings[0])
 
+    # --- WI-0005: code examples are not entries, reference-style links are ---------
+
+    def test_a_dead_link_shown_inside_a_fenced_code_block_is_not_reported(self):
+        """An index illustrating its own link syntax in a fenced example is not a
+        set of live entries — the target inside the fence must not be checked."""
+        self.write_index(
+            CLEAN_INDEX
+            + "Example entry format:\n"
+            + "\n"
+            + "```\n"
+            + "- [Example](dead_fenced.md) — illustrative sample\n"
+            + "```\n"
+        )
+
+        self.assertEqual(self.link_findings(self.run_lint().stdout), [])
+
+    def test_a_dead_link_shown_inline_in_backticks_is_not_reported(self):
+        """Same illustration, inline: `` `[Example](dead_inline.md)` `` is prose,
+        not an entry."""
+        self.write_index(
+            CLEAN_INDEX + "Entries look like `[Example](dead_inline.md)` in this file.\n"
+        )
+
+        self.assertEqual(self.link_findings(self.run_lint().stdout), [])
+
+    def test_a_reference_style_definition_with_a_dead_target_is_reported(self):
+        """`[x][ref-dead]` plus its definition line `[ref-dead]: dead_reference.md`
+        is the same defect class the check exists for, one syntax further."""
+        self.write_index(
+            CLEAN_INDEX
+            + "See [the reference entry][ref-dead] for details.\n"
+            + "\n"
+            + "[ref-dead]: dead_reference.md\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("dead_reference.md", findings[0])
+
+    def test_a_reference_style_definition_with_a_live_target_is_not_reported(self):
+        self.write_index(CLEAN_INDEX + "[ref-live]: project_alpha.md\n")
+
+        self.assertEqual(self.link_findings(self.run_lint().stdout), [])
+
     # --- Forms the check deliberately skips, and its scope -------------------------
 
     def test_angle_bracket_targets_are_skipped(self):

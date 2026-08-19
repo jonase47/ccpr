@@ -414,8 +414,47 @@ if [[ -f "$TIER1_INDEX" ]]; then
             }
             return out
         }
+        # Strip single-backtick inline code spans (`code`): a span never crosses a
+        # line in Markdown, so unlike decomment() this needs no state across
+        # records. An index documenting its own link syntax inline
+        # (`` `[x](dead.md)` ``) illustrates the syntax; it is not an entry.
+        function strip_inline_code(s,   out, a, b) {
+            out = ""
+            while (length(s) > 0) {
+                a = index(s, "`")
+                if (a == 0) return out s
+                out = out substr(s, 1, a - 1)
+                s = substr(s, a + 1)
+                b = index(s, "`")
+                if (b == 0) return out   # unterminated backtick — drop the remainder
+                s = substr(s, b + 1)
+            }
+            return out
+        }
         {
-            line = decomment($0)
+            # A fenced code block (```…``` or ~~~…~~~, optionally indented up to 3
+            # spaces per CommonMark) is skipped wholesale: an index illustrating its
+            # own link syntax inside a fenced example is not a set of live entries.
+            # in_fence carries the toggle across lines, same shape as in_comment.
+            if (match($0, /^[ ]{0,3}(```+|~~~+)/)) {
+                in_fence = !in_fence
+                next
+            }
+            if (in_fence) next
+
+            line = strip_inline_code(decomment($0))
+
+            # Reference-style link definition: `[id]: target "optional title"`.
+            # The one-line form `[x](target)` this check already handled leaves
+            # `[x][id]` + a separate `[id]: target` definition line unseen — same
+            # defect class, one syntax further. Target normalisation (whitespace,
+            # quoted-title stripping) happens uniformly on the shell side below,
+            # so this only has to isolate the target-plus-optional-title substring.
+            if (match(line, /^[ ]{0,3}\[[^][]+\]:[ \t]*/)) {
+                print substr(line, RSTART + RLENGTH)
+                next
+            }
+
             prev = ""
             while (match(line, /\[[^][]*\]\([^)]*\)/)) {
                 if (RSTART > 1) prev = substr(line, RSTART - 1, 1)
