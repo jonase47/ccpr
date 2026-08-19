@@ -428,6 +428,27 @@ class CapParserToleranceTest(HandoverSizeHookTestCase):
         self.assertEqual("over", entry.get("level"), result.stderr)
 
 
+class DegenerateCapGuardTest(HandoverSizeHookTestCase):
+    """A header declaring "≤0 KB" really does parse to a (0, 0) cap — is_at_least_pct's
+    bool(cap) guard is what keeps that reachable-but-degenerate cap from being treated
+    as "already exceeded by anything". Without the guard, 100 * count >= pct_of_cap * 0
+    is true for any count >= 0, so every file, including an all-but-empty one, would be
+    reported as over its own zero-byte cap.
+    """
+
+    def test_a_header_declaring_a_zero_cap_does_not_warn_on_every_file(self):
+        header = (
+            "# Handover – Work State\n"
+            "\n"
+            "> **Size cap**: keep it ≤0 KB (~0 lines).\n"
+            "\n"
+        )
+        self.write_handover(header)  # header only — as small a file as this fixture gets
+        result = self.run_hook("SessionStart", source="startup")
+        self.assertEqual([], self.size_warnings(result), result.stderr)
+        self.assertEqual([], [e for e in self.error_events() if e.get("event") == "HandoverSize"])
+
+
 # === Does it stay quiet when it must? ============================================
 
 class SilenceTest(HandoverSizeHookTestCase):
