@@ -437,7 +437,15 @@ class MemoryLintTest(unittest.TestCase):
         self.assertEqual(self.link_findings(self.run_lint().stdout), [])
 
     def test_a_live_link_after_a_closed_comment_on_the_same_line_is_checked(self):
-        self.write_index(CLEAN_INDEX + "<!-- retired --> - [Ghost](gone.md) — live entry\n")
+        """The comment must not OPEN the line here — a comment starting a line
+        (after <=3 leading spaces) is CommonMark HTML block type 2, which
+        swallows the whole physical line including anything after `-->`
+        (WI-0041); that is a different mechanism, pinned separately below.
+        Prefixing with 'Note: ' keeps this test on the INLINE splice path
+        (decomment() mid-line, `boundary` carried across the closed span) that
+        it was written to cover.
+        """
+        self.write_index(CLEAN_INDEX + "- Note: <!-- retired --> [Ghost](gone.md) — live entry\n")
 
         findings = self.link_findings(self.run_lint().stdout)
 
@@ -459,14 +467,40 @@ class MemoryLintTest(unittest.TestCase):
         self.assertEqual(len(findings), 1, findings)
         self.assertIn("gone.md", findings[0])
 
+    def test_a_multi_line_html_comments_closing_line_hides_a_link_after_it(self):
+        """WI-0041: a block-level HTML comment's closing line is entirely raw
+        HTML per CommonMark, including any text after `-->` on that same
+        line — not just the comment span itself. Measured against a
+        CommonMark reference implementation: `<!--\\nx\\n-->[y](dead.md)`
+        renders no `<a href>` at all, so `dead.md` is not a link and must not
+        be reported. Before the fix, decomment() only strips the comment span
+        and leaves the rest of the closing line to be parsed normally, so the
+        link was reported as a false positive.
+        """
+        self.write_index(CLEAN_INDEX + "<!--\nx\n-->[y](dead.md)\n")
+
+        self.assertEqual(self.link_findings(self.run_lint().stdout), [])
+
+    def test_a_single_line_html_comment_opening_the_line_hides_a_link_after_it(self):
+        """Same mechanism as the multi-line case above, single-line variant:
+        a comment that opens AND closes on the same physical line still
+        swallows the whole line if it starts at column 0 (<=3 leading
+        spaces). Measured: `<!--x-->[y](dead.md)` renders no `<a href>`.
+        """
+        self.write_index(CLEAN_INDEX + "<!--x-->[y](dead.md)\n")
+
+        self.assertEqual(self.link_findings(self.run_lint().stdout), [])
+
     def test_an_image_inside_a_single_line_html_comment_is_skipped(self):
         """Both skip mechanisms — comment-stripping and the image exclusion — are
         covered separately elsewhere; this exercises them combined on one line
         (WI-0026). decomment() runs before the image/link distinction, so an
         image markup that sits entirely inside a comment must vanish before
-        that distinction is ever made.
+        that distinction is ever made. The comment must not OPEN the line —
+        see the note on the inline-splice test above (WI-0041) — so this is
+        prefixed with 'Note:' to stay on the inline path.
         """
-        self.write_index(CLEAN_INDEX + "<!-- ![Diagram](dead_diagram.md) --> - [Ghost](gone.md)\n")
+        self.write_index(CLEAN_INDEX + "- Note: <!-- ![Diagram](dead_diagram.md) --> [Ghost](gone.md)\n")
 
         findings = self.link_findings(self.run_lint().stdout)
 

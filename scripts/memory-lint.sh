@@ -570,6 +570,28 @@ if [[ -f "$TIER1_INDEX" ]]; then
                 next
             }
 
+            # An HTML comment that opens a line (after <=3 leading spaces) is
+            # CommonMark HTML block type 2, not an inline comment: the WHOLE
+            # physical line is raw HTML, including any text after the closing
+            # `-->` on that same line, and every full line up to and including
+            # the one that finally contains `-->` (WI-0041). This is a
+            # different mechanism from the in_comment state decomment() carries below,
+            # which only ever runs on a comment that does NOT open its line.
+            # Checked here, before decomment() runs, so a link written on the
+            # closing line of the block is never even offered to the
+            # extractor — mirrors the fence handling one block up. A block comment that
+            # never closes swallows the rest of the file exactly like an
+            # unclosed fence (the WI-0032 mechanism) but is not yet reported as
+            # its own warning; left open, not fixed here.
+            if (in_html_comment) {
+                if ($0 ~ /-->/) in_html_comment = 0
+                next
+            }
+            if (match($0, /^[ ]{0,3}<!--/)) {
+                if ($0 !~ /-->/) in_html_comment = 1
+                next
+            }
+
             line = strip_inline_code(decomment($0))
 
             # Reference-style link definition: `[id]: target "optional title"`.
