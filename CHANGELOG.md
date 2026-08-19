@@ -51,6 +51,21 @@ All notable changes to this project are documented in this file. The format is b
   printed `bad substitution` instead of the hint: the message interpolated a bash-4 lowercase
   expansion, and macOS ships bash 3.2. The error path errored. A sweep over all 22 tracked shell
   files found this as the only occurrence, and a regression test now guards everything a user runs.
+- **`memory-sync.sh` let a failed `git clone`/`fetch`/`push` print the repository URL straight to the
+  terminal, unmasked.** Every line the script emits itself goes through the same deny-list + `$HOME`
+  mask `say()` uses — but git's own transport error text never passed through that function, and a
+  failing clone or fetch prints the repository URL verbatim, which is exactly where a configured
+  tenant/project name lives. Fixed by capturing the subprocess's stderr and re-emitting it through
+  `die()`, the same mask path, instead of leaving it alone: the token git injects into the URL for
+  auth was already confirmed to be stripped by git itself before this reaches the capture, but the
+  host and repository path were not, and now are. Capturing a command substitution's own exit status
+  on the same statement (`out="$(cmd 2>&1)" || rc=$?`) keeps a transport failure fatal — piping the
+  capture into the mask would otherwise have reported the mask's exit status instead of git's.
+  Note one deliberate behaviour change that follows: a transport failure now exits **2**, the script's
+  own documented hard-error code, where it previously aborted with git's raw status (measured: 128 for
+  a refused connection). The old status was never part of the contract the file's header states
+  (`Exit: 0 ok, 1 gate/soft failure, 2 hard error`), so this aligns the script with its own promise —
+  but a CI job keyed on 128 rather than "non-zero" will see the difference.
 - **`/p5-polish` wrote its `handover`-triage items into a section that did not exist.** It has always
   instructed agents to record blocked items in `docs/HANDOVER.md` "under Open Points", but no shipped
   template ever contained that heading — the flow dangled unless a project invented the section itself.

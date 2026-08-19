@@ -124,13 +124,41 @@ authed_url() {
   printf '%s' "$REPO_URL" | sed -E "s#^http://#http://oauth2:${tok}@#; s#^https://#https://oauth2:${tok}@#"
 }
 
+# git_or_die <label> <git-command...> — run a git subprocess whose stderr can
+# carry the repository URL (clone, fetch, push), and route a failure through
+# the same mask everything ELSE this script prints goes through.
+#
+# git's own error text is written straight to the terminal/CI log; it never
+# passes through say(), so on its own it bypasses the deny-list and $HOME
+# fold this file exists to apply. Captured here instead of left alone.
+#
+# `out="$(... 2>&1)" || rc=$?` on one statement is deliberate: under this
+# file's `set -e`, a bare failing command substitution would abort the
+# script right here with git's own exit status and the message still
+# unmasked — exactly the bug this function exists to close. Recording the
+# status in `rc` on the same line keeps errexit from firing on the
+# assignment, so the `if` below decides the outcome instead of the shell.
+# stdout is folded into the same capture (`2>&1`) because --quiet leaves
+# nothing there on success and the failure paths below only fire on rc!=0.
+#
+# The message is passed to die() as ONE argument, never spliced into a
+# format string — die() already wraps it in the literal '%s: %s' (see the
+# comment above say()), so a '%' inside git's own text (e.g. a URL-encoded
+# byte) is consumed as a %s argument, not read as a directive.
+git_or_die() {
+  local label="$1"; shift
+  local out rc=0
+  out="$("$@" 2>&1)" || rc=$?
+  [[ $rc -eq 0 ]] || die "$label: $out"
+}
+
 # --- git clone / fetch --------------------------------------------------------
 ensure_clone() {
   local aurl; aurl="$(authed_url)"
   if [[ -d "$CLONE/.git" ]]; then
     note "fetching $REPO_URL"
     git -C "$CLONE" remote set-url origin "$REPO_URL" >/dev/null 2>&1 || true
-    git -C "$CLONE" fetch --quiet "$aurl" '+refs/heads/*:refs/remotes/origin/*'
+    git_or_die "git fetch" git -C "$CLONE" fetch --quiet "$aurl" '+refs/heads/*:refs/remotes/origin/*'
     # reset working tree to origin default branch (overlay clone is read-through).
     # symbolic-ref fails when origin/HEAD is unset — keep it errexit-safe (|| true inside the subshell).
     local def
@@ -141,7 +169,7 @@ ensure_clone() {
   else
     note "cloning $REPO_URL -> $CLONE"
     mkdir -p "$(dirname "$CLONE")"
-    git clone --quiet "$aurl" "$CLONE"
+    git_or_die "git clone" git clone --quiet "$aurl" "$CLONE"
     git -C "$CLONE" remote set-url origin "$REPO_URL" >/dev/null 2>&1 || true
   fi
 }
@@ -452,7 +480,7 @@ cmd_promote() {
     note "no change to promote (already up to date)."; return 0
   fi
   git -C "$CLONE" commit --quiet -m "memory: promote $(basename -- "$dst")"
-  git -C "$CLONE" push --quiet "$(authed_url)" HEAD:refs/heads/"$(git -C "$CLONE" rev-parse --abbrev-ref HEAD)"
+  git_or_die "git push" git -C "$CLONE" push --quiet "$(authed_url)" HEAD:refs/heads/"$(git -C "$CLONE" rev-parse --abbrev-ref HEAD)"
   note "promoted $dst -> $REPO_URL"
 }
 
