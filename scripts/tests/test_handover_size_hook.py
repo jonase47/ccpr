@@ -30,6 +30,7 @@ The tests are grouped by the question they answer:
   values that behaviour tests alone leave free to drift.
 """
 
+import importlib.util
 import json
 import os
 import shutil
@@ -41,6 +42,25 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 HOOK_PATH = REPO_ROOT / "hooks" / "agent-monitor.py"
+
+
+def _load_agent_monitor_module():
+    """Loads hooks/agent-monitor.py as a module, for its constants only.
+
+    Used exclusively as the source of truth for parametrized tests (e.g.
+    HANDOVER_WRITE_TOOLS below) — every behaviour assertion in this file still drives
+    the real entry point as a subprocess (see module docstring); nothing here calls a
+    function from the loaded module directly. __name__ is "ccpr_agent_monitor", not
+    "__main__", so the `if __name__ == "__main__": main()` guard at the bottom of the
+    hook does not fire and no hook logic runs as a side effect of the import.
+    """
+    spec = importlib.util.spec_from_file_location("ccpr_agent_monitor", HOOK_PATH)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+AGENT_MONITOR = _load_agent_monitor_module()
 
 # The shipped default from templates/HANDOVER_TEMPLATE.md. KB is 1024 bytes, matching
 # scripts/doc-volume-check.sh.
@@ -356,6 +376,23 @@ class SilenceTest(HandoverSizeHookTestCase):
         self.assertEqual(1, len(self.size_warnings(second)), second.stderr)
         self.assertNotIn("approaching", self.size_warnings(second)[0].lower())
 
+    def test_session_start_and_post_tool_use_each_warn_in_the_same_session(self):
+        """The dedup key is (session, source_event, level) — source_event is part of it.
+
+        A SessionStart warning must not suppress the PostToolUse warning that follows in
+        the same session, and vice versa: they are two different moments a human could
+        plausibly see, on two different surfaces (a session boot vs. a live edit).
+        Dropping source_event from the dedup key would collapse both onto one slot and
+        the second call would go silent.
+        """
+        self.write_handover(handover_of_size(DEFAULT_CAP_BYTES + 600))
+        first = self.run_hook("SessionStart", source="startup")
+        second = self.run_hook(
+            "PostToolUse", tool_name="Edit",
+            tool_input={"file_path": str(self.project / "docs" / "HANDOVER.md")})
+        self.assertEqual(1, len(self.size_warnings(first)), first.stderr)
+        self.assertEqual(1, len(self.size_warnings(second)), second.stderr)
+
 
 class EventScopeTest(HandoverSizeHookTestCase):
     """Only the deliberately chosen events run the check."""
@@ -387,6 +424,81 @@ class EventScopeTest(HandoverSizeHookTestCase):
         self.write_handover(handover_of_size(DEFAULT_CAP_BYTES + 600))
         result = self.run_hook("PreToolUse", **self.handover_edit_payload())
         self.assertEqual([], self.size_warnings(result))
+
+    def test_a_handover_backup_file_is_silent(self):
+        """docs/HANDOVER.md.bak must not count as a HANDOVER write.
+
+        Pins exact-basename comparison against a substring-match relaxation: the real,
+        over-cap docs/HANDOVER.md sits on disk throughout, so a gate that answered "yes"
+        to the .bak suffix would surface as a warning here, not only as a missing
+        exception.
+        """
+        self.write_handover(handover_of_size(DEFAULT_CAP_BYTES + 600))
+        result = self.run_hook(
+            "PostToolUse", tool_name="Edit",
+            tool_input={"file_path": str(self.project / "docs" / "HANDOVER.md.bak")})
+        self.assertEqual([], self.size_warnings(result))
+
+    def test_a_handover_prefixed_file_is_silent(self):
+        """docs/xHANDOVER.md must not count as a HANDOVER write either.
+
+        Same pin as the .bak case, from the other side: "HANDOVER.md" is a substring of
+        "xHANDOVER.md" too, so a substring-match relaxation would catch this shape while
+        missing the .bak one, or vice versa, depending on which side of the match it
+        checks. Both must stay silent under the exact-basename comparison.
+        """
+        self.write_handover(handover_of_size(DEFAULT_CAP_BYTES + 600))
+        result = self.run_hook(
+            "PostToolUse", tool_name="Edit",
+            tool_input={"file_path": str(self.project / "docs" / "xHANDOVER.md")})
+        self.assertEqual([], self.size_warnings(result))
+
+
+class WriteGateCoverageTest(HandoverSizeHookTestCase):
+    """Every tool declared in HANDOVER_WRITE_TOOLS actually triggers the size check.
+
+    Before this test class, only "Edit" was exercised by a test that asserts the size
+    warning itself; "Write", "MultiEdit" and "NotebookEdit" were declared in the set but
+    never independently verified. Reducing HANDOVER_WRITE_TOOLS to {"Edit"} left every
+    test in this file green (confirmed 18.08.2026) — a set lookup on an untested tool
+    name is a gap the exit-code-only NeverBlocksTest cases cannot see, because the hook
+    never blocks in either world.
+    """
+
+    def test_write_on_the_handover_warns(self):
+        """The full-rewrite case: what a compaction pass actually does to HANDOVER.md."""
+        self.write_handover(handover_of_size(DEFAULT_CAP_BYTES + 600))
+        result = self.run_hook(
+            "PostToolUse", tool_name="Write",
+            tool_input={"file_path": str(self.project / "docs" / "HANDOVER.md")})
+        self.assertEqual(1, len(self.size_warnings(result)), result.stderr)
+
+    def test_multiedit_on_the_handover_warns(self):
+        self.write_handover(handover_of_size(DEFAULT_CAP_BYTES + 600))
+        result = self.run_hook(
+            "PostToolUse", tool_name="MultiEdit",
+            tool_input={"file_path": str(self.project / "docs" / "HANDOVER.md")})
+        self.assertEqual(1, len(self.size_warnings(result)), result.stderr)
+
+    def test_notebookedit_on_the_handover_warns(self):
+        self.write_handover(handover_of_size(DEFAULT_CAP_BYTES + 600))
+        result = self.run_hook(
+            "PostToolUse", tool_name="NotebookEdit",
+            tool_input={"file_path": str(self.project / "docs" / "HANDOVER.md")})
+        self.assertEqual(1, len(self.size_warnings(result)), result.stderr)
+
+    def test_every_declared_write_tool_warns(self):
+        """Data-driven over HANDOVER_WRITE_TOOLS itself, so a tool added to the set in
+        the future is exercised automatically instead of staying silent until someone
+        remembers to add a named test for it."""
+        self.write_handover(handover_of_size(DEFAULT_CAP_BYTES + 600))
+        for tool_name in sorted(AGENT_MONITOR.HANDOVER_WRITE_TOOLS):
+            with self.subTest(tool_name=tool_name):
+                result = self.run_hook(
+                    "PostToolUse", tool_name=tool_name,
+                    tool_input={"file_path": str(self.project / "docs" / "HANDOVER.md")},
+                    session_id=f"test-{uuid.uuid4().hex[:12]}")
+                self.assertEqual(1, len(self.size_warnings(result)), result.stderr)
 
 
 # === Does it ever block? =========================================================
