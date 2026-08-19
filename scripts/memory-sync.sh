@@ -185,13 +185,24 @@ run_gate() {
     note "deny-list NOT CONFIGURED — no tenant/project names were checked. Set gate.denyNames in $CONFIG, or pass CCPR_GATE_DENY_NAMES."
   fi
 
-  out="$(gate_scan_file "$f" memory || true)"
-  [[ -n "$out" ]] || return 0
+  # gate_scan_file's own header comment promises "returns 1 when there was at
+  # least one finding, 0 otherwise" — this is that promise's one consumer.
+  # Capturing the exit status this way (an `if` around the assignment, not
+  # `|| true`) is required under `set -e`: the common case IS a nonzero
+  # return (a dirty file), and `|| true` exists specifically to survive that
+  # under `set -e` — swapping it for the `if` form keeps the same survival
+  # property while no longer discarding the value it survives.
+  local scan_rc=0
+  if out="$(gate_scan_file "$f" memory)"; then
+    scan_rc=0
+  else
+    scan_rc=$?
+  fi
+  [[ "$scan_rc" -eq 0 ]] && return 0
 
   local rendered
   rendered="$(printf '%s\n' "$out" \
     | awk -F'\t' '$2 != "_exempt" && !seen[$2 FS $3]++ { printf "  [%s] %s\n", $2, $3 }')"
-  [[ -n "$rendered" ]] || return 0
   printf '%s\n' "$rendered"
   return 1
 }

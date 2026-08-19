@@ -750,6 +750,76 @@ class ScanFileReturnContractTest(GateTestBase):
 
 
 # ---------------------------------------------------------------------------
+# 4b'. run_gate (scripts/memory-sync.sh) must be a real customer of the
+# contract pinned above (WI-0036), not just a second independent re-derivation
+# of "clean vs. dirty" from the same $out records gate_scan_file also prints.
+#
+# Proof this is not cosmetic: inverting gate_scan_file's own return statement
+# (the library's OWN contract, unrelated to what it prints) must now flip
+# memory-sync.sh's `gate` exit code too. Before WI-0036, `run_gate` discarded
+# the return value with `|| true` and re-derived its own verdict by parsing
+# $out, so this exact mutation left every era test green — it is measured here
+# through a scratch copy of the shipped scripts (never the tracked files) so
+# the mutation can never leak into a real run.
+# ---------------------------------------------------------------------------
+class RunGateConsumesScanFileReturnContractTest(GateTestBase):
+    def setUp(self):
+        super().setUp()
+        self.write_config(ipAllowlist="")
+
+    RETURN_TAIL = '[ "$found" -eq 0 ] || return 1\n  return 0\n}'
+    INVERTED_TAIL = '[ "$found" -eq 0 ] || return 0\n  return 1\n}'
+
+    def copied_memory_sync(self, lib_text=None):
+        """Copies memory-sync.sh + lib/discipline_gate.sh into an isolated scratch
+        tree, preserving the relative layout memory-sync.sh's own $HERE lookup
+        needs, so a mutated library is exercised without ever touching the
+        tracked file discipline_gate.sh."""
+        scratch = Path(tempfile.mkdtemp(prefix="ccpr-run-gate-mutation-"))
+        self.addCleanup(shutil.rmtree, scratch, ignore_errors=True)
+        (scratch / "lib").mkdir()
+        shutil.copy(MEMORY_SYNC, scratch / "memory-sync.sh")
+        text = lib_text if lib_text is not None else LIB.read_text(encoding="utf-8")
+        (scratch / "lib" / "discipline_gate.sh").write_text(text, encoding="utf-8")
+        return scratch / "memory-sync.sh"
+
+    def run_copied(self, script, *args):
+        return subprocess.run(
+            ["bash", str(script), *[str(a) for a in args]],
+            capture_output=True, text=True, env=self.env(),
+        )
+
+    def test_inverting_gate_scan_files_return_value_flips_run_gates_exit_code(self):
+        lib_text = LIB.read_text(encoding="utf-8")
+        assert self.RETURN_TAIL in lib_text, (
+            "mutation target not found — gate_scan_file's final return sequence "
+            "moved or was reworded"
+        )
+        inverted = lib_text.replace(self.RETURN_TAIL, self.INVERTED_TAIL, 1)
+        script = self.copied_memory_sync(lib_text=inverted)
+        dirty = self.write("dirty.md", CREDENTIAL + "\n")
+
+        r = self.run_copied(script, "gate", dirty)
+
+        # gate_scan_file now (falsely) claims "clean" via its return value while
+        # still emitting the finding record on stdout -- run_gate must follow
+        # the return value, the same way ScanFileReturnContractTest measures
+        # gate_scan_file's own contract directly.
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_an_unmutated_library_still_reports_the_same_dirty_verdict(self):
+        """Companion pin: the mutation harness itself must reproduce today's real
+        exit code on the unmutated library, or the flip above would not mean
+        anything."""
+        script = self.copied_memory_sync()
+        dirty = self.write("dirty.md", CREDENTIAL + "\n")
+
+        r = self.run_copied(script, "gate", dirty)
+
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+
+
+# ---------------------------------------------------------------------------
 # 4c. The pattern-source exemption suppresses something today (WI-0013 pt. 3).
 #
 # WI-0014 planted three connection-string-shaped examples into this file's own
