@@ -433,7 +433,16 @@ if [[ -f "$TIER1_INDEX" ]]; then
         # checked. `boundary` is inert for every other regex in this script (not
         # `[`, `]`, `(`, `)`, a backtick, `!`, a quote or whitespace), so it only
         # ever breaks an accidental adjacency — it does not introduce one.
-        function decomment(s,   a, b, out) {
+        # dest_mark wraps a link destination that protect_link_destinations()
+        # has already isolated (WI-0042): CommonMark link-destination grammar
+        # is not inline-parsed, so a `<!--...-->` sequence inside `[x](dest)`
+        # is literal text, not a comment to strip. A dest_mark..dest_mark span
+        # is therefore copied through untouched here rather than scanned for
+        # `<!--`/`-->` — the two sentinels are stripped again once the
+        # destination has been extracted (strip_dest_mark()). This only ever
+        # protects a destination; comment text in a link LABEL is ordinary
+        # inline content and keeps being decommented below, unchanged.
+        function decomment(s,   a, b, w, e, out) {
             out = ""
             while (length(s) > 0) {
                 if (in_comment) {
@@ -442,15 +451,45 @@ if [[ -f "$TIER1_INDEX" ]]; then
                     s = substr(s, b + 3)
                     in_comment = 0
                     out = out boundary
-                } else {
-                    a = index(s, "<!--")
-                    if (a == 0) return out s
-                    out = out substr(s, 1, a - 1)
-                    s = substr(s, a + 4)
-                    in_comment = 1
+                    continue
                 }
+                w = index(s, dest_mark)
+                a = index(s, "<!--")
+                if (w > 0 && (a == 0 || w < a)) {
+                    e = index(substr(s, w + 1), dest_mark)
+                    if (e == 0) return out s   # malformed guard — should not happen
+                    out = out substr(s, 1, w + e)
+                    s = substr(s, w + e + 1)
+                    continue
+                }
+                if (a == 0) return out s
+                out = out substr(s, 1, a - 1)
+                s = substr(s, a + 4)
+                in_comment = 1
             }
             return out
+        }
+        # Isolates every inline link destination — the `(...)` immediately
+        # after `](` — and wraps its raw text in dest_mark before decomment()
+        # or strip_inline_code() ever see it (WI-0042). Riding the raw text
+        # along inside the normal `line` flow, instead of re-locating it
+        # afterward from a parallel scan, keeps it structurally glued to
+        # whichever `[text](dest)` span it belongs to — including when that
+        # whole span later turns out to be inside a code span or an
+        # illustrative backtick example and gets discarded as a unit.
+        function protect_link_destinations(s,    out, dest) {
+            out = ""
+            while (match(s, /\]\([^)]*\)/)) {
+                out = out substr(s, 1, RSTART + 1)   # up through and including the ]( pair
+                dest = substr(s, RSTART + 2, RLENGTH - 3)
+                out = out dest_mark dest dest_mark ")"
+                s = substr(s, RSTART + RLENGTH)
+            }
+            return out s
+        }
+        function strip_dest_mark(s) {
+            gsub(dest_mark, "", s)
+            return s
         }
         # Strip inline code spans (`code`, ``code with a ` in it``): a span never
         # crosses a line in Markdown, so unlike decomment() this needs no state
@@ -532,19 +571,12 @@ if [[ -f "$TIER1_INDEX" ]]; then
             if (match(d, /^\([^)]*\)[ \t]*$/)) return 1
             return 0
         }
-        # boundary only has a job while a link is being *found* — keeping two
-        # bits of decommented text from fusing into syntax the author never
-        # wrote (WI-0029). Once a destination has been isolated, the same byte
-        # is nothing but a comment-shaped hole inside it, and it must not reach
-        # the finding message. strip_boundary() runs on the two extraction
-        # results only (plain-link destination, reference-definition target) —
-        # never on `line` itself, so the character keeps doing its adjacency
-        # job for every match still ahead on that line.
-        function strip_boundary(s) {
-            gsub(boundary, "", s)
-            return s
+        BEGIN {
+            sq = sprintf("%c", 39)
+            boundary = sprintf("%c", 1)
+            fence_sentinel = sprintf("%c", 2)
+            dest_mark = sprintf("%c", 3)
         }
-        BEGIN { sq = sprintf("%c", 39); boundary = sprintf("%c", 1); fence_sentinel = sprintf("%c", 2) }
         {
             # A fenced code block (```…``` or ~~~…~~~, optionally indented up to 3
             # spaces per CommonMark) is skipped wholesale: an index illustrating its
@@ -592,25 +624,33 @@ if [[ -f "$TIER1_INDEX" ]]; then
                 next
             }
 
-            line = strip_inline_code(decomment($0))
-
             # Reference-style link definition: `[id]: target "optional title"`.
             # The one-line form `[x](target)` this check already handled leaves
             # `[x][id]` + a separate `[id]: target` definition line unseen — same
-            # defect class, one syntax further. Target normalisation (whitespace,
-            # quoted-title stripping) happens uniformly on the shell side below,
-            # so this only has to isolate the target-plus-optional-title substring
-            # — after confirming the line really is a reference definition and not
-            # ordinary prose that starts with `[Label]:` (a glossary line, say).
-            if (match(line, /^[ ]{0,3}\[[^][]+\]:[ \t]*/)) {
-                rest = substr(line, RSTART + RLENGTH)
-                if (reference_definition_tail(rest)) {
-                    print strip_boundary(rest)
+            # defect class, one syntax further. Checked directly against the RAW
+            # line, before decomment() runs (WI-0042): a reference-definition
+            # destination is not inline-parsed by CommonMark, so a comment
+            # inside it is literal text, not something to strip — printing the
+            # raw remainder verbatim keeps it that way. Target normalisation
+            # (whitespace, quoted-title stripping) happens uniformly on the
+            # shell side below.
+            if (match($0, /^[ ]{0,3}\[[^][]+\]:[ \t]*/)) {
+                raw_rest = substr($0, RSTART + RLENGTH)
+                if (reference_definition_tail(raw_rest)) {
+                    print raw_rest
                     next
                 }
                 # Not a valid reference definition — fall through so a real
                 # `[x](y)` link elsewhere on this line is still found below.
             }
+
+            # protect_link_destinations() wraps each `(...)` destination in
+            # dest_mark before decomment()/strip_inline_code() run, so a
+            # comment inside a destination survives both passes as literal
+            # text (WI-0042) while a comment in the link LABEL is still
+            # decommented normally — the image-exclusion mechanism below
+            # (WI-0029) depends on that.
+            line = strip_inline_code(decomment(protect_link_destinations($0)))
 
             prev = ""
             while (match(line, /\[[^][]*\]\([^)]*\)/)) {
@@ -618,7 +658,7 @@ if [[ -f "$TIER1_INDEX" ]]; then
                 link = substr(line, RSTART, RLENGTH)
                 sep = index(link, "](")
                 # `![alt](src)` is an image, not an index entry.
-                if (prev != "!") print strip_boundary(substr(link, sep + 2, length(link) - sep - 2))
+                if (prev != "!") print strip_dest_mark(substr(link, sep + 2, length(link) - sep - 2))
                 line = substr(line, RSTART + RLENGTH)
                 prev = ")"
             }

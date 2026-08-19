@@ -523,19 +523,18 @@ class MemoryLintTest(unittest.TestCase):
         self.assertTrue(any("dead_one.md" in f for f in findings), findings)
         self.assertTrue(any("dead_two.md" in f for f in findings), findings)
 
-    def test_a_comment_inside_a_link_destination_does_not_leak_its_boundary_byte(self):
-        """decomment() replaces a closed comment with a boundary byte (chr(1),
-        WI-0029) so that text straddling the comment does not fuse into syntax the
-        author never wrote. That byte must stay internal to the check — once a
-        `[x](target)` destination has been extracted, a stray control byte inside
-        it must not reach the finding message. (Whether the comment should instead
-        make the checked path wrong is WI-0042 and out of scope here — the
-        baseline before this fix already checks the wrong path; this only makes
-        the reported text readable.) A plain `assertIn("dead.md", ...)` would pass
-        in both the leaking and the fixed state (`chr(1)` sits between `dead` and
-        `.md`, but `in` does not care about what is between two other substring
-        matches on the same string) — asserting the byte's absence and the exact
-        quoted target as one token is what actually discriminates the two states.
+    def test_a_comment_inside_a_link_destination_is_literal_text_not_a_comment(self):
+        """WI-0042: CommonMark link-destination grammar is not inline-parsed, so
+        a `<!--...-->` sequence inside `[x](dest)` is literal text, not an HTML
+        comment to strip. Reference-measured: `[x](dead<!--c-->.md)` renders
+        `href="dead%3C%21--c--%3E.md"` — the comment markup is part of the
+        destination. decomment() used to run over the whole line regardless of
+        link structure and stripped it anyway, so the check resolved a path
+        nobody wrote (`dead.md`) instead of the real one. Before this fix, a
+        boundary byte (chr(1), WI-0029) also leaked into the finding message at
+        the comment's former position; this pins both defects closed at once —
+        the destination must be the literal text, and no control byte may
+        appear anywhere in the report either way.
         """
         self.write_index(CLEAN_INDEX + "- [x](dead<!--c-->.md)\n")
 
@@ -544,12 +543,12 @@ class MemoryLintTest(unittest.TestCase):
 
         self.assertEqual(len(findings), 1, findings)
         self.assertNotIn("\x01", output, output)
-        self.assertIn("'dead.md'", findings[0])
+        self.assertIn("'dead<!--c-->.md'", findings[0])
 
-    def test_a_comment_inside_a_reference_definition_target_does_not_leak_its_boundary_byte(self):
+    def test_a_comment_inside_a_reference_definition_target_is_literal_text_not_a_comment(self):
         """Same defect, the reference-definition path (`[id]: target`) instead of
-        the inline `[x](target)` form — the two paths extract the target
-        independently, so the leak has to be closed in both."""
+        the inline `[x](target)` form (WI-0042) — the two paths extract the
+        target independently, so the fix has to cover both."""
         self.write_index(CLEAN_INDEX + "[r]: refdead<!--c-->.md\n")
 
         output = self.run_lint().stdout
@@ -557,7 +556,24 @@ class MemoryLintTest(unittest.TestCase):
 
         self.assertEqual(len(findings), 1, findings)
         self.assertNotIn("\x01", output, output)
-        self.assertIn("'refdead.md'", findings[0])
+        self.assertIn("'refdead<!--c-->.md'", findings[0])
+
+    def test_a_comment_inside_link_text_stays_a_comment_and_is_stripped(self):
+        """Control probe, the opposite side of WI-0042's direction split: a
+        comment in the link LABEL (not the destination) is inline content, so
+        CommonMark does not exempt it from ordinary inline parsing the way the
+        destination is exempt. Reference-measured: `[te<!--c-->xt](dead.md)`
+        renders `<a href="dead.md">te<!--c-->xt</a></a>` — a live link to
+        `dead.md`, comment markup included in the (irrelevant, for this check)
+        label. Pins that the destination-only fix above does not also start
+        exempting label text, which this check never inspects anyway.
+        """
+        self.write_index(CLEAN_INDEX + "- [te<!--c-->xt](dead_label.md)\n")
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("'dead_label.md'", findings[0])
 
     # --- WI-0005: code examples are not entries, reference-style links are ---------
 
