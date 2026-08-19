@@ -58,6 +58,31 @@ is the only exception.
 This runs **before** the size cap on purpose: clearing the inbox is a lossless way to shrink the
 file and may bring it back under the cap without archiving anything.
 
+### 1a. Unparseable inbox lines (report only)
+
+The count in §1 is deliberately heading-independent (match on the marker, not the heading) — this
+pass is the opposite: it needs the section boundary that count ignores, purely to report drift, not
+to change the count.
+
+Search for a line starting with the heading `## Open Points` (any suffix, e.g. the shipped
+`## Open Points (append-only inbox)`). If found, collect every line from there up to (not including)
+the next `## ` heading or end of file. Within that block, a line is **structure, not a finding** —
+excluded from this pass — if it is blank, a blockquote line (starts with `> `), an HTML comment
+(`<!-- ... -->`), or a line matching §1's marker pattern. The template's own format example lives
+entirely inside the blockquote, so a fresh `project-init` HANDOVER must report **zero** unparseable
+lines here — if your count is not zero on an untouched template, the exclusion list above is wrong,
+not the fixture.
+
+Every remaining non-empty line is **unparseable, needs reshaping**: it landed in the inbox section
+without the five-field marker format (commonly an epilogue bullet writing free prose instead of an
+`- INBOX | ...` line — see `commands/p5-polish.md` §6 for what a correctly formatted entry looks
+like). Report each such line (verbatim, truncated to 80 chars) and offer to reshape it into the
+five-field form on confirmation. Never reshape silently, and never count it toward §1's entry count
+— it was never a triageable entry to begin with.
+
+If the `## Open Points` heading is missing entirely, this pass reports nothing, same as §1's own
+"heading missing" branch: that is not an error.
+
 ### 2. HANDOVER size cap enforcement (auto with confirm)
 
 Read `docs/HANDOVER.md` size (bytes) and line count.
@@ -142,7 +167,7 @@ Print a compact summary table at the end:
 Drift Report — <project>
 | Check               | Status      | Action |
 |---|---|---|
-| HANDOVER inbox      | 0 entries | N entries | section absent | <triaged: N→backlog, N→decision, N kept, N dropped / none> |
+| HANDOVER inbox      | 0 entries | N entries | section absent | <triaged: N→backlog, N→decision, N kept, N dropped / none — plus M unparseable, needs reshaping, if any> |
 | HANDOVER cap        | ok | approaching | over | n/a | <none / archived N blocks / archive offered, declined / suggested archive> |
 | memory-lint         | clean | warn | error | <command to inspect> |
 | phase-docs-lint     | clean | warn | error | <command to inspect> |
