@@ -605,7 +605,19 @@ class WriteGateCoverageTest(HandoverSizeHookTestCase):
     def test_every_declared_write_tool_warns(self):
         """Data-driven over HANDOVER_WRITE_TOOLS itself, so a tool added to the set in
         the future is exercised automatically instead of staying silent until someone
-        remembers to add a named test for it."""
+        remembers to add a named test for it.
+
+        The loop below iterates the very set it is meant to guard, so shrinking
+        HANDOVER_WRITE_TOOLS shrinks the loop along with it and stays green (WI-0030) —
+        the coverage that actually catches a shrink lives in the four named tests
+        above, not in this loop. The assertion pins the set's exact contents so a
+        shrink here fails immediately, with a message pointing at those named tests.
+        """
+        self.assertEqual(
+            {"Write", "Edit", "MultiEdit", "NotebookEdit"},
+            AGENT_MONITOR.HANDOVER_WRITE_TOOLS,
+            "a change here needs its own named test above, not just this loop",
+        )
         self.write_handover(handover_of_size(DEFAULT_CAP_BYTES + 600))
         for tool_name in sorted(AGENT_MONITOR.HANDOVER_WRITE_TOOLS):
             with self.subTest(tool_name=tool_name):
