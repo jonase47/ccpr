@@ -41,4 +41,4 @@ docs/decisions/
 # like the user's own state. Framework docs that explain the design (adr/,
 # CONSTITUTION.md, PROJECT_PHASES.md, the flat Tier-1 memory files) stay tracked.
 docs/workitems/
-docs/memory/*/
+docs/memory/
