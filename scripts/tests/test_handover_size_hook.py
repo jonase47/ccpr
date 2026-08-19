@@ -726,7 +726,7 @@ class ThresholdDerivationTest(HandoverSizeHookTestCase):
                          f"a file one run's growth below the cap must warn; stderr={result.stderr}")
         self.assertIn("approaching", warnings[0].lower())
         entry = [e for e in self.error_events() if e.get("event") == "HandoverSize"][0]
-        self.assertEqual(DERIVED_WARN_PCT, entry.get("pct_of_cap"),
+        self.assertEqual(DERIVED_WARN_PCT, entry.get("pct_of_cap_rounded"),
                          "the fixture must land exactly on the threshold, not merely above it")
 
     def test_one_step_below_the_last_preventive_moment_is_silent(self):
@@ -824,7 +824,7 @@ class RoundingBoundaryTest(HandoverSizeHookTestCase):
         result = self.run_hook("SessionStart", source="startup")
         entry = self.assert_level(result, "approaching")
         self.assertIn("100 % of the 5 KB cap", self.size_warnings(result)[0])
-        self.assertEqual(100, entry.get("pct_of_cap"))
+        self.assertEqual(100, entry.get("pct_of_cap_rounded"))
 
     # --- the line dimension ------------------------------------------------------
 
@@ -863,12 +863,12 @@ class RoundingBoundaryTest(HandoverSizeHookTestCase):
         199 of 200 lines is 99.5 % exactly. round(99.5) is 100 (round-half-to-even
         picks the even neighbour); int(99.5) truncates to 99. Both give "approaching"
         as the level (decided on the exact ratio, not on this field), so only a direct
-        assertion on pct_of_cap tells the two implementations apart.
+        assertion on pct_of_cap_rounded tells the two implementations apart.
         """
         self.write_handover_of_lines(DECLARED_LINE_CAP - 1)
         result = self.run_hook("SessionStart", source="startup")
         entry = self.assert_level(result, "approaching")
-        self.assertEqual(100, entry.get("pct_of_cap"))
+        self.assertEqual(100, entry.get("pct_of_cap_rounded"))
 
 
 @unittest.skipUnless(hasattr(os, "mkfifo"), "platform has no FIFOs")

@@ -505,7 +505,7 @@ def check_handover_size(session_id: str, source_event: str):
             "lines": line_count,
             "cap_bytes": cap_bytes,
             "cap_lines": cap_lines,
-            "pct_of_cap": pct,
+            "pct_of_cap_rounded": pct,
             "session": session_id,
         })
         verdict = (
