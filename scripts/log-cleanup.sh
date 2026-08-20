@@ -111,6 +111,19 @@ fi
 # === 2. Trim aggregated logs ===
 LINES_BEFORE=0
 LINES_AFTER=0
+TRIM_FAILURES=0
+
+# tmpfile is created in ${LOG_DIR} itself (same filesystem as the target), so
+# the swap below is a single atomic rename: a reader never observes a
+# half-written file, and a process kill either lands before the rename
+# (original untouched) or after it (new content fully in place). If the
+# script is killed by a CATCHABLE signal between the write and the rename,
+# this trap removes the current iteration's leftover tmpfile so it does not
+# linger forever (it does not match the *.jsonl rotation glob below). An
+# uncatchable SIGKILL cannot be defended against by any userspace mechanism
+# -- the residual cost there is a stray, harmless tmpfile, not data loss.
+tmpfile=""
+trap '[ -n "${tmpfile}" ] && rm -f "${tmpfile}"' EXIT
 
 for logfile in activity.jsonl errors.jsonl performance.jsonl; do
     filepath="${LOG_DIR}/${logfile}"
@@ -136,24 +149,38 @@ print(count)
         echo "  [TRIM] ${logfile}: ${lines_before} -> ${lines_after} lines"
         LINES_AFTER=$((LINES_AFTER + lines_after))
     else
-        # Actually trim
-        tmpfile=$(mktemp)
-        python3 -c "
+        # Actually trim. python3's exit status is checked explicitly, not
+        # left to this file's `set -e` alone (WI-0056): a failed/incomplete
+        # write must never reach the `mv` -- the original file is kept
+        # untouched, and processing continues with the remaining files
+        # instead of aborting the whole run over one bad file.
+        tmpfile=$(mktemp "${filepath}.XXXXXX")
+        if lines_after=$(python3 -c "
 import json
 cutoff = '${CUTOFF_DATE}'
+count = 0
 with open('${filepath}') as f_in, open('${tmpfile}', 'w') as f_out:
     for line in f_in:
         try:
             ts = json.loads(line).get('ts', '')
             if ts >= cutoff:
                 f_out.write(line)
+                count += 1
         except:
             pass  # Discard broken lines
-" 2>/dev/null  # exit-status: exempt known-risk-not-yet-fixed
-        lines_after=$(wc -l < "${tmpfile}" | tr -d ' ')
-        LINES_AFTER=$((LINES_AFTER + lines_after))
-        mv "${tmpfile}" "${filepath}"
-        echo "  [TRIM] ${logfile}: ${lines_before} -> ${lines_after} lines"
+print(count)
+") && [[ "${lines_after}" =~ ^[0-9]+$ ]]; then
+            LINES_AFTER=$((LINES_AFTER + lines_after))
+            mv "${tmpfile}" "${filepath}"
+            tmpfile=""
+            echo "  [TRIM] ${logfile}: ${lines_before} -> ${lines_after} lines"
+        else
+            echo "  [ERROR] ${logfile}: trim failed (python3 did not complete), keeping original untouched" >&2
+            rm -f "${tmpfile}"
+            tmpfile=""
+            LINES_AFTER=$((LINES_AFTER + lines_before))
+            TRIM_FAILURES=$((TRIM_FAILURES + 1))
+        fi
     fi
 done
 
@@ -184,4 +211,10 @@ fi
 if $DRY_RUN; then
     echo ""
     echo "Dry run – nothing deleted. Run without --dry-run to clean up."
+fi
+
+if [ ${TRIM_FAILURES} -gt 0 ]; then
+    echo ""
+    echo "WARNING: ${TRIM_FAILURES} log file(s) could not be trimmed (see [ERROR] lines above); originals kept"
+    exit 1
 fi

@@ -7,6 +7,39 @@ All notable changes to this project are documented in this file. The format is b
 ## [Unreleased]
 
 ### Fixed
+- **`scripts/log-cleanup.sh` could silently replace a real log with garbage instead of a trimmed
+  copy (WI-0056).** Found and deliberately left unfixed by WI-0054's classifier as
+  `known-risk-not-yet-fixed`: the trimmed log was written to a tmpfile by a bare
+  `python3 -c "..." 2>/dev/null`, followed by an UNCONDITIONAL `mv`. MEASURED first, and the
+  item's own headline mechanism did not reproduce: a python3 that FAILS (nonzero exit, via a PATH
+  stub or `PYTHONHOME=/nonexistent`) already aborted the whole script under this file's own
+  `set -euo pipefail` before the `mv` was ever reached — the log survived, just silently (empty
+  stderr, no indication which of the three files failed or why). The actually reproducible shape
+  was narrower: a python3 that returns EXIT 0 without doing the real work. Fixed by creating the
+  tmpfile in the same directory as the target (atomic rename — a process kill either lands before
+  it, original untouched, or after it, fully in place), capturing python3's exit status explicitly
+  AND validating its stdout is a well-formed line count before trusting it (closes both the
+  exit-nonzero and the exit-0-with-garbage-output shapes), skipping only the failed file instead of
+  aborting the whole run, and printing a per-file `[ERROR]` instead of staying silent. A residual,
+  deliberately unfixed gap remains: a python3 that returns exit 0 AND prints a plausible but wrong
+  line count cannot be told apart from a legitimate full trim by any exit-status check — recorded in
+  `docs/memory/senior-developer/scripts-conventions.md`, not silently closed.
+- **`scripts/bootstrap.sh` could abort its whole session-context dashboard on a legitimate empty
+  result (WI-0057).** Also found and left unfixed by WI-0054 as `known-risk-not-yet-fixed`: a bare
+  `grep -E '^### \[' "${INSTINCTS_FILE}" | head -5 | while read ...` — under `set -o pipefail`, a
+  grep that matches nothing exits 1 and takes the whole `{ ... } > "${OUTPUT_FILE}"` block down with
+  it. MEASURED first: this repository's own current `~/.claude/instincts.md` (a bullet-point index,
+  zero `### ` headings at all) never reaches this line — an earlier `count -eq 0` guard already
+  returns first, so the item's summary read too broadly for that shape. The reproducible case is an
+  instincts file that DOES have `### ` headings, just not in the `### [ID] ...` bracket form (the
+  shape this repo's own topic files actually use: `### G-008: ...`, no leading bracket) — there,
+  `grep -E '^### \['` legitimately matches nothing and the pipeline abort is pure `pipefail`, not
+  SIGPIPE from `head -5` (verified: a 200-heading probe that `head -5` truncates hard still exits 0
+  for the pipeline). Fixed by capturing the grep call's output and status explicitly and branching on
+  grep's own documented exit-status contract (1 = ran fine, nothing matched; 2+ = grep itself
+  failed) — deliberately not a blanket `|| true`, which would recreate the exact "failure read as
+  empty result" confusion this fix exists to close, in the other direction, for a genuine grep
+  failure.
 - **`scripts/quality-scan.sh` could not be parsed by bash and silently exited 0 having scanned
   nothing (WI-0055).** A `python3 << 'PYEOF' ... PYEOF` heredoc was nested inside a `$(...)` command
   substitution (`grep_findings=$(python3 << 'PYEOF' ...)`); the heredoc body's SQL-injection pattern

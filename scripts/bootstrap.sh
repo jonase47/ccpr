@@ -202,10 +202,24 @@ collect_instincts() {
         echo "- WARNING: instincts.md not updated in ${file_age_days} days"
     fi
 
-    # List instinct IDs with confidence
-    grep -E '^### \[' "${INSTINCTS_FILE}" 2>/dev/null | head -5 | while read -r line; do  # exit-status: exempt known-risk-not-yet-fixed
-        echo "  ${line}"
-    done
+    # List instinct IDs with confidence. grep's own documented contract
+    # distinguishes the two outcomes that must stay distinguishable here
+    # (WI-0057): exit 1 means "ran fine, nothing matched" -- a normal,
+    # valid state for an instincts file that uses a different heading
+    # convention -- exit 2+ means grep itself could not run. Capturing the
+    # status explicitly (rather than a blanket `|| true`) keeps a genuine
+    # failure from being silently read as "no headings" too.
+    local heading_lines grep_rc=0
+    heading_lines=$(grep -E '^### \[' "${INSTINCTS_FILE}" 2>/dev/null) || grep_rc=$?
+    if [ "${grep_rc}" -gt 1 ]; then
+        echo "  WARNING: could not scan ${INSTINCTS_FILE} for instinct headings (grep exit ${grep_rc})"
+        return
+    fi
+    if [ -n "${heading_lines}" ]; then
+        echo "${heading_lines}" | head -5 | while read -r line; do
+            echo "  ${line}"
+        done
+    fi
 }
 
 # -- Main Output --

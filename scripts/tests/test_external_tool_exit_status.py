@@ -118,10 +118,10 @@ moment the invocation's own text changes.
 `<category>` must be a key in `EXEMPTION_REASONS` below, one shared reason
 per category rather than one per site: most of the ~80 exemption sites are
 routine (a HANDOVER.md field extraction degrading to blank output, a git
-overlay-clone refresh already designed to tolerate failure), and repeating a
-bespoke reason at each one would train a reader to stop reading the list --
-the two sites that are NOT routine (`known-risk-not-yet-fixed`) are the ones
-meant to stand out.
+overlay-clone refresh already designed to tolerate failure). `known-risk-
+not-yet-fixed` was, until WI-0056/WI-0057, the category meant to stand out
+from the routine ones -- see "Findings surfaced, not fixed" below for why no
+site carries it any more.
 
 ## What this check cannot see
 
@@ -154,20 +154,57 @@ each such site is a recorded, individually-reasoned decision, not a proof.
 
 ## Findings surfaced, not fixed (WI-0054 scope: a test, not a behaviour change)
 
-Two `known-risk-not-yet-fixed` exemptions record real, unfixed risk found
-while building this check (reported here rather than silently exempted like
-the routine sites, and NOT fixed -- a behaviour change is a separate item):
-  * bootstrap.sh:206 -- `grep -E '^### \[' "${INSTINCTS_FILE}" | head -5 |
-    while read ...` is completely bare. If the file has zero matching
-    headings (a normal, expected state, e.g. a fresh instincts.md), grep
-    exits 1 and this whole pipeline aborts bootstrap.sh under
-    `set -o pipefail` -- an over-abort on an empty-but-valid result, not a
-    swallowed status, but still the wrong "decided" outcome.
-  * log-cleanup.sh:141-155 -- the trimmed log is written to a tmpfile by a
-    bare `python3 -c "..." 2>/dev/null`, and `mv "${tmpfile}" "${filepath}"`
-    on line 155 runs UNCONDITIONALLY afterward. If python3 crashes before
-    writing anything, `mv` still succeeds, silently replacing the log with
-    an empty file -- a real data-loss shape, not just a missed check.
+WI-0054 recorded two `known-risk-not-yet-fixed` exemptions for real,
+unfixed risk found while building this check (surfaced here rather than
+silently exempted like the routine sites, deliberately NOT fixed at the
+time -- a behaviour change was a separate item). Both were closed on
+20.08.2026 (WI-0056, WI-0057); the category still exists in
+`EXEMPTION_REASONS` for any future finding of the same shape, but no site
+in the shipped scripts currently carries it:
+  * bootstrap.sh:206 (WI-0057) -- `grep -E '^### \[' "${INSTINCTS_FILE}" |
+    head -5 | while read ...` was completely bare. MEASURED behaviour did
+    not match the item's own summary for every "empty" shape: this
+    repository's actual `~/.claude/instincts.md` (a bullet-point index, zero
+    `### ` headings at all) never reached this line -- `collect_instincts`'s
+    earlier `count -eq 0` guard already returns first. The reproducible case
+    was narrower: an instincts file WITH `### ` headings that don't use the
+    `### [ID] ...` bracket form (the shape this repo's own topic files use:
+    `### G-008: ...`, no leading bracket). There, `grep -E '^### \['`
+    legitimately matches nothing, exits 1, and -- under `set -o pipefail`
+    -- took the whole `{ ... } > "${OUTPUT_FILE}"` block down with it: exit
+    1, completely empty stderr, no "Session context written" confirmation,
+    even though every section before "## Instinct Status" had already been
+    written correctly. Root cause confirmed as pure `pipefail` on a
+    legitimately-empty grep, not SIGPIPE from `head -5` (a 200-heading probe
+    that `head -5` truncates hard still exits 0 for the pipeline). Fixed by
+    capturing the grep call's output and status explicitly and branching on
+    grep's own documented exit-status contract (1 = ran fine, nothing
+    matched; 2+ = grep itself failed) -- not a blanket `|| true`, which
+    would have re-created the exact confusion this item exists to close, in
+    the other direction, for a genuine grep failure.
+  * log-cleanup.sh:141-155 (WI-0056) -- the trimmed log was written to a
+    tmpfile by a bare `python3 -c "..." 2>/dev/null`, and
+    `mv "${tmpfile}" "${filepath}"` ran UNCONDITIONALLY afterward. MEASURED
+    behaviour did not match the item's own headline mechanism: a python3
+    that FAILS (nonzero exit, whether via a PATH stub or this repo's own
+    `PYTHONHOME=/nonexistent` broken-interpreter method) already aborted the
+    script under this file's own `set -euo pipefail` BEFORE the unconditional
+    `mv` was ever reached -- the log survived, silently (stderr empty, no
+    diagnostic, no indication of which of three files failed or why). The
+    reproducible data-loss shape was different and narrower: a python3 that
+    returns EXIT 0 without doing the real work (a broken shim, not a crash by
+    the ordinary meaning of "fails"). Fixed by creating the tmpfile in the
+    same directory as the target (atomic rename, closing the "process dies
+    between write and mv" question -- either the rename hasn't happened yet,
+    original untouched, or it has, fully in place), capturing python3's exit
+    status AND validating its stdout is a well-formed line count before
+    trusting it (closing both the exit-nonzero AND the exit-0-with-garbage-
+    output shapes), skipping only the failed file rather than aborting the
+    whole run, and surfacing a per-file `[ERROR]` instead of staying silent.
+    A residual, deliberately unfixed gap remains and is recorded in
+    docs/memory/senior-developer/: a python3 that returns exit 0 AND prints
+    a plausible, well-formed (but wrong) line count cannot be distinguished
+    from a legitimate full trim by any exit-status-based check.
 """
 
 import re
@@ -662,11 +699,15 @@ class ExternalToolExitStatusTest(unittest.TestCase):
         )
 
     def test_classification_counts(self):
-        """Regression pin on the measured baseline (WI-0054, 20.08.2026):
-        125 invocations total across the 15 shipped files, split as below.
-        A change in these numbers means either a script changed shape or
-        the scanner's own logic changed -- worth a deliberate look either
-        way, not a silent drift."""
+        """Regression pin on the measured baseline (WI-0054, 20.08.2026;
+        updated 20.08.2026 when WI-0056/WI-0057 closed the two
+        `known-risk-not-yet-fixed` sites this same baseline recorded --
+        both invocations are now explicitly checked, not exempted, so
+        `bare-needs-exemption` drops by 2 and the two checked buckets each
+        gain one site). 125 invocations total across the 15 shipped files,
+        split as below. A change in these numbers means either a script
+        changed shape or the scanner's own logic changed -- worth a
+        deliberate look either way, not a silent drift."""
         invocations = scan_tree()
         by_disposition = {}
         for inv in invocations:
@@ -675,10 +716,10 @@ class ExternalToolExitStatusTest(unittest.TestCase):
         self.assertEqual(
             {
                 "checked-condition": 16,
-                "checked-captured": 4,
-                "checked-chain": 13,
+                "checked-captured": 5,
+                "checked-chain": 14,
                 "discard-needs-exemption": 31,
-                "bare-needs-exemption": 61,
+                "bare-needs-exemption": 59,
             },
             by_disposition,
         )
