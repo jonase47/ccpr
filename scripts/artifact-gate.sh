@@ -135,6 +135,7 @@ fi
 # --- scan ---------------------------------------------------------------------
 scanned=0
 skipped_binary=0
+skipped_symlink=0
 findings=0
 dirty_files=0
 exempt_lines=0
@@ -142,7 +143,24 @@ exempt_file=""
 
 while IFS= read -r f; do
   [ -n "$f" ] || continue
-  [ -f "$f" ] || continue
+
+  # WI-0015: `install.sh` ships a symlink by copying it AS a link (`cp -R`
+  # preserves symlinks, it does not follow them), so what CCPR ships for a
+  # symlink is the link, never its target's bytes. The gate's subject is
+  # therefore the link's own name, exactly like any other path -- the target
+  # is never opened, resolving or dangling alike. `-L` is checked before `-f`
+  # on purpose: `-f` follows a symlink and would fold a resolving link back
+  # into the "regular file" branch below, silently reading through it again.
+  # `test -L` also works for the same file argument whether it came from a
+  # `git ls-files` sweep or from an explicit command-line path, unlike a
+  # `git ls-files -s` mode-120000 lookup, which only has an index entry to
+  # ask in the sweep case.
+  is_symlink=0
+  if [ -L "$f" ]; then
+    is_symlink=1
+  elif [ ! -f "$f" ]; then
+    continue
+  fi
 
   rel="$f"
   if [ -n "$REPO" ]; then rel="${f#"$REPO"/}"; fi
@@ -155,38 +173,49 @@ while IFS= read -r f; do
   # first; redacting `rel` once, for every line this file will emit, fixes the
   # second. The repository-relative path is what gets matched: a checkout that
   # merely happens to sit under a tenant-named directory says nothing about the
-  # artifact, whereas the path inside the repo ships with it.
+  # artifact, whereas the path inside the repo ships with it. This runs for a
+  # symlink too -- a dangling link whose own filename carries a deny name must
+  # still be reported, or the fix below reproduces the silent-scope-loss
+  # defect it exists to close.
   path_idx="$(gate_path_deny_index "$rel" || true)"
   if [ -n "$path_idx" ]; then rel="$(gate_redact_path "$rel")"; fi
 
-  # A file whose bytes could not be read has not been verified. `is_text` below
-  # cannot tell "not text" from "not readable", so a locked file was counted as
-  # a binary skip and a scope of one readable file next to it exited 0 — the
-  # empty-scope failure shape (a green run over nothing), one file at a time.
-  # The header has always promised exit 2 for unreadable input; this is where
-  # that promise is kept. Only regular files reach this line, so a dangling
-  # symlink — which is not readable either — is not swept up in the refusal.
-  [ -r "$f" ] || die "unreadable file, nothing was verified: $rel"
-
-  # The name is checked for every file; the CONTENT only for text. A binary's
-  # bytes are out of scope by design, but its name ships exactly like any other
-  # file's — an image called after a tenant sits in the index, in the checkout
-  # and in every log line naming it. Skipping the whole file on `is_text` would
-  # have left that visible copy unchecked.
   out=""
-  if ! is_text "$f"; then
-    skipped_binary=$((skipped_binary + 1))
+  if [ "$is_symlink" -eq 1 ]; then
+    # Never read through: not the target's content, not even a readability
+    # check on it. A dangling link is not readable either, and the point is
+    # that this is irrelevant here -- the target does not ship, so whether it
+    # exists is not this gate's business. Counted on its own so a run cannot
+    # silently shrink by the number of tracked links it walked past.
+    skipped_symlink=$((skipped_symlink + 1))
   else
-    scanned=$((scanned + 1))
-    out="$(gate_scan_file "$f" artifact || true)"
+    # A file whose bytes could not be read has not been verified. `is_text`
+    # below cannot tell "not text" from "not readable", so a locked file was
+    # counted as a binary skip and a scope of one readable file next to it
+    # exited 0 — the empty-scope failure shape (a green run over nothing), one
+    # file at a time. The header has always promised exit 2 for unreadable
+    # input; this is where that promise is kept.
+    [ -r "$f" ] || die "unreadable file, nothing was verified: $rel"
 
-    # Split the bookkeeping record off before anything is counted as a finding.
-    if [ -n "$out" ]; then
-      exempt_here="$(printf '%s\n' "$out" | awk -F'\t' '$2 == "_exempt" { print $3 }')"
-      if [ -n "$exempt_here" ]; then
-        exempt_lines=$((exempt_lines + exempt_here))
-        exempt_file="$f"
-        out="$(printf '%s\n' "$out" | awk -F'\t' '$2 != "_exempt"')"
+    # The name is checked for every file; the CONTENT only for text. A binary's
+    # bytes are out of scope by design, but its name ships exactly like any other
+    # file's — an image called after a tenant sits in the index, in the checkout
+    # and in every log line naming it. Skipping the whole file on `is_text` would
+    # have left that visible copy unchecked.
+    if ! is_text "$f"; then
+      skipped_binary=$((skipped_binary + 1))
+    else
+      scanned=$((scanned + 1))
+      out="$(gate_scan_file "$f" artifact || true)"
+
+      # Split the bookkeeping record off before anything is counted as a finding.
+      if [ -n "$out" ]; then
+        exempt_here="$(printf '%s\n' "$out" | awk -F'\t' '$2 == "_exempt" { print $3 }')"
+        if [ -n "$exempt_here" ]; then
+          exempt_lines=$((exempt_lines + exempt_here))
+          exempt_file="$f"
+          out="$(printf '%s\n' "$out" | awk -F'\t' '$2 != "_exempt"')"
+        fi
       fi
     fi
   fi
@@ -254,6 +283,15 @@ if [ "$skipped_binary" -gt 0 ]; then
     "$PROG" "$skipped_binary"
 fi
 
+# Same shape, same reason: a symlink's target is never read (WI-0015, see the
+# scan loop above), so saying nothing here would make "scanned N files" read
+# as "N files is all there was" for a tracked link too -- the exact defect
+# this line exists to avoid repeating for binaries.
+if [ "$skipped_symlink" -gt 0 ]; then
+  say '%s: %s symlink(s) skipped — target not scanned, names still checked' \
+    "$PROG" "$skipped_symlink"
+fi
+
 # A run that inspected nothing has proved nothing. Reporting "0 findings" over an
 # empty scope is the failure mode least likely to be noticed, because it looks
 # exactly like success: the CI job goes green having verified no artifact at all.
@@ -267,7 +305,7 @@ if [ "$findings" -gt 0 ]; then
 fi
 
 if [ "$scanned" -eq 0 ]; then
-  warn '%s: no files were scanned — nothing was verified. Check the --repo path or the file arguments; a scope of only binary files ends up empty too.' "$PROG"
+  warn '%s: no files were scanned — nothing was verified. Check the --repo path or the file arguments; a scope of only binary files or symlinks ends up empty too.' "$PROG"
   exit 2
 fi
 if [ "$REQUIRE_DENYLIST" -eq 1 ] && [ "$denylist_missing" -eq 1 ]; then

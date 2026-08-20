@@ -1744,5 +1744,96 @@ class CiTemplateExecutionTest(GateTestBase):
                           required_run.stdout + required_run.stderr)
 
 
+# ---------------------------------------------------------------------------
+# 12. Symlinks (WI-0015) — the gate's subject is the link's own NAME, never
+#     its target. install.sh ships a symlink with `cp -R`, which preserves it
+#     AS a link; the target's bytes never travel, so reading through it would
+#     scan and report content that does not ship. The link's own filename is
+#     deny-checked exactly like any other path, dangling or not.
+# ---------------------------------------------------------------------------
+class SymlinkTest(GateTestBase):
+    def make_repo(self):
+        repo = self.work / "symrepo"
+        repo.mkdir()
+        subprocess.run(["git", "init", "-q"], cwd=repo, check=True, env=self.env())
+        return repo
+
+    def commit_all(self, repo):
+        env = self.env(GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@host.invalid",
+                       GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@host.invalid")
+        subprocess.run(["git", "add", "-A"], cwd=repo, check=True, env=env)
+        subprocess.run(["git", "commit", "-qm", "x"], cwd=repo, check=True, env=env)
+
+    def test_a_dangling_symlink_whose_name_carries_a_deny_name_is_reported_and_counted(self):
+        # The silent-scope-loss defect: a dangling link's own filename was
+        # never deny-checked at all, so a tenant name sitting right there in
+        # the tracked path went unreported.
+        self.write_config(denyNames=["Zorblatt"])
+        repo = self.make_repo()
+        (repo / "clean.md").write_text(CLEAN_TEXT, encoding="utf-8")
+        link = repo / "zorblatt-link.md"
+        link.symlink_to(repo / "does-not-exist.md")
+        self.commit_all(repo)
+        r = self.run_gate("--repo", repo)
+        out = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 1, out)
+        self.assertIn("denylist", self.categories(r))
+        self.assertNotIn("zorblatt", out.lower())
+        self.assertIn("1 symlink", out)
+
+    def test_a_dangling_symlink_with_a_harmless_name_is_counted_not_a_finding(self):
+        # Counted in its own summary line so the run cannot silently shrink,
+        # but not reported: a harmless filename is not a finding. The other
+        # tracked, regular file is unaffected -- still scanned normally.
+        repo = self.make_repo()
+        (repo / "clean.md").write_text(CLEAN_TEXT, encoding="utf-8")
+        link = repo / "harmless-link.md"
+        link.symlink_to(repo / "does-not-exist.md")
+        self.commit_all(repo)
+        r = self.run_gate("--repo", repo)
+        out = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 0, out)
+        self.assertEqual(self.categories(r), set())
+        self.assertIn("1 symlink", out)
+        self.assertIn("scanned 1 files", out)
+
+    def test_a_link_resolving_in_repo_scans_its_target_exactly_once(self):
+        # Following the link would scan the target's bytes twice: once via
+        # its own tracked entry, once again through the link. Not following
+        # it must leave exactly one finding, from the real file.
+        repo = self.make_repo()
+        target = repo / "target.md"
+        target.write_text("leak " + HOME_PATH + "\n", encoding="utf-8")
+        link = repo / "alias.md"
+        link.symlink_to(target)
+        self.commit_all(repo)
+        r = self.run_gate("--repo", repo)
+        out = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 1, out)
+        personal_findings = [ln for ln in out.splitlines() if "[personal]" in ln]
+        self.assertEqual(len(personal_findings), 1, out)
+        self.assertIn("scanned 1 files", out)
+        self.assertIn("1 symlink", out)
+
+    def test_a_link_resolving_out_of_repo_never_ships_the_targets_content(self):
+        # The accepted cost: a target outside the repo does not ship, so its
+        # content is never scanned or reported -- even though it leaks.
+        outside = Path(tempfile.mkdtemp(prefix="ccpr-artifact-gate-outside-"))
+        self.addCleanup(shutil.rmtree, outside, ignore_errors=True)
+        target = outside / "secret.md"
+        target.write_text("leak " + HOME_PATH + "\n", encoding="utf-8")
+        repo = self.make_repo()
+        (repo / "clean.md").write_text(CLEAN_TEXT, encoding="utf-8")
+        link = repo / "outside-link.md"
+        link.symlink_to(target)
+        self.commit_all(repo)
+        r = self.run_gate("--repo", repo)
+        out = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 0, out)
+        self.assertEqual(self.categories(r), set())
+        self.assertIn("1 symlink", out)
+        self.assertIn("scanned 1 files", out)
+
+
 if __name__ == "__main__":
     unittest.main()

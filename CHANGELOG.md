@@ -7,6 +7,22 @@ All notable changes to this project are documented in this file. The format is b
 ## [Unreleased]
 
 ### Fixed
+- **`artifact-gate.sh` followed a tracked symlink instead of treating it as its own name.**
+  Two related defects: a dangling symlink vanished from the sweep silently — `[ -f ]` failed and
+  the loop `continue`d before the file's own name ever reached the deny-check, so a tracked link
+  whose filename carried a configured tenant name went unreported and the scope shrank without a
+  word. A *resolving* symlink was worse the other way: `-f` follows a symlink, so its target's
+  bytes were read through the link's path, scanning an in-repo target twice (once via its own
+  tracked entry, once again through the link) and reporting a leak from an out-of-repo target
+  under a repo-relative path — even though that target's bytes never ship. `install.sh` copies
+  with `cp -R`, which preserves a symlink AS a link; what CCPR ships for a symlink is the link
+  itself, never its target, so the gate's subject is the link's own name, checked exactly like any
+  other path, dangling or not — the target is never opened. `test -L` (checked before `-f`, so a
+  resolving link cannot fall through into the regular-file branch) now discriminates a symlink
+  from a regular file, uniformly for both an explicit file argument and a `git ls-files` sweep
+  entry. A new `skipped_symlink` counter and its own summary line ("N symlink(s) skipped — target
+  not scanned, names still checked") mirror the existing binary-skip line, so the fix does not
+  reproduce the silent-scope-loss defect it closes.
 - **A screaming-snake-case placeholder still read as a bearer token or a keyword-assignment
   secret.** `Authorization: Bearer YOUR_TOKEN_HERE_REPLACE_ME` and
   `Authorization: Bearer TODO_INSERT_YOUR_TOKEN_HERE` both fired as `[secret]`, because the value
