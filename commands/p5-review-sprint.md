@@ -101,7 +101,7 @@ Orchestrator gathers and provides inline:
 ### Handover Epilog
 Update `docs/HANDOVER.md`:
 - What was created/changed
-- Open points (esp. any CRITICAL/HIGH carried into the gate)
+- Open decisions → the `## Open Decisions` table (esp. any CRITICAL/HIGH carried into the gate); a finding outside this command's scope goes to the `## Open Points` inbox instead
 - Next Steps (according to `~/.claude/docs/NEXT_STEPS_REFERENCE.md`)
 
 Recommend 1-3 sensible next commands to the user:

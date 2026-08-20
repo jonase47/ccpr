@@ -239,6 +239,32 @@ All notable changes to this project are documented in this file. The format is b
   as `imported-*.md`), while index bullets with no matching entry are a WARNING — the index pointing
   at content that does not exist.
 
+### Changed
+- **The Handover-Epilogue "Open points"/"Open items" bullet, shipped identically in 104 command
+  prompts, named a destination without saying which of the two `docs/HANDOVER.md` sections it
+  meant.** The template offers two places for a mid-task finding: the `## Open Decisions` table
+  (what the PO must decide about THIS command's own assignment) and the `## Open Points`
+  append-only inbox (a finding made OUTSIDE the current assignment). The bullet an agent actually
+  followed just said "Open points" (91 files) or, in a further 12 files (`gate-p7*`, `p7-*`,
+  `p8-*`), "Open items" — same block, same position, same three-bullet shape, same ambiguity,
+  different word; found while measuring the first 92, initially treated as a separate finding and
+  folded into the same fix on review, since the defect is the missing destination, not the literal
+  string searched for. `/cleanup`'s unparseable-line report made the resulting drift visible
+  rather than silently absorbing it. No ADR: the Constitution's Inviolable triggers on a change
+  that *invalidates* an existing project artifact, and naming a destination more precisely
+  invalidates nothing — settled against the volume of files touched, not the wording. 103 files
+  carried a bare bullet, one (`p5-review-sprint.md`) a suffixed sibling keeping its own
+  CRITICAL/HIGH qualifier; all 104 now name the `## Open Decisions` table for a PO decision and
+  the `## Open Points` inbox for an out-of-scope finding explicitly, applied as two scripted
+  substitutions (not 104 hand edits) with a five-point integrity proof run over each tranche:
+  before/after occurrence counts, `git diff --stat` at exactly 1 insertion + 1 deletion per file,
+  a diff-line filter proving no neighbouring line moved, and a byte-count delta check per file.
+  Pinned by a new `scripts/tests/test_handover_epilogue_bullet.py`, which asserts the positive
+  form (every Handover-Epilogue "Open ..." bullet is the disambiguated wording or the one, named,
+  genuinely unrelated `specialize.md` exception) rather than merely the old string's absence — an
+  allowlist for files carrying the same defect the test exists to prevent was rejected as reading
+  like a sanctioned exception rather than a gap.
+
 ## [0.2.1-beta] - 2026-07-10
 
 ### Fixed

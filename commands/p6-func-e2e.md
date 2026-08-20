@@ -66,7 +66,7 @@ Update `docs/quality/FUNCTIONAL.md` (the functional-testing sub-index, created b
 ### Handover Epilogue
 Update `docs/HANDOVER.md`:
 - What was created/changed
-- Open points
+- Open decisions → the `## Open Decisions` table; a finding outside this command's scope goes to the `## Open Points` inbox instead
 - Next Steps (according to `~/.claude/docs/NEXT_STEPS_REFERENCE.md`)
 
 Recommend 1-3 useful next commands to the user:
