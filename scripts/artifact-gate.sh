@@ -206,7 +206,25 @@ while IFS= read -r f; do
       skipped_binary=$((skipped_binary + 1))
     else
       scanned=$((scanned + 1))
-      out="$(gate_scan_file "$f" artifact || true)"
+      # gate_scan_file's own header comment promises "returns 1 when there was
+      # at least one finding, 0 otherwise" -- and, since WI-0051, >=2 when one
+      # of its checks did not run to completion (a crashing grep, not a clean
+      # file). Capturing the exit status this way (an `if` around the
+      # assignment, not `|| true`) is required under `set -e`: the common case
+      # IS a nonzero return (a dirty file), and `|| true` exists specifically
+      # to survive that under `set -e` -- but it swallowed >=2 right along
+      # with 1, which is the defect WI-0051 is about. The `if` form keeps the
+      # same survival property for 1 while still letting >=2 through to the
+      # check below.
+      scan_rc=0
+      if out="$(gate_scan_file "$f" artifact)"; then
+        scan_rc=0
+      else
+        scan_rc=$?
+      fi
+      if [ "$scan_rc" -ge 2 ]; then
+        die "$(printf '%s\n' "$out" | awk -F'\t' '$2 == "_error" { print $3; exit }')"
+      fi
 
       # Split the bookkeeping record off before anything is counted as a finding.
       if [ -n "$out" ]; then

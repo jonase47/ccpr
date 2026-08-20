@@ -226,6 +226,16 @@ run_gate() {
   else
     scan_rc=$?
   fi
+
+  # WI-0051: gate_scan_file returns >=2 when one of its checks (a grep call)
+  # did not run to completion, never 0 findings for a check that never ran.
+  # That is the same shape artifact-gate.sh's empty-scope guard already
+  # refuses -- a run that could not tell whether it looked has proved
+  # nothing -- so it takes the same code, exit 2, rather than being folded
+  # into the "1 = findings" branch below.
+  if [[ "$scan_rc" -ge 2 ]]; then
+    die "$(printf '%s\n' "$out" | awk -F'\t' '$2 == "_error" { print $3; exit }')"
+  fi
   [[ "$scan_rc" -eq 0 ]] && return 0
 
   local rendered

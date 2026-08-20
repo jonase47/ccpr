@@ -276,9 +276,24 @@ gate_load_config() {
 
   # An environment-supplied list lets a CI job inject names from a secret store
   # without a config file. Newline- or comma-separated.
+  #
+  # WI-0051: this list feeds the deny-list check for EVERY file in the run —
+  # a crash in the final grep here silently emptied GATE_DENY_NAMES, which
+  # disabled the denylist category for the whole run, not just one file's
+  # worth of one category. tr/sed are not checked the same way: unlike
+  # grep, neither has a "1 = nothing matched, not an error" status to
+  # confuse with a crash, so an unprotected failure of either already fails
+  # closed under this function's inherited `set -e`.
   if [ -n "${CCPR_GATE_DENY_NAMES:-}" ]; then
-    GATE_DENY_NAMES="$(printf '%s\n' "$CCPR_GATE_DENY_NAMES" | tr ',' '\n' \
-      | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' | grep -v '^$' || true)"
+    local pre out rc=0
+    pre="$(printf '%s\n' "$CCPR_GATE_DENY_NAMES" | tr ',' '\n' \
+      | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+    out="$(_gate_checked "config/CCPR_GATE_DENY_NAMES blank-line-filter" "$pre" -v '^$')" || rc=$?
+    if [ "$rc" -ge 2 ]; then
+      printf 'gate: %s\n' "$(printf '%s\n' "$out" | awk -F'\t' '$2 == "_error" { print $3 }')" >&2
+      exit 2
+    fi
+    GATE_DENY_NAMES="$out"
     [ -n "$GATE_DENY_NAMES" ] && GATE_DENY_SOURCE="env"
   fi
 
@@ -584,16 +599,61 @@ _GATE_PATTERN_SOURCE="$(_gate_abspath "${BASH_SOURCE[0]}")"
 
 _gate_emit() { printf '%s\t%s\t%s\n' "$1" "$2" "$3"; }
 
-# _gate_lines <content> <grep-flags...> — print "<line>:<match>" records.
+# _gate_hits <content> <grep-flags...> — print "<line>:<match>" records.
+#
+# grep's own exit status IS this function's return status: 0 a match, 1 no
+# match (the ordinary empty-category case, silent by design), >=2 grep did
+# not run to completion (crash, bad pattern, a locale/encoding fault on
+# malformed multi-byte input). Deliberately no "|| true" here (WI-0051):
+# that used to fold status 1 and status >=2 into the identical empty
+# result, and every caller of this function read "the category is clean"
+# either way. _gate_checked below is what turns the distinction into an
+# abort — every check in gate_scan_file goes through IT, not this function
+# directly.
 _gate_hits() {
   local content="$1"; shift
-  printf '%s\n' "$content" | grep "$@" || true
+  printf '%s\n' "$content" | grep "$@"
+}
+
+# _gate_checked <label> <content> <grep-flags...> — _gate_hits, plus the
+# WI-0051 status split every call site below needs.
+#
+# On a normal run (grep exit 0 or 1) this prints exactly what _gate_hits
+# would have and returns the same status. On a crash (exit >=2) it prints
+# ONE "_error" record instead of the unreliable/partial match text, and
+# returns that status.
+#
+# The record travels on stdout, the same channel _gate_emit already uses
+# for "_exempt" a few lines below: every call site captures this function's
+# output inside a "$(...)" command substitution, which forks a subshell,
+# and a variable set inside a subshell does not survive it — only what the
+# subshell PRINTS does.
+#
+# gate_scan_file's own callers (artifact-gate.sh, memory-sync.sh) capture
+# gate_scan_file itself the same way, which is why every checked call site
+# in gate_scan_file explicitly tests the returned status and `return`s
+# instead of trusting `set -e` to do it: a function invoked from a tested
+# context ("cmd || true", "if cmd; then" — which is exactly how BOTH entry
+# points already call gate_scan_file) suspends errexit for everything
+# inside it, transitively, not just its own top-level exit status. A crash
+# several call-levels down would otherwise run the rest of the function to
+# completion in silence. Measured, not assumed.
+_gate_checked() {
+  local label="$1" content="$2"; shift 2
+  local out rc=0
+  out="$(_gate_hits "$content" "$@")" || rc=$?
+  if [ "$rc" -ge 2 ]; then
+    _gate_emit 0 _error "$label check did not run — grep exited $rc"
+    return "$rc"
+  fi
+  printf '%s\n' "$out"
+  return "$rc"
 }
 
 # gate_scan_file <file> <profile>
 gate_scan_file() {
   local f="$1" profile="${2:-artifact}"
-  local content hits ip line found=0
+  local content hits blob_hits cs_hits ip line found=0 rc=0
   GATE_LAST_EXEMPT_LINES=0
 
   if [ "$(_gate_abspath "$f")" = "$_GATE_PATTERN_SOURCE" ]; then
@@ -613,8 +673,13 @@ gate_scan_file() {
   # placeholder word (WI-0035). `-o` also means a line with more than one
   # candidate now reports once per match instead of once per line — the same
   # granularity the connection-string pair already uses.
-  hits="$(_gate_hits "$content" -noEi -e "$GATE_RE_SECRET_KV" \
-    | grep -viE -e "$GATE_RE_SECRET_PLACEHOLDER_WORD" || true)"
+  hits="$(_gate_checked "secret/credential-assignment extract" "$content" -noEi -e "$GATE_RE_SECRET_KV")" || rc=$?
+  [ "$rc" -lt 2 ] || { printf '%s\n' "$hits"; return "$rc"; }
+  if [ -n "$hits" ]; then
+    rc=0
+    hits="$(_gate_checked "secret/credential-assignment placeholder-filter" "$hits" -viE -e "$GATE_RE_SECRET_PLACEHOLDER_WORD")" || rc=$?
+    [ "$rc" -lt 2 ] || { printf '%s\n' "$hits"; return "$rc"; }
+  fi
   while IFS= read -r line; do
     [ -n "$line" ] || continue
     _gate_emit "${line%%:*}" secret "possible credential assignment (keyword = <value>)"
@@ -623,8 +688,14 @@ gate_scan_file() {
 $hits
 EOF
 
-  hits="$(_gate_hits "$content" -noEi -e "$GATE_RE_SECRET_BEARER" \
-    | grep -viE -e "$GATE_RE_SECRET_PLACEHOLDER_WORD" || true)"
+  rc=0
+  hits="$(_gate_checked "secret/bearer-token extract" "$content" -noEi -e "$GATE_RE_SECRET_BEARER")" || rc=$?
+  [ "$rc" -lt 2 ] || { printf '%s\n' "$hits"; return "$rc"; }
+  if [ -n "$hits" ]; then
+    rc=0
+    hits="$(_gate_checked "secret/bearer-token placeholder-filter" "$hits" -viE -e "$GATE_RE_SECRET_PLACEHOLDER_WORD")" || rc=$?
+    [ "$rc" -lt 2 ] || { printf '%s\n' "$hits"; return "$rc"; }
+  fi
   while IFS= read -r line; do
     [ -n "$line" ] || continue
     _gate_emit "${line%%:*}" secret "bearer token header — verify it is not a real credential"
@@ -633,9 +704,14 @@ EOF
 $hits
 EOF
 
-  hits="$(_gate_hits "$content" -nE -e "$GATE_RE_SECRET_VENDOR")"
+  rc=0
+  hits="$(_gate_checked "secret/vendor-token" "$content" -nE -e "$GATE_RE_SECRET_VENDOR")" || rc=$?
+  [ "$rc" -lt 2 ] || { printf '%s\n' "$hits"; return "$rc"; }
+  rc=0
+  blob_hits="$(_gate_checked "secret/token-blob" "$content" -nE -e "$GATE_RE_SECRET_BLOB")" || rc=$?
+  [ "$rc" -lt 2 ] || { printf '%s\n' "$blob_hits"; return "$rc"; }
   hits="$hits
-$(_gate_hits "$content" -nE -e "$GATE_RE_SECRET_BLOB")"
+$blob_hits"
   while IFS= read -r line; do
     [ -n "$line" ] || continue
     _gate_emit "${line%%:*}" secret "long token-like string — verify it is a name/path, not a value"
@@ -644,10 +720,19 @@ $(_gate_hits "$content" -nE -e "$GATE_RE_SECRET_BLOB")"
 $hits
 EOF
 
-  hits="$(_gate_hits "$content" -nE -e "$GATE_RE_PRIVATE_KEY")"
+  rc=0
+  hits="$(_gate_checked "secret/private-key" "$content" -nE -e "$GATE_RE_PRIVATE_KEY")" || rc=$?
+  [ "$rc" -lt 2 ] || { printf '%s\n' "$hits"; return "$rc"; }
+  rc=0
+  cs_hits="$(_gate_checked "secret/connection-string extract" "$content" -noE -e "$GATE_RE_CONNSTRING")" || rc=$?
+  [ "$rc" -lt 2 ] || { printf '%s\n' "$cs_hits"; return "$rc"; }
+  if [ -n "$cs_hits" ]; then
+    rc=0
+    cs_hits="$(_gate_checked "secret/connection-string placeholder-filter" "$cs_hits" -vE -e "$GATE_RE_PLACEHOLDER")" || rc=$?
+    [ "$rc" -lt 2 ] || { printf '%s\n' "$cs_hits"; return "$rc"; }
+  fi
   hits="$hits
-$(printf '%s\n' "$content" | grep -noE -e "$GATE_RE_CONNSTRING" \
-    | grep -vE -e "$GATE_RE_PLACEHOLDER" || true)"
+$cs_hits"
   while IFS= read -r line; do
     [ -n "$line" ] || continue
     _gate_emit "${line%%:*}" secret "private key block or credential-bearing connection string"
@@ -657,7 +742,9 @@ $hits
 EOF
 
   # --- personal ------------------------------------------------------------
-  hits="$(_gate_hits "$content" -nEi -e "$GATE_RE_PERSONAL")"
+  rc=0
+  hits="$(_gate_checked "personal/session-home" "$content" -nEi -e "$GATE_RE_PERSONAL")" || rc=$?
+  [ "$rc" -lt 2 ] || { printf '%s\n' "$hits"; return "$rc"; }
   while IFS= read -r line; do
     [ -n "$line" ] || continue
     _gate_emit "${line%%:*}" personal "session hash / home path"
@@ -666,8 +753,14 @@ EOF
 $hits
 EOF
 
-  hits="$(printf '%s\n' "$content" | grep -noE -e "$GATE_RE_EMAIL" \
-    | grep -viE -e "$GATE_RE_EMAIL_RESERVED" || true)"
+  rc=0
+  hits="$(_gate_checked "personal/email extract" "$content" -noE -e "$GATE_RE_EMAIL")" || rc=$?
+  [ "$rc" -lt 2 ] || { printf '%s\n' "$hits"; return "$rc"; }
+  if [ -n "$hits" ]; then
+    rc=0
+    hits="$(_gate_checked "personal/email reserved-domain-filter" "$hits" -viE -e "$GATE_RE_EMAIL_RESERVED")" || rc=$?
+    [ "$rc" -lt 2 ] || { printf '%s\n' "$hits"; return "$rc"; }
+  fi
   while IFS= read -r line; do
     [ -n "$line" ] || continue
     _gate_emit "${line%%:*}" personal "email address — remove or generalize"
@@ -677,7 +770,9 @@ $hits
 EOF
 
   if [ "$profile" = "memory" ]; then
-    hits="$(_gate_hits "$content" -nEi -e "$GATE_RE_CONTEXT")"
+    rc=0
+    hits="$(_gate_checked "context/marker" "$content" -nEi -e "$GATE_RE_CONTEXT")" || rc=$?
+    [ "$rc" -lt 2 ] || { printf '%s\n' "$hits"; return "$rc"; }
     while IFS= read -r line; do
       [ -n "$line" ] || continue
       _gate_emit "${line%%:*}" context "personal-context marker (colour vision / accessibility) — de-personalize before sharing"
@@ -686,7 +781,9 @@ EOF
 $hits
 EOF
 
-    hits="$(_gate_hits "$content" -nE -e "$GATE_RE_TYPE_USER")"
+    rc=0
+    hits="$(_gate_checked "personal/type-user" "$content" -nE -e "$GATE_RE_TYPE_USER")" || rc=$?
+    [ "$rc" -lt 2 ] || { printf '%s\n' "$hits"; return "$rc"; }
     while IFS= read -r line; do
       [ -n "$line" ] || continue
       _gate_emit "${line%%:*}" personal "type: user is personal-only, never shared"
@@ -697,10 +794,18 @@ EOF
   fi
 
   # --- network -------------------------------------------------------------
-  hits="$(printf '%s\n' "$content" | grep -noE -e "$GATE_RE_IPV4" || true)"
+  rc=0
+  hits="$(_gate_checked "network/ipv4" "$content" -noE -e "$GATE_RE_IPV4")" || rc=$?
+  [ "$rc" -lt 2 ] || { printf '%s\n' "$hits"; return "$rc"; }
   while IFS= read -r line; do
     [ -n "$line" ] || continue
     ip="${line#*:}"
+    # WI-0051 does not extend to this membership test: a broken
+    # GATE_IP_ALLOWLIST regex here fails CLOSED already (the `&&` makes the
+    # `if` false, so the IP falls through to being reported as a finding
+    # rather than silently allowlisted), the opposite direction from the
+    # "0 findings for a check that never ran" shape this file's other sites
+    # were fixed for. Left alone deliberately, not an oversight.
     if [ -n "$GATE_IP_ALLOWLIST" ] && printf '%s\n' "$ip" | grep -qE -e "$GATE_IP_ALLOWLIST"; then
       continue
     fi
@@ -712,7 +817,9 @@ EOF
 
   # --- content (memory only) -----------------------------------------------
   if [ "$profile" = "memory" ]; then
-    hits="$(_gate_hits "$content" -nE -e "$GATE_RE_CONTENT")"
+    rc=0
+    hits="$(_gate_checked "content/marker" "$content" -nE -e "$GATE_RE_CONTENT")" || rc=$?
+    [ "$rc" -lt 2 ] || { printf '%s\n' "$hits"; return "$rc"; }
     while IFS= read -r line; do
       [ -n "$line" ] || continue
       _gate_emit "${line%%:*}" content "work-item marker (TODO:/FIXME:/checkbox/open-status/next-steps heading) — track in the ticket system, not in shared memory"   # gate-pattern-source
@@ -737,7 +844,9 @@ EOF
       [ -n "$name" ] || continue
       idx=$((idx + 1))
       if _gate_is_ascii "$name"; then
-        hits="$(printf '%s\n' "$content" | grep -nFi -- "$name" || true)"
+        rc=0
+        hits="$(_gate_checked "denylist/name #$idx" "$content" -nFi -- "$name")" || rc=$?
+        [ "$rc" -lt 2 ] || { printf '%s\n' "$hits"; return "$rc"; }
         while IFS= read -r line; do
           [ -n "$line" ] || continue
           _gate_emit "${line%%:*}" denylist "configured tenant/project name #$idx occurs here (name redacted)"
@@ -765,7 +874,9 @@ EOF
           # helper crashed.
           *)
             printf 'gate: unicode content matcher failed (status %s) — falling back to ASCII folding\n' "$rc" >&2
-            hits="$(printf '%s\n' "$content" | grep -nFi -- "$name" || true)"
+            rc=0
+            hits="$(_gate_checked "denylist/name #$idx (unicode-fallback)" "$content" -nFi -- "$name")" || rc=$?
+            [ "$rc" -lt 2 ] || { printf '%s\n' "$hits"; return "$rc"; }
             while IFS= read -r line; do
               [ -n "$line" ] || continue
               _gate_emit "${line%%:*}" denylist "configured tenant/project name #$idx occurs here (name redacted)"
@@ -783,7 +894,9 @@ EOF
           printf 'gate: python3 not found — non-ASCII names are folded as ASCII only\n' >&2
           _GATE_UNICODE_WARNED=1
         fi
-        hits="$(printf '%s\n' "$content" | grep -nFi -- "$name" || true)"
+        rc=0
+        hits="$(_gate_checked "denylist/name #$idx (ascii-only, no python3)" "$content" -nFi -- "$name")" || rc=$?
+        [ "$rc" -lt 2 ] || { printf '%s\n' "$hits"; return "$rc"; }
         while IFS= read -r line; do
           [ -n "$line" ] || continue
           _gate_emit "${line%%:*}" denylist "configured tenant/project name #$idx occurs here (name redacted)"

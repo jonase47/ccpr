@@ -7,6 +7,33 @@ All notable changes to this project are documented in this file. The format is b
 ## [Unreleased]
 
 ### Fixed
+- **A crashing `grep` inside the discipline gate's checks used to read as "no findings", not as
+  "this check did not run" (WI-0051).** Every check in `gate_scan_file` — and the deny-list's own
+  config parsing in `gate_load_config` — routed its `grep` through a trailing `|| true`, which
+  folded grep's exit 1 ("no match", the ordinary empty-category case) and exit >=2 ("did not run
+  to completion" — a crash, a bad pattern, a locale/encoding fault on malformed multi-byte input)
+  into the identical empty result: a file carrying a private key, a credential, or a configured
+  tenant name behind a crashed check came back "0 findings", exit 0. That is the same shape the
+  empty-scope guard in `artifact-gate.sh` already refuses ("a run that inspected nothing has proved
+  nothing"), and grep IS the matcher here — unlike WI-0049's unicode-vs-ASCII fallback, there is no
+  degraded-but-real second answer to fall back to, so a crashed check aborts the whole run (exit 2)
+  rather than warning and continuing. `_gate_checked` (wrapping `_gate_hits`, which no longer
+  swallows grep's status itself) is now the ONE call every check in `gate_scan_file` goes through —
+  the plain single-grep checks, the two-stage extract-then-placeholder-filter pairs (both the ones
+  that used to route through `_gate_hits` and the ones, like WI-0035's connection-string/email
+  pairs, that bypassed it entirely with a direct `printf | grep`), and all three deny-list match
+  sites (the plain ASCII path and both of WI-0049's non-ASCII fallback branches). The abort message
+  names which check failed and grep's exit status. `gate_scan_file` and `gate_load_config` report
+  the failure by returning a status the two entry points (`artifact-gate.sh`, `memory-sync.sh`) now
+  explicitly check for and abort on — a plain `|| true`/`return` cannot carry it, because a function
+  invoked from an already-tested context (`cmd || true`, `if cmd; then` — exactly how both entry
+  points already call `gate_scan_file`) suspends `set -e` for everything inside it, not just its own
+  top-level exit status, so a crash several call-levels down used to run the rest of the function to
+  completion in silence. The IP-allowlist membership test (`grep -qE` against a configured CIDR/IP
+  regex) is deliberately left as-is: a broken allowlist regex there already fails CLOSED — the `&&`
+  in `if [ -n "$GATE_IP_ALLOWLIST" ] && grep -qE ...` makes the IP fall through to being reported as
+  a finding rather than silently allowlisted — the opposite direction from the defect this item
+  fixes.
 - **The deny-list content check was ASCII-only and un-normalised, so a configured non-ASCII
   tenant/project name could differ from its occurrence in a file's CONTENT only in case, or only
   in NFD-vs-NFC normalisation, and still pass (WI-0017 part 2).** The path side already escalates

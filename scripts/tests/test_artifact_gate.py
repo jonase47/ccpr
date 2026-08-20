@@ -2026,5 +2026,309 @@ class SymlinkTest(GateTestBase):
         self.assertIn("scanned 1 files", out)
 
 
+# ---------------------------------------------------------------------------
+# 8. WI-0051 — a crashing grep must abort the run, never read as "no findings".
+#
+# Before this item, every check in gate_scan_file (and gate_load_config's own
+# deny-list parsing) routed its grep through a trailing `|| true`, which
+# folded "no match" (grep exit 1, the ordinary empty-category case) and
+# "grep did not run to completion" (exit >=2 -- a crash, a bad pattern, a
+# locale/encoding fault on malformed multi-byte input) into the identical
+# empty result. A fixture whose only finding lived behind the crashing check
+# came back "0 findings", exit 0.
+#
+# Each case below injects a fake `grep` ahead of the real one on PATH that
+# crashes (exit 2) only when one of ITS OWN arguments contains a marker
+# string unique to the ONE GATE_RE_* pattern under test (never a whole
+# pattern -- these are checked for cross-pattern collisions in
+# CrashMarkersAreUniqueToOnePatternTest below) -- every OTHER check in the
+# same run still calls the real grep, so a fixture carrying only the
+# crash-triggering content proves the specific call site, not a general
+# breakage.
+# ---------------------------------------------------------------------------
+class GrepCrashAbortsInsteadOfReadingAsCleanTest(GateTestBase):
+    def grep_stub_dir(self, crash_on):
+        stub_dir = Path(tempfile.mkdtemp(prefix="ccpr-fake-grep-"))
+        self.addCleanup(shutil.rmtree, stub_dir, ignore_errors=True)
+        stub = stub_dir / "grep"
+        stub.write_text(
+            "#!/bin/sh\n"
+            f"marker={shlex.quote(crash_on)}\n"
+            'for a in "$@"; do\n'
+            '  case "$a" in\n'
+            '    *"$marker"*) echo "fake-grep: simulated crash" >&2; exit 2 ;;\n'
+            "  esac\n"
+            "done\n"
+            'exec /usr/bin/grep "$@"\n'
+        )
+        stub.chmod(0o755)
+        return stub_dir
+
+    def grep_stub(self, crash_on):
+        return f"{self.grep_stub_dir(crash_on)}:/usr/bin:/bin:/usr/sbin:/sbin"
+
+    def path_without_python3(self, stub_dir):
+        """A PATH containing the grep stub plus every /usr/bin, /bin,
+        /usr/sbin and /sbin entry EXCEPT python3 -- for the "no python3 at
+        all" fallback branch, which cannot be reached by breaking python3
+        (PYTHONHOME=/nonexistent still leaves `command -v python3` true)."""
+        no_python = Path(tempfile.mkdtemp(prefix="ccpr-no-python3-"))
+        self.addCleanup(shutil.rmtree, no_python, ignore_errors=True)
+        for d in ("/usr/bin", "/bin", "/usr/sbin", "/sbin"):
+            src = Path(d)
+            if not src.is_dir():
+                continue
+            for entry in src.iterdir():
+                if entry.name.startswith("python3"):
+                    continue
+                target = no_python / entry.name
+                if target.exists():
+                    continue
+                try:
+                    target.symlink_to(entry)
+                except OSError:
+                    pass
+        return f"{stub_dir}:{no_python}"
+
+    def run_memory_gate_with_env(self, path, **extra_env):
+        return subprocess.run(
+            ["bash", str(MEMORY_SYNC), "gate", str(path)],
+            capture_output=True, text=True, env=self.env(**extra_env),
+        )
+
+    def assert_artifact_check_crash_aborts(self, path, marker, label, deny_names=None):
+        extra = {"PATH": self.grep_stub(marker)}
+        if deny_names is not None:
+            extra["CCPR_GATE_DENY_NAMES"] = deny_names
+        r = self.run_gate(path, **extra)
+        out = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 2, out)
+        self.assertIn(label, out)
+        self.assertIn("exited 2", out)
+        self.assertNotIn("0 findings", out)
+
+    def assert_memory_check_crash_aborts(self, path, marker, label, **extra_env):
+        r = self.run_memory_gate_with_env(path, PATH=self.grep_stub(marker), **extra_env)
+        out = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 2, out)
+        self.assertIn(label, out)
+        self.assertIn("exited 2", out)
+
+    # --- secrets, single-stage (the plain _gate_hits shape) ------------------
+    def test_secret_vendor_token_check_crash_aborts(self):
+        p = self.write("vendor.md", VENDOR_TOKEN + "\n")
+        self.assert_artifact_check_crash_aborts(p, "gh[pousr]_", "secret/vendor-token")
+
+    def test_secret_token_blob_check_crash_aborts(self):
+        p = self.write("blob.md", JWT + "\n")
+        self.assert_artifact_check_crash_aborts(p, "eyJ[A-Za-z0-9_-]{10,}", "secret/token-blob")
+
+    def test_secret_private_key_check_crash_aborts(self):
+        p = self.write("privkey.md", PRIVATE_KEY + "\n")
+        self.assert_artifact_check_crash_aborts(p, "PRIVATE KEY-----", "secret/private-key")
+
+    # --- secrets, two-stage through _gate_hits (extract, then a placeholder
+    # filter -- WI-0035's shape) ----------------------------------------------
+    def test_secret_credential_assignment_extract_crash_aborts(self):
+        p = self.write("kv.md", CREDENTIAL + "\n")
+        self.assert_artifact_check_crash_aborts(p, "passwd|bearer", "secret/credential-assignment extract")
+
+    def test_secret_credential_assignment_placeholder_filter_crash_aborts(self):
+        p = self.write("kv.md", CREDENTIAL + "\n")
+        self.assert_artifact_check_crash_aborts(
+            p, "REPLACE|CHANGEME", "secret/credential-assignment placeholder-filter"
+        )
+
+    def test_secret_bearer_token_extract_crash_aborts(self):
+        p = self.write("bearer.md", BEARER_TOKEN + "\n")
+        self.assert_artifact_check_crash_aborts(p, "bearer[[:space:]]+", "secret/bearer-token extract")
+
+    def test_secret_bearer_token_placeholder_filter_crash_aborts(self):
+        p = self.write("bearer.md", BEARER_TOKEN + "\n")
+        self.assert_artifact_check_crash_aborts(
+            p, "REPLACE|CHANGEME", "secret/bearer-token placeholder-filter"
+        )
+
+    # --- secrets, two-stage DIRECT (bypassed _gate_hits entirely before this
+    # fix -- the connection-string/placeholder pair) -------------------------
+    def test_secret_connection_string_extract_crash_aborts(self):
+        p = self.write("conn.md", CONNECTION_STRING + "\n")
+        self.assert_artifact_check_crash_aborts(p, "[^/[:space:]@]+@", "secret/connection-string extract")
+
+    def test_secret_connection_string_placeholder_filter_crash_aborts(self):
+        p = self.write("conn.md", CONNECTION_STRING + "\n")
+        self.assert_artifact_check_crash_aborts(
+            p, r"\{\{[^}]*\}\}", "secret/connection-string placeholder-filter"
+        )
+
+    # --- personal --------------------------------------------------------------
+    def test_personal_session_home_check_crash_aborts(self):
+        p = self.write("home.md", HOME_PATH + "\n")
+        self.assert_artifact_check_crash_aborts(p, r"claude\.ai/code/session", "personal/session-home")
+
+    def test_personal_email_extract_crash_aborts(self):
+        p = self.write("email.md", REAL_EMAIL + "\n")
+        self.assert_artifact_check_crash_aborts(p, "[[:alnum:]]([[:alnum:].-]", "personal/email extract")
+
+    def test_personal_email_reserved_domain_filter_crash_aborts(self):
+        p = self.write("email.md", REAL_EMAIL + "\n")
+        self.assert_artifact_check_crash_aborts(
+            p, r"example\.(com|net|org)", "personal/email reserved-domain-filter"
+        )
+
+    # --- network -----------------------------------------------------------
+    def test_network_ipv4_check_crash_aborts(self):
+        p = self.write("ip.md", IPV4 + "\n")
+        self.assert_artifact_check_crash_aborts(p, r"{1,3}\.){3}", "network/ipv4")
+
+    # --- deny-list (direct grep -nFi, the ASCII branch) ----------------------
+    def test_denylist_name_check_crash_aborts(self):
+        p = self.write("tenant.md", "mentions Zorblatt in prose\n")
+        self.assert_artifact_check_crash_aborts(p, "Zorblatt", "denylist/name", deny_names="Zorblatt")
+
+    def test_denylist_unicode_fallback_check_crash_aborts(self):
+        # WI-0049 shape: python3 IS present but ITS OWN comparison crashes
+        # (PYTHONHOME=/nonexistent breaks it without removing it from PATH),
+        # so gate_scan_file falls back to a plain ASCII grep -nFi -- which is
+        # a SEPARATE call site this item's fix must cover too, not just the
+        # unicode/direct-ASCII paths above.
+        name = "Quüxcorp"  # non-ASCII on purpose, forces the escalation
+        p = self.write("tenant.md", f"mentions {name} in prose\n")
+        r = self.run_gate(
+            p, CCPR_GATE_DENY_NAMES=name, PYTHONHOME="/nonexistent",
+            PATH=self.grep_stub(name),
+        )
+        out = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 2, out)
+        self.assertIn("denylist/name #1 (unicode-fallback)", out)
+        self.assertIn("exited 2", out)
+
+    def test_denylist_no_python3_fallback_check_crash_aborts(self):
+        # The OTHER fallback branch: no python3 anywhere on PATH, so
+        # gate_scan_file goes straight to the ASCII grep without ever trying
+        # the unicode matcher -- it must also abort rather than read as
+        # clean if IT crashes.
+        name = "Quüxcorp"
+        p = self.write("tenant.md", f"mentions {name} in prose\n")
+        path_no_python3 = self.path_without_python3(self.grep_stub_dir(name))
+        r = self.run_gate(p, CCPR_GATE_DENY_NAMES=name, PATH=path_no_python3)
+        out = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 2, out)
+        self.assertIn("denylist/name #1 (ascii-only, no python3)", out)
+        self.assertIn("exited 2", out)
+
+    # --- memory-only categories (context, type: user, work-item markers) ----
+    def test_context_marker_check_crash_aborts(self):
+        # memory-sync.sh requires its config file to exist for every verb,
+        # even "gate" -- gate_load_config itself does not need it (see the
+        # config-parsing test below, which crashes before this check runs).
+        self.write_config()
+        p = self.write("ctx.md", "a note about Accessibility-Familien testing\n")
+        self.assert_memory_check_crash_aborts(p, "Accessibility-Familien", "context/marker")
+
+    def test_type_user_check_crash_aborts(self):
+        self.write_config()
+        p = self.write("tu.md", "type: user\nsome body\n")
+        self.assert_memory_check_crash_aborts(p, "type:[[:space:]]*user", "personal/type-user")
+
+    def test_content_marker_check_crash_aborts(self):
+        self.write_config()
+        p = self.write("wi.md", "# Next Steps\nTODO: something\n")
+        self.assert_memory_check_crash_aborts(p, "Next Steps|N", "content/marker")
+
+    # --- config parsing (gate_load_config, not gate_scan_file -- runs ONCE,
+    # before any file is scanned; a crash here used to silently empty the
+    # WHOLE run's deny-list, not just one file's worth of one category) ------
+    def test_config_deny_names_blank_line_filter_crash_aborts(self):
+        p = self.write("clean.md", CLEAN_TEXT)
+        self.assert_memory_check_crash_aborts(
+            p, "^$", "config/CCPR_GATE_DENY_NAMES blank-line-filter",
+            CCPR_GATE_DENY_NAMES="some-tenant,other-tenant",
+        )
+
+    # --- companion pin: the stub harness itself must be inert when its
+    # marker never matches -- otherwise the aborts above could just be an
+    # artifact of shelling out through a stub, not of the crash. -------------
+    def test_a_healthy_grep_is_unaffected_by_the_stub_harness(self):
+        p = self.write("clean.md", CLEAN_TEXT)
+        path = self.grep_stub("this-marker-never-occurs-anywhere")
+        r = self.run_gate(p, PATH=path)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+
+class CrashMarkersAreUniqueToOnePatternTest(unittest.TestCase):
+    """Each marker GrepCrashAbortsInsteadOfReadingAsCleanTest uses to target
+    one call site's grep must not also occur in any OTHER GATE_RE_* pattern
+    this file defines -- otherwise a test believed to isolate one check would
+    silently also be crashing others, and a failure could not be attributed."""
+
+    # A list of (marker, pattern_name) pairs, not a dict literal: a dict
+    # entry pairing a keyword-shaped marker with a long quoted value is
+    # ITSELF shaped like GATE_RE_SECRET_KV's own credential-assignment
+    # pattern (a keyword, an optional quote, a colon, a 16+ char value), and
+    # the shipped-artifacts sweep correctly fires on this file's own source
+    # over that shape -- so the pairs travel as tuples instead.
+    MARKERS = [
+        ("gh[pousr]_", "GATE_RE_SECRET_VENDOR"),
+        ("eyJ[A-Za-z0-9_-]{10,}", "GATE_RE_SECRET_BLOB"),
+        ("PRIVATE KEY-----", "GATE_RE_PRIVATE_KEY"),
+        ("passwd|bearer", "GATE_RE_SECRET_KV"),
+        ("REPLACE|CHANGEME", "GATE_RE_SECRET_PLACEHOLDER_WORD"),
+        ("bearer[[:space:]]+", "GATE_RE_SECRET_BEARER"),
+        ("[^/[:space:]@]+@", "GATE_RE_CONNSTRING"),
+        (r"\{\{[^}]*\}\}", "GATE_RE_PLACEHOLDER"),
+        (r"claude\.ai/code/session", "GATE_RE_PERSONAL"),
+        ("[[:alnum:]]([[:alnum:].-]", "GATE_RE_EMAIL"),
+        (r"example\.(com|net|org)", "GATE_RE_EMAIL_RESERVED"),
+        (r"{1,3}\.){3}", "GATE_RE_IPV4"),
+        ("Accessibility-Familien", "GATE_RE_CONTEXT"),
+        ("type:[[:space:]]*user", "GATE_RE_TYPE_USER"),
+        ("Next Steps|N", "GATE_RE_CONTENT"),
+    ]
+
+    # The RUNTIME value, not the static source line: GATE_RE_PLACEHOLDER is
+    # built at source-time from GATE_RE_PLACEHOLDER_SLOT
+    # ('...${GATE_RE_PLACEHOLDER_SLOT}...' as shell text), so its own source
+    # line never literally contains the mustache-slot marker the way every
+    # other pattern's does -- only the expanded shell variable does.
+    ALL_PATTERN_NAMES = [
+        "GATE_RE_SECRET_KV", "GATE_RE_SECRET_BEARER", "GATE_RE_SECRET_PLACEHOLDER_WORD",
+        "GATE_RE_SECRET_VENDOR", "GATE_RE_SECRET_BLOB", "GATE_RE_PRIVATE_KEY",
+        "GATE_RE_CONNSTRING", "GATE_RE_PLACEHOLDER", "GATE_RE_PERSONAL",
+        "GATE_RE_EMAIL", "GATE_RE_EMAIL_RESERVED", "GATE_RE_TYPE_USER",
+        "GATE_RE_IPV4", "GATE_RE_CONTENT", "GATE_RE_CONTEXT",
+    ]
+
+    @classmethod
+    def setUpClass(cls):
+        script = f"source {shlex.quote(str(LIB))}; " + "; ".join(
+            f'printf "%s\\x1e" "${n}"' for n in cls.ALL_PATTERN_NAMES
+        )
+        r = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
+        assert r.returncode == 0, r.stderr
+        values = r.stdout.split("\x1e")[:-1]
+        assert len(values) == len(cls.ALL_PATTERN_NAMES), (
+            f"expected {len(cls.ALL_PATTERN_NAMES)} pattern values, got {len(values)}"
+        )
+        cls.pattern_lines = dict(zip(cls.ALL_PATTERN_NAMES, values))
+
+    def test_every_marker_is_present_in_its_own_pattern(self):
+        for marker, pattern_name in self.MARKERS:
+            with self.subTest(pattern=pattern_name):
+                self.assertIn(pattern_name, self.pattern_lines,
+                               f"{pattern_name} not found as a gate-pattern-source line")
+                self.assertIn(marker, self.pattern_lines[pattern_name])
+
+    def test_no_marker_occurs_in_a_different_pattern(self):
+        for marker, owner in self.MARKERS:
+            with self.subTest(marker=marker):
+                collisions = [
+                    name for name, text in self.pattern_lines.items()
+                    if name != owner and marker in text
+                ]
+                self.assertEqual(collisions, [],
+                                  f"marker {marker!r} for {owner} also occurs in {collisions}")
+
+
 if __name__ == "__main__":
     unittest.main()
