@@ -350,6 +350,11 @@ _gate_needs_unicode() {
 # Bytes travel through ENVIRON and are written back with surrogateescape, so a
 # path that is not valid UTF-8 comes out as the bytes that went in instead of
 # aborting the comparison.
+# Load-bearing coupling: the python block below reads this value from the
+# environment with a STRICT lookup, so it must be set on every invocation. If
+# that heredoc is ever extracted into a standalone script, carry the variable
+# with it -- a missing or non-numeric value raises inside python, which exits 1,
+# which is exactly the status this sentinel exists to stop colliding with.
 _GATE_UNICODE_NO_MATCH=2
 _gate_unicode_py() {
   GATE_U_MODE="$1" GATE_U_SUBJECT="$2" GATE_U_NAMES="$GATE_DENY_NAMES" \

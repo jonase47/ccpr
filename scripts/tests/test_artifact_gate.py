@@ -871,6 +871,14 @@ class GatePathDenyIndexBrokenInterpreterTest(GateTestBase):
         # comparison did not fully happen.
         r = self.call(self.NAME.upper() + "-notes.md", self.NAME, python_home="/nonexistent")
         self.assertIn("unicode matcher failed", r.stderr)
+        # Pinned deliberately, and it is NOT a 0: this is the residual cost the
+        # PO accepted when choosing warn-and-fall-back over a hard abort. The
+        # ASCII fallback cannot fold a non-ASCII letter's case, so it reports
+        # "no match" (1) on a subject that genuinely carries the name. What the
+        # fix bought is that it can no longer happen SILENTLY -- the warning
+        # above is the whole difference. Asserting the 1 here keeps the test
+        # from reading as proof of something stronger than it shows.
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
 
 
 class GateRedactPathBrokenInterpreterTest(GateTestBase):
