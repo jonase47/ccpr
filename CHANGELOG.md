@@ -286,15 +286,15 @@ All notable changes to this project are documented in this file. The format is b
   silently shrink its own scope: both now emit their own warning naming the line where the
   construct opened, independent of severity (WI-0032, WI-0043). Images, in-page anchors and
   external URLs are skipped, correctly — none of them is a link to a file in the repository. A
-  destination in CommonMark's angle-bracket form (`[x](<target.md>)`) is skipped too, and that one
-  is a known gap rather than a decision: the reference parser reads it as an ordinary link, so a
-  dead target written that way is missed. This is a floor, not a full fix: it catches a target
-  file that no longer exists, not a wrong anchor into a file that does — anchor resolution needs
-  heading-to-slug modelling and is a separate, unbuilt item. Ships at **warning** severity by
-  default; `MEMORY_INDEX_LINK_SEVERITY` is the documented escape hatch to `err`, validated up
-  front so a typo reports a configuration error (exit 3) instead of aborting with `command not
-  found` (exit 127), indistinguishable from a findings result. Promotion to error is tracked
-  separately and is the SemVer-relevant step (ADR-0001).
+  destination in CommonMark's angle-bracket form (`[x](<target.md>)`) is skipped too, deliberately
+  and with its own comment in the code — but that decision is wrong: the reference parser reads it
+  as an ordinary link to a file, so a dead target written that way is missed. This is a floor, not
+  a full fix: it catches a target file that no longer exists, not a wrong anchor into a file that
+  does — anchor resolution needs heading-to-slug modelling and is a separate, unbuilt item. Ships
+  at **warning** severity by default; `MEMORY_INDEX_LINK_SEVERITY` is the documented escape hatch
+  to `err`, validated up front so a typo reports a configuration error (exit 3) instead of
+  aborting with `command not found` (exit 127), indistinguishable from a findings result.
+  Promotion to error is tracked separately and is the SemVer-relevant step (ADR-0001).
 - **First test coverage for a shell script in this repo.** `scripts/tests/` was Python-only and
   covered the work-item CLI; `scripts/tests/test_memory_lint.py` invokes `memory-lint.sh` as a
   subprocess with `HOME` redirected to a temp directory, so the checks against `~/.claude/**` cannot
