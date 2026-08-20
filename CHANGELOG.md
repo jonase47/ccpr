@@ -7,6 +7,31 @@ All notable changes to this project are documented in this file. The format is b
 ## [Unreleased]
 
 ### Fixed
+- **`scripts/quality-scan.sh` could not be parsed by bash and silently exited 0 having scanned
+  nothing (WI-0055).** A `python3 << 'PYEOF' ... PYEOF` heredoc was nested inside a `$(...)` command
+  substitution (`grep_findings=$(python3 << 'PYEOF' ...)`); the heredoc body's SQL-injection pattern
+  carried an apostrophe (`f\'`), and an ODD apostrophe count breaks bash's quote tracking while it
+  scans for the substitution's closing `)` — this is the exact mechanism WI-0044 named for
+  `memory-lint.sh`'s awk block, on a second shipped script. `bash -n` failed at the line carrying the
+  pattern; running the script printed the same syntax error to stderr, wrote no report, and still
+  reported exit 0 — traced to the EXIT trap's own `rm -rf` succeeding and silently becoming the
+  shell's final exit status once a bash-level parse abort (which never sets `$?` to anything
+  reflecting the abort) reached it. Escaping the apostrophe was rejected as the fix, on this
+  repository's own history: it is the shape that left `memory-lint.sh` fragile for eight rounds and
+  produced WI-0037 and WI-0044. Instead the heredoc body moved to a real file
+  (`scripts/lib/quality_scan_sast_patterns.py`), invoked as a plain `python3 <path>` call — no
+  parity to defend, independently `py_compile`-able. The other two heredoc-in-substitution-shaped
+  blocks in the file were checked and are not affected: neither is nested inside a command
+  substitution, so no closing `)` is ever scanned for while bash tracks their quoting. Also added an
+  explicit end-of-run check that the report file is non-empty (`docs/quality-scan.sh` used to reach
+  its final `cat` step even when nothing upstream had written anything), and a generalised `bash -n`
+  gate (`scripts/tests/test_shell_script_syntax.py`) over every shipped script under `scripts/*.sh`
+  and `scripts/lib/*.sh`, so the next unparseable script fails the suite instead of shipping quietly
+  — the same enumeration `test_external_tool_exit_status.py` (WI-0054) already uses for the same 15
+  files. `scripts/tests/test_quality_scan.py` pins that the script actually runs end-to-end across
+  multiple scopes against a scratch fixture project (never this repository's own `docs/`), including
+  a mutation proof that reintroduces the exact pre-fix construct in a scratch copy and confirms both
+  the syntax gate and a real run reproduce the measured pre-fix symptom.
 - **Two more discipline-gate call sites collapsed "no match" into "the tool failed", plus a third
   found while sweeping for the same class (WI-0053).** WI-0051 closed twenty sites where a crashing
   `grep` inside `gate_scan_file` read as "0 findings" instead of "this check did not run"; two sites

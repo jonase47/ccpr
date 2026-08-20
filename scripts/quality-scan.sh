@@ -6,6 +6,10 @@
 
 set -euo pipefail
 
+# Captured before the cd below -- resolves the script's own directory
+# regardless of the project directory it is asked to scan.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 SCOPE="${1:-all}"
 PROJECT_DIR="${2:-$(pwd)}"
 cd "${PROJECT_DIR}"
@@ -18,6 +22,17 @@ mkdir -p "${PROJECT_DIR}/docs"
 # Temporary results
 TMPDIR=$(mktemp -d /tmp/quality-scan-XXXXXX)
 trap "rm -rf ${TMPDIR}" EXIT
+# Note on WI-0055's measured "exit 0 having done nothing": a bash-level fatal
+# abort (the parse error this item fixes; the same applies to a `set -u`
+# unbound-variable hit) never sets $? to anything reflecting the abort, so no
+# trap wording -- not even `trap 'ec=$?; ...; exit "${ec}"' EXIT` -- can
+# recover it (measured: capturing $? first still reports exit 0 for both
+# failure shapes, because $? already held the PRECEDING command's status
+# before the abort happened; only ordinary command failures under `set -e`
+# and explicit `exit N` calls survive a trap intact, which this script's own
+# report-integrity check below relies on). The actual fix for "cannot ship
+# unparseable" is scripts/tests/test_shell_script_syntax.py's `bash -n` gate,
+# not this trap.
 
 # -- Scan Functions --
 
@@ -108,68 +123,13 @@ print(json.dumps(findings))
         fi
     fi
 
-    # Grep-based pattern scan (fallback / always runs)
+    # Grep-based pattern scan (fallback / always runs). Body lives in a real
+    # file (lib/quality_scan_sast_patterns.py) rather than an inline heredoc
+    # -- WI-0055: a heredoc nested inside this command substitution broke
+    # bash's quote tracking on an apostrophe in the body's SQL-string
+    # pattern and made the whole script unparseable.
     local grep_findings
-    grep_findings=$(python3 << 'PYEOF'  # exit-status: exempt set-e-sufficient
-import os, re, json
-
-PATTERNS = {
-    "eval/exec": {
-        "pattern": r"\b(eval|exec)\s*\(",
-        "extensions": [".py", ".js", ".ts"],
-        "severity": "high",
-        "message": "eval/exec found - potential code injection risk",
-    },
-    "innerHTML": {
-        "pattern": r"\.innerHTML\s*=",
-        "extensions": [".js", ".ts", ".jsx", ".tsx"],
-        "severity": "high",
-        "message": "innerHTML assignment - XSS risk",
-    },
-    "SQL-String": {
-        "pattern": r'(f"|f\').*?(SELECT|INSERT|UPDATE|DELETE)',
-        "extensions": [".py"],
-        "severity": "high",
-        "message": "SQL in f-string - SQL injection risk",
-    },
-    "hardcoded-secret": {
-        "pattern": r'(password|secret|api_key|token)\s*=\s*["\'][^"\']{8,}',
-        "extensions": [".py", ".js", ".ts", ".env", ".yml", ".yaml", ".json"],
-        "severity": "critical",
-        "message": "Possible hardcoded secret",
-    },
-    "console-log": {
-        "pattern": r"console\.(log|debug|warn)\(",
-        "extensions": [".js", ".ts", ".jsx", ".tsx"],
-        "severity": "info",
-        "message": "console.log in production code",
-    },
-}
-
-findings = []
-for root, dirs, files in os.walk("src"):
-    dirs[:] = [d for d in dirs if d not in ("node_modules", ".git", "__pycache__", "venv", ".venv")]
-    for fname in files:
-        ext = os.path.splitext(fname)[1]
-        fpath = os.path.join(root, fname)
-        try:
-            with open(fpath, "r", errors="ignore") as f:
-                for i, line in enumerate(f, 1):
-                    for name, rule in PATTERNS.items():
-                        if ext in rule["extensions"] and re.search(rule["pattern"], line, re.IGNORECASE):
-                            findings.append({
-                                "type": f"pattern-{name}",
-                                "severity": rule["severity"],
-                                "message": rule["message"],
-                                "file": fpath,
-                                "line": i,
-                            })
-        except:
-            pass
-
-print(json.dumps(findings[:50]))
-PYEOF
-    )
+    grep_findings=$(python3 "${SCRIPT_DIR}/lib/quality_scan_sast_patterns.py")  # exit-status: exempt set-e-sufficient
 
     # Merge findings
     python3 -c "
@@ -369,6 +329,17 @@ report = {
 
 print(json.dumps(report, indent=2, ensure_ascii=False))
 " <<< "$(printf '%s\n' "${results[@]}")" > "${REPORT_FILE}"  # exit-status: exempt set-e-sufficient
+
+# Make "the scan ran" and "the scan failed" distinguishable explicitly,
+# instead of relying only on the implicit chain of set -e propagating a
+# python3 failure this far (WI-0055: exit 0 used to be reported even when
+# no report was ever written -- see the trap comment above for why that
+# specific case cannot be recovered after the fact, and
+# scripts/tests/test_shell_script_syntax.py for what actually prevents it).
+if [ ! -s "${REPORT_FILE}" ]; then
+    echo "quality-scan.sh: FAILED -- no report was written to ${REPORT_FILE}" >&2
+    exit 1
+fi
 
 # Print summary to stderr
 echo "Report written: ${REPORT_FILE}" >&2
