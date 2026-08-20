@@ -7,6 +7,26 @@ All notable changes to this project are documented in this file. The format is b
 ## [Unreleased]
 
 ### Fixed
+- **`memory-lint.sh` check (n) both missed a dead angle-bracket link (WI-0060) and misreported a
+  non-link as one (WI-0061) — the same shell-side target-handling case blocks, fixed together.**
+  Found in sequence while settling `docs/memory/reference_commonmark-conformance.md`'s table for
+  WI-0060: an explicit `\<*` case arm skipped CommonMark's bracket destination form
+  (`[x](<target.md>)`) outright, alongside external schemes and in-page anchors it correctly belongs
+  with — except the bracket form DOES address a file in the repository, so a dead target written that
+  way passed silently, reaching neither the existence check nor even a report under the bracketed
+  name. WI-0061, found while settling the same table, is the direction that matters more: the WI-0034
+  comment concluding "a bare space is no delimiter, so `[x](my file.md)` keeps its space instead of
+  collapsing to `my`" was right about not truncating, but wrong about what to do with the untruncated
+  result — per the reference an unescaped, untitled space in an UNBRACKETED destination means the
+  whole `[x](...)` construct is not a link at all, so `[x](my file.md)` was being reported as a dead
+  target for content that was never a link, the direction `MEMORY_INDEX_LINK_SEVERITY`'s `warn`
+  default exists to protect against. Fixed by unwrapping the bracket form before resolving (an
+  UNCLOSED opener, `[x](<a.md)`, stays skipped — CommonMark reads it as literal text, not a link) and
+  by treating a leftover space in an unbracketed target as "not a link" instead of "a target with a
+  space in it". Nine fixtures (one per reference-table row, `docs/memory/reference_commonmark-conformance.md`)
+  plus the reference-style-definition sibling path (`[id]: <target>`, which shares the same shell
+  code) are wired into `scripts/tests/test_memory_lint.py`, each mutation-checked against a scratch
+  copy of the pre-fix code restored byte-identical afterward.
 - **`scripts/baseline.sh` archived HANDOVER.md into an undotted `docs/handover-archive/`
   directory no convention named (WI-0059).** Found by WI-0058's implementer as out-of-scope drift:
   three other places already agreed on the dotted spelling — `.gitignore` ignores
@@ -286,11 +306,13 @@ All notable changes to this project are documented in this file. The format is b
   silently shrink its own scope: both now emit their own warning naming the line where the
   construct opened, independent of severity (WI-0032, WI-0043). Images, in-page anchors and
   external URLs are skipped, correctly — none of them is a link to a file in the repository. A
-  destination in CommonMark's angle-bracket form (`[x](<target.md>)`) is skipped too, deliberately
-  and with its own comment in the code — but that decision is wrong: the reference parser reads it
-  as an ordinary link to a file, so a dead target written that way is missed. This is a floor, not
-  a full fix: it catches a target file that no longer exists, not a wrong anchor into a file that
-  does — anchor resolution needs heading-to-slug modelling and is a separate, unbuilt item. Ships
+  destination in CommonMark's angle-bracket form (`[x](<target.md>)`) is unwrapped and resolved like
+  any other target (WI-0060, fixed after this entry originally shipped) — the reference parser reads
+  it as an ordinary link to a file, so it belongs with the checked forms above, not with the skipped
+  ones; an UNCLOSED opener (`[x](<target.md)`) stays skipped, because the reference reads that as
+  literal text, not a link. This is a floor, not a full fix: it catches a target file that no longer
+  exists, not a wrong anchor into a file that does — anchor resolution needs heading-to-slug
+  modelling and is a separate, unbuilt item. Ships
   at **warning** severity by default; `MEMORY_INDEX_LINK_SEVERITY` is the documented escape hatch
   to `err`, validated up front so a typo reports a configuration error (exit 3) instead of
   aborting with `command not found` (exit 127), indistinguishable from a findings result.

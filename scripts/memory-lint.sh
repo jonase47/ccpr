@@ -400,22 +400,50 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
         target="${target%"${target##*[![:space:]]}"}"
         # A title after the target (`[x](a.md "Title")`) is not part of the path, but
         # only a genuine quoted suffix is one — a bare space is no delimiter, so
-        # `[x](my file.md)` keeps its space instead of collapsing to `my`. All three
-        # CommonMark title delimiters are stripped here (WI-0034): double quotes,
-        # single quotes and parentheses. This case must stay in agreement with
+        # `[x](my file.md)` does not collapse to `my` here. All three CommonMark
+        # title delimiters are stripped here (WI-0034): double quotes, single
+        # quotes and parentheses. This case must stay in agreement with
         # reference_definition_tail() above — recognising a parenthesised title as
         # a valid reference definition without also stripping it here would leave
         # the title text glued to the checked target, turning a live file into a
-        # reported-dead one.
+        # reported-dead one. A bare space that is NOT part of a recognised title
+        # is left in place here on purpose — the next block below decides what an
+        # unbracketed leftover space means (WI-0061); this block only strips
+        # titles, it does not judge validity.
         case "$target" in
             *[[:space:]]\"*\") target="${target%[[:space:]]\"*}" ;;
             *[[:space:]]\'*\') target="${target%[[:space:]]\'*}" ;;
             *[[:space:]]\(*\)) target="${target%[[:space:]]\(*}" ;;
         esac
         target="${target%"${target##*[![:space:]]}"}"
-        # Skip external schemes, in-page anchors and the angle-bracket form.
+        # The bracket form `<...>` (CommonMark) exists specifically so a
+        # destination MAY contain a space. An UNBRACKETED destination may not —
+        # an unescaped space terminates it, and whatever follows (already
+        # stripped above if it was a real title) is not a valid title either,
+        # so the whole `[x](...)` construct is not a link at all. `[x](my
+        # file.md)` is therefore neither a link to `my` (WI-0034, the
+        # truncation fix above) nor a dead target to report (WI-0061) — it is
+        # not a link, so it is skipped like any other non-link text.
         case "$target" in
-            http://*|https://*|mailto:*|\#*|\<*) continue ;;
+            \<*) : ;;
+            *[[:space:]]*) continue ;;
+        esac
+        # Unwrap the bracket form before resolving — the raw `<...>` text
+        # reaches here unchanged from protect_link_destinations() (WI-0060).
+        # An UNCLOSED opening bracket (`[x](<a.md)`, no matching `>` before the
+        # captured text ends) is not a valid link at all per CommonMark and
+        # must stay skipped, not have its bracket silently dropped.
+        case "$target" in
+            \<*\>) target="${target#<}"; target="${target%>}" ;;
+            \<*) continue ;;
+        esac
+        # Skip external schemes and in-page anchors outright — neither
+        # addresses a file in the repository. Checked AFTER the bracket
+        # unwrap above so a bracket-wrapped external URL
+        # (`[x](<http://example.com>)`) is skipped too, instead of being
+        # treated as a relative file path.
+        case "$target" in
+            http://*|https://*|mailto:*|\#*) continue ;;
         esac
         # `a.md#section` addresses the file a.md — drop the fragment before resolving.
         target="${target%%#*}"

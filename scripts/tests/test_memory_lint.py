@@ -419,23 +419,46 @@ class MemoryLintTest(unittest.TestCase):
 
     # --- Target parsing: only a genuine quoted title may be stripped ---------------
 
-    def test_a_space_inside_the_target_is_not_a_title_delimiter(self):
-        """`[X](my file.md)` addresses `my file.md`, not `my`.
+    def test_a_bare_space_in_an_unbracketed_target_is_not_a_link_at_all(self):
+        """`[X](my file.md)` is not a link — CommonMark, not this checker's opinion.
 
-        The Markdown title suffix is `](target "Title")`; a bare space is no
-        delimiter, so truncating at the first space invented a target.
+        WI-0034 established that a bare space is no truncation delimiter (it
+        must not collapse `my file.md` to `my`); it did NOT follow that the
+        untruncated string is then a target to check. Per the CommonMark
+        reference an unescaped space terminates an unbracketed destination, and
+        `file.md)` is not a valid title, so the whole `[X](...)` construct
+        fails to parse as a link (WI-0061). It must therefore stay silent even
+        though `my missing file.md` does not exist — reporting it would flag
+        prose that was never a link.
         """
-        self.write_index(CLEAN_INDEX + "- [Spaces](my missing file.md) — dead\n")
+        self.write_index(CLEAN_INDEX + "- [Spaces](my missing file.md) — not a link\n")
 
-        findings = self.link_findings(self.run_lint().stdout)
+        self.assertEqual(self.link_findings(self.run_lint().stdout), [])
 
-        self.assertEqual(len(findings), 1, findings)
-        self.assertIn("my missing file.md", findings[0])
+    def test_an_unbracketed_target_with_a_space_is_silent_even_when_the_file_exists(self):
+        """Same non-link verdict as the dead case above — existence is moot.
 
-    def test_a_target_with_a_space_resolves_when_the_file_exists(self):
+        `senior-developer/notes with space.md` genuinely exists on disk here;
+        the finding list is empty regardless, because `](...)` with an
+        unescaped, untitled space in it is not a link to begin with. The
+        bracket form directly below is how a destination containing a space is
+        actually written and actually resolved.
+        """
         spaced = self.memory_dir / "senior-developer" / "notes with space.md"
         spaced.write_text(TIER2_TOPIC_TEXT, encoding="utf-8")
         self.write_index(CLEAN_INDEX + "- [Spaces](senior-developer/notes with space.md) — live\n")
+
+        self.assertEqual(self.link_findings(self.run_lint().stdout), [])
+
+    def test_a_bracketed_target_with_a_space_resolves_when_the_file_exists(self):
+        """`[x](<...>)` is the CommonMark form that exists specifically so a
+        destination MAY contain a space (WI-0060) — this is the live control
+        for the dead one further down in the angle-bracket section."""
+        spaced = self.memory_dir / "senior-developer" / "notes with space.md"
+        spaced.write_text(TIER2_TOPIC_TEXT, encoding="utf-8")
+        self.write_index(
+            CLEAN_INDEX + "- [Spaces](<senior-developer/notes with space.md>) — live\n"
+        )
 
         self.assertEqual(self.link_findings(self.run_lint().stdout), [])
 
@@ -1265,12 +1288,26 @@ class MemoryLintTest(unittest.TestCase):
 
         self.assertEqual(self.link_findings(self.run_lint().stdout), [])
 
-    def test_reference_style_definition_in_angle_brackets_is_skipped(self):
-        """`[id]: <live.md>` — the escaped-destination form, same scope decision
-        as the inline `[x](<t.md>)` form pinned below."""
+    def test_reference_style_definition_in_angle_brackets_resolves_when_live(self):
+        """`[id]: <live.md>` — the bracket destination form, unwrapped and
+        resolved like the inline `[x](<t.md>)` form pinned below (WI-0060).
+        Previously this whole form was skipped outright; it is checked now, so
+        this is the live control for the dead one immediately after it."""
         self.write_index(CLEAN_INDEX + "[ref-angle]: <project_alpha.md>\n")
 
         self.assertEqual(self.link_findings(self.run_lint().stdout), [])
+
+    def test_a_dead_reference_style_angle_bracket_target_is_reported(self):
+        """Sibling-path parity for WI-0060: the reference-style definition
+        `[id]: <target>` shares the same shell-side unwrap/resolve logic as the
+        inline `[x](<target>)` form, so a dead target in this form must be
+        caught too, not just the inline one."""
+        self.write_index(CLEAN_INDEX + "[ref-angle-dead]: <gone_reference_angle.md>\n")
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("gone_reference_angle.md", findings[0])
 
     def test_a_dead_reference_link_still_fires_after_the_fix(self):
         """Control probe: the reference-style path must still catch a genuine
@@ -1600,15 +1637,72 @@ class MemoryLintTest(unittest.TestCase):
         self.assertEqual(len(findings), 1, findings)
         self.assertIn("dead_plain_control.md", findings[0])
 
-    # --- Forms the check deliberately skips, and its scope -------------------------
+    # --- The angle-bracket destination form `[x](<t.md>)` (WI-0060) ----------------
+    # CommonMark's bracket form protects a destination that may contain a space
+    # (see the space-form tests above) or other characters that would otherwise
+    # need escaping. It used to be skipped outright by an explicit case arm
+    # (`\<*`), which made a DEAD target written this way invisible — the report
+    # checked nothing, not even under the bracketed name. It is unwrapped and
+    # resolved like any other target now; one test per row of the reference
+    # table settled in docs/memory/reference_commonmark-conformance.md.
 
-    def test_angle_bracket_targets_are_skipped(self):
-        """`[x](<t.md>)` is the escaped destination form — currently out of scope.
+    def test_a_live_angle_bracket_target_is_not_reported(self):
+        """`[x](<a.md>)` where `a.md` exists — the live control for the dead
+        one directly below. Previously silent because the form was skipped;
+        silent now because it resolves and the file is there."""
+        self.write_index(CLEAN_INDEX + "- [Angle](<project_alpha.md>) — live\n")
 
-        Pinned as skipped rather than half-checked: without the skip the angle
-        brackets end up in the path and every such link is a false positive.
-        """
-        self.write_index(CLEAN_INDEX + "- [Angle](<project_alpha.md>) — escaped form\n")
+        self.assertEqual(self.link_findings(self.run_lint().stdout), [])
+
+    def test_a_dead_angle_bracket_target_is_reported(self):
+        """The WI-0060 defect itself: a dead target written in bracket form
+        used to pass silently. It must be caught exactly like the plain form."""
+        self.write_index(CLEAN_INDEX + "- [Angle](<gone_angle.md>) — dead\n")
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("gone_angle.md", findings[0])
+        self.assertNotIn("<", findings[0])
+        self.assertNotIn(">", findings[0])
+
+    def test_an_angle_bracket_target_with_a_title_outside_the_brackets_resolves(self):
+        """`[x](<a.md> "T")` — CommonMark puts the title outside the brackets
+        for this form; it must be stripped the same way it is for the plain
+        form, leaving `a.md` as the checked target."""
+        self.write_index(CLEAN_INDEX + '- [Angle](<project_alpha.md> "A Title") — live\n')
+
+        self.assertEqual(self.link_findings(self.run_lint().stdout), [])
+
+    def test_an_unclosed_angle_bracket_target_stays_silent(self):
+        """`[x](<a.md)` — no matching `>` before the destination ends. Per
+        CommonMark this is NOT a valid link at all, unlike the closed form.
+        Deliberately pointed at a target that does not exist either, so a
+        report here could only come from unwrapping a bracket that was never
+        closed — exactly the over-eager fix WI-0060 warns against."""
+        self.write_index(CLEAN_INDEX + "- [Angle](<gone_unclosed.md) — not a link\n")
+
+        self.assertEqual(self.link_findings(self.run_lint().stdout), [])
+
+    def test_an_empty_angle_bracket_target_is_silent(self):
+        """`[x](<>)` — an explicitly empty destination. Nothing to resolve, so
+        nothing to report; it must not be misread as a same-directory link."""
+        self.write_index(CLEAN_INDEX + "- [Angle](<>) — empty destination\n")
+
+        self.assertEqual(self.link_findings(self.run_lint().stdout), [])
+
+    def test_an_angle_bracket_target_with_a_fragment_resolves_to_the_file(self):
+        """`[x](<a.md#sec>)` — the fragment sits inside the brackets here,
+        unlike the plain form's `a.md#sec`; it must still be dropped before
+        the file existence check, exactly like the plain form."""
+        self.write_index(CLEAN_INDEX + "- [Angle](<project_alpha.md#section>) — live\n")
+
+        self.assertEqual(self.link_findings(self.run_lint().stdout), [])
+
+    def test_a_root_absolute_angle_bracket_target_resolves(self):
+        """`[x](</a.md>)` — root-absolute, same as the plain form's `/a.md`,
+        just wrapped. Resolves against the project root once unwrapped."""
+        self.write_index(CLEAN_INDEX + "- [Angle](</docs/memory/project_alpha.md>) — live\n")
 
         self.assertEqual(self.link_findings(self.run_lint().stdout), [])
 
