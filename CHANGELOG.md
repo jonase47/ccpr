@@ -108,206 +108,6 @@ All notable changes to this project are documented in this file. The format is b
   multiple scopes against a scratch fixture project (never this repository's own `docs/`), including
   a mutation proof that reintroduces the exact pre-fix construct in a scratch copy and confirms both
   the syntax gate and a real run reproduce the measured pre-fix symptom.
-- **Two more discipline-gate call sites collapsed "no match" into "the tool failed", plus a third
-  found while sweeping for the same class (WI-0053).** WI-0051 closed twenty sites where a crashing
-  `grep` inside `gate_scan_file` read as "0 findings" instead of "this check did not run"; two sites
-  were deliberately left out of that item's scope, and a sweep of the same three files found a
-  third. **(a)** `gate_path_deny_index`'s ASCII fallback for PATH matching (`grep -qFi`) had no
-  `|| true` at all, but that did not save it: the call sat inside an `if`, which suspends `errexit`
-  the same way a `|| true` does, so a crash there was indistinguishable from "the configured name
-  isn't in this path" — measured with a grep that fails only for that invocation shape, a file
-  literally named after a configured tenant/project name passed the artifact gate clean. This is
-  the LAST matcher on the PATH side — WI-0049's unicode-vs-ASCII fallback sits above it, not below —
-  so the fix takes WI-0051's answer (abort, exit 2, naming the check and grep's exit status) rather
-  than WI-0049's warn-and-fall-back: there is no third matcher to fall back to. Both callers of
-  `gate_path_deny_index` (`artifact-gate.sh`'s own FILE PATH finding, and `memory-sync.sh promote`'s
-  destination check — the one irreversible push in either tool) previously routed the function's
-  result through `|| true` as well, which would have swallowed the newly-distinguished crash status
-  right back into "no name found"; both now capture the real status and abort on it. **(b)**
-  `artifact-gate.sh`'s command-line `FILES` list was filtered through `grep -v '^$' | ... || true`.
-  This parses arguments, not content, so it cannot hide a leak directly — but a crash there silently
-  shrinks WHAT GETS SCANNED, one file dropping out of the scan set without a trace; a file with a
-  real credential in it, listed after the file whose path happened to crash the filter, was scanned
-  0 times and the run reported clean. **(c)**, found by the sweep and not named in the item's text:
-  `is_text()`'s own binary/text classifier (`grep -qI ''`) had the identical shape — a crash read
-  back as "not text", which the caller counts as `skipped_binary` and moves past silently, so a file
-  already in the scan list was never scanned for content at all. This is the more dangerous of the
-  three: (b) only trims the file list before scanning starts, (c) skips a file's content check after
-  it was already selected for scanning. All three now fail loudly (exit 2, naming the check and
-  grep's exit status) instead of scanning less without saying so — the same answer this repository
-  has given every time it has met this shape (WI-0015's dangling-symlink counter, the unreadable-
-  file guard, the empty-scope guard, and WI-0051 itself).
-- **A crashing `grep` inside the discipline gate's checks used to read as "no findings", not as
-  "this check did not run" (WI-0051).** Every check in `gate_scan_file` — and the deny-list's own
-  config parsing in `gate_load_config` — routed its `grep` through a trailing `|| true`, which
-  folded grep's exit 1 ("no match", the ordinary empty-category case) and exit >=2 ("did not run
-  to completion" — a crash, a bad pattern, a locale/encoding fault on malformed multi-byte input)
-  into the identical empty result: a file carrying a private key, a credential, or a configured
-  tenant name behind a crashed check came back "0 findings", exit 0. That is the same shape the
-  empty-scope guard in `artifact-gate.sh` already refuses ("a run that inspected nothing has proved
-  nothing"), and grep IS the matcher here — unlike WI-0049's unicode-vs-ASCII fallback, there is no
-  degraded-but-real second answer to fall back to, so a crashed check aborts the whole run (exit 2)
-  rather than warning and continuing. `_gate_checked` (wrapping `_gate_hits`, which no longer
-  swallows grep's status itself) is now the ONE call every check in `gate_scan_file` goes through —
-  the plain single-grep checks, the two-stage extract-then-placeholder-filter pairs (both the ones
-  that used to route through `_gate_hits` and the ones, like WI-0035's connection-string/email
-  pairs, that bypassed it entirely with a direct `printf | grep`), and all three deny-list match
-  sites (the plain ASCII path and both of WI-0049's non-ASCII fallback branches). The abort message
-  names which check failed and grep's exit status. `gate_scan_file` and `gate_load_config` report
-  the failure by returning a status the two entry points (`artifact-gate.sh`, `memory-sync.sh`) now
-  explicitly check for and abort on — a plain `|| true`/`return` cannot carry it, because a function
-  invoked from an already-tested context (`cmd || true`, `if cmd; then` — exactly how both entry
-  points already call `gate_scan_file`) suspends `set -e` for everything inside it, not just its own
-  top-level exit status, so a crash several call-levels down used to run the rest of the function to
-  completion in silence. The IP-allowlist membership test (`grep -qE` against a configured CIDR/IP
-  regex) is deliberately left as-is: a broken allowlist regex there already fails CLOSED — the `&&`
-  in `if [ -n "$GATE_IP_ALLOWLIST" ] && grep -qE ...` makes the IP fall through to being reported as
-  a finding rather than silently allowlisted — the opposite direction from the defect this item
-  fixes.
-- **The deny-list content check was ASCII-only and un-normalised, so a configured non-ASCII
-  tenant/project name could differ from its occurrence in a file's CONTENT only in case, or only
-  in NFD-vs-NFC normalisation, and still pass (WI-0017 part 2).** The path side already escalates
-  to a python3 comparison (NFC-normalised, full-Unicode case folding) for a non-ASCII subject or
-  name; content matching stayed a plain `grep -nFi` because escalating it the same way the path
-  side gates — subject OR name non-ASCII — was measured against this repository's own 271 tracked
-  files: 257 of them (94%) carry a non-ASCII byte in ordinary prose, so that gate would add ~4.0s
-  (~41%) to every sweep even with a pure-ASCII deny list. The fix gates on the configured NAME
-  alone, never on file content, which costs nothing extra when the deny list is pure ASCII: for an
-  ASCII name the plain matcher is provably complete rather than merely assumed to be — measured
-  with the ASCII name `cafe` against NFD-decomposed content `cafe`+U+0301, `grep -Fi` reports a
-  match while python's NFC view reports none, so the ASCII path can only over-report relative to
-  the escalation, never miss what it would find. `_gate_content_deny_lines` runs the same
-  NFC-normalise-and-fold comparison as the path side, one name at a time, with content passed on
-  **stdin** rather than through the environment — the path side's env-based transport is fine for
-  a path, but the largest tracked file today (93 KB) fits under `ARG_MAX` (1 MiB) only by chance,
-  and a larger one would fail hard with "argument list too long". The exit contract mirrors
-  WI-0049's sentinel shape exactly (0 = match, `_GATE_UNICODE_NO_MATCH` = no match, anything else =
-  the helper did not run) so the two consumers of the shared library cannot drift apart again; a
-  broken interpreter warns and falls back to the ASCII matcher rather than reading as a clean file.
-  An earlier `LC_ALL=C` patch for the same line, prepared and parked mid-item, is superseded by
-  this fix rather than applied: once the ASCII path only ever runs for ASCII names, locale-dependent
-  case folding of an ASCII pattern cannot change the answer, so no locale pin is needed there either.
-- **`memory-lint.sh` picked a fixed winner between an HTML comment and a code span, and assumed a
-  code span never crosses a line, both of which CommonMark contradicts (WI-0048, WI-0052).**
-  `decomment_paragraph()` and `strip_inline_code()` used to be two separate whole-paragraph passes
-  in a fixed order — comments stripped first, code spans stripped second, per resulting line. Any
-  fixed order between two such passes is wrong in one direction: reordering them would have fixed
-  one measured case and broken another that already worked. CommonMark gives precedence to
-  whichever construct opens FIRST, reading left to right — the other's delimiters are then literal
-  text inside the span that opened first. Separately, `strip_inline_code()`'s own comment stated "a
-  span never crosses a line in Markdown, so unlike decomment() this needs no state across records"
-  — that premise is false: a code span crosses a paragraph-internal line break exactly like an
-  inline HTML comment does, stopping only at the same block boundaries (list item, blank line,
-  heading, fence, block-level HTML comment) WI-0050 already established. Both passes are replaced
-  by one function, `resolve_paragraph()`: a single left-to-right scan over the whole buffered
-  paragraph in which whichever construct — a `dest_mark`-protected link destination, an HTML
-  comment opener, or a backtick run — is met first at the current scan position claims its span
-  whole; the paragraph-buffering mechanics WI-0050 built (`append_paragraph()`/`flush_paragraph()`)
-  are unchanged. `dest_mark` opacity (WI-0042 — a link destination is not inline-parsed) is now
-  honoured by the code-span search too, closing a gap the old `strip_inline_code()` never guarded
-  at all. Every fixture was settled at a CommonMark reference implementation before being pinned as
-  a test — see `docs/memory/reference_commonmark-conformance.md` — and mutation-checked against the
-  pre-fix script: an index illustrating its own two-line link syntax inside one code span
-  (`` `an entry looks like\n[label](dest) inside a span` ``) used to report the illustrative link as
-  a dead target; it no longer does.
-- **`memory-lint.sh` treated an unclosed mid-line HTML comment as swallowing the rest of the
-  file instead of nothing.** CommonMark HTML block type 2 only applies when `<!--` opens the
-  line itself (after up to three spaces); a `<!--` that appears mid-line is inline raw HTML, and
-  whether it hides anything downstream of it depends on whether it closes before the current
-  paragraph ends — never on the rest of the file. The extractor's `decomment()` used a single
-  `in_comment` variable that was never declared local inside `awk`, which makes it GLOBAL: an
-  opener with no closer on its own line left that state set, and every following line — in the
-  same paragraph, the next paragraph, a later list item, anywhere before end of file — was
-  silently treated as still inside the comment. Three shapes, each settled at a CommonMark
-  reference implementation before being pinned as a test: a mid-line opener in a LIST ITEM never
-  crosses into the next item, because each item is its own block; inside a plain PARAGRAPH it DOES
-  cross into a later line of the same paragraph if the closer is there; and an opener that never
-  closes before the paragraph ends is literal text — nothing is discarded. The fix buffers the
-  current paragraph across physical lines (`append_paragraph()`/`flush_paragraph()`) up to the
-  next block boundary — a blank line, a list-item marker, a heading, a fenced code block, or a
-  block-level HTML comment — and resolves the whole buffered paragraph in one call to a new
-  `decomment_paragraph()`, which uses a genuinely local per-call variable instead of the old bare
-  global. Lookahead is bounded to one paragraph and never reaches past a block boundary, closing
-  both the crossing-into-the-next-paragraph defect and the case an unclosed opener used to just
-  drop the rest of its own line instead of leaving it as literal text.
-- **`artifact-gate.sh` followed a tracked symlink instead of treating it as its own name.**
-  Two related defects: a dangling symlink vanished from the sweep silently — `[ -f ]` failed and
-  the loop `continue`d before the file's own name ever reached the deny-check, so a tracked link
-  whose filename carried a configured tenant name went unreported and the scope shrank without a
-  word. A *resolving* symlink was worse the other way: `-f` follows a symlink, so its target's
-  bytes were read through the link's path, scanning an in-repo target twice (once via its own
-  tracked entry, once again through the link) and reporting a leak from an out-of-repo target
-  under a repo-relative path — even though that target's bytes never ship. `install.sh` copies
-  with `cp -R`, which preserves a symlink AS a link; what CCPR ships for a symlink is the link
-  itself, never its target, so the gate's subject is the link's own name, checked exactly like any
-  other path, dangling or not — the target is never opened. `test -L` (checked before `-f`, so a
-  resolving link cannot fall through into the regular-file branch) now discriminates a symlink
-  from a regular file, uniformly for both an explicit file argument and a `git ls-files` sweep
-  entry. A new `skipped_symlink` counter and its own summary line ("N symlink(s) skipped — target
-  not scanned, names still checked") mirror the existing binary-skip line, so the fix does not
-  reproduce the silent-scope-loss defect it closes.
-- **A screaming-snake-case placeholder still read as a bearer token or a keyword-assignment
-  secret.** `Authorization: Bearer YOUR_TOKEN_HERE_REPLACE_ME` and
-  `Authorization: Bearer TODO_INSERT_YOUR_TOKEN_HERE` both fired as `[secret]`, because the value
-  opens with a plain alphanumeric — the same class a real credential starts with, and none of
-  `GATE_RE_PLACEHOLDER_SLOT`'s shapes (`${...}`, `$VAR`, `<...>`, `{{...}}`, a `%`-format slot,
-  `***`) cover it, since all of those open with a non-alphanumeric character instead. A
-  shape-based filter (dropping values made only of capitals, digits and underscores) was
-  considered and rejected: `GATE_RE_SECRET_VENDOR`'s own `AKIA[0-9A-Z]{16}` is exactly that shape,
-  so it would have gone congruent with a real AWS Access Key ID. Added
-  `GATE_RE_SECRET_PLACEHOLDER_WORD` instead — a case-insensitive, substring match against a word
-  list (`YOUR`, `TODO`, `REPLACE`, `CHANGEME`, `EXAMPLE`, `PLACEHOLDER`, `INSERT`, `DUMMY`,
-  `SAMPLE`) — applied only to the keyword-assignment (1a) and bearer-header (1a') checks via the
-  same extract-then-drop two-pass idiom `GATE_RE_CONNSTRING`/`GATE_RE_PLACEHOLDER` already use.
-  Scoped deliberately: the vendor/blob/private-key/connection-string rules get no such filter, so
-  AWS's own documentation key (`AKIA...EXAMPLE`) still fires there, unfiltered. Accepted cost: the
-  word list is never complete and will grow — an unlisted word means a placeholder still fires (a
-  false positive), never a missed leak.
-- **`memory-sync.sh promote` accepted a destination that reads as a command-line flag.**
-  `promote <src> --all` and `promote <src> -n` both exited 0 and published a file literally named
-  `--all` or `-n`. Not a leak — `git add -- "$dst"`, `dirname -- "$dst"` and `cp -- "$src" "$dst"`
-  already treat the destination as a path regardless of a leading dash — but a file with that name
-  is almost certainly a mistyped flag, and it reads as a flag again to every tool that later globs
-  the directory it landed in. `require_file_destination` now refuses a destination with any
-  `/`-separated component starting with `-` (covering both a top-level `-n` and a nested
-  `instincts/-n`), the same way it already refuses `.`/`..`/a trailing slash — before the clone is
-  touched, before the token is read. The refusal names the actual mistake ("looks like a
-  command-line flag") rather than reusing the directory-destination message.
-- **A fatally broken `python3` made the deny-list name check pass clean instead of failing.**
-  `gate_path_deny_index`'s non-ASCII escalation reads `_gate_unicode_py`'s exit status: 0 for a
-  match, and a case arm written to catch "the comparison did not happen" and fall back to the
-  ASCII matcher for anything else. That fallback arm signalled "no match" with `sys.exit(1)` — the
-  same status a fatally broken interpreter produces on start-up (measured:
-  `PYTHONHOME=/nonexistent python3 -c pass` exits 1), before the script's own no-match line ever
-  runs. So the arm written for exactly this fault was unreachable for the most likely one, and a
-  dead matcher read as a clean path: on a repo with one tracked file named after a configured
-  deny-listed name, a working interpreter reported 1 finding and exit 1, a broken one reported
-  "scanned 1 files, 0 findings" and exit 0, with the documented "unicode matcher failed" warning
-  never printed. "No match" now exits with a dedicated sentinel instead, so every other status —
-  including a broken interpreter's 1 — falls through to the existing warn-and-fall-back arm, which
-  is now reachable. `gate_redact_path`, the sibling call site that already trusted only `rc -eq 0`
-  and fell back to `awk` for everything else, was already correct and is unaffected.
-- **`templates/ci/artifact-gate.ci.sh` shipped without any execution check.** Nothing ran the
-  template — not even a syntax check — so the first team to activate it in CI would have been the
-  first to discover whether it actually worked. Added a `sh -n` syntax test plus a fixture-repo
-  invocation that copies the real gate into a throwaway git repo and asserts the template fails a
-  repo carrying a planted finding, passes a clean one, exits 2 with its own message when the gate
-  is not installed at `$REPO_ROOT`, and passes `REQUIRE_DENYLIST=1` through to the gate as
-  `--require-denylist`. Also corrected the template's Activation note: the sweep reads only
-  `git ls-files`, not history, so a shallow checkout is fine — what it actually needs is a `.git`
-  working tree, not full history as the note previously said.
-- **`artifact-gate.sh` reported its own pattern definitions as secrets when run from an
-  installation.** The self-exemption that keeps the gate from flagging its own credential-shaped
-  pattern definitions is bound to the *resolved path* of the file that defines them
-  (`scripts/lib/discipline_gate.sh`), by design — the marker line-comment that grants the exemption
-  is honoured only in that one file, so it cannot be used as a suppression backdoor anywhere else. An
-  installed copy of the gate (e.g. `~/.claude/scripts/artifact-gate.sh`) scanning a *different*
-  checkout therefore meets a `discipline_gate.sh` that is not its own, and reported three genuine
-  false positives with no context. Widening the exemption to recognise a foreign copy by name or
-  location would reopen exactly the backdoor it exists to close, so the fix does not touch the
-  exemption: a finding whose line still carries the exemption marker now names it and says the file
-  was not recognised as the pattern source, so a maintainer reads the reason instead of triaging
-  three unexplained "secret" findings.
 - **`/cleanup`'s unparseable-inbox-line rule rejected the shipped template's own blockquote
   lines.** §1a excluded blockquote lines from the check by requiring a trailing space after `>`,
   but `templates/HANDOVER_TEMPLATE.md` uses bare `>` lines (no trailing space) as paragraph
@@ -326,7 +126,14 @@ All notable changes to this project are documented in this file. The format is b
   checked and the string published were different strings. Directory destinations are rejected as a
   usage error, which is what the documented contract always said, and that equality is now the reason
   the guard exists. Also fixed with it: ASCII-only case folding, NFC/NFD normalisation on macOS, and
-  a missing `--` that let a destination named `--all` sweep unrelated files into the push.
+  a missing `--` that let a destination named `--all` sweep unrelated files into the push. A later
+  refinement closed one more shape: a destination whose name reads as a command-line flag (`--all`,
+  `-n`, or a nested component like `instincts/-n`) exited 0 and published a file literally named
+  that — not a leak by itself, since every consumer already treats the destination as a path
+  regardless of a leading dash, but a file named that way reads as a flag again to any tool that
+  later globs the directory it landed in. `require_file_destination` now refuses it the same way it
+  already refuses `.`, `..` and a trailing slash, naming the actual mistake ("looks like a
+  command-line flag") instead of reusing the directory-destination message.
 - **`memory-sync.sh` failed on macOS's bash in its own usage hint.** `promote` without a destination
   printed `bad substitution` instead of the hint: the message interpolated a bash-4 lowercase
   expansion, and macOS ships bash 3.2. The error path errored. A sweep over all 22 tracked shell
@@ -346,17 +153,31 @@ All notable changes to this project are documented in this file. The format is b
   a refused connection). The old status was never part of the contract the file's header states
   (`Exit: 0 ok, 1 gate/soft failure, 2 hard error`), so this aligns the script with its own promise —
   but a CI job keyed on 128 rather than "non-zero" will see the difference.
+- **`memory-sync.sh`'s push gate read an internal scan failure as a clean file, not as a check that
+  never ran (WI-0036).** `run_gate` tested whether `gate_scan_file`'s *output* was empty rather than
+  consuming the exit status the function's own header comment already promised callers — a promise
+  nothing was reading. An internal failure inside the scan (not "no findings", but "the check did
+  not complete") produced the same empty result as a genuinely clean file. `run_gate` now captures
+  `gate_scan_file`'s real exit status: an internal failure now reads as dirty where it previously
+  read as silently clean, the safe direction for a push gate — fail closed, not open. Verified the
+  ordinary paths are unaffected: a clean file still exits 0, a file carrying a bearer token still
+  exits 1. The real behaviour change: a broken gate now blocks a push instead of waving it through.
 - **`/p5-polish` wrote its `handover`-triage items into a section that did not exist.** It has always
   instructed agents to record blocked items in `docs/HANDOVER.md` "under Open Points", but no shipped
   template ever contained that heading — the flow dangled unless a project invented the section itself.
   The inbox now provides the destination, and `/p5-polish` writes the same entry format the `/cleanup`
   triage reads, so producer and consumer finally agree.
-- **`memory-lint.sh` gained exit code 3 for a configuration error.** The severity knob for the new
-  check was expanded in command position, so a typo aborted the run with `command not found`, exit
-  127 and no report at all — a caller testing for "non-zero" would have read a dead script as a
-  findings result. The value is now validated up front and findings are dispatched by `case`. The
-  contract at the top of the script, in `templates/MEMORY_SCHEMA.md` and in `/cleanup` now all name
-  the new code.
+- **HANDOVER's Next Steps extraction no longer matches a field written mid-line (WI-0024).** The
+  inbox WI-0002 added works only because the shipped template places `## Open Points` below
+  `## Next Steps` — an unanchored `re.search` in `next_steps.py` picks the first match anywhere in
+  the document, so an inbox finding whose text happened to contain `Next Steps:` followed by a
+  `/command` reference could be read as the real next step. The extraction is now anchored to line
+  start (`re.MULTILINE`), which makes the section order irrelevant instead of protected by
+  convention. The narrowing is the fix — a field written mid-line
+  (`Status ok. **Next Steps:** ... /cmd`) is no longer matched, only the line-start form and the
+  `## Next Steps` heading are. The shipped template already uses the heading form, so nothing CCPR
+  ships relies on the old match, but the change is silent for a hand-maintained HANDOVER.md that
+  wrote its Next Steps field mid-line.
 - **`instinct-check.sh` now actually counts instincts.** It reported `Active instincts: 0` in every
   project while hundreds existed. Three independent causes: (1) it counted `### ` headings in
   `~/.claude/instincts.md`, but under the split layout the index holds only bullets — the entries live
@@ -368,25 +189,6 @@ All notable changes to this project are documented in this file. The format is b
 - **`instinct-check.sh` reported a stale age.** File age came from the index mtime alone, so editing a
   theme file without touching the index left the age unchanged. It now uses the newest mtime across
   the index and all theme files.
-- **`memory-lint.sh` check (n) dropped the rest of the file when a code fence was never closed —
-  silently.** An unclosed fence running to end-of-document is correct CommonMark, so the skip itself
-  was right; nothing said the scope had shrunk, so a single stray triple-backtick could disable dead-link
-  checking for everything below it without any indication in the report. The check now emits a warning
-  naming the line where the fence opened, independent of `MEMORY_INDEX_LINK_SEVERITY`.
-- **`memory-lint.sh` check (n) validated the Tier-1 index only — nothing checked a persona (Tier-2)
-  index's links.** `docs/memory/{agent}/MEMORY.md` carries far more links than the Tier-1 index (deep
-  anchors into topic files, one per review/implementation round), and splitting a persona silo found
-  three already-dead entries that nothing had noticed. The check now scans every persona index too, in
-  addition to the Tier-1 one — a relative target resolves against its own index's directory, not the
-  Tier-1 memory dir, so a persona index's target file is checked in the right place. Deliberately a
-  floor, not a full fix: it catches a target file that no longer exists, not a wrong anchor into a file
-  that still does — anchor resolution needs heading-to-slug modelling and is a separate, unbuilt item.
-- **An unclosed HTML comment silently switched check (n) off for everything below it, with no
-  warning.** Correct behaviour per CommonMark — a block comment opened at the start of a line and
-  never closed swallows the rest of the document as raw HTML, so no link there was ever missed — but
-  the failure mode was silent, same class as the unclosed-fence case above. The check now emits a
-  warning naming the line where the comment opened, reusing the same end-of-input sentinel mechanism,
-  independent of `MEMORY_INDEX_LINK_SEVERITY`.
 
 ### Added
 - **Every external-tool invocation in the shipped shell scripts is now pinned to a consumed exit
@@ -412,14 +214,35 @@ All notable changes to this project are documented in this file. The format is b
   anonymised. Hand sweeps are what let it through. The existing memory gate could not simply be
   pointed at the repo: swept over 273 files it produced 77 files with findings and **zero** true
   positives, and it would not have caught the actual breach, because it has no concept of a tenant
-  *name*. The gate is now split into a pattern library used by both entry points, with profiles
-  selecting which checks run rather than what a pattern means. The generic 40-character rule — the
-  source of every false positive — was replaced with shapes machine-generated credentials actually
-  have. A deny-list of tenant and project names closes the real gap; it is read from personal config
-  or an environment variable, never from the repository, and matches are reported with file and line
-  while the name itself is redacted from every emitted line, because a CI log is a shipped artifact
-  too. An unconfigured deny-list says so loudly instead of passing silently. Ships with a dormant CI
-  template that names no forge. The repo currently scans clean: 275 files, 0 findings.
+  *name*. The gate is now split into a pattern library (`scripts/lib/discipline_gate.sh`) used by
+  both entry points — `artifact-gate.sh` and `memory-sync.sh promote`'s destination check — with
+  profiles selecting which checks run rather than what a pattern means. The generic 40-character
+  rule — the source of every false positive — was replaced with shapes machine-generated credentials
+  actually have, plus a dedicated check for a screaming-snake-case placeholder (`YOUR_TOKEN_HERE`,
+  `TODO_INSERT...`) that would otherwise read as a bearer token or a keyword-assignment secret,
+  scoped to those two checks only so a real vendor-shaped key (AWS's own `AKIA...EXAMPLE`) still
+  fires unfiltered elsewhere. A deny-list of tenant and project names closes the real gap; it is
+  read from personal config or an environment variable, never from the repository, matches are
+  reported with file and line while the name itself is redacted from every emitted line (a CI log is
+  a shipped artifact too), and it escalates to an NFC-normalised, case-folded comparison for a
+  non-ASCII subject or name on both the path and — gated on the configured name only, so a pure-ASCII
+  deny list costs nothing extra — the file content side; a fatally broken `python3` interpreter now
+  falls back to the ASCII matcher with a warning instead of silently reading as a clean file. Every
+  check the gate runs — the deny-list matchers, the shared scan-and-report loop, and the file-list
+  filter — fails loudly (abort, exit 2, naming the check and the failing tool's exit status) if its
+  underlying `grep`/`python3` call crashes, instead of the crash reading as "0 findings", "not text"
+  (silently skipping a file already selected for scanning), or a narrower scan scope with no trace.
+  A tracked symlink is treated as its own name rather than followed: a dangling one no longer drops
+  out of the sweep silently, and a resolving one is never read through — its target's bytes are never
+  opened, matching what `install.sh` actually ships for a symlink (the link itself, never its
+  target); a `skipped_symlink` counter reports the count. The self-exemption that keeps the gate from
+  flagging its own pattern definitions is bound to the resolved path of the one file that defines
+  them, so an installed copy scanning a foreign checkout reports the reason a finding was not
+  recognised as its own source, rather than unexplained "secret" findings. Ships with a dormant CI
+  template (`templates/ci/artifact-gate.ci.sh`, syntax-checked and exercised against a fixture repo)
+  that names no forge; its activation note correctly states that the sweep reads only
+  `git ls-files`, not history, so a shallow checkout is sufficient. An unconfigured deny-list says so
+  loudly instead of passing silently. The repo currently scans clean: 275 files, 0 findings.
 - **The HANDOVER size cap is now watched automatically.** The ≤5 KB / 150-line cap was documented in
   the template and enforced by `/cleanup`, but nothing triggered it — the file drifted past its limit
   unnoticed until someone happened to run the command, and `doc-volume-check.sh` does not cover it
@@ -442,16 +265,35 @@ All notable changes to this project are documented in this file. The format is b
   a project with a ticket system gets a real item and a prose project gets a BACKLOG entry. Reaching
   the ceiling flags rather than blocks: refusing an append would reintroduce the loss the inbox
   prevents. `project-guide` surfaces the count; it may neither append nor clear.
-- **`memory-lint.sh` now validates the Tier-1 index's own links (check `n`).** The lint checked
-  cross-references in one direction only: it found memory files the index had forgotten (check `g`)
-  and `related:` entries pointing at nothing (check `f`), but a link *inside* `docs/memory/MEMORY.md`
-  whose target had been deleted passed silently — reported from the field, where a manual pass found
-  two such links in a live index. Reproduced before the fix: an index with two dead links produced
-  zero findings. The check skips images, HTML-commented entries, code-fence-free inline links, anchors
-  and external URLs, resolves root-absolute targets against the project root, and reports every dead
-  link on a line rather than the first. It ships at **warning** severity: the link extraction does not
-  yet see fenced/inline code examples or reference-style links, and erroring on an incomplete
-  extraction would claim a completeness that is not evidenced. Promotion to error is tracked
+- **`memory-lint.sh` now validates the Tier-1 index's own links, and every Tier-2 persona index's,
+  catching a dead link nothing else in the lint saw (check `n`).** The lint checked
+  cross-references in one direction only: it found memory files the index had forgotten (check
+  `g`) and `related:` entries pointing at nothing (check `f`), but a link *inside* an index passed
+  silently even when its target had been deleted. The check resolves every inline link
+  (`[x](target)`) and reference-style definition (`[id]: target "title"`, all three CommonMark
+  title delimiters — double quotes, single quotes, parentheses) against the file that carries it:
+  the Tier-1 index (`docs/memory/MEMORY.md`) and every `docs/memory/{agent}/MEMORY.md` persona
+  index (WI-0040) — a persona index carries far more links than the Tier-1 one, deep anchors into
+  topic files, and nothing had validated those before. A relative target resolves against its own
+  index's directory, not the Tier-1 memory dir; a leading `/` resolves from the project root.
+  Comments and inline code spans are resolved paragraph by paragraph, left to right: whichever
+  construct — an HTML comment opener or a run of backticks — opens first at a given position
+  claims its whole span, and the other's delimiters inside it are literal text (WI-0048); either
+  can cross a physical line break inside the same paragraph, stopping only at a real block
+  boundary — a blank line, a list-item marker, a heading, a fence, or a block-level comment
+  (WI-0050, WI-0052). A code fence or an HTML comment left open at end of file is correct
+  CommonMark — the rest of the document genuinely is inside it — but the check no longer lets that
+  silently shrink its own scope: both now emit their own warning naming the line where the
+  construct opened, independent of severity (WI-0032, WI-0043). Images, in-page anchors and
+  external URLs are skipped, correctly — none of them is a link to a file in the repository. A
+  destination in CommonMark's angle-bracket form (`[x](<target.md>)`) is skipped too, and that one
+  is a known gap rather than a decision: the reference parser reads it as an ordinary link, so a
+  dead target written that way is missed. This is a floor, not a full fix: it catches a target
+  file that no longer exists, not a wrong anchor into a file that does — anchor resolution needs
+  heading-to-slug modelling and is a separate, unbuilt item. Ships at **warning** severity by
+  default; `MEMORY_INDEX_LINK_SEVERITY` is the documented escape hatch to `err`, validated up
+  front so a typo reports a configuration error (exit 3) instead of aborting with `command not
+  found` (exit 127), indistinguishable from a findings result. Promotion to error is tracked
   separately and is the SemVer-relevant step (ADR-0001).
 - **First test coverage for a shell script in this repo.** `scripts/tests/` was Python-only and
   covered the work-item CLI; `scripts/tests/test_memory_lint.py` invokes `memory-lint.sh` as a
