@@ -7,6 +7,26 @@ All notable changes to this project are documented in this file. The format is b
 ## [Unreleased]
 
 ### Fixed
+- **`memory-lint.sh` treated an unclosed mid-line HTML comment as swallowing the rest of the
+  file instead of nothing.** CommonMark HTML block type 2 only applies when `<!--` opens the
+  line itself (after up to three spaces); a `<!--` that appears mid-line is inline raw HTML, and
+  whether it hides anything downstream of it depends on whether it closes before the current
+  paragraph ends — never on the rest of the file. The extractor's `decomment()` used a single
+  `in_comment` variable that was never declared local inside `awk`, which makes it GLOBAL: an
+  opener with no closer on its own line left that state set, and every following line — in the
+  same paragraph, the next paragraph, a later list item, anywhere before end of file — was
+  silently treated as still inside the comment. Three shapes, each settled at a CommonMark
+  reference implementation before being pinned as a test: a mid-line opener in a LIST ITEM never
+  crosses into the next item, because each item is its own block; inside a plain PARAGRAPH it DOES
+  cross into a later line of the same paragraph if the closer is there; and an opener that never
+  closes before the paragraph ends is literal text — nothing is discarded. The fix buffers the
+  current paragraph across physical lines (`append_paragraph()`/`flush_paragraph()`) up to the
+  next block boundary — a blank line, a list-item marker, a heading, a fenced code block, or a
+  block-level HTML comment — and resolves the whole buffered paragraph in one call to a new
+  `decomment_paragraph()`, which uses a genuinely local per-call variable instead of the old bare
+  global. Lookahead is bounded to one paragraph and never reaches past a block boundary, closing
+  both the crossing-into-the-next-paragraph defect and the case an unclosed opener used to just
+  drop the rest of its own line instead of leaving it as literal text.
 - **`artifact-gate.sh` followed a tracked symlink instead of treating it as its own name.**
   Two related defects: a dangling symlink vanished from the sweep silently — `[ -f ]` failed and
   the loop `continue`d before the file's own name ever reached the deny-check, so a tracked link

@@ -450,7 +450,22 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
     done < <(awk '
         # Strip HTML-comment spans before extracting links: parking a retired entry
         # in `<!-- ... -->` is ordinary index practice and must not be linted.
-        # in_comment carries the state across lines, so comment blocks work too.
+        #
+        # WI-0050: a mid-line comment opener is resolved against its own
+        # PARAGRAPH, not against the whole file. CommonMark HTML block type 2
+        # only applies when a comment OPENS the line (handled separately below,
+        # in_html_comment); a comment that opens mid-line is inline raw HTML, and
+        # whether it swallows anything depends on whether it closes before the
+        # paragraph ends. Three measured shapes (WI-0050 comment, 20.08.2026):
+        # a list item never lets a mid-line opener cross into the next item (each
+        # item is its own block); a plain paragraph DOES let it cross into a
+        # later line of the SAME paragraph, if the closer is there; and an
+        # opener that never closes before the paragraph ends is literal text,
+        # nothing is discarded. append_paragraph()/flush_paragraph() below buffer
+        # the current paragraph across physical lines and hand the whole thing
+        # to decomment_paragraph() in one call, so lookahead is bounded to one
+        # paragraph and never reaches past a block boundary (blank line, list
+        # marker, heading, fence, or a block-level HTML comment).
         #
         # A closed comment is replaced by one `boundary` character rather than by
         # nothing (WI-0029). CommonMark treats an inline HTML comment as its own
@@ -471,14 +486,31 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
         # destination has been extracted (strip_dest_mark()). This only ever
         # protects a destination; comment text in a link LABEL is ordinary
         # inline content and keeps being decommented below, unchanged.
-        function decomment(s,   a, b, w, e, out) {
+        #
+        # local_in_comment is declared as a function parameter (an awk local),
+        # not read from a bare global name — that undeclared-global mistake is
+        # exactly WI-0050s defect: the old decomment() used a bare `in_comment`,
+        # which awk makes GLOBAL by default, so an opener with no closer on its
+        # own record left the state set and swallowed every following record
+        # (line) until a `-->` turned up or the file ended. A fresh local per
+        # call means a paragraph that never closes its opener cannot leak
+        # anything into the next paragraph, or the next file.
+        function decomment_paragraph(s,   a, b, w, e, out, local_in_comment) {
             out = ""
+            local_in_comment = 0
             while (length(s) > 0) {
-                if (in_comment) {
+                if (local_in_comment) {
                     b = index(s, "-->")
-                    if (b == 0) return out
+                    if (b == 0) {
+                        # Unclosed within this paragraph — literal text, per the
+                        # PO decision of 20.08.2026: nothing is discarded. Restore
+                        # the opener that was already consumed below and stop;
+                        # the remainder of s is untouched raw content.
+                        out = out "<!--" s
+                        return out
+                    }
                     s = substr(s, b + 3)
-                    in_comment = 0
+                    local_in_comment = 0
                     out = out boundary
                     continue
                 }
@@ -494,7 +526,7 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
                 if (a == 0) return out s
                 out = out substr(s, 1, a - 1)
                 s = substr(s, a + 4)
-                in_comment = 1
+                local_in_comment = 1
             }
             return out
         }
@@ -535,6 +567,12 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
         # ways: it can pair mismatched run lengths (misreading a lone backtick
         # inside a double-backtick span as that spans closer), and, chained from
         # that, later runs on the same line inherit the wrong offset.
+        #
+        # WI-0050 keeps this scoped to one paragraph-buffer SEGMENT at a time
+        # (see process_link_line() below), the same scope it always ran at —
+        # a segment can now be the tail of a comment-joined multi-line span
+        # instead of a single raw physical line, but this function itself is
+        # unchanged and still never looks past what it is handed.
         function strip_inline_code(s,   out, i, n, run_start, run_len, c, j, close_len, found) {
             out = ""
             n = length(s)
@@ -600,12 +638,61 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
             if (match(d, /^\([^)]*\)[ \t]*$/)) return 1
             return 0
         }
+        # Runs the extraction that used to sit directly in the main record
+        # block: find every `[text](dest)` span left after decommenting and
+        # code-span stripping, and print the destination unless it is an
+        # image marker (`![...]`, WI-0029). Factored out unchanged (WI-0050)
+        # so flush_paragraph() can call it once per resolved segment.
+        function process_link_line(line,   prev, link, sep) {
+            prev = ""
+            while (match(line, /\[[^][]*\]\([^)]*\)/)) {
+                if (RSTART > 1) prev = substr(line, RSTART - 1, 1)
+                link = substr(line, RSTART, RLENGTH)
+                sep = index(link, "](")
+                # `![alt](src)` is an image, not an index entry.
+                if (prev != "!") print strip_dest_mark(substr(link, sep + 2, length(link) - sep - 2))
+                line = substr(line, RSTART + RLENGTH)
+                prev = ")"
+            }
+        }
+        # Buffers one physical line into the current paragraph. protect_link_
+        # destinations() runs here, per raw line, exactly where it always ran —
+        # only decomment() moved to paragraph scope, this did not.
+        function append_paragraph(raw_line) {
+            if (pbuf_n == 0) pbuf = protect_link_destinations(raw_line)
+            else pbuf = pbuf "\n" protect_link_destinations(raw_line)
+            pbuf_n++
+        }
+        # Resolves the buffered paragraph and extracts its links, then clears
+        # the buffer. Joining with a real newline before decomment_paragraph()
+        # and splitting on the same character afterward means a comment span
+        # that closes on a later line collapses the lines it swallowed into one
+        # segment (its newlines were inside the removed span), while a span
+        # that never closes leaves every original line boundary intact — no
+        # extra bookkeeping needed to tell the two cases apart. strip_inline_
+        # code() and process_link_line() still run once per resulting segment,
+        # same as they always ran once per physical line, so a code span still
+        # cannot cross what was a paragraph-internal line break — a scope
+        # decision this fix inherits, not one it makes (out of scope, see
+        # WI-0050 and WI-0048).
+        function flush_paragraph(   resolved, segments, seg_count, i) {
+            if (pbuf_n == 0) return
+            resolved = decomment_paragraph(pbuf)
+            seg_count = split(resolved, segments, "\n")
+            for (i = 1; i <= seg_count; i++) {
+                process_link_line(strip_inline_code(segments[i]))
+            }
+            pbuf = ""
+            pbuf_n = 0
+        }
         BEGIN {
             sq = sprintf("%c", 39)
             boundary = sprintf("%c", 1)
             fence_sentinel = sprintf("%c", 2)
             dest_mark = sprintf("%c", 3)
             html_comment_sentinel = sprintf("%c", 4)
+            pbuf = ""
+            pbuf_n = 0
         }
         {
             # A fenced code block (```…``` or ~~~…~~~, optionally indented up to 3
@@ -630,9 +717,16 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
             # reverse direction needs no such gate: `if (in_fence)` above already
             # runs first and unconditionally `next`s, so nothing inside a real
             # fence is ever offered to the comment-opener check.
+            #
+            # A fence opener is itself a block boundary, so it flushes whatever
+            # paragraph was being buffered — the opener substring is read out of
+            # $0 via RSTART/RLENGTH BEFORE the flush, because flush_paragraph()
+            # runs process_link_line(), which calls match() itself and would
+            # otherwise clobber them.
             if (!in_html_comment && match($0, /^[ ]{0,3}(```+|~~~+)/)) {
                 opener = substr($0, RSTART, RLENGTH)
                 sub(/^[ ]{0,3}/, "", opener)
+                flush_paragraph()
                 fence_char = substr(opener, 1, 1)
                 fence_len = length(opener)
                 in_fence = 1
@@ -645,20 +739,22 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
             # physical line is raw HTML, including any text after the closing
             # `-->` on that same line, and every full line up to and including
             # the one that finally contains `-->` (WI-0041). This is a
-            # different mechanism from the in_comment state decomment() carries below,
-            # which only ever runs on a comment that does NOT open its line.
-            # Checked here, before decomment() runs, so a link written on the
-            # closing line of the block is never even offered to the
-            # extractor — mirrors the fence handling one block up. A block comment
-            # that never closes swallows the rest of the file exactly like an
-            # unclosed fence (the WI-0032 mechanism); html_comment_open_line feeds
-            # the same end-of-input sentinel reporting that gives (WI-0043). Fence
-            # and HTML-comment states cannot both be open at the same time: the
-            # fence-opener check just above is gated on !in_html_comment, and the
-            # in_fence branch above THAT already runs first and unconditionally
-            # `next`s once a fence is open — so there is exactly one sentinel to
-            # report, not two. That is a property this gate establishes, not one
-            # that held on its own.
+            # different mechanism from the paragraph-scoped state decomment_
+            # paragraph() resolves below, which only ever applies to a comment
+            # that does NOT open its line.
+            # Checked here, before the paragraph is flushed to decomment_
+            # paragraph(), so a link written on the closing line of the block is
+            # never even offered to the extractor — mirrors the fence handling
+            # one block up. A block comment that never closes swallows the rest
+            # of the file exactly like an unclosed fence (the WI-0032 mechanism);
+            # html_comment_open_line feeds the same end-of-input sentinel
+            # reporting that gives (WI-0043). Fence and HTML-comment states
+            # cannot both be open at the same time: the fence-opener check just
+            # above is gated on !in_html_comment, and the in_fence branch above
+            # THAT already runs first and unconditionally `next`s once a fence
+            # is open — so there is exactly one sentinel to report, not two.
+            # That is a property this gate establishes, not one that held on
+            # its own.
             # NOTE: no apostrophes in this awk block — memory-lint.sh embeds it as
             # one single-quoted bash string, and an unescaped apostrophe silently
             # truncates the program (WI-0005 round 3; see awk-scripting.md).
@@ -667,6 +763,7 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
                 next
             }
             if (match($0, /^[ ]{0,3}<!--/)) {
+                flush_paragraph()
                 if ($0 !~ /-->/) {
                     in_html_comment = 1
                     html_comment_open_line = NR
@@ -678,15 +775,20 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
             # The one-line form `[x](target)` this check already handled leaves
             # `[x][id]` + a separate `[id]: target` definition line unseen — same
             # defect class, one syntax further. Checked directly against the RAW
-            # line, before decomment() runs (WI-0042): a reference-definition
-            # destination is not inline-parsed by CommonMark, so a comment
-            # inside it is literal text, not something to strip — printing the
-            # raw remainder verbatim keeps it that way. Target normalisation
-            # (whitespace, quoted-title stripping) happens uniformly on the
-            # shell side below.
+            # line, before the paragraph flow ever sees it (WI-0042): a
+            # reference-definition destination is not inline-parsed by
+            # CommonMark, so a comment inside it is literal text, not something
+            # to strip — printing the raw remainder verbatim keeps it that way.
+            # Target normalisation (whitespace, quoted-title stripping) happens
+            # uniformly on the shell side below. A genuine reference definition
+            # is its own block, so it flushes whatever paragraph was buffered;
+            # raw_rest is read out via RSTART/RLENGTH before that flush, for the
+            # same reason the fence-opener branch above reads its own substring
+            # first.
             if (match($0, /^[ ]{0,3}\[[^][]+\]:[ \t]*/)) {
                 raw_rest = substr($0, RSTART + RLENGTH)
                 if (reference_definition_tail(raw_rest)) {
+                    flush_paragraph()
                     print raw_rest
                     next
                 }
@@ -694,24 +796,42 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
                 # `[x](y)` link elsewhere on this line is still found below.
             }
 
-            # protect_link_destinations() wraps each `(...)` destination in
-            # dest_mark before decomment()/strip_inline_code() run, so a
-            # comment inside a destination survives both passes as literal
-            # text (WI-0042) while a comment in the link LABEL is still
-            # decommented normally — the image-exclusion mechanism below
-            # (WI-0029) depends on that.
-            line = strip_inline_code(decomment(protect_link_destinations($0)))
-
-            prev = ""
-            while (match(line, /\[[^][]*\]\([^)]*\)/)) {
-                if (RSTART > 1) prev = substr(line, RSTART - 1, 1)
-                link = substr(line, RSTART, RLENGTH)
-                sep = index(link, "](")
-                # `![alt](src)` is an image, not an index entry.
-                if (prev != "!") print strip_dest_mark(substr(link, sep + 2, length(link) - sep - 2))
-                line = substr(line, RSTART + RLENGTH)
-                prev = ")"
+            # WI-0050 block boundaries: a blank line, a list-item marker or a
+            # heading each end the current paragraph the way CommonMark ends
+            # a block. This is deliberately not a full CommonMark block
+            # grammar — a thematic break (`---` with no following list-marker
+            # space) is not recognised as a boundary here, and neither is a
+            # setext-heading underline; both fall through to the ordinary
+            # content branch below and stay inside whatever paragraph is being
+            # buffered, same as they always did (out of scope, see the
+            # senior-developer report for WI-0050).
+            #
+            # A blank line closes the paragraph and carries no content of its
+            # own.
+            if ($0 ~ /^[ \t]*$/) {
+                flush_paragraph()
+                next
             }
+            # An ATX heading (`#` through `######`) is always exactly one line
+            # in CommonMark, so it flushes immediately after buffering itself —
+            # it never accumulates a continuation line the way a list item can.
+            if ($0 ~ /^[ ]{0,3}#{1,6}([ \t]|$)/) {
+                flush_paragraph()
+                append_paragraph($0)
+                flush_paragraph()
+                next
+            }
+            # A list-item marker starts a new block, but unlike a heading it
+            # may run on to further lines (a wrapped list item is still one
+            # block) — flush whatever came before, then keep buffering from
+            # here until the next boundary.
+            if ($0 ~ /^[ ]{0,3}([-+*]|[0-9]{1,9}[.)])[ \t]/) {
+                flush_paragraph()
+                append_paragraph($0)
+                next
+            }
+            # Ordinary paragraph content — accumulate, do not resolve yet.
+            append_paragraph($0)
         }
         # A fence or an HTML comment still open at end-of-input runs to
         # end-of-document — correct CommonMark (WI-0032 for the fence, WI-0041 for
@@ -723,8 +843,12 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
         # ordinary dead-target finding and report it as its own warning instead. The
         # two states can never both be open at end-of-input (the fence-opener check
         # above is gated on !in_html_comment, see that comment for why), so at most
-        # one of these fires.
+        # one of these fires. flush_paragraph() runs first so a paragraph still
+        # buffered when the file simply ends (no trailing blank line) is not lost —
+        # it cannot coexist with either open state, both of which already flushed
+        # the buffer on the way in and never touch it again while open.
         END {
+            flush_paragraph()
             if (in_fence) print fence_sentinel fence_open_line
             if (in_html_comment) print html_comment_sentinel html_comment_open_line
         }

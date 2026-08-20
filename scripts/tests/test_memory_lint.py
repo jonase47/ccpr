@@ -664,6 +664,271 @@ class MemoryLintTest(unittest.TestCase):
         self.assertEqual(len(findings), 1, findings)
         self.assertIn("'dead_label.md'", findings[0])
 
+    # --- WI-0050: a mid-line comment opener is resolved per PARAGRAPH, not per
+    # FILE. Before the fix, decomment()'s in_comment state was an undeclared
+    # (therefore global, in awk) variable that survived past the record it was
+    # set on: an unclosed mid-line opener silently disabled link checking for
+    # the rest of the file. Three shapes below are the PO decision's own
+    # measurement (20.08.2026), reference-confirmed with a CommonMark
+    # implementation before writing each test; a fourth pins the swallow-the-
+    # file regression this item is named for; a fifth pins that WI-0043's
+    # block-level sentinel still fires; the last two are controls.
+
+    def test_a_mid_line_comment_opener_does_not_cross_into_the_next_list_item(self):
+        """Shape (1): a mid-line opener on one list item that only closes on a
+        LATER item must not cross the line — each list item is its own block.
+        Reference-confirmed: both links render.
+        """
+        self.write_index(
+            CLEAN_INDEX
+            + "- one <!-- comment [Dead A](dead_wi0050_list_a.md)\n"
+            + "- comment continues --> [Dead B](dead_wi0050_list_b.md)\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 2, findings)
+        self.assertTrue(any("dead_wi0050_list_a.md" in f for f in findings), findings)
+        self.assertTrue(any("dead_wi0050_list_b.md" in f for f in findings), findings)
+
+    def test_a_heading_flushes_immediately_and_does_not_merge_with_a_following_paragraph(self):
+        """A third named boundary: an ATX heading is always exactly one line in
+        CommonMark, so it must resolve on its own, even with no blank line
+        before the paragraph that follows it. The opener is deliberately paired
+        with a closer on the FOLLOWING line — if the heading wrongly kept
+        buffering past itself, that closer would pair with the heading's
+        opener and swallow the link inside the heading; reference-confirmed it
+        does not, because the heading and the paragraph after it are separate
+        blocks.
+        """
+        self.write_index(
+            CLEAN_INDEX
+            + "\n"
+            + "# Heading <!-- opens here [Dead A](dead_wi0050_heading_open_a.md)\n"
+            + "closes here --> [Dead B](dead_wi0050_heading_close_b.md)\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 2, findings)
+        self.assertTrue(any("dead_wi0050_heading_open_a.md" in f for f in findings), findings)
+        self.assertTrue(any("dead_wi0050_heading_close_b.md" in f for f in findings), findings)
+
+    def test_a_mid_line_comment_opener_crosses_into_the_next_line_of_the_same_paragraph(self):
+        """Shape (2): inside a PLAIN paragraph (no list marker, no blank line
+        between), a mid-line opener that closes on a later line DOES span the
+        line break — the enclosed link must not be reported, only the link
+        after the closer. Reference-confirmed.
+        """
+        self.write_index(
+            CLEAN_INDEX
+            + "\n"
+            + "Note: <!-- comment [Dead A](dead_wi0050_para_a.md)\n"
+            + "continues --> [Dead B](dead_wi0050_para_b.md)\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("dead_wi0050_para_b.md", findings[0])
+
+    def test_an_unclosed_mid_line_comment_opener_is_literal_text_within_its_own_paragraph(self):
+        """Shape (3): a mid-line opener that never closes anywhere in the file
+        is literal text — nothing is discarded, and every link in its own
+        paragraph is still found. Reference-confirmed.
+        """
+        self.write_index(
+            CLEAN_INDEX
+            + "\n"
+            + "Note: <!-- unclosed [Dead A](dead_wi0050_open_a.md) more [Dead B](dead_wi0050_open_b.md)\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 2, findings)
+        self.assertTrue(any("dead_wi0050_open_a.md" in f for f in findings), findings)
+        self.assertTrue(any("dead_wi0050_open_b.md" in f for f in findings), findings)
+
+    def test_an_unclosed_mid_line_comment_in_one_paragraph_does_not_swallow_a_later_paragraph(self):
+        """The defect this item is named for: before the fix, an unclosed
+        mid-line opener in one paragraph disabled link checking for the rest of
+        the FILE, not just its own paragraph — the two paragraphs below are
+        independent CommonMark blocks, reference-confirmed, both links render.
+        """
+        self.write_index(
+            CLEAN_INDEX
+            + "\n"
+            + "Note: <!-- unclosed [Dead A](dead_wi0050_swallow_a.md)\n"
+            + "\n"
+            + "A later paragraph [Dead B](dead_wi0050_swallow_b.md)\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 2, findings)
+        self.assertTrue(any("dead_wi0050_swallow_a.md" in f for f in findings), findings)
+        self.assertTrue(any("dead_wi0050_swallow_b.md" in f for f in findings), findings)
+
+    def test_a_mid_line_comment_opener_does_not_pair_with_a_closer_across_a_blank_line(self):
+        """The blank-line boundary itself, isolated: unlike shape (2) above (a
+        closer on a later line of the SAME paragraph), a closer that only
+        appears AFTER a blank line must not retroactively close an opener in
+        the paragraph before it — each paragraph is inlined separately in
+        CommonMark, a blank line ends the block. Reference-confirmed: both
+        links render, the second paragraph's `-->` is inert literal text with
+        no opener of its own to pair with.
+        """
+        self.write_index(
+            CLEAN_INDEX
+            + "\n"
+            + "Note: <!-- opens here [Dead A](dead_wi0050_blank_a.md)\n"
+            + "\n"
+            + "closes here --> [Dead B](dead_wi0050_blank_b.md)\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 2, findings)
+        self.assertTrue(any("dead_wi0050_blank_a.md" in f for f in findings), findings)
+        self.assertTrue(any("dead_wi0050_blank_b.md" in f for f in findings), findings)
+
+    def test_an_unclosed_opener_does_not_leak_into_a_later_paragraphs_own_unrelated_arrow(self):
+        """Isolates the exact mechanism WI-0050 names: decomment_paragraph()
+        must use a FRESH local per call, not state that survives the call.
+        Reference-confirmed the two paragraphs below are independent; the
+        second one has nothing to do with a comment at all, it just happens to
+        contain the literal text `-->`, which is not special on its own. If
+        state leaked from paragraph one (still unresolved) into paragraph two,
+        that unrelated `-->` would be wrongly read as a closer and everything
+        before it in paragraph two — including its own link — would be
+        discarded as if it were comment content.
+        """
+        self.write_index(
+            CLEAN_INDEX
+            + "\n"
+            + "Note: <!-- unclosed [Dead A](dead_wi0050_leak_a.md)\n"
+            + "\n"
+            + "[Dead B](dead_wi0050_leak_b.md) --> more text after an unrelated arrow\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 2, findings)
+        self.assertTrue(any("dead_wi0050_leak_a.md" in f for f in findings), findings)
+        self.assertTrue(any("dead_wi0050_leak_b.md" in f for f in findings), findings)
+
+    def test_the_block_level_unclosed_comment_sentinel_still_fires_after_a_buffered_paragraph(self):
+        """WI-0050 must not weaken WI-0043: a PLAIN paragraph (not a list item)
+        buffered ahead of a block-level HTML comment (opens at column 0, never
+        closes) must still flush correctly, and the sentinel must still fire.
+        Asserts scope, not only the verdict: the paragraph before the block
+        comment must still be scanned (its own dead link found), and the
+        content swallowed by the unclosed block comment must not be — a bare
+        `assertEqual(findings, [])` here would be satisfied just as well by a
+        run that scanned nothing at all.
+        """
+        self.write_index(
+            CLEAN_INDEX
+            + "\n"
+            + "A live paragraph pointing at [Dead C](dead_wi0050_sentinel_before.md).\n"
+            + "\n"
+            + "<!--\n"
+            + "- [Example](dead_wi0050_sentinel_after.md)\n"
+        )
+
+        result = self.run_lint()
+
+        findings = self.link_findings(result.stdout)
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("dead_wi0050_sentinel_before.md", findings[0])
+        warnings = self.findings(result.stdout, "Warnings")
+        self.assertTrue(any("never closed" in w for w in warnings), warnings)
+
+    def test_a_fenced_code_block_flushes_the_paragraph_buffered_ahead_of_it(self):
+        """A fence opener is a block boundary too, the same as the three named
+        ones — a paragraph buffered right up against a fence (no blank line
+        between) must flush BEFORE the fence is entered, not carry an unclosed
+        opener across the fenced block into whatever paragraph follows it.
+        Reference-confirmed: the paragraph before the fence, the fenced block
+        itself, and the paragraph after it are three independent blocks.
+        """
+        self.write_index(
+            CLEAN_INDEX
+            + "\n"
+            + "Note: <!-- unclosed [Dead A](dead_wi0050_fence_a.md)\n"
+            + "```\n"
+            + "ignored fence content\n"
+            + "```\n"
+            + "[Dead B](dead_wi0050_fence_b.md) --> more text\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 2, findings)
+        self.assertTrue(any("dead_wi0050_fence_a.md" in f for f in findings), findings)
+        self.assertTrue(any("dead_wi0050_fence_b.md" in f for f in findings), findings)
+
+    def test_a_block_level_html_comment_flushes_the_paragraph_buffered_ahead_of_it(self):
+        """Same boundary as the fence case above, for the OTHER block-level
+        construct: a column-0 HTML comment (WI-0043's block mechanism) must
+        also flush whatever paragraph is buffered ahead of it, not carry an
+        unclosed mid-line opener across the block comment into the paragraph
+        that follows. Reference-confirmed: three independent blocks.
+        """
+        self.write_index(
+            CLEAN_INDEX
+            + "\n"
+            + "Note: <!-- unclosed [Dead A](dead_wi0050_htmlblock_a.md)\n"
+            + "<!--\n"
+            + "- [Ignored](ignored.md)\n"
+            + "-->\n"
+            + "[Dead B](dead_wi0050_htmlblock_b.md) --> more text\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 2, findings)
+        self.assertTrue(any("dead_wi0050_htmlblock_a.md" in f for f in findings), findings)
+        self.assertTrue(any("dead_wi0050_htmlblock_b.md" in f for f in findings), findings)
+
+    def test_a_multi_line_paragraph_without_any_comment_is_unaffected_by_paragraph_buffering(self):
+        """Control: WI-0050 introduces paragraph buffering even when no comment
+        is present at all. A plain paragraph wrapped over two physical lines,
+        each holding a link, must still report both — buffering must not merge
+        or drop line-scoped content that decomment_paragraph() never touches.
+        """
+        self.write_index(
+            CLEAN_INDEX
+            + "\n"
+            + "A live paragraph with [Dead A](dead_wi0050_plain_a.md) on\n"
+            + "its first line and [Dead B](dead_wi0050_plain_b.md) on its second.\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 2, findings)
+        self.assertTrue(any("dead_wi0050_plain_a.md" in f for f in findings), findings)
+        self.assertTrue(any("dead_wi0050_plain_b.md" in f for f in findings), findings)
+
+    def test_a_live_link_survives_paragraph_buffering_while_a_dead_one_beside_it_is_still_reported(self):
+        """Control: a live link sharing a buffered paragraph with a dead one
+        must not be reported — buffering is purely about comment resolution
+        scope, not a new source of false positives. The dead sibling proves
+        the paragraph was actually scanned, not merely skipped clean.
+        """
+        self.write_index(
+            CLEAN_INDEX
+            + "\n"
+            + "A live target [Alpha](project_alpha.md) and a dead one\n"
+            + "[Dead A](dead_wi0050_live_control.md) share one buffered paragraph.\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("dead_wi0050_live_control.md", findings[0])
+        self.assertNotIn("project_alpha.md", findings[0])
+
     # --- WI-0005: code examples are not entries, reference-style links are ---------
 
     def test_a_dead_link_shown_inside_a_fenced_code_block_is_not_reported(self):
@@ -1351,7 +1616,9 @@ class ScriptActuallyRanTest(unittest.TestCase):
     # forms of the SAME mutation target, so the odd/even contrast is measured
     # side by side rather than asserted from memory.
 
-    _EVEN_MUTATION_TARGET = "        # in_comment carries the state across lines, so comment blocks work too.\n"
+    _EVEN_MUTATION_TARGET = (
+        "        # Strip HTML-comment spans before extracting links: parking a retired entry\n"
+    )
 
     def _build_mutated_script(self, mutated_line, expected_delta):
         original = SCRIPT_PATH.read_text(encoding="utf-8")
@@ -1370,7 +1637,7 @@ class ScriptActuallyRanTest(unittest.TestCase):
     def test_odd_apostrophe_count_is_still_caught_by_bash_syntax_check(self):
         """The already-shipped half of the contrast: ODD stays caught by bash -n."""
         broken = self._build_mutated_script(
-            "        # in_comment carries the state's own across lines, so comment blocks work too.\n",
+            "        # Strip HTML-comment spans before extracting links: parking a retired entry's own copy\n",
             expected_delta=1,
         )
         with tempfile.TemporaryDirectory() as tmp:
@@ -1391,7 +1658,7 @@ class ScriptActuallyRanTest(unittest.TestCase):
         section, and reports zero findings where one is due.
         """
         broken = self._build_mutated_script(
-            "        # in_comment carries the state's own across lines, so this construct's comment blocks work too.\n",
+            "        # Strip HTML-comment spans before extracting links: parking a retired entry's own copy, don't stop\n",
             expected_delta=2,
         )
         with tempfile.TemporaryDirectory() as tmp:
