@@ -121,7 +121,7 @@ GATE_RE_SECRET_BEARER='[:=][[:space:]]*["'"'"']?bearer[[:space:]]+[A-Za-z0-9+][A
 #      congruent with a real credential format this gate is built to catch.
 #      Widening this word filter to the vendor/blob/private-key/
 #      connection-string rules would carry the same risk for no benefit —
-#      AWS's own documentation access key contains a listed word (EXAMPLE)   # gate-pattern-source
+#      AWS's own documentation access key contains a listed word (EXAMPLE)
 #      and must keep firing there, unfiltered.
 #
 #      ACCEPTED COST, decided 20.08.2026: this word list is never complete
