@@ -384,6 +384,21 @@ reject_directory_destination() {
   die "promote refused: the destination must be a FILE path inside the repo (e.g. instincts/$(ns_lower)-org.md), not a directory: $1"
 }
 
+# A dash-shaped destination is not a directory — reusing
+# reject_directory_destination's message would tell the operator their FILE
+# path looks like a DIRECTORY, which is not the mistake that was made. It is
+# no longer a leak either: `git add -- "$dst"`, `dirname -- "$dst"` and
+# `cp -- "$src" "$dst"` all treat the destination as a path regardless of a
+# leading dash, so nothing unexpected ships. What ships is USELESS: a file
+# literally named `--all` or `-n`, almost certainly a mistyped flag rather
+# than an intended name, and one that reads as a flag again to every future
+# tool that globs the directory it landed in. Refused for that reason, the
+# same way `.`/`..`/a trailing slash are refused — before the clone is
+# touched, before the token is read.
+reject_option_shaped_destination() {
+  die "promote refused: the destination must be a FILE path, not something that looks like a command-line flag (a component starting with '-'): $1"
+}
+
 require_file_destination() {
   local d="$1" part rest
   # Three shapes are decided by the string alone — a trailing slash, and any
@@ -397,6 +412,10 @@ require_file_destination() {
     part="${rest%%/*}"
     case "$part" in
       .|..) reject_directory_destination "$d" ;;
+      # Every component, not just the destination's first character: a
+      # top-level `-n` and a nested `instincts/-n` are the same trap for a
+      # tool that later globs `instincts/*`, so both are refused here.
+      -*) reject_option_shaped_destination "$d" ;;
     esac
     case "$rest" in
       */*) rest="${rest#*/}" ;;

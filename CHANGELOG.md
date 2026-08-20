@@ -7,6 +7,16 @@ All notable changes to this project are documented in this file. The format is b
 ## [Unreleased]
 
 ### Fixed
+- **`memory-sync.sh promote` accepted a destination that reads as a command-line flag.**
+  `promote <src> --all` and `promote <src> -n` both exited 0 and published a file literally named
+  `--all` or `-n`. Not a leak — `git add -- "$dst"`, `dirname -- "$dst"` and `cp -- "$src" "$dst"`
+  already treat the destination as a path regardless of a leading dash — but a file with that name
+  is almost certainly a mistyped flag, and it reads as a flag again to every tool that later globs
+  the directory it landed in. `require_file_destination` now refuses a destination with any
+  `/`-separated component starting with `-` (covering both a top-level `-n` and a nested
+  `instincts/-n`), the same way it already refuses `.`/`..`/a trailing slash — before the clone is
+  touched, before the token is read. The refusal names the actual mistake ("looks like a
+  command-line flag") rather than reusing the directory-destination message.
 - **A fatally broken `python3` made the deny-list name check pass clean instead of failing.**
   `gate_path_deny_index`'s non-ASCII escalation reads `_gate_unicode_py`'s exit status: 0 for a
   match, and a case arm written to catch "the comparison did not happen" and fall back to the

@@ -695,9 +695,18 @@ class NonAsciiDenyNameTest(PromoteTestBase):
 # ---------------------------------------------------------------------------
 # 8. WI-0014 round 2 — B4: a destination is a path, never an option.
 #
-# `git add "$dst"` without `--` reads a leading dash as an option. `--all`
-# stages the whole clone into the irreversible push; `-n` stages nothing and
-# the run reports success over an empty promote.
+# `git add -- "$dst"` (note the `--`) already reads a leading dash as a path,
+# not an option — `--all` no longer sweeps the clone and `-n` no longer turns
+# `git add` into a silent dry run. That closed the LEAK.
+#
+# WI-0017 part (1): what is left is not a leak, only a usability trap. A file
+# literally named `--all` or `-n` still gets published, and it is published
+# because someone MISTYPED a flag, not because they meant a file by that name
+# — and it will look like a flag to every tool that later globs the directory
+# it landed in (`grep -r pattern instincts/*`, `ls instincts/*`, ...). So
+# `require_file_destination` now refuses a dash-shaped destination outright,
+# the same way it already refuses `.`/`..`/a trailing slash: before the clone
+# is touched, before the token is read.
 # ---------------------------------------------------------------------------
 class OptionShapedDestinationTest(PromoteTestBase):
     def stray_file_in_clone(self, name="scratch-notes.md"):
@@ -708,24 +717,54 @@ class OptionShapedDestinationTest(PromoteTestBase):
         (self.clone / name).write_text("scratch\n", encoding="utf-8")
         return name
 
-    def test_an_option_shaped_destination_does_not_sweep_the_clone_into_the_push(self):
+    def test_an_option_shaped_destination_is_refused_not_swept_into_the_push(self):
         self.write_config(denyNames=[DENY_NAME])
         stray = self.stray_file_in_clone()
-        self.promote(self.write_src(), "--all")
+        before = self.remote_state()
+        r = self.promote(self.write_src(), "--all")
+        self.assertNotEqual(r.returncode, 0, "expected a refusal:\n" + self.output(r))
+        self.assert_nothing_published(before, r)
         self.assertNotIn(
             stray, self.remote_tree(),
             "an unrelated file in the clone was published: %r" % (self.remote_tree(),),
         )
 
-    def test_a_dry_run_shaped_destination_does_not_report_success_over_nothing(self):
-        # `-n` made `git add` a dry run: nothing staged, "no change to
-        # promote", exit 0 — a success report for a promote that never
-        # happened. Read as a path it is an odd but honest file name, and the
-        # rule this suite exists for holds: what was checked is what ships.
+    def test_a_dry_run_shaped_destination_is_refused_not_reported_as_success(self):
+        # Before WI-0017: `-n` made `git add` (without `--`) a dry run —
+        # nothing staged, "no change to promote", exit 0. That specific bypass
+        # is already closed by `--`; this only checks the newer, stricter
+        # rule: a destination that reads as a flag is refused before anything
+        # runs, not silently accepted as an odd-but-honest file name.
         self.write_config(denyNames=[DENY_NAME])
+        before = self.remote_state()
         r = self.promote(self.write_src(), "-n")
-        self.assertEqual(r.returncode, 0, self.output(r))
-        self.assertIn("-n", self.remote_tree(), self.output(r))
+        self.assertNotEqual(r.returncode, 0, "expected a refusal:\n" + self.output(r))
+        self.assert_nothing_published(before, r)
+
+    def test_a_dash_after_a_slash_is_refused_the_same_way(self):
+        # The leading character of the WHOLE string is not the only place a
+        # dash-shaped basename can sit: `instincts/-n` looks exactly as
+        # confusing to a tool that later globs `instincts/*` as a bare `-n`
+        # does at the top level. Refusing only the first character of the
+        # full destination would leave this shape open, so the walk that
+        # already inspects every `/`-separated component for `.`/`..` inspects
+        # each component for a leading `-` too.
+        self.write_config(denyNames=[DENY_NAME])
+        before = self.remote_state()
+        r = self.promote(self.write_src(), "instincts/-n")
+        self.assertNotEqual(r.returncode, 0, "expected a refusal:\n" + self.output(r))
+        self.assert_nothing_published(before, r)
+
+    def test_the_refusal_names_a_flag_not_a_directory(self):
+        # A wrong message is worse than a generic one: reusing
+        # `reject_directory_destination`'s wording would tell the operator
+        # their FILE path looks like a DIRECTORY, which is not what is wrong
+        # here and would send them chasing the wrong fix.
+        self.write_config(denyNames=[DENY_NAME])
+        r = self.promote(self.write_src(), "--all")
+        out = self.output(r).lower()
+        self.assertIn("flag", out, self.output(r))
+        self.assertNotIn("directory", out, self.output(r))
 
 
 # ---------------------------------------------------------------------------
