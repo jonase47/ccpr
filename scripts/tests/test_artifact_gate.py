@@ -113,6 +113,28 @@ PY_DICT_API_KEY = leak("{'api", "_key': 'A1b2C3d4E5f6G7h8I9j0K1l2M3'}")
 # The pattern-source self-exemption marker, spelled out here so the suite can
 # prove it has no effect outside the file that defines the patterns.
 EXEMPT_MARKER = leak("gate-", "pattern-source")
+# WI-0035: the two false positives measured 19.08.2026 -- a documentation
+# placeholder written in capitals behind a real "Authorization: Bearer"
+# header. It opens with a plain alphanumeric, so it is NOT excluded by the
+# GATE_RE_PLACEHOLDER_SLOT shapes (those all open with a non-alnum character).
+PLACEHOLDER_BEARER_1 = leak("Authorization: Bearer ", "YOUR_TOKEN_HERE_REPLACE_ME")
+PLACEHOLDER_BEARER_2 = leak("Authorization: Bearer ", "TODO_INSERT_YOUR_TOKEN_HERE")
+# Same placeholder-word shape, reached through 1a (GATE_RE_SECRET_KV) instead
+# of 1a' -- the filter is scoped to both rules, not just the bearer one.
+PLACEHOLDER_KV = leak("token: ", "YOUR_TOKEN_HERE_REPLACE_ME")
+# Lower-case spelling of the same word list -- pins the case-insensitive
+# design decision; a case-sensitive filter would let this one through.
+PLACEHOLDER_BEARER_LOWERCASE = leak("Authorization: Bearer ", "your_token_here_replace_me")
+# A value that is credential-shaped (mixed-case, no dictionary word other than
+# the one under test) and merely CONTAINS a listed word mid-string, not
+# prefixed/suffixed by it the way the two reported cases are. Pins the PO
+# decision that "contains" -- not "is" -- is what the filter checks.
+PLACEHOLDER_WORD_MID_VALUE_KV = leak("token: aB3d", "EXAMPLE", "f9K2mN4pQ7rS0tU1vW")
+# AWS's own documentation access key. Contains EXAMPLE, and must still fire --
+# but only GATE_RE_SECRET_VENDOR (AKIA[0-9A-Z]{16}, no placeholder filter) may
+# be the source: this fixture carries no keyword/`[:=]` context, so neither 1a
+# nor 1a' can match it in the first place.
+AWS_DOC_EXAMPLE_KEY = leak("AKIA", "IOSFODNN7EXAMPLE")
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -493,6 +515,90 @@ class BearerTokenTest(GateTestBase):
 
     def test_a_bearer_masked_slot_is_still_a_template(self):
         self.assert_silent("log: Bearer ****************\n")
+
+
+# ---------------------------------------------------------------------------
+# 2e. Placeholder WORDS in a 1a/1a' value (WI-0035).
+#
+# GATE_RE_PLACEHOLDER_SLOT (2b, above) stays silent on '${...}', '<...>',
+# '{{...}}', a '%'-format slot and '***' because every one of those shapes
+# opens with a character outside [A-Za-z0-9+] -- the same class the 1a/1a'
+# value itself must start with. 'YOUR_TOKEN_HERE_REPLACE_ME' opens with a
+# plain alphanumeric, so none of that reasoning reaches it; a documentation
+# placeholder written in screaming-snake-case still reads as a real
+# credential to the keyword-assignment and bearer-header rules.
+#
+# Scoped to 1a (GATE_RE_SECRET_KV) and 1a' (GATE_RE_SECRET_BEARER) only. The
+# vendor/blob/private-key/connection-string rules get no placeholder-word
+# filter and must not: WI-0035 measured that the shape-based alternative this
+# item considered and rejected (dropping values of only capitals, digits and
+# underscores) is congruent with GATE_RE_SECRET_VENDOR's own AWS Access Key
+# ID shape. AWS's own documentation access key (AWS_DOC_EXAMPLE_KEY below) is
+# proof: it contains a listed word (EXAMPLE) and must still fire, via the
+# vendor rule, which carries no such filter.
+# ---------------------------------------------------------------------------
+class PlaceholderWordInKeywordOrBearerValueTest(GateTestBase):
+    def test_the_first_reported_bearer_placeholder_goes_silent(self):
+        self.assert_silent(PLACEHOLDER_BEARER_1 + "\n")
+
+    def test_the_second_reported_bearer_placeholder_goes_silent(self):
+        self.assert_silent(PLACEHOLDER_BEARER_2 + "\n")
+
+    def test_a_keyword_assignment_placeholder_goes_silent_too(self):
+        # Same filter, the other rule it is scoped to -- 1a, not just 1a'.
+        self.assert_silent(PLACEHOLDER_KV + "\n")
+
+    def test_a_lowercase_placeholder_word_goes_silent_too(self):
+        # Case-insensitive by design: WI-0035's word list is spelled in caps
+        # because both reported cases were, but the filter must not become a
+        # letter-case check by the back door -- that is exactly the shape the
+        # PO decision rejected for the OTHER half of this item.
+        self.assert_silent(PLACEHOLDER_BEARER_LOWERCASE + "\n")
+
+    def test_a_value_that_merely_contains_a_placeholder_word_goes_silent(self):
+        # Decided: the filter checks CONTAINS, not IS -- an otherwise
+        # credential-shaped value with a listed word sitting mid-string is
+        # dropped too. Be precise about which direction that fails in, since
+        # this test pins a SILENCED credential-shaped value: it is the list's
+        # INCOMPLETENESS that fails safely (an unlisted word still fires).
+        # A listed word landing inside a genuinely real value IS a missed
+        # leak -- accepted because the odds of a random credential carrying
+        # one of these words are negligible, not because it cannot happen.
+        self.assert_silent(PLACEHOLDER_WORD_MID_VALUE_KV + "\n")
+
+    def test_a_mixed_case_credential_without_a_placeholder_word_still_fires(self):
+        # Regression guard: the filter must not over-match on mixed case or
+        # on credential-shaped values that carry no listed word.
+        self.assert_fires(CREDENTIAL + "\n", "secret")
+
+    def test_a_real_credential_still_fires_when_the_LINE_says_example(self):
+        # The one that makes `-o` load-bearing rather than cosmetic. The
+        # filter drops a candidate whose MATCH contains a listed word; the
+        # match is the keyword + separator + value, not the whole line. Prose
+        # elsewhere on the line must not silence a real credential.
+        #
+        # Measured: with `-o` removed (filtering line-wise instead), this
+        # input yields 0 findings while the whole suite stays green -- a
+        # genuine credential silenced by an unrelated word, the one direction
+        # this gate must not fail in. Nothing else pins it.
+        self.assert_fires("For example, see the docs: " + CREDENTIAL + "\n", "secret")
+
+    def test_two_candidates_on_one_line_are_reported_separately(self):
+        # Second consequence of `-o`, pinned so the granularity change is a
+        # decision rather than a side effect: line-wise extraction reported
+        # such a line once, match-wise reports it twice.
+        text = CREDENTIAL + " and " + leak("to", "ken = ") + "Z9y8X7w6V5u4T3s2R1q0P9\n"
+        r = self.run_gate(self.write("sample.md", text))
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertEqual(
+            (r.stdout + r.stderr).count("[secret]"), 2, r.stdout + r.stderr
+        )
+
+    def test_aws_doc_example_key_still_fires_via_the_vendor_rule(self):
+        self.assert_fires(
+            "AWS docs use " + AWS_DOC_EXAMPLE_KEY + " as the demo access key.\n",
+            "secret",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -1093,12 +1199,13 @@ class PatternSourceExemptionIsLoadBearingTest(GateTestBase):
         self.assertEqual(len(finding_lines), 3, r.stdout)
         # Line numbers as of this test, not the {95, 96, 104} the work item
         # names: adding the bearer-token pattern block (WI-0013 point 1)
-        # shifted these three comment lines down by 20, and anchoring
+        # shifted these three comment lines down by 20, anchoring
         # GATE_RE_SECRET_BEARER against prose (WI-0013 blocker follow-up)
-        # shifted them another 10.
-        self.assertIn(":125:", r.stdout)
-        self.assertIn(":126:", r.stdout)
-        self.assertIn(":134:", r.stdout)
+        # shifted them another 10, and adding the placeholder-word filter
+        # (WI-0035) shifted them another 40.
+        self.assertIn(":165:", r.stdout)
+        self.assertIn(":166:", r.stdout)
+        self.assertIn(":174:", r.stdout)
         self.assertEqual(self.categories(r), {"secret"})
 
     # -----------------------------------------------------------------------

@@ -7,6 +7,23 @@ All notable changes to this project are documented in this file. The format is b
 ## [Unreleased]
 
 ### Fixed
+- **A screaming-snake-case placeholder still read as a bearer token or a keyword-assignment
+  secret.** `Authorization: Bearer YOUR_TOKEN_HERE_REPLACE_ME` and
+  `Authorization: Bearer TODO_INSERT_YOUR_TOKEN_HERE` both fired as `[secret]`, because the value
+  opens with a plain alphanumeric — the same class a real credential starts with, and none of
+  `GATE_RE_PLACEHOLDER_SLOT`'s shapes (`${...}`, `$VAR`, `<...>`, `{{...}}`, a `%`-format slot,
+  `***`) cover it, since all of those open with a non-alphanumeric character instead. A
+  shape-based filter (dropping values made only of capitals, digits and underscores) was
+  considered and rejected: `GATE_RE_SECRET_VENDOR`'s own `AKIA[0-9A-Z]{16}` is exactly that shape,
+  so it would have gone congruent with a real AWS Access Key ID. Added
+  `GATE_RE_SECRET_PLACEHOLDER_WORD` instead — a case-insensitive, substring match against a word
+  list (`YOUR`, `TODO`, `REPLACE`, `CHANGEME`, `EXAMPLE`, `PLACEHOLDER`, `INSERT`, `DUMMY`,
+  `SAMPLE`) — applied only to the keyword-assignment (1a) and bearer-header (1a') checks via the
+  same extract-then-drop two-pass idiom `GATE_RE_CONNSTRING`/`GATE_RE_PLACEHOLDER` already use.
+  Scoped deliberately: the vendor/blob/private-key/connection-string rules get no such filter, so
+  AWS's own documentation key (`AKIA...EXAMPLE`) still fires there, unfiltered. Accepted cost: the
+  word list is never complete and will grow — an unlisted word means a placeholder still fires (a
+  false positive), never a missed leak.
 - **`memory-sync.sh promote` accepted a destination that reads as a command-line flag.**
   `promote <src> --all` and `promote <src> -n` both exited 0 and published a file literally named
   `--all` or `-n`. Not a leak — `git add -- "$dst"`, `dirname -- "$dst"` and `cp -- "$src" "$dst"`

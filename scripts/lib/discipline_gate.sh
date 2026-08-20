@@ -91,6 +91,46 @@ GATE_RE_SECRET_KV='(token|secret|password|passwd|bearer|api[_-]?key)["'"'"']?[[:
 #      unreachable code, not a second guard.
 GATE_RE_SECRET_BEARER='[:=][[:space:]]*["'"'"']?bearer[[:space:]]+[A-Za-z0-9+][A-Za-z0-9._/+=-]{15,}'   # gate-pattern-source
 
+# 1a'') placeholder WORDS in a 1a/1a' value (WI-0035). The comment on 1a'
+#      above is right that no filter is needed for the six
+#      GATE_RE_PLACEHOLDER_SLOT shapes: each of `${...}`, `$VAR`, `<...>`,
+#      `{{...}}`, a `%`-format slot and `***` opens with a character outside
+#      `[A-Za-z0-9+]`, so the value's own start-of-match class already
+#      excludes them. It does NOT cover this shape: a documentation
+#      placeholder written in screaming-snake-case —
+#      'YOUR_TOKEN_HERE_REPLACE_ME', 'TODO_INSERT_YOUR_TOKEN_HERE' — opens
+#      with a plain alphanumeric, same as a real credential, so it reaches
+#      1a/1a' untouched. This extends that comment's reasoning to a shape it
+#      does not claim to cover, rather than contradicting it.
+#
+#      Matched as a SUBSTRING of the extracted match (keyword/"bearer" +
+#      separator + value together — none of 1a/1a's keyword alternatives
+#      collide with a word below, so scoping to the value alone would filter
+#      the identical set at extra cost) and CASE-INSENSITIVELY, so a
+#      lowercase 'your_token_here' is caught the same as the reported
+#      all-caps case. "Contains", not "is": WI-0035's PO decision phrased it
+#      that way, and an otherwise credential-shaped value that merely has one
+#      of these words sitting mid-string is dropped too — decided, not an
+#      oversight.
+#
+#      Scoped to 1a and 1a' ONLY — not 1b/1b'/1c. WI-0035 measured the
+#      shape-based alternative this item first considered (dropping values
+#      made only of capitals, digits and underscores) against
+#      GATE_RE_SECRET_VENDOR's own 'AKIA[0-9A-Z]{16}': an AWS Access Key ID
+#      is exactly that shape, so the proposed filter would have gone
+#      congruent with a real credential format this gate is built to catch.
+#      Widening this word filter to the vendor/blob/private-key/
+#      connection-string rules would carry the same risk for no benefit —
+#      AWS's own documentation access key contains a listed word (EXAMPLE)   # gate-pattern-source
+#      and must keep firing there, unfiltered.
+#
+#      ACCEPTED COST, decided 20.08.2026: this word list is never complete
+#      and will grow. That is the safe direction on purpose — an unlisted
+#      word means a placeholder still fires (a false positive), never a
+#      missed leak. Do not "fix" this into a shape-based filter; that shape
+#      was already measured and rejected for the reason above.
+GATE_RE_SECRET_PLACEHOLDER_WORD='(YOUR|TODO|REPLACE|CHANGEME|EXAMPLE|PLACEHOLDER|INSERT|DUMMY|SAMPLE)'   # gate-pattern-source
+
 # 1b) vendor-prefixed credentials — short, unambiguous, no length heuristic.
 GATE_RE_SECRET_VENDOR='(perm-[A-Za-z0-9._-]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16})'   # gate-pattern-source
 
@@ -504,7 +544,13 @@ gate_scan_file() {
   fi
 
   # --- secrets -------------------------------------------------------------
-  hits="$(_gate_hits "$content" -nEi -e "$GATE_RE_SECRET_KV")"
+  # Two-pass, same idiom as GATE_RE_CONNSTRING/GATE_RE_PLACEHOLDER below:
+  # extract candidates with `-o`, then drop those whose match contains a
+  # placeholder word (WI-0035). `-o` also means a line with more than one
+  # candidate now reports once per match instead of once per line — the same
+  # granularity the connection-string pair already uses.
+  hits="$(_gate_hits "$content" -noEi -e "$GATE_RE_SECRET_KV" \
+    | grep -viE -e "$GATE_RE_SECRET_PLACEHOLDER_WORD" || true)"
   while IFS= read -r line; do
     [ -n "$line" ] || continue
     _gate_emit "${line%%:*}" secret "possible credential assignment (keyword = <value>)"
@@ -513,7 +559,8 @@ gate_scan_file() {
 $hits
 EOF
 
-  hits="$(_gate_hits "$content" -nEi -e "$GATE_RE_SECRET_BEARER")"
+  hits="$(_gate_hits "$content" -noEi -e "$GATE_RE_SECRET_BEARER" \
+    | grep -viE -e "$GATE_RE_SECRET_PLACEHOLDER_WORD" || true)"
   while IFS= read -r line; do
     [ -n "$line" ] || continue
     _gate_emit "${line%%:*}" secret "bearer token header — verify it is not a real credential"
