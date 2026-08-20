@@ -704,21 +704,28 @@ class ExternalToolExitStatusTest(unittest.TestCase):
         `known-risk-not-yet-fixed` sites this same baseline recorded --
         both invocations are now explicitly checked, not exempted, so
         `bare-needs-exemption` drops by 2 and the two checked buckets each
-        gain one site). 125 invocations total across the 15 shipped files,
-        split as below. A change in these numbers means either a script
-        changed shape or the scanner's own logic changed -- worth a
-        deliberate look either way, not a silent drift."""
+        gain one site; updated again the same day when WI-0018's follow-up
+        fix added three `git rev-parse --show-toplevel` calls to
+        artifact-gate.sh's docs-boundary self-detection -- one discarded
+        under `|| true` with a `downstream-checks-result` marker (its
+        output is tested for emptiness two lines later), two real `||`
+        fallback-assignment branches, so `discard-needs-exemption` gains
+        one site and `checked-chain` gains two). 128 invocations total
+        across the 15 shipped files, split as below. A change in these
+        numbers means either a script changed shape or the scanner's own
+        logic changed -- worth a deliberate look either way, not a silent
+        drift."""
         invocations = scan_tree()
         by_disposition = {}
         for inv in invocations:
             by_disposition[inv.disposition] = by_disposition.get(inv.disposition, 0) + 1
-        self.assertEqual(125, len(invocations))
+        self.assertEqual(128, len(invocations))
         self.assertEqual(
             {
                 "checked-condition": 16,
                 "checked-captured": 5,
-                "checked-chain": 14,
-                "discard-needs-exemption": 31,
+                "checked-chain": 16,
+                "discard-needs-exemption": 32,
                 "bare-needs-exemption": 59,
             },
             by_disposition,

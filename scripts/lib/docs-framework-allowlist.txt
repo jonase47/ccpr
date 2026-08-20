@@ -1,0 +1,23 @@
+# Framework paths under docs/ that install.sh ships to every user's own
+# ~/.claude (see scripts/artifact-gate.sh's docs/ boundary check and
+# install.sh's docs/ copy logic).
+#
+# One entry per line, relative to docs/. A trailing "/" matches that
+# directory and everything under it; an entry without a trailing "/" matches
+# exactly one file. Blank lines and lines starting with "#" are ignored.
+#
+# This file is the SINGLE SOURCE OF TRUTH for both sides of the boundary
+# (WI-0018): artifact-gate.sh fails a newly tracked docs/ path that is not
+# listed here, install.sh copies only the entries listed here out of docs/
+# and reports what it skipped. Neither script keeps its own copy of this
+# list -- two hand-kept copies is the defect shape WI-0059 already produced
+# once (an archive path held in a variable and again as a literal).
+#
+# Adding a framework document is one new line here, paid once, at the moment
+# someone adds the document. Everything else tracked under docs/ is working
+# state and belongs in .gitignore instead.
+adr/
+logo/
+CONSTITUTION.md
+NEXT_STEPS_REFERENCE.md
+PROJECT_PHASES.md

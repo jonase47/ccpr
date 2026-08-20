@@ -51,6 +51,90 @@ PERSONAL=( settings.json CLAUDE.md )
 #   - scripts/lib/scan_rules, scripts/lib/test_parsers : harness-managed local data.
 PROTECTED=( scripts/local-llm scripts/lib/scan_rules scripts/lib/test_parsers )
 
+# WI-0018: docs/ ships both framework documentation (adr/, CONSTITUTION.md,
+# ...) and, in a working checkout, THIS repository's own working state
+# (docs/workitems/, docs/memory/, docs/HANDOVER.md, docs/decisions/, ...).
+# .gitignore keeps that state out of a fresh clone, but a checkout that
+# predates the gitignore rule -- or one that has simply been worked in for a
+# while, like a maintainer's own dogfooding directory -- still carries it on
+# disk, and a plain wholesale `cp -R docs` would ship it into every install.
+#
+# DOCS_ALLOWLIST_FILE is the single source of truth for which top-level
+# docs/ entries are framework: the SAME file scripts/artifact-gate.sh
+# enforces against the repository's tracked files (its docs/ boundary
+# check). Neither script keeps its own copy of the list.
+DOCS_ALLOWLIST_FILE="$SRC/scripts/lib/docs-framework-allowlist.txt"
+
+# docs_entry_is_allowlisted <name> — true when <name> (a top-level docs/
+# child's own basename) is listed in DOCS_ALLOWLIST_FILE. Mirrors
+# scripts/artifact-gate.sh's gate_docs_boundary_violation(): a trailing "/"
+# entry matches a directory of that name, an entry without one matches a
+# file of that exact name. Comments (#) and blank lines are ignored.
+docs_entry_is_allowlisted() {
+  local name="$1" entry
+  while IFS= read -r entry; do
+    case "$entry" in
+      ''|'#'*) continue ;;
+    esac
+    case "$entry" in
+      */) [[ "$name" == "${entry%/}" ]] && return 0 ;;
+      *) [[ "$name" == "$entry" ]] && return 0 ;;
+    esac
+  done < "$DOCS_ALLOWLIST_FILE"
+  return 1
+}
+
+# install_docs — replaces the generic wholesale directory copy for the
+# single artifact "docs": copies only the top-level entries listed in
+# DOCS_ALLOWLIST_FILE from $SRC/docs into $DEST/docs, and reports whatever it
+# skipped (name + approximate size) instead of leaving the operator to
+# wonder later where files went.
+install_docs() {
+  local src_docs="$SRC/docs" dest_docs="$DEST/docs"
+  [[ -d "$src_docs" ]] || { echo "  (skip: docs not present in source)"; return; }
+  if [[ ! -r "$DOCS_ALLOWLIST_FILE" ]]; then
+    echo "ERROR: docs/ framework allowlist not found: $DOCS_ALLOWLIST_FILE" >&2
+    exit 1
+  fi
+
+  echo "  installing docs"
+  rm -rf "${dest_docs:?}"
+  mkdir -p "$dest_docs"
+
+  local skipped_names=() skipped_kb=0 name size
+  # dotglob: a plain `*` never matches a dotfile, and docs/ is where the
+  # project's OWN dotfiles/dot-directories accumulate (docs/.DS_Store,
+  # docs/.handover-archive/) -- without it those entries are neither copied
+  # nor reported, the exact silent-scope-loss shape this check exists to
+  # close, just for a different glob than the one that usually causes it.
+  # `.` and `..` are never matched by shell filename generation regardless.
+  local had_dotglob=0
+  shopt -q dotglob && had_dotglob=1
+  shopt -s dotglob
+  for entry_path in "$src_docs"/*; do
+    [[ -e "$entry_path" ]] || continue
+    name="$(basename "$entry_path")"
+    if docs_entry_is_allowlisted "$name"; then
+      cp -R "$entry_path" "$dest_docs/$name"
+    else
+      size="$(du -sk "$entry_path" 2>/dev/null | cut -f1)"
+      skipped_names+=("$name")
+      skipped_kb=$((skipped_kb + ${size:-0}))
+    fi
+  done
+  [[ "$had_dotglob" -eq 1 ]] || shopt -u dotglob
+
+  if [[ ${#skipped_names[@]} -gt 0 ]]; then
+    echo "    skipped ${#skipped_names[@]} working-state path(s) under docs/ (~${skipped_kb}K, not installed):"
+    for name in "${skipped_names[@]}"; do
+      echo "      - docs/$name"
+    done
+    echo "    (likely a checkout predating the docs/.gitignore rule -- see .gitignore and"
+    echo "     scripts/lib/docs-framework-allowlist.txt. If one of these IS framework"
+    echo "     documentation, add it to the allowlist and re-run.)"
+  fi
+}
+
 ASSUME_YES=0
 DRY_RUN=0
 UPDATE=0
@@ -190,6 +274,12 @@ mkdir -p "$DEST"
 for item in "${ARTIFACTS[@]}"; do
   if [[ ! -e "$SRC/$item" ]]; then
     echo "  (skip: $item not present in source)"
+    continue
+  fi
+  # WI-0018: "docs" is the one FRAMEWORK artifact that is not shipped
+  # wholesale -- see install_docs() above.
+  if [[ "$item" == "docs" ]]; then
+    install_docs
     continue
   fi
   echo "  installing $item"

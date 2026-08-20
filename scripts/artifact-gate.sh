@@ -73,6 +73,80 @@ usage() {
   sed -n '2,/^$/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'  # exit-status: exempt set-e-sufficient
 }
 
+# --- docs/ framework-vs-working-state boundary (WI-0018) ----------------------
+# install.sh ships every tracked path under docs/ to every user's own
+# ~/.claude (see install.sh's docs/ copy logic). A path that RECORDS work on
+# the framework rather than EXPLAINING it -- a work item, a persona's review
+# notes -- would land in that user's own docs/ looking like their state; this
+# is exactly what shipped once (17 work items, ~96 KB of persona notes,
+# committed and pushed before the gitignore rule existed).
+#
+# DOCS_ALLOWLIST_FILE is the single source of truth for BOTH sides of the
+# boundary: this check fails a newly tracked docs/ path that is not listed
+# there, install.sh copies only the listed entries out of docs/. Neither side
+# keeps its own copy of the list.
+DOCS_ALLOWLIST_FILE="$HERE/lib/docs-framework-allowlist.txt"
+
+# The rule above encodes a fact about CCPR's OWN repository ("docs/ is a
+# framework directory"), which is nonsense applied to any other repository:
+# a foreign project's docs/README.md is their documentation, and
+# docs/workitems/ may be exactly where THEIR work items belong. Measured
+# false positive: this script, pointed at an unrelated project via --repo,
+# reported the project's own docs/ as violating CCPR's allowlist and told the
+# owner their documentation belonged in .gitignore.
+#
+# Self-detecting, no new flag: mirrors the self-exemption a few lines up in
+# lib/discipline_gate.sh (_GATE_PATTERN_SOURCE resolves the gate's own
+# absolute FILE path to recognise itself when scanning content). Here the
+# gate resolves the git REPOSITORY it itself lives in, and the docs-boundary
+# rule applies only when that is the SAME repository being swept
+# (DOCS_BOUNDARY_APPLIES below, finalised once the scan scope is known).
+# Empty when this copy of the script is not inside a git repository at all
+# -- ordinarily true for an installed copy under ~/.claude -- which is also
+# the correct answer: an installed gate swept over any --repo must not fire
+# this rule either.
+#
+# Known, accepted gap: a project that VENDORS a copy of this script into its
+# own repository and points --repo at itself satisfies this equality too --
+# the copy's "own repository" IS the one being swept. Self-detection by
+# location cannot distinguish "the same location" from "CCPR's project
+# identity" without a content fingerprint, which would trade one fragility
+# for another; not solved here.
+_GATE_OWN_REPO_ROOT="$(git -C "$HERE" rev-parse --show-toplevel 2>/dev/null)" || true  # exit-status: exempt downstream-checks-result
+
+# gate_docs_boundary_violation <repo-relative-path> — print a finding message
+# and return 1 when <path> starts with "docs/" and is not covered by
+# DOCS_ALLOWLIST_FILE; return 0 and print nothing for anything else
+# (including every path that does not start with "docs/" at all, and every
+# path at all once DOCS_BOUNDARY_APPLIES is 0); return 2 when the allowlist
+# itself could not be read, so a missing/broken data file cannot silently
+# read as "nothing to enforce".
+gate_docs_boundary_violation() {
+  local rel="$1" sub entry
+  [ "$DOCS_BOUNDARY_APPLIES" -eq 1 ] || return 0
+  case "$rel" in
+    docs/*) : ;;
+    *) return 0 ;;
+  esac
+  if [ ! -r "$DOCS_ALLOWLIST_FILE" ]; then
+    printf 'docs/ framework allowlist not found or unreadable: %s' "$DOCS_ALLOWLIST_FILE"
+    return 2
+  fi
+  sub="${rel#docs/}"
+  while IFS= read -r entry; do
+    case "$entry" in
+      ''|'#'*) continue ;;
+    esac
+    case "$entry" in
+      */) case "$sub" in "$entry"*) return 0 ;; esac ;;
+      *) [ "$sub" = "$entry" ] && return 0 ;;
+    esac
+  done < "$DOCS_ALLOWLIST_FILE"
+  printf '%s is tracked under docs/ but is not in the framework allowlist (%s) -- if it documents CCPR itself, add it there; if it records work ON the framework (a work item, a persona silo, a decision draft, a generated report) it is working state and belongs in .gitignore instead' \
+    "$rel" "$DOCS_ALLOWLIST_FILE"
+  return 1
+}
+
 # Loaded before the arguments are parsed: die() masks configured names, and it
 # can only do that once the list is known. A usage error names whatever the
 # caller typed, which is exactly where a tenant-named path arrives from CI.
@@ -168,6 +242,29 @@ else
     | while IFS= read -r -d '' rel; do printf '%s\n' "$REPO/$rel"; done > "$TMP"  # exit-status: exempt set-e-sufficient
 fi
 
+# WI-0018 follow-up: finalise whether the docs-boundary rule applies, now that
+# the scope being scanned is known. --repo mode compares against the SWEPT
+# repository directly; explicit FILES mode has no such variable, so it falls
+# back to the invoking process's own working directory -- the shape a
+# pre-commit hook or CI job actually runs in (cwd = the repository being
+# checked). A FILES-mode path is only ever matched against "docs/*" as a
+# repository-RELATIVE string (see gate_docs_boundary_violation), so an
+# absolute path handed to this mode never triggers the rule regardless of
+# this detection, and a caller passing a relative docs/ path from a foreign
+# repository's own working directory correctly stays disabled (its own
+# toplevel differs from _GATE_OWN_REPO_ROOT).
+DOCS_BOUNDARY_APPLIES=0
+if [ -n "$_GATE_OWN_REPO_ROOT" ]; then
+  if [ -n "$REPO" ]; then
+    _docs_swept_root="$(git -C "$REPO" rev-parse --show-toplevel 2>/dev/null)" || _docs_swept_root=""
+  else
+    _docs_swept_root="$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null)" || _docs_swept_root=""
+  fi
+  if [ -n "$_docs_swept_root" ] && [ "$_docs_swept_root" = "$_GATE_OWN_REPO_ROOT" ]; then
+    DOCS_BOUNDARY_APPLIES=1
+  fi
+fi
+
 # --- scan ---------------------------------------------------------------------
 scanned=0
 skipped_binary=0
@@ -231,6 +328,23 @@ while IFS= read -r f; do
   fi
   if [ -n "$path_idx" ]; then rel="$(gate_redact_path "$rel")"; fi
 
+  # WI-0018: a path-shaped check, like the deny-list one just above, so it
+  # runs on every tracked path regardless of symlink/binary status -- a
+  # working-state file that happens to be an image still ships as itself.
+  # Same `if`-around-the-assignment shape as the deny-list and content checks
+  # in this loop, for the same reason under `set -e`: the ordinary case IS a
+  # nonzero return (1, a clean path), and only >=2 (the allowlist file itself
+  # could not be read) must abort the run.
+  docs_rc=0
+  if docs_msg="$(gate_docs_boundary_violation "$rel")"; then
+    docs_rc=0
+  else
+    docs_rc=$?
+  fi
+  if [ "$docs_rc" -ge 2 ]; then
+    die "$docs_msg"
+  fi
+
   out=""
   if [ "$is_symlink" -eq 1 ]; then
     # Never read through: not the target's content, not even a readability
@@ -289,7 +403,7 @@ while IFS= read -r f; do
     fi
   fi
 
-  if [ -z "$out" ] && [ -z "$path_idx" ]; then continue; fi
+  if [ -z "$out" ] && [ -z "$path_idx" ] && [ "$docs_rc" -ne 1 ]; then continue; fi
 
   dirty_files=$((dirty_files + 1))
 
@@ -297,6 +411,13 @@ while IFS= read -r f; do
     # Line 0: the finding is the name of the file, not a line inside it.
     say '%s:0: [denylist] configured tenant/project name #%s occurs in the FILE PATH (name redacted)' \
       "$rel" "$path_idx"
+    findings=$((findings + 1))
+  fi
+
+  if [ "$docs_rc" -eq 1 ]; then
+    # Line 0: same reason as the deny-list finding above -- the offence is
+    # the path's LOCATION under docs/, not a line inside the file.
+    say '%s:0: [docs-boundary] %s' "$rel" "$docs_msg"
     findings=$((findings + 1))
   fi
 

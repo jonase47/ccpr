@@ -1612,6 +1612,171 @@ class SweepTest(GateTestBase):
 
 
 # ---------------------------------------------------------------------------
+# 5b. WI-0018 — the docs/ framework-vs-working-state boundary. install.sh
+#     ships every tracked path under docs/ to every user's own ~/.claude; a
+#     path that RECORDS work on the framework rather than EXPLAINING it (a
+#     work item, a persona's review notes) would land there looking like the
+#     user's own state. scripts/lib/docs-framework-allowlist.txt is the single
+#     source of truth this check reads, shared with install.sh's copy logic
+#     (see test_install_docs_boundary.py) so the two sides cannot drift apart.
+# ---------------------------------------------------------------------------
+class DocsBoundaryTest(GateTestBase):
+    """The docs-boundary rule is self-detecting (artifact-gate.sh's
+    _GATE_OWN_REPO_ROOT, mirroring lib/discipline_gate.sh's own
+    _GATE_PATTERN_SOURCE self-exemption): it only fires when the repository
+    being swept is the SAME repository the running gate script itself lives
+    in. Every test here therefore VENDORS a copy of the gate (+ its lib +
+    the shared allowlist file) into the scratch repo and runs THAT copy --
+    exactly the same reason test_install_docs_boundary.py's InstallTestBase
+    copies install.sh into its own fixture tree (install.sh resolves SRC the
+    same self-referential way). See ForeignRepoIsNeverFlaggedTest below for
+    the mirror-image case: the REAL, un-vendored gate pointed at a foreign
+    repository must come back clean."""
+
+    def make_repo(self):
+        repo = self.work / "repo"
+        repo.mkdir()
+        subprocess.run(["git", "init", "-q"], cwd=repo, check=True, env=self.env())
+        return repo
+
+    def commit_all(self, repo):
+        env = self.env(GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@host.invalid",
+                       GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@host.invalid")
+        subprocess.run(["git", "add", "-A"], cwd=repo, check=True, env=env)
+        subprocess.run(["git", "commit", "-qm", "x"], cwd=repo, check=True, env=env)
+
+    def vendor_gate(self, repo):
+        dest_scripts = repo / "scripts"
+        dest_lib = dest_scripts / "lib"
+        dest_lib.mkdir(parents=True)
+        shutil.copy(GATE, dest_scripts / "artifact-gate.sh")
+        shutil.copy(LIB, dest_lib / "discipline_gate.sh")
+        shutil.copy(REPO_ROOT / "scripts" / "lib" / "docs-framework-allowlist.txt",
+                    dest_lib / "docs-framework-allowlist.txt")
+        return dest_scripts / "artifact-gate.sh"
+
+    def run_vendored_gate(self, repo, *args):
+        vendored = self.vendor_gate(repo)
+        return subprocess.run(
+            ["bash", str(vendored), *[str(a) for a in args]],
+            capture_output=True, text=True, env=self.env(),
+        )
+
+    def test_a_newly_tracked_docs_path_outside_the_allowlist_fails(self):
+        repo = self.make_repo()
+        (repo / "docs").mkdir()
+        (repo / "docs" / "workitems").mkdir()
+        (repo / "docs" / "workitems" / "WI-9999.md").write_text(
+            "---\nid: WI-9999\n---\n\nworking state, not framework docs.\n",
+            encoding="utf-8",
+        )
+        self.commit_all(repo)
+        r = self.run_vendored_gate(repo, "--repo", repo)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("docs-boundary", r.stdout)
+        self.assertIn("docs/workitems/WI-9999.md", r.stdout)
+
+    def test_the_failure_message_names_both_remedies(self):
+        repo = self.make_repo()
+        (repo / "docs").mkdir()
+        (repo / "docs" / "HANDOVER.md").write_text("state\n", encoding="utf-8")
+        self.commit_all(repo)
+        r = self.run_vendored_gate(repo, "--repo", repo)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        # The finding has to tell a contributor what to do next: either this
+        # is framework documentation (add it to the allowlist) or it is
+        # working state (add it to .gitignore instead).
+        self.assertIn("allowlist", r.stdout)
+        self.assertIn("gitignore", r.stdout)
+
+    def test_each_allowlisted_entry_passes(self):
+        repo = self.make_repo()
+        (repo / "docs" / "adr").mkdir(parents=True)
+        (repo / "docs" / "adr" / "ADR-0001.md").write_text(CLEAN_TEXT, encoding="utf-8")
+        (repo / "docs" / "logo").mkdir(parents=True)
+        (repo / "docs" / "logo" / "mark.png").write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 8)
+        (repo / "docs" / "CONSTITUTION.md").write_text(CLEAN_TEXT, encoding="utf-8")
+        (repo / "docs" / "NEXT_STEPS_REFERENCE.md").write_text(CLEAN_TEXT, encoding="utf-8")
+        (repo / "docs" / "PROJECT_PHASES.md").write_text(CLEAN_TEXT, encoding="utf-8")
+        self.commit_all(repo)
+        r = self.run_vendored_gate(repo, "--repo", repo)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_a_nested_path_under_an_allowlisted_directory_passes(self):
+        repo = self.make_repo()
+        (repo / "docs" / "adr" / "nested").mkdir(parents=True)
+        (repo / "docs" / "adr" / "nested" / "ADR-0002.md").write_text(
+            CLEAN_TEXT, encoding="utf-8",
+        )
+        self.commit_all(repo)
+        r = self.run_vendored_gate(repo, "--repo", repo)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_a_path_outside_docs_is_not_subject_to_the_boundary_check(self):
+        repo = self.make_repo()
+        (repo / "src").mkdir()
+        (repo / "src" / "workitems.md").write_text(CLEAN_TEXT, encoding="utf-8")
+        self.commit_all(repo)
+        r = self.run_vendored_gate(repo, "--repo", repo)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_a_path_named_like_an_allowlist_entry_but_not_a_prefix_match_fails(self):
+        # "adr-notes.md" starts with "adr" but is not under "adr/" -- the
+        # trailing slash in the allowlist entry must be honoured as a real
+        # path-segment boundary, not a string prefix.
+        repo = self.make_repo()
+        (repo / "docs").mkdir()
+        (repo / "docs" / "adr-notes.md").write_text(CLEAN_TEXT, encoding="utf-8")
+        self.commit_all(repo)
+        r = self.run_vendored_gate(repo, "--repo", repo)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("docs-boundary", r.stdout)
+
+
+# ---------------------------------------------------------------------------
+# 5c. WI-0018 follow-up (20.08.2026 PO report): the docs-boundary rule fired
+# on EVERY repository the gate swept, not only CCPR's own -- a project
+# adopting CCPR and running the shipped, un-vendored gate against its own
+# `--repo` got told its own docs/README.md and docs/workitems/ belonged in
+# .gitignore. Fixed by self-detection (artifact-gate.sh's
+# _GATE_OWN_REPO_ROOT / DOCS_BOUNDARY_APPLIES): the rule now only applies
+# when the repository being swept IS the one the running gate script lives
+# in. This class uses the REAL, un-vendored GATE constant (unlike
+# DocsBoundaryTest above, which deliberately vendors a copy) -- that is the
+# exact shape of the reported defect: CCPR's own gate script, pointed via
+# --repo at an unrelated project.
+# ---------------------------------------------------------------------------
+class ForeignRepoIsNeverFlaggedTest(GateTestBase):
+    def make_foreign_repo(self):
+        repo = self.work / "foreign-project"
+        repo.mkdir()
+        subprocess.run(["git", "init", "-q"], cwd=repo, check=True, env=self.env())
+        (repo / "docs" / "workitems").mkdir(parents=True)
+        (repo / "docs" / "README.md").write_text(
+            "# My Project Docs\n\nordinary project documentation.\n", encoding="utf-8",
+        )
+        (repo / "docs" / "workitems" / "MY-1.md").write_text(
+            "---\nid: MY-1\n---\n\nthis project's own work item.\n", encoding="utf-8",
+        )
+        env = self.env(GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@host.invalid",
+                       GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@host.invalid")
+        subprocess.run(["git", "add", "-A"], cwd=repo, check=True, env=env)
+        subprocess.run(["git", "commit", "-qm", "x"], cwd=repo, check=True, env=env)
+        return repo
+
+    def test_a_foreign_projects_docs_readme_and_workitems_produce_no_docs_boundary_finding(self):
+        repo = self.make_foreign_repo()
+        r = self.run_gate("--repo", repo)
+        self.assertNotIn("docs-boundary", r.stdout + r.stderr)
+
+    def test_a_foreign_repo_sweep_exits_clean(self):
+        repo = self.make_foreign_repo()
+        r = self.run_gate("--repo", repo)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("2 files", r.stdout)
+
+
+# ---------------------------------------------------------------------------
 # 6. This repository must itself be clean — the point of the exercise.
 # ---------------------------------------------------------------------------
 class ShippedArtifactsAreCleanTest(GateTestBase):

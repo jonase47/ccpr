@@ -342,6 +342,35 @@ All notable changes to this project are documented in this file. The format is b
   in a theme file but not listed in the index are reported as INFO (expected for frozen overlays such
   as `imported-*.md`), while index bullets with no matching entry are a WARNING — the index pointing
   at content that does not exist.
+- **The docs/ framework-vs-working-state boundary is now machine-enforced on both sides
+  (WI-0018).** `install.sh` shipped every tracked path under `docs/` wholesale, so this repository's
+  own working state — 17 work items about CCPR's own defects at the time of measurement, since grown
+  to 63 — would reach every user's `~/.claude/docs/` looking like their own state; a checkout carrying
+  that state (any long-running contributor's own working copy, not only a stale pre-gitignore clone)
+  landed 852 KB of it, exit 0, no warning. `scripts/lib/docs-framework-allowlist.txt` is a new file
+  naming the five framework paths currently tracked (`adr/`, `logo/`, `CONSTITUTION.md`,
+  `NEXT_STEPS_REFERENCE.md`, `PROJECT_PHASES.md`) and is the single source of truth for both sides —
+  neither script keeps its own copy of the list, which is the shape that produced WI-0059 once
+  already (an archive path held in a variable and again as a literal). `scripts/artifact-gate.sh`
+  fails a newly tracked `docs/` path that is not on the list (`[docs-boundary]`, naming both remedies:
+  add it to the allowlist if it is framework documentation, or to `.gitignore` if it is working
+  state). `install.sh` now copies only the allowlisted entries out of `docs/` and reports what it
+  skipped, by name and approximate size, naming the likely cause — including dotfiles/dot-directories
+  (`docs/.handover-archive/`), which a plain `*` glob would otherwise drop from both the install and
+  the report silently. This is a separate mechanism from the existing `PROTECTED` stash-and-restore
+  concept: `PROTECTED` preserves the *target's* user-owned files across a wholesale directory replace,
+  this skips *source*-side working-state files from ever being copied in the first place.
+  **Follow-up fix, same day:** the `[docs-boundary]` rule fired on every repository `artifact-gate.sh`
+  swept, not only CCPR's own — a project adopting CCPR and running the shipped gate against its own
+  `--repo` was told its own `docs/README.md` and `docs/workitems/` belonged in `.gitignore`. Scoped by
+  self-detection, mirroring the gate's existing pattern-source self-exemption
+  (`_GATE_PATTERN_SOURCE` in `lib/discipline_gate.sh`, which resolves the gate's own file path to
+  recognise itself): the rule now only applies when the repository being swept is the SAME repository
+  the running gate script lives in (`_GATE_OWN_REPO_ROOT` / `DOCS_BOUNDARY_APPLIES`), no new flag or
+  configuration. An installed copy under `~/.claude` — ordinarily not a git repository itself — is
+  correctly inert against any `--repo` it is pointed at. Known, accepted gap: a project that vendors a
+  copy of this script into its own repository and points `--repo` at itself satisfies the equality too;
+  self-detection by location cannot distinguish "the same location" from "CCPR's project identity".
 
 ### Changed
 - **The Handover-Epilogue "Open points"/"Open items" bullet, shipped identically in 104 command
