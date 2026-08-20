@@ -7,6 +7,29 @@ All notable changes to this project are documented in this file. The format is b
 ## [Unreleased]
 
 ### Fixed
+- **`memory-lint.sh` picked a fixed winner between an HTML comment and a code span, and assumed a
+  code span never crosses a line, both of which CommonMark contradicts (WI-0048, WI-0052).**
+  `decomment_paragraph()` and `strip_inline_code()` used to be two separate whole-paragraph passes
+  in a fixed order — comments stripped first, code spans stripped second, per resulting line. Any
+  fixed order between two such passes is wrong in one direction: reordering them would have fixed
+  one measured case and broken another that already worked. CommonMark gives precedence to
+  whichever construct opens FIRST, reading left to right — the other's delimiters are then literal
+  text inside the span that opened first. Separately, `strip_inline_code()`'s own comment stated "a
+  span never crosses a line in Markdown, so unlike decomment() this needs no state across records"
+  — that premise is false: a code span crosses a paragraph-internal line break exactly like an
+  inline HTML comment does, stopping only at the same block boundaries (list item, blank line,
+  heading, fence, block-level HTML comment) WI-0050 already established. Both passes are replaced
+  by one function, `resolve_paragraph()`: a single left-to-right scan over the whole buffered
+  paragraph in which whichever construct — a `dest_mark`-protected link destination, an HTML
+  comment opener, or a backtick run — is met first at the current scan position claims its span
+  whole; the paragraph-buffering mechanics WI-0050 built (`append_paragraph()`/`flush_paragraph()`)
+  are unchanged. `dest_mark` opacity (WI-0042 — a link destination is not inline-parsed) is now
+  honoured by the code-span search too, closing a gap the old `strip_inline_code()` never guarded
+  at all. Every fixture was settled at a CommonMark reference implementation before being pinned as
+  a test — see `docs/memory/reference_commonmark-conformance.md` — and mutation-checked against the
+  pre-fix script: an index illustrating its own two-line link syntax inside one code span
+  (`` `an entry looks like\n[label](dest) inside a span` ``) used to report the illustrative link as
+  a dead target; it no longer does.
 - **`memory-lint.sh` treated an unclosed mid-line HTML comment as swallowing the rest of the
   file instead of nothing.** CommonMark HTML block type 2 only applies when `<!--` opens the
   line itself (after up to three spaces); a `<!--` that appears mid-line is inline raw HTML, and

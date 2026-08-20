@@ -929,6 +929,229 @@ class MemoryLintTest(unittest.TestCase):
         self.assertIn("dead_wi0050_live_control.md", findings[0])
         self.assertNotIn("project_alpha.md", findings[0])
 
+    # --- WI-0048: whichever inline construct opens FIRST claims its span -----------
+    # decomment_paragraph() and strip_inline_code() used to be two separate
+    # whole-paragraph passes in a fixed order, which gets the precedence between
+    # an HTML comment and a code span wrong in one direction no matter which
+    # order is picked. resolve_paragraph() replaces both with one left-to-right
+    # scan (see memory-lint.sh). All four fixtures below are settled at the
+    # CommonMark reference and tracked in
+    # docs/memory/reference_commonmark-conformance.md under "Inline precedence:
+    # whichever construct opens FIRST claims its span".
+
+    def test_a_code_span_opened_before_a_comment_delimiter_makes_it_literal_and_the_link_is_found(self):
+        """Reference-measured (table row, WI-0048): `` a `b<!--c` [x](t.md)`e ``
+        renders a genuine link — the backtick opens first, so the `<!--`
+        inside the span is literal content, not a comment opener. Pinned as a
+        control for this exact fixture shape; it is NOT, on its own, a
+        regression pin for the old two-pass design — mutation-checked (see
+        the mutation table in the senior-developer report): this specific
+        shape has no closing `-->` anywhere in the line, so the OLD
+        decomment_paragraph() (already WI-0050-fixed) treats the whole
+        `<!--...` as an unclosed, literal comment and never collapses
+        anything, after which the OLD strip_inline_code()'s plain run-length
+        pairing lands on the same code-span boundary by coincidence. The
+        canonical work-item repro below, which DOES include a `-->`, is the
+        one that actually discriminates old from new.
+        """
+        self.write_index(
+            CLEAN_INDEX + "a `b<!--c` [x](dead_wi0048_span_first.md)`e\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("dead_wi0048_span_first.md", findings[0])
+
+    def test_wi_0048_canonical_repro_with_a_closed_comment_inside_the_span_still_finds_the_link(self):
+        """The work item's own concrete repro (WI-0048, 19.08.2026): a
+        backtick-opened span whose content includes both the comment opener
+        AND its closer, then a real link, then a closing backtick — reference-
+        measured to render the link live, the code span covering only
+        `` b<!--c ``. This is the actual regression pin: mutation-checked
+        against the pre-fix, two-pass memory-lint.sh (git history), this
+        exact fixture goes from 1 finding to 0 — the old decomment_paragraph()
+        DOES find and collapse the closed `<!--c-->` span here (unlike the
+        control above), which removes one of the two remaining backticks and
+        lets the surviving pair re-pair across the real link, swallowing it as
+        code — exactly the mechanism the work item describes ("the surviving
+        backticks then re-pair across the resulting gap").
+        """
+        self.write_index(
+            CLEAN_INDEX
+            + "- a`b<!--c`--> [link](dead_wi0048_ordering_gap.md)`e\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("dead_wi0048_ordering_gap.md", findings[0])
+
+    def test_a_comment_opened_before_a_code_span_makes_the_backtick_literal_and_the_link_is_found(self):
+        """Reference-measured: `text <!-- a ` b --> [x](t.md)` renders a
+        genuine link too — the comment opens first here, so the backtick
+        inside it is literal. The extractor already got this direction right
+        before WI-0048 (decomment_paragraph() ran first); this pins it as a
+        control so the merge into resolve_paragraph() cannot regress it.
+        """
+        self.write_index(
+            CLEAN_INDEX + "text <!-- a ` b --> [x](dead_wi0048_comment_first.md)\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("dead_wi0048_comment_first.md", findings[0])
+
+    def test_a_mid_line_comment_that_fully_encloses_a_link_on_one_line_hides_it(self):
+        """Reference-measured: `text <!-- a [x](t.md) b -->` renders no link at
+        all — a mid-line comment does hide a link it fully encloses. A live
+        sibling link outside the comment, in the same paragraph, proves the
+        paragraph was actually scanned rather than skipped whole.
+        """
+        self.write_index(
+            CLEAN_INDEX
+            + "text <!-- a [x](dead_wi0048_enclosed.md) b --> and "
+            + "[y](dead_wi0048_enclosed_sibling.md)\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("dead_wi0048_enclosed_sibling.md", findings[0])
+        self.assertNotIn("dead_wi0048_enclosed.md", findings[0])
+
+    def test_an_unclosed_mid_line_comment_swallows_nothing_and_the_link_after_it_is_found(self):
+        """Reference-measured: `text <!-- a [x](t.md)`, unclosed, renders the
+        link — an unclosed INLINE comment swallows nothing, unlike HTML block
+        type 2 which needs `<!--` to begin the line. Same shape as the WI-0050
+        controls above, restated here as its own row of the WI-0048 precedence
+        table (docs/memory/reference_commonmark-conformance.md) so the table
+        is traceable one row at a time.
+        """
+        self.write_index(
+            CLEAN_INDEX
+            + "\n"
+            + "text <!-- a [x](dead_wi0048_unclosed.md)\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("dead_wi0048_unclosed.md", findings[0])
+
+    # --- WI-0052: a code span crosses physical lines inside one paragraph ----------
+    # strip_inline_code() carried the stated premise that a code span never
+    # crosses a line, so it ran once per physical line even after WI-0050 gave
+    # comments paragraph scope. That premise is false — CommonMark lets a code
+    # span cross a line break the same way a comment does. resolve_paragraph()
+    # now runs once over the whole buffered paragraph. All four fixtures below
+    # are settled at the CommonMark reference and tracked in
+    # docs/memory/reference_commonmark-conformance.md.
+
+    def test_a_code_span_crosses_two_physical_lines_and_the_link_after_it_is_found(self):
+        """Reference-measured: `` text `code `` / `` more code` [x](a.md) ``
+        renders ONE code span containing both lines, with the link outside it
+        and live. Before the fix, strip_inline_code() ran per line and never
+        saw the two backtick runs as a pair at all — each line kept its own
+        stray backtick as literal text and the link was reported as ordinary
+        prose, which happened to also find it, so this pins the SPAN, not
+        merely the verdict: see the list-item control below for the shape
+        where the span must NOT form.
+        """
+        self.write_index(
+            CLEAN_INDEX
+            + "\n"
+            + "text `code\n"
+            + "more code` [x](dead_wi0052_span_crosses_line.md)\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("dead_wi0052_span_crosses_line.md", findings[0])
+
+    def test_a_list_item_boundary_stops_a_code_span_from_crossing_into_the_next_item(self):
+        """Reference-measured: a code span does NOT cross a list-item boundary
+        — each item is its own block, the same paragraph-anchored rule WI-0050
+        established for comments. Both stray backticks stay literal within
+        their own item, and both links (one per item) are found — proving the
+        span-crossing fix above is scoped to a PARAGRAPH, not to the raw
+        paragraph buffer regardless of block boundaries.
+        """
+        self.write_index(
+            CLEAN_INDEX
+            + "\n"
+            + "- text `code [a](dead_wi0052_list_a.md)\n"
+            + "- more code` [b](dead_wi0052_list_b.md)\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 2, findings)
+        self.assertTrue(any("dead_wi0052_list_a.md" in f for f in findings), findings)
+        self.assertTrue(any("dead_wi0052_list_b.md" in f for f in findings), findings)
+
+    def test_a_comment_then_a_code_span_both_crossing_lines_are_resolved_in_order(self):
+        """Reference-measured: `text <!-- c` / `d --> `e` / `` f` [x](a.md) ``
+        resolves the comment first (it opens first), then the code span (it
+        opens next), each swallowing the line break inside it in turn, with
+        the link outside both and live. Exercises WI-0048's precedence and
+        WI-0052's cross-line reach together, in the same buffered paragraph.
+        """
+        self.write_index(
+            CLEAN_INDEX
+            + "\n"
+            + "text <!-- c\n"
+            + "d --> `e\n"
+            + "f` [x](dead_wi0052_comment_then_span.md)\n"
+        )
+
+        output = self.run_lint().stdout
+        findings = self.link_findings(output)
+
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("dead_wi0052_comment_then_span.md", findings[0])
+        self.assertNotIn("\x01", output, output)
+
+    def test_a_code_span_opened_before_a_comment_across_a_line_break_wins_and_the_arrow_after_it_is_literal(self):
+        """Reference-measured: `` text `a <!-- b `` / `` c` d --> [x](a.md) ``
+        — the code span opens first, crosses the line break, and its content
+        (including the `<!--`) is literal; the `-->` after the closing
+        backtick is then ordinary literal text too, and the link is live. Pins
+        WI-0048's precedence rule for the case where the winning construct is
+        the one that spans the line break, not the one that stays on one line.
+        """
+        self.write_index(
+            CLEAN_INDEX
+            + "\n"
+            + "text `a <!-- b\n"
+            + "c` d --> [x](dead_wi0052_span_wins_then_arrow.md)\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("dead_wi0052_span_wins_then_arrow.md", findings[0])
+
+    def test_a_two_line_illustrative_code_span_in_an_index_entry_produces_no_finding(self):
+        """WI-0052's own end-to-end repro: an index documenting its own entry
+        syntax across two physical lines, inside one code span, must not have
+        its illustrative link reported as a dead target — the reference
+        renders no `<a href>` for this input at all. Before the fix,
+        memory-lint reported `gone_illustrative.md` as a dead link, exactly
+        the WI-0005 gap (1) false-positive class this check exists to avoid,
+        one line-break further than WI-0005 originally covered.
+        """
+        self.write_index(
+            CLEAN_INDEX
+            + "\n"
+            + "Example syntax: `an entry looks like\n"
+            + "[label](gone_illustrative.md) inside a span`\n"
+        )
+
+        self.assertEqual(self.link_findings(self.run_lint().stdout), [])
+
     # --- WI-0005: code examples are not entries, reference-style links are ---------
 
     def test_a_dead_link_shown_inside_a_fenced_code_block_is_not_reported(self):

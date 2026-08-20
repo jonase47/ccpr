@@ -463,9 +463,36 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
         # opener that never closes before the paragraph ends is literal text,
         # nothing is discarded. append_paragraph()/flush_paragraph() below buffer
         # the current paragraph across physical lines and hand the whole thing
-        # to decomment_paragraph() in one call, so lookahead is bounded to one
+        # to resolve_paragraph() in one call, so lookahead is bounded to one
         # paragraph and never reaches past a block boundary (blank line, list
         # marker, heading, fence, or a block-level HTML comment).
+        #
+        # WI-0048: there is no fixed winner between an HTML comment and a code
+        # span — whichever construct opens FIRST, reading left to right, claims
+        # its span, and the other constructs delimiters inside that span are
+        # literal text. The two used to be two separate whole-paragraph passes
+        # (decomment_paragraph() then, per resulting segment, strip_inline_
+        # code()) — any fixed order between two such passes is wrong in one
+        # direction: a comment opened first correctly hid a backtick inside it,
+        # but a code span opened first wrongly let the comment pass re-pair
+        # backticks across a comment delimiter it should never have seen,
+        # because decomment_paragraph() ran over the whole line before strip_
+        # inline_code() ever got to look at it. resolve_paragraph() below
+        # replaces both with ONE left-to-right scan: at each position it asks
+        # only "does a construct open exactly here", so whichever one is
+        # encountered first is exactly the one that gets to claim its span —
+        # see docs/memory/reference_commonmark-conformance.md for the four
+        # fixtures this was measured against.
+        #
+        # WI-0052: strip_inline_code() used to carry the premise that a code
+        # span never crosses a physical line, so it could run once per line
+        # after decomment_paragraph() split the resolved paragraph back into
+        # segments. That premise is false — CommonMark lets a code span cross a
+        # line break inside one paragraph, exactly like an HTML comment does.
+        # resolve_paragraph() therefore runs once over the WHOLE buffered
+        # paragraph, the same scope decomment_paragraph() already used for
+        # comments, and flush_paragraph() below no longer splits the resolved
+        # text into per-line segments at all.
         #
         # A closed comment is replaced by one `boundary` character rather than by
         # nothing (WI-0029). CommonMark treats an inline HTML comment as its own
@@ -476,114 +503,80 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
         # image marker, and the link after it was skipped as an image and never
         # checked. `boundary` is inert for every other regex in this script (not
         # `[`, `]`, `(`, `)`, a backtick, `!`, a quote or whitespace), so it only
-        # ever breaks an accidental adjacency — it does not introduce one.
+        # ever breaks an accidental adjacency — it does not introduce one. A
+        # removed code span is not given a boundary of its own: that gap is
+        # pre-existing (unchanged by this merge) and out of scope for WI-0048/
+        # WI-0052.
+        #
         # dest_mark wraps a link destination that protect_link_destinations()
-        # has already isolated (WI-0042): CommonMark link-destination grammar
-        # is not inline-parsed, so a `<!--...-->` sequence inside `[x](dest)`
-        # is literal text, not a comment to strip. A dest_mark..dest_mark span
-        # is therefore copied through untouched here rather than scanned for
-        # `<!--`/`-->` — the two sentinels are stripped again once the
+        # has already isolated (WI-0042): CommonMark link-destination grammar is
+        # not inline-parsed, so neither a `<!--...-->` sequence nor a backtick
+        # inside `[x](dest)` opens or closes anything there — both are literal
+        # text, not a delimiter to interpret. A dest_mark..dest_mark span is
+        # therefore copied through untouched wherever it is met — at the top
+        # level of the scan, and also while resolve_paragraph() is searching for
+        # a code spans closing run, which the pre-merge strip_inline_code()
+        # never guarded (it ran after dest_mark was already in the text, with no
+        # awareness of it at all). The two sentinels are stripped again once the
         # destination has been extracted (strip_dest_mark()). This only ever
-        # protects a destination; comment text in a link LABEL is ordinary
-        # inline content and keeps being decommented below, unchanged.
+        # protects a destination; comment or code-span markup in a link LABEL is
+        # ordinary inline content and is still resolved by the scan below,
+        # unchanged.
         #
-        # local_in_comment is declared as a function parameter (an awk local),
-        # not read from a bare global name — that undeclared-global mistake is
-        # exactly WI-0050s defect: the old decomment() used a bare `in_comment`,
-        # which awk makes GLOBAL by default, so an opener with no closer on its
-        # own record left the state set and swallowed every following record
-        # (line) until a `-->` turned up or the file ended. A fresh local per
-        # call means a paragraph that never closes its opener cannot leak
-        # anything into the next paragraph, or the next file.
-        function decomment_paragraph(s,   a, b, w, e, out, local_in_comment) {
-            out = ""
-            local_in_comment = 0
-            while (length(s) > 0) {
-                if (local_in_comment) {
-                    b = index(s, "-->")
-                    if (b == 0) {
-                        # Unclosed within this paragraph — literal text, per the
-                        # PO decision of 20.08.2026: nothing is discarded. Restore
-                        # the opener that was already consumed below and stop;
-                        # the remainder of s is untouched raw content.
-                        out = out "<!--" s
-                        return out
-                    }
-                    s = substr(s, b + 3)
-                    local_in_comment = 0
-                    out = out boundary
-                    continue
-                }
-                w = index(s, dest_mark)
-                a = index(s, "<!--")
-                if (w > 0 && (a == 0 || w < a)) {
-                    e = index(substr(s, w + 1), dest_mark)
-                    if (e == 0) return out s   # malformed guard — should not happen
-                    out = out substr(s, 1, w + e)
-                    s = substr(s, w + e + 1)
-                    continue
-                }
-                if (a == 0) return out s
-                out = out substr(s, 1, a - 1)
-                s = substr(s, a + 4)
-                local_in_comment = 1
-            }
-            return out
-        }
-        # Isolates every inline link destination — the `(...)` immediately
-        # after `](` — and wraps its raw text in dest_mark before decomment()
-        # or strip_inline_code() ever see it (WI-0042). Riding the raw text
-        # along inside the normal `line` flow, instead of re-locating it
-        # afterward from a parallel scan, keeps it structurally glued to
-        # whichever `[text](dest)` span it belongs to — including when that
-        # whole span later turns out to be inside a code span or an
-        # illustrative backtick example and gets discarded as a unit.
-        function protect_link_destinations(s,    out, dest) {
-            out = ""
-            while (match(s, /\]\([^)]*\)/)) {
-                out = out substr(s, 1, RSTART + 1)   # up through and including the ]( pair
-                dest = substr(s, RSTART + 2, RLENGTH - 3)
-                out = out dest_mark dest dest_mark ")"
-                s = substr(s, RSTART + RLENGTH)
-            }
-            return out s
-        }
-        function strip_dest_mark(s) {
-            gsub(dest_mark, "", s)
-            return s
-        }
-        # Strip inline code spans (`code`, ``code with a ` in it``): a span never
-        # crosses a line in Markdown, so unlike decomment() this needs no state
-        # across records. An index documenting its own link syntax inline
-        # (`` `[x](dead.md)` ``) illustrates the syntax; it is not an entry.
-        #
-        # CommonMark pairs by *run length*, not by position: a code span opens
-        # with a backtick run of length N and closes at the next run of exactly
-        # length N — a run of a different length is skipped over as content, and
-        # a run with no same-length partner anywhere ahead is literal text, not
-        # an opener (mirrors the fence rule above, except a fence closes on
-        # length >= opener while a code span closes on length == opener). A
-        # naive 1st-backtick-pairs-with-2nd-backtick scan gets this wrong in two
-        # ways: it can pair mismatched run lengths (misreading a lone backtick
-        # inside a double-backtick span as that spans closer), and, chained from
-        # that, later runs on the same line inherit the wrong offset.
-        #
-        # WI-0050 keeps this scoped to one paragraph-buffer SEGMENT at a time
-        # (see process_link_line() below), the same scope it always ran at —
-        # a segment can now be the tail of a comment-joined multi-line span
-        # instead of a single raw physical line, but this function itself is
-        # unchanged and still never looks past what it is handed.
-        function strip_inline_code(s,   out, i, n, run_start, run_len, c, j, close_len, found) {
+        # All of resolve_paragraph()s working state — out, i, n, run_start,
+        # run_len, j, close_len, found, e — is declared as an awk LOCAL (an
+        # extra, whitespace-separated function parameter never passed a value),
+        # the same discipline WI-0050 established for decomment_paragraph()s
+        # local_in_comment: an undeclared bare name defaults to GLOBAL in awk,
+        # and a global that survives past the call that set it is exactly how
+        # the pre-WI-0050 decomment() leaked an unclosed comment across the rest
+        # of the file. resolve_paragraph() goes further than declaring one flag
+        # local — because comment and code-span resolution now happen inside
+        # the SAME scan, in the SAME call, there is no in_comment-style flag
+        # that needs to survive between iterations of the loop at all: an
+        # opener is found and its closer is searched for (or the paragraph
+        # ends) within the same pass over the same local `s`, so nothing has a
+        # chance to leak into the next paragraph or the next file.
+        function resolve_paragraph(s,   out, i, n, e, run_start, run_len, j, close_len, found) {
             out = ""
             n = length(s)
             i = 1
             while (i <= n) {
-                c = substr(s, i, 1)
-                if (c != "`") {
-                    out = out c
+                if (substr(s, i, 1) == dest_mark) {
+                    e = index(substr(s, i + 1), dest_mark)
+                    if (e == 0) {          # malformed guard — should not happen
+                        out = out substr(s, i)
+                        return out
+                    }
+                    out = out substr(s, i, e + 1)
+                    i = i + e + 1
+                    continue
+                }
+                if (substr(s, i, 4) == "<!--") {
+                    e = index(substr(s, i + 4), "-->")
+                    if (e == 0) {
+                        # Unclosed within this paragraph — literal text, per the
+                        # PO decision of 20.08.2026: nothing is discarded.
+                        out = out substr(s, i)
+                        return out
+                    }
+                    i = i + 4 + e + 2
+                    out = out boundary
+                    continue
+                }
+                if (substr(s, i, 1) != "`") {
+                    out = out substr(s, i, 1)
                     i++
                     continue
                 }
+                # Code-span opener: a run of backticks, closed only by the next
+                # run of the SAME length — CommonMark pairs by *run length*, not
+                # by position (mirrors the fence rule above, except a fence
+                # closes on length >= opener while a code span closes on length
+                # == opener). A naive 1st-backtick-pairs-with-2nd-backtick scan
+                # gets this wrong: it can pair mismatched run lengths, and,
+                # chained from that, later runs on the same paragraph inherit
+                # the wrong offset.
                 run_start = i
                 run_len = 0
                 while (i <= n && substr(s, i, 1) == "`") {
@@ -593,6 +586,12 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
                 found = 0
                 j = i
                 while (j <= n) {
+                    if (substr(s, j, 1) == dest_mark) {
+                        e = index(substr(s, j + 1), dest_mark)
+                        if (e == 0) break   # malformed guard — should not happen
+                        j = j + e + 2
+                        continue
+                    }
                     if (substr(s, j, 1) != "`") {
                         j++
                         continue
@@ -615,11 +614,32 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
                     i = j   # discard opener..closer, resume right after the closer
                 } else {
                     out = out substr(s, run_start, run_len)   # unpaired run — literal
-                    # `i` already sits right after the opening run; resume there
-                    # instead of dropping the rest of the line (see fix 3, a838a1f).
+                    i = run_start + run_len   # resume right after the opening run
                 }
             }
             return out
+        }
+        # Isolates every inline link destination — the `(...)` immediately
+        # after `](` — and wraps its raw text in dest_mark before resolve_
+        # paragraph() ever sees it (WI-0042). Riding the raw text along inside
+        # the normal `line` flow, instead of re-locating it afterward from a
+        # parallel scan, keeps it structurally glued to whichever
+        # `[text](dest)` span it belongs to — including when that whole span
+        # later turns out to be inside a code span or an illustrative backtick
+        # example and gets discarded as a unit.
+        function protect_link_destinations(s,    out, dest) {
+            out = ""
+            while (match(s, /\]\([^)]*\)/)) {
+                out = out substr(s, 1, RSTART + 1)   # up through and including the ]( pair
+                dest = substr(s, RSTART + 2, RLENGTH - 3)
+                out = out dest_mark dest dest_mark ")"
+                s = substr(s, RSTART + RLENGTH)
+            }
+            return out s
+        }
+        function strip_dest_mark(s) {
+            gsub(dest_mark, "", s)
+            return s
         }
         # A reference-style definition destination is either the bracketed
         # `<...>` form (never contains unescaped whitespace) or a bare token that
@@ -641,8 +661,8 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
         # Runs the extraction that used to sit directly in the main record
         # block: find every `[text](dest)` span left after decommenting and
         # code-span stripping, and print the destination unless it is an
-        # image marker (`![...]`, WI-0029). Factored out unchanged (WI-0050)
-        # so flush_paragraph() can call it once per resolved segment.
+        # image marker (`![...]`, WI-0029). Factored out unchanged (WI-0050),
+        # called once per resolved paragraph by flush_paragraph() below.
         function process_link_line(line,   prev, link, sep) {
             prev = ""
             while (match(line, /\[[^][]*\]\([^)]*\)/)) {
@@ -657,31 +677,29 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
         }
         # Buffers one physical line into the current paragraph. protect_link_
         # destinations() runs here, per raw line, exactly where it always ran —
-        # only decomment() moved to paragraph scope, this did not.
+        # only comment/code-span resolution moved to paragraph scope, this did
+        # not.
         function append_paragraph(raw_line) {
             if (pbuf_n == 0) pbuf = protect_link_destinations(raw_line)
             else pbuf = pbuf "\n" protect_link_destinations(raw_line)
             pbuf_n++
         }
         # Resolves the buffered paragraph and extracts its links, then clears
-        # the buffer. Joining with a real newline before decomment_paragraph()
-        # and splitting on the same character afterward means a comment span
-        # that closes on a later line collapses the lines it swallowed into one
-        # segment (its newlines were inside the removed span), while a span
-        # that never closes leaves every original line boundary intact — no
-        # extra bookkeeping needed to tell the two cases apart. strip_inline_
-        # code() and process_link_line() still run once per resulting segment,
-        # same as they always ran once per physical line, so a code span still
-        # cannot cross what was a paragraph-internal line break — a scope
-        # decision this fix inherits, not one it makes (out of scope, see
-        # WI-0050 and WI-0048).
-        function flush_paragraph(   resolved, segments, seg_count, i) {
+        # the buffer. resolve_paragraph() runs once over the WHOLE joined
+        # paragraph — both a comment span and a code span can swallow the
+        # newlines that used to separate physical lines (WI-0050 for the
+        # comment, WI-0052 for the code span), and whichever of the two opens
+        # first at a given position claims that span (WI-0048). There is no
+        # per-line segment left to loop over afterward: process_link_line()
+        # runs exactly once, directly on the fully resolved text — its own
+        # `[^][]*`/`[^)]*` link regex already matches across an embedded
+        # newline the same way it matches across any other character, so a
+        # link whose label happens to still straddle two original lines (never
+        # inside a comment or code span) is found too, at no extra cost.
+        function flush_paragraph(   resolved) {
             if (pbuf_n == 0) return
-            resolved = decomment_paragraph(pbuf)
-            seg_count = split(resolved, segments, "\n")
-            for (i = 1; i <= seg_count; i++) {
-                process_link_line(strip_inline_code(segments[i]))
-            }
+            resolved = resolve_paragraph(pbuf)
+            process_link_line(resolved)
             pbuf = ""
             pbuf_n = 0
         }
