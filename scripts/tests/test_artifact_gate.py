@@ -1047,6 +1047,197 @@ class BrokenInterpreterEndToEndTest(GateTestBase):
 
 
 # ---------------------------------------------------------------------------
+# 3d. WI-0017 part (2) — content-side deny matching escalates to python3, but
+# ONLY when the configured NAME is non-ASCII, never on the file content.
+#
+# Gating on subject-or-name the way the path side does was measured and
+# rejected (WI-0017, 20.08.2026): 257 of this repo's own 271 tracked files
+# carry a non-ASCII byte (em dashes, umlauts in prose), so that gate would
+# fire on 94% of files and add ~41% to every sweep even with a pure-ASCII
+# deny list. Gating on the name alone costs zero extra process starts
+# whenever the deny list is pure ASCII, which
+# AnAsciiDenyNameNeverInvokesPython3Test proves rather than asserts.
+#
+# For an ASCII name the ASCII matcher is provably safe without escalation:
+# it can only OVER-report relative to python's NFC view (AsciiOverReport...
+# below), never miss what python would find, so LC_ALL=C is not needed at
+# that line either — the PO decision this item's history shows was added,
+# then shelved, then finally dropped for this reason.
+# ---------------------------------------------------------------------------
+class ContentDenyEscalationTest(GateTestBase):
+    # Fictional, non-ASCII on purpose — same fixture shape as
+    # NonAsciiPathDenyTest above, which exercises the sibling path-side
+    # escalation.
+    NAME = "Quüxcorp"
+
+    def test_a_non_ascii_name_differing_only_in_case_is_found_in_content(self):
+        # The defect this item exists for: content-side matching was
+        # ASCII-only, so a configured name that differs from the content
+        # only in a non-ASCII letter's case slipped through.
+        p = self.write("sample.md", "See " + self.NAME.upper() + " rollout notes.\n")
+        r = self.run_gate(p, CCPR_GATE_DENY_NAMES=self.NAME)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("denylist", self.categories(r))
+
+    def test_a_decomposed_non_ascii_name_in_content_matches_a_composed_deny_entry(self):
+        # The item's own other named failure mode, alongside the case
+        # difference above: "a tenant name written in NFD inside a file's
+        # CONTENT... still passes the content gate". Both sides are
+        # normalised to NFC before comparison, mirroring the path side.
+        import unicodedata
+        p = self.write("sample.md", "See " + unicodedata.normalize("NFD", self.NAME) + " rollout notes.\n")
+        r = self.run_gate(p, CCPR_GATE_DENY_NAMES=self.NAME)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("denylist", self.categories(r))
+
+    def test_the_non_ascii_name_is_never_echoed_into_the_content_finding(self):
+        p = self.write("sample.md", "See " + self.NAME.upper() + " rollout notes.\n")
+        r = self.run_gate(p, CCPR_GATE_DENY_NAMES=self.NAME)
+        out = r.stdout + r.stderr
+        self.assertNotIn(self.NAME.lower(), out.lower())
+        self.assertIn("name redacted", out)
+
+    def test_the_match_carries_the_correct_line_number(self):
+        text = "line one\nline two\nSee " + self.NAME.upper() + " here\nline four\n"
+        p = self.write("sample.md", text)
+        r = self.run_gate(p, CCPR_GATE_DENY_NAMES=self.NAME)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn(":3:", r.stdout, r.stdout)
+
+    def test_a_file_larger_than_an_env_var_could_carry_is_scanned_without_error(self):
+        # ARG_MAX is 1 MiB on this machine (measured in the item); content now
+        # travels on stdin, not through the environment the way the path
+        # subject does. A few hundred KB is enough to prove the stdin route
+        # without generating a full ARG_MAX+ fixture.
+        filler = "ordinary prose line without a match.\n" * 8000  # ~300 KB
+        text = filler + "See " + self.NAME.upper() + " rollout notes.\n"
+        p = self.write("sample.md", text)
+        r = self.run_gate(p, CCPR_GATE_DENY_NAMES=self.NAME)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("denylist", self.categories(r))
+        self.assertIn("scanned 1 files", r.stdout)
+
+    def test_an_ascii_deny_name_never_invokes_python3(self):
+        # Proof, not assertion: a python3 that shadows this run's PATH and
+        # exits non-zero must not change the outcome for an ASCII name. If
+        # python were invoked, the run would warn ("unicode content matcher
+        # failed") and fall back instead of answering directly.
+        stub_dir = Path(tempfile.mkdtemp(prefix="ccpr-fake-python3-"))
+        self.addCleanup(shutil.rmtree, stub_dir, ignore_errors=True)
+        stub = stub_dir / "python3"
+        stub.write_text("#!/bin/sh\nexit 7\n")
+        stub.chmod(0o755)
+        p = self.write("sample.md", "The Zorblatt rollout.\n")
+        r = self.run_gate(
+            p, CCPR_GATE_DENY_NAMES="Zorblatt",
+            PATH=f"{stub_dir}:/usr/bin:/bin:/usr/sbin:/sbin",
+        )
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("denylist", self.categories(r))
+        out = r.stdout + r.stderr
+        self.assertNotIn("unicode content matcher failed", out)
+        self.assertNotIn("falling back", out)
+
+    def test_the_path_side_escalation_is_unchanged(self):
+        # Pin: this item touches content matching only.
+        p = self.write(self.NAME.upper() + "-notes.md", "clean prose\n")
+        r = self.run_gate(p, CCPR_GATE_DENY_NAMES=self.NAME)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("denylist", self.categories(r))
+
+    def test_ascii_name_over_reports_on_nfd_decomposed_content_rather_than_missing_it(self):
+        # Pinned exactly as measured in the item: an ASCII name against
+        # NFD-decomposed content is found by the byte-literal ASCII matcher
+        # even though NFC-normalised python would not — over-reporting is the
+        # safe direction for this gate, and it is why an ASCII name needs no
+        # escalation at all.
+        import unicodedata
+        decomposed = unicodedata.normalize("NFD", "café") + " rollout notes\n"
+        p = self.write("sample.md", decomposed)
+        r = self.run_gate(p, CCPR_GATE_DENY_NAMES="cafe")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("denylist", self.categories(r))
+
+    def test_an_unrelated_file_with_a_non_ascii_deny_name_stays_clean(self):
+        # Scope check: "no findings" must mean the file was actually
+        # scanned, not that nothing ran.
+        p = self.write("sample.md", "grün prose, unrelated content\n")
+        r = self.run_gate(p, CCPR_GATE_DENY_NAMES=self.NAME)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("scanned 1 files", r.stdout)
+
+    def test_a_file_larger_than_arg_max_is_still_matched(self):
+        # Pins the STDIN route as load-bearing, not a style preference. The
+        # content reaches python on stdin; carrying it in an environment
+        # variable instead works only until the file exceeds ARG_MAX (1 MB
+        # here), and then it does not fail loudly -- it fails into a WRONG
+        # ANSWER.
+        #
+        # Measured on a 2.2 MB fixture with the deny name planted near the
+        # end: stdin route -> exit 1, one denylist finding. Env-var route ->
+        # "unicode content matcher failed (status 126)" on stderr, then
+        # "scanned 1 files, 0 findings" and exit 0. A configured tenant name
+        # in an ordinary large file would ship, with the only warning on a
+        # stream CI does not gate on. The mutation that swapped stdin for an
+        # env var survived the whole suite before this test existed.
+        filler = "a line of ordinary prose that is long enough to matter"
+        lines = [filler] * 40000
+        lines[39000] = "the " + self.NAME.upper() + " rollout note"
+        p = self.write("big.md", "\n".join(lines) + "\n")
+        self.assertGreater(p.stat().st_size, 1048576, "fixture must exceed ARG_MAX")
+        r = self.run_gate(p, CCPR_GATE_DENY_NAMES=self.NAME)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("denylist", self.categories(r))
+        self.assertNotIn("matcher failed", r.stdout + r.stderr)
+
+    def test_a_healthy_no_match_stays_silent_about_the_matcher(self):
+        # The genuine no-match case with a working interpreter must not be
+        # misread as "the helper did not run" -- that would print the
+        # fallback warning on every clean file with a non-ASCII deny name.
+        p = self.write("sample.md", "grün prose, unrelated content\n")
+        r = self.run_gate(p, CCPR_GATE_DENY_NAMES=self.NAME)
+        self.assertNotIn("unicode content matcher failed", r.stdout + r.stderr)
+
+
+class ContentDenyBrokenInterpreterTest(GateTestBase):
+    """Mirrors GatePathDenyIndexBrokenInterpreterTest (WI-0049) for the
+    content-side escalation this item adds: fail-warn-and-fall-back, never a
+    silent clean read."""
+
+    NAME = "Quüxcorp"
+
+    def test_a_broken_interpreter_does_not_silently_report_a_clean_file(self):
+        # The ASCII fallback cannot fold this non-ASCII letter's case, so —
+        # same residual WI-0049 accepted on the path side — a subject the
+        # fallback genuinely cannot see comes back as "no match" (0). What
+        # the fix buys is that it can no longer happen SILENTLY: the warning
+        # below is the whole difference, so it must be present even though
+        # the verdict itself stays "clean".
+        p = self.write("sample.md", "See " + self.NAME.upper() + " here\n")
+        r = self.run_gate(p, CCPR_GATE_DENY_NAMES=self.NAME, PYTHONHOME="/nonexistent")
+        out = r.stdout + r.stderr
+        self.assertIn("unicode content matcher failed", out)
+        self.assertEqual(r.returncode, 0, out)
+
+    def test_a_broken_interpreter_still_finds_a_literal_match(self):
+        # Same casing on both sides means the ASCII fallback's plain
+        # byte-literal grep still finds it once the warning fires.
+        p = self.write("sample.md", "See " + self.NAME + " here\n")
+        r = self.run_gate(p, CCPR_GATE_DENY_NAMES=self.NAME, PYTHONHOME="/nonexistent")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("denylist", self.categories(r))
+        self.assertIn("unicode content matcher failed", r.stdout + r.stderr)
+
+    def test_an_ascii_only_deny_list_never_starts_python_even_with_a_broken_interpreter(self):
+        p = self.write("sample.md", "The acme rollout.\n")
+        r = self.run_gate(p, CCPR_GATE_DENY_NAMES="acme", PYTHONHOME="/nonexistent")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        out = r.stdout + r.stderr
+        self.assertNotIn("unicode content matcher failed", out)
+        self.assertNotIn("Fatal Python error", out)
+
+
+# ---------------------------------------------------------------------------
 # 4. The self-match case — the file that defines the patterns.
 # ---------------------------------------------------------------------------
 class SelfMatchTest(GateTestBase):

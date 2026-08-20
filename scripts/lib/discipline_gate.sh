@@ -211,13 +211,17 @@ GATE_RE_CONTENT='(TODO[:(]|FIXME[:(]|^[[:space:]]*[-*][[:space:]]*\[[ xX]\]|^sta
 #   * in a PATH — case-insensitive over the full Unicode range, both spellings
 #     normalised to NFC (see "folding and normalisation" below). Simple case
 #     folding: `ß` does not match `ss`.
-#   * in FILE CONTENT — `grep -nFi`, i.e. case-insensitive over ASCII only and
-#     without normalisation. A file whose BYTES spell a configured name with a
-#     different case on a non-ASCII letter is not flagged. Left as it is
-#     knowingly: content matching runs per line of every scanned file, where the
-#     escalation used for paths would mean a helper process per file. Configure
-#     the spellings that matter, or expect the path check to be the stricter of
-#     the two.
+#   * in FILE CONTENT — `grep -nFi` (ASCII-only, unnormalised) for an ASCII
+#     deny NAME; a python3 escalation, normalised to NFC and folded over the
+#     whole Unicode range, for a non-ASCII name (WI-0017). Gated on the NAME,
+#     not on the content: measured 20.08.2026 that gating on content the way
+#     the path side gates it would fire on 94% of this repository's own
+#     tracked files (non-ASCII prose is common), while an ASCII name can never
+#     miss what the escalation would find — see the comment above
+#     _gate_content_deny_lines for the measurement. Configure the spelling
+#     that matters if a name folds case only in a locale-dependent way this
+#     gate does not follow (simple case folding, same limitation as the path
+#     side: `ß` does not match `ss`).
 GATE_IP_ALLOWLIST=""
 GATE_DENY_NAMES=""
 GATE_DENY_SOURCE="none"
@@ -508,6 +512,66 @@ gate_redact_path() {
     }'
 }
 
+# --- deny-listed names in FILE CONTENT ----------------------------------------
+# WI-0017 part (2): content matching stayed ASCII-only and un-normalised
+# (`grep -nFi`, no locale pin) while the path side above escalates to python3
+# for Unicode. Escalating on the same condition as the path side — subject OR
+# name non-ASCII — was measured and rejected: 257 of this repository's own
+# 271 tracked files carry a non-ASCII byte (em dashes, umlauts in prose), so
+# that gate would fire on 94% of files and add ~41% to every sweep even when
+# the configured deny list is pure ASCII. The escalation below therefore
+# gates on the NAME alone, never on the content.
+#
+# This is provably safe for an ASCII name, not merely assumed: measured with
+# the ASCII name `cafe` against NFD-decomposed content `cafe`+U+0301, plain
+# `grep -Fi` reports a match while python's NFC-normalised search reports
+# none — NFC composes the letter and the accent, removing the ASCII substring
+# the byte-literal grep saw. So for an ASCII name the ASCII matcher can only
+# OVER-report relative to what python would find, never miss it, which is the
+# safe direction for a gate. A locale pin (LC_ALL=C) is not needed at the
+# grep call below for the same reason: once this path only ever runs for
+# ASCII names, locale-dependent case folding of an ASCII pattern cannot
+# change the answer either.
+#
+# _gate_content_deny_lines <name> — content on stdin, <name> the ONE
+# configured entry currently being checked (never the whole list: the
+# deny-list loop in gate_scan_file already iterates by name, and keeping this
+# to one comparison at a time matches _gate_unicode_py's index mode). Prints
+# one 1-based line number per matching line. Exit contract mirrors WI-0049's
+# path-side shape exactly, on the same sentinel, so the two consumers of this
+# library cannot drift apart again: 0 = at least one match, printed to
+# stdout; $_GATE_UNICODE_NO_MATCH = no match; any other status = the helper
+# did not run to completion.
+#
+# Content arrives on STDIN, not through the environment the way the path
+# subject does in _gate_unicode_py: an environment value is capped at
+# ARG_MAX (measured 1 MiB on this machine), and the largest tracked file
+# today (93 KB) fits only by chance — a file above that ceiling would fail
+# hard with "argument list too long". `python3 -c` takes the SCRIPT as its
+# argument instead: fixed, short, never sized by any file this gate reads —
+# leaving stdin free to carry the actual content, unbounded by ARG_MAX.
+_gate_content_deny_lines() {
+  GATE_CD_NAME="$1" GATE_CD_NO_MATCH="$_GATE_UNICODE_NO_MATCH" python3 -c '
+import os, re, sys, unicodedata
+
+def nfc(s):
+    return unicodedata.normalize("NFC", s)
+
+no_match = int(os.environ["GATE_CD_NO_MATCH"])
+name = nfc(os.environ.get("GATE_CD_NAME", ""))
+if not name:
+    sys.exit(no_match)
+pat = re.compile(re.escape(name), re.IGNORECASE)
+text = sys.stdin.buffer.read().decode("utf-8", "surrogateescape")
+found = False
+for lineno, line in enumerate(text.split("\n"), start=1):
+    if pat.search(nfc(line)):
+        sys.stdout.write(str(lineno) + "\n")
+        found = True
+sys.exit(0 if found else no_match)
+'
+}
+
 # --- scanning -----------------------------------------------------------------
 _gate_abspath() {
   local d b
@@ -661,19 +725,73 @@ EOF
   # --- deny-list -----------------------------------------------------------
   # The configured names are NEVER echoed: a CI log is a shipped artifact too.
   # The index plus the line number is enough to locate the occurrence.
+  #
+  # WI-0017: escalation to _gate_content_deny_lines is gated on the NAME
+  # being non-ASCII, never on $content — see the comment on that function for
+  # why gating on content was measured and rejected. An ASCII name always
+  # takes the unchanged `grep -nFi` path below, so an all-ASCII deny list
+  # never starts python3 at all.
   if [ -n "$GATE_DENY_NAMES" ]; then
     local idx=0 name
     while IFS= read -r name; do
       [ -n "$name" ] || continue
       idx=$((idx + 1))
-      hits="$(printf '%s\n' "$content" | grep -nFi -- "$name" || true)"
-      while IFS= read -r line; do
-        [ -n "$line" ] || continue
-        _gate_emit "${line%%:*}" denylist "configured tenant/project name #$idx occurs here (name redacted)"
-        found=1
-      done <<EOF
+      if _gate_is_ascii "$name"; then
+        hits="$(printf '%s\n' "$content" | grep -nFi -- "$name" || true)"
+        while IFS= read -r line; do
+          [ -n "$line" ] || continue
+          _gate_emit "${line%%:*}" denylist "configured tenant/project name #$idx occurs here (name redacted)"
+          found=1
+        done <<EOF
 $hits
 EOF
+      elif command -v python3 >/dev/null 2>&1; then
+        local cd_lines rc=0
+        cd_lines="$(printf '%s' "$content" | _gate_content_deny_lines "$name")" || rc=$?
+        case "$rc" in
+          0)
+            while IFS= read -r line; do
+              [ -n "$line" ] || continue
+              _gate_emit "$line" denylist "configured tenant/project name #$idx occurs here (name redacted)"
+              found=1
+            done <<EOF
+$cd_lines
+EOF
+            ;;
+          "$_GATE_UNICODE_NO_MATCH") : ;;
+          # Any other status means the comparison did not run to completion
+          # (WI-0049 shape). Say so and let the ASCII matcher below answer
+          # what it can, rather than reporting a clean file because the
+          # helper crashed.
+          *)
+            printf 'gate: unicode content matcher failed (status %s) — falling back to ASCII folding\n' "$rc" >&2
+            hits="$(printf '%s\n' "$content" | grep -nFi -- "$name" || true)"
+            while IFS= read -r line; do
+              [ -n "$line" ] || continue
+              _gate_emit "${line%%:*}" denylist "configured tenant/project name #$idx occurs here (name redacted)"
+              found=1
+            done <<EOF
+$hits
+EOF
+            ;;
+        esac
+      else
+        # Announced, never silent — same message and same one-shot dedupe
+        # flag _gate_needs_unicode already uses for the identical condition
+        # on the path side.
+        if [ "$_GATE_UNICODE_WARNED" -eq 0 ]; then
+          printf 'gate: python3 not found — non-ASCII names are folded as ASCII only\n' >&2
+          _GATE_UNICODE_WARNED=1
+        fi
+        hits="$(printf '%s\n' "$content" | grep -nFi -- "$name" || true)"
+        while IFS= read -r line; do
+          [ -n "$line" ] || continue
+          _gate_emit "${line%%:*}" denylist "configured tenant/project name #$idx occurs here (name redacted)"
+          found=1
+        done <<EOF
+$hits
+EOF
+      fi
     done <<EOF
 $GATE_DENY_NAMES
 EOF

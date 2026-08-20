@@ -7,6 +7,29 @@ All notable changes to this project are documented in this file. The format is b
 ## [Unreleased]
 
 ### Fixed
+- **The deny-list content check was ASCII-only and un-normalised, so a configured non-ASCII
+  tenant/project name could differ from its occurrence in a file's CONTENT only in case, or only
+  in NFD-vs-NFC normalisation, and still pass (WI-0017 part 2).** The path side already escalates
+  to a python3 comparison (NFC-normalised, full-Unicode case folding) for a non-ASCII subject or
+  name; content matching stayed a plain `grep -nFi` because escalating it the same way the path
+  side gates — subject OR name non-ASCII — was measured against this repository's own 271 tracked
+  files: 257 of them (94%) carry a non-ASCII byte in ordinary prose, so that gate would add ~4.0s
+  (~41%) to every sweep even with a pure-ASCII deny list. The fix gates on the configured NAME
+  alone, never on file content, which costs nothing extra when the deny list is pure ASCII: for an
+  ASCII name the plain matcher is provably complete rather than merely assumed to be — measured
+  with the ASCII name `cafe` against NFD-decomposed content `cafe`+U+0301, `grep -Fi` reports a
+  match while python's NFC view reports none, so the ASCII path can only over-report relative to
+  the escalation, never miss what it would find. `_gate_content_deny_lines` runs the same
+  NFC-normalise-and-fold comparison as the path side, one name at a time, with content passed on
+  **stdin** rather than through the environment — the path side's env-based transport is fine for
+  a path, but the largest tracked file today (93 KB) fits under `ARG_MAX` (1 MiB) only by chance,
+  and a larger one would fail hard with "argument list too long". The exit contract mirrors
+  WI-0049's sentinel shape exactly (0 = match, `_GATE_UNICODE_NO_MATCH` = no match, anything else =
+  the helper did not run) so the two consumers of the shared library cannot drift apart again; a
+  broken interpreter warns and falls back to the ASCII matcher rather than reading as a clean file.
+  An earlier `LC_ALL=C` patch for the same line, prepared and parked mid-item, is superseded by
+  this fix rather than applied: once the ASCII path only ever runs for ASCII names, locale-dependent
+  case folding of an ASCII pattern cannot change the answer, so no locale pin is needed there either.
 - **`memory-lint.sh` picked a fixed winner between an HTML comment and a code span, and assumed a
   code span never crosses a line, both of which CommonMark contradicts (WI-0048, WI-0052).**
   `decomment_paragraph()` and `strip_inline_code()` used to be two separate whole-paragraph passes
