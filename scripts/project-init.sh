@@ -37,7 +37,7 @@ fi
 
 if [ -f "${TEMPLATES_DIR}/PROJECT_CLAUDE_TEMPLATE.md" ]; then
     # Copy and replace project name placeholder
-    sed "s/{{PROJECT_NAME}}/${PROJECT_NAME}/g" "${TEMPLATES_DIR}/PROJECT_CLAUDE_TEMPLATE.md" > "${PROJECT_DIR}/.claude/CLAUDE.md"
+    sed "s/{{PROJECT_NAME}}/${PROJECT_NAME}/g" "${TEMPLATES_DIR}/PROJECT_CLAUDE_TEMPLATE.md" > "${PROJECT_DIR}/.claude/CLAUDE.md"  # exit-status: exempt set-e-sufficient
 fi
 
 # Generate empty P0 phase index (Document Splitting Convention).
@@ -133,9 +133,9 @@ esac
 
 # Initialize git
 cd "${PROJECT_DIR}"
-git init -q
-git add -A
-git commit -q -m "project: initialize project structure (template: ${TEMPLATE})"
+git init -q  # exit-status: exempt set-e-sufficient
+git add -A  # exit-status: exempt set-e-sufficient
+git commit -q -m "project: initialize project structure (template: ${TEMPLATE})"  # exit-status: exempt set-e-sufficient
 
 echo ""
 echo "Project created: ${PROJECT_DIR}"
@@ -145,4 +145,4 @@ echo "  cd ${PROJECT_DIR} && claude"
 echo "  Then: /project-init or /p0-problem"
 echo ""
 echo "Directory structure:"
-find "${PROJECT_DIR}" -maxdepth 3 -not -path '*/.git/*' -not -path '*/.git' | sort | head -40 | sed "s|${WORKSPACE}/||"
+find "${PROJECT_DIR}" -maxdepth 3 -not -path '*/.git/*' -not -path '*/.git' | sort | head -40 | sed "s|${WORKSPACE}/||"  # exit-status: exempt best-effort-status-display

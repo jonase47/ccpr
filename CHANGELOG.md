@@ -288,6 +288,23 @@ All notable changes to this project are documented in this file. The format is b
   independent of `MEMORY_INDEX_LINK_SEVERITY`.
 
 ### Added
+- **Every external-tool invocation in the shipped shell scripts is now pinned to a consumed exit
+  status (`scripts/tests/test_external_tool_exit_status.py`, WI-0054).** Three prior rounds
+  (WI-0049, WI-0051, WI-0053) closed one recurring defect — a crashing `grep`/`sed`/`awk`/`python3`/
+  `git` read as "nothing found" instead of "this check did not run" — by enumerating call sites BY
+  READING the source, and each pass kept missing at least one site the eye skipped. A new,
+  self-contained shell scanner (no external parser dependency) re-enumerates every invocation in
+  `scripts/*.sh` and `scripts/lib/*.sh` on every test run and asserts, in the positive form, that
+  each one is either structurally checked (an `if`/`while` condition, a `$?`/`|| return` capture, a
+  real `&&`/`||` chain) or carries an inline `# exit-status: exempt <category>` marker naming one of
+  eleven shared, reasoned categories — so a newly added, unclassified invocation fails the very next
+  run instead of waiting for a fourth sweep. Of 125 invocations found, 33 were already structurally
+  checked and 92 needed a marker; two of those markers record a genuine, unfixed risk found while
+  building the check (`bootstrap.sh`'s instinct-listing `grep` can abort the whole dashboard on a
+  normal empty result; `log-cleanup.sh`'s log trim can silently replace a log with an empty file if
+  `python3` crashes) rather than being silently absorbed as routine. The check's own docstring states
+  its limitation plainly: it cannot see a status swallowed several call-frames up (WI-0053's own
+  `gate_path_deny_index` site), only what it can see reading forward from each invocation.
 - **CCPR can now gate its own shipped artifacts (`scripts/artifact-gate.sh`).** The Constitution
   forbids personal or tenant data in shipped artifacts, and that Inviolable was breached — a tenant
   project name sat in an instinct's rationale while the file's own header claimed such details were

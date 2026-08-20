@@ -22,7 +22,7 @@ detect_framework() {
         else
             # Check for test script
             local test_cmd
-            test_cmd=$(python3 -c "import json; d=json.load(open('package.json')); print(d.get('scripts',{}).get('test',''))" 2>/dev/null || true)
+            test_cmd=$(python3 -c "import json; d=json.load(open('package.json')); print(d.get('scripts',{}).get('test',''))" 2>/dev/null || true)  # exit-status: exempt downstream-checks-result
             if echo "${test_cmd}" | grep -q "vitest"; then echo "vitest"
             elif echo "${test_cmd}" | grep -q "jest"; then echo "jest"
             else echo "npm-test"
@@ -54,9 +54,9 @@ run_pytest() {
         python3 -m pytest "${test_arg}" --tb=short -q \
             --json-report --json-report-file="${tmpfile}" \
             $( [ -n "$(pip show pytest-cov 2>/dev/null)" ] && echo "--cov --cov-report=json:/tmp/pytest-cov.json" || true ) \
-            2>&1 || true
+            2>&1 || true  # exit-status: exempt test-runner-output-capture
 
-        python3 << PYEOF
+        python3 << PYEOF  # exit-status: exempt set-e-sufficient
 import json, sys
 
 try:
@@ -111,9 +111,9 @@ PYEOF
     else
         # Fallback: parse raw pytest output
         local raw
-        raw=$(python3 -m pytest "${test_arg}" --tb=short -q 2>&1 || true)
+        raw=$(python3 -m pytest "${test_arg}" --tb=short -q 2>&1 || true)  # exit-status: exempt test-runner-output-capture
 
-        python3 << PYEOF
+        python3 << PYEOF  # exit-status: exempt set-e-sufficient
 import re, json
 
 raw = '''${raw}'''
@@ -169,7 +169,7 @@ run_jest_or_vitest() {
         npx jest ${test_arg} --json --outputFile="${tmpfile}" 2>/dev/null || true
     fi
 
-    python3 << PYEOF
+    python3 << PYEOF  # exit-status: exempt set-e-sufficient
 import json, sys
 
 try:
@@ -216,7 +216,7 @@ run_cargo() {
     local raw
     raw=$(cargo test ${test_arg} 2>&1 || true)
 
-    python3 << PYEOF
+    python3 << PYEOF  # exit-status: exempt set-e-sufficient
 import re, json
 
 raw = '''${raw}'''
@@ -259,7 +259,7 @@ run_go() {
     local raw
     raw=$(go test -v -count=1 ${test_arg} 2>&1 || true)
 
-    python3 << PYEOF
+    python3 << PYEOF  # exit-status: exempt set-e-sufficient
 import re, json
 
 raw = '''${raw}'''
@@ -300,7 +300,7 @@ PYEOF
 run_npm_test() {
     local raw
     raw=$(npm test 2>&1 || true)
-    echo "{\"framework\": \"npm-test\", \"timestamp\": \"${TIMESTAMP}\", \"raw_output\": $(echo "${raw}" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()[:2000]))')}"
+    echo "{\"framework\": \"npm-test\", \"timestamp\": \"${TIMESTAMP}\", \"raw_output\": $(echo "${raw}" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()[:2000]))')}"  # exit-status: exempt set-e-sufficient
 }
 
 # -- Main --

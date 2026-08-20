@@ -81,7 +81,7 @@ command -v python3 >/dev/null || die "python3 not found"
 # --- config access -----------------------------------------------------------
 # cfg <dotted.key> — read a value from the JSON config; empty string if absent.
 cfg() {
-  python3 - "$CONFIG" "$1" <<'PY'
+  python3 - "$CONFIG" "$1" <<'PY'  # exit-status: exempt propagates-as-function-return
 import json, sys
 cfg = json.load(open(sys.argv[1]))
 cur = cfg
@@ -121,7 +121,7 @@ resolve_token() {
 # authed URL for a git op — token injected in-memory, never written to .git/config
 authed_url() {
   local tok; tok="$(resolve_token)"
-  printf '%s' "$REPO_URL" | sed -E "s#^http://#http://oauth2:${tok}@#; s#^https://#https://oauth2:${tok}@#"
+  printf '%s' "$REPO_URL" | sed -E "s#^http://#http://oauth2:${tok}@#; s#^https://#https://oauth2:${tok}@#"  # exit-status: exempt set-e-sufficient
 }
 
 # git_or_die <label> <git-command...> — run a git subprocess whose stderr can
@@ -157,20 +157,20 @@ ensure_clone() {
   local aurl; aurl="$(authed_url)"
   if [[ -d "$CLONE/.git" ]]; then
     note "fetching $REPO_URL"
-    git -C "$CLONE" remote set-url origin "$REPO_URL" >/dev/null 2>&1 || true
+    git -C "$CLONE" remote set-url origin "$REPO_URL" >/dev/null 2>&1 || true  # exit-status: exempt git-cache-refresh
     git_or_die "git fetch" git -C "$CLONE" fetch --quiet "$aurl" '+refs/heads/*:refs/remotes/origin/*'
     # reset working tree to origin default branch (overlay clone is read-through).
     # symbolic-ref fails when origin/HEAD is unset — keep it errexit-safe (|| true inside the subshell).
     local def
-    def="$(git -C "$CLONE" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##' || true)"
+    def="$(git -C "$CLONE" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##' || true)"  # exit-status: exempt git-cache-refresh
     def="${def:-main}"
-    git -C "$CLONE" checkout --quiet -B "$def" "origin/$def" 2>/dev/null || git -C "$CLONE" checkout --quiet "$def" 2>/dev/null || true
-    git -C "$CLONE" reset --quiet --hard "origin/$def" 2>/dev/null || true
+    git -C "$CLONE" checkout --quiet -B "$def" "origin/$def" 2>/dev/null || git -C "$CLONE" checkout --quiet "$def" 2>/dev/null || true  # exit-status: exempt git-cache-refresh
+    git -C "$CLONE" reset --quiet --hard "origin/$def" 2>/dev/null || true  # exit-status: exempt git-cache-refresh
   else
     note "cloning $REPO_URL -> $CLONE"
     mkdir -p "$(dirname "$CLONE")"
     git_or_die "git clone" git clone --quiet "$aurl" "$CLONE"
-    git -C "$CLONE" remote set-url origin "$REPO_URL" >/dev/null 2>&1 || true
+    git -C "$CLONE" remote set-url origin "$REPO_URL" >/dev/null 2>&1 || true  # exit-status: exempt git-cache-refresh
   fi
 }
 
@@ -234,13 +234,13 @@ run_gate() {
   # nothing -- so it takes the same code, exit 2, rather than being folded
   # into the "1 = findings" branch below.
   if [[ "$scan_rc" -ge 2 ]]; then
-    die "$(printf '%s\n' "$out" | awk -F'\t' '$2 == "_error" { print $3; exit }')"
+    die "$(printf '%s\n' "$out" | awk -F'\t' '$2 == "_error" { print $3; exit }')"  # exit-status: exempt internal-record-parsing
   fi
   [[ "$scan_rc" -eq 0 ]] && return 0
 
   local rendered
   rendered="$(printf '%s\n' "$out" \
-    | awk -F'\t' '$2 != "_exempt" && !seen[$2 FS $3]++ { printf "  [%s] %s\n", $2, $3 }')"
+    | awk -F'\t' '$2 != "_exempt" && !seen[$2 FS $3]++ { printf "  [%s] %s\n", $2, $3 }')"  # exit-status: exempt internal-record-parsing
   printf '%s\n' "$rendered"
   return 1
 }
@@ -262,7 +262,7 @@ ensure_index_block() {
   [[ -f "$INSTINCTS_INDEX" ]] || return 0
   [[ -f "$INSTINCTS_TARGET" ]] || return 0
   local rel="instincts/$(basename "$INSTINCTS_TARGET")"
-  python3 - "$INSTINCTS_INDEX" "$INSTINCTS_TARGET" "$rel" "$INDEX_BLOCK_TITLE" "$REPO_URL" "$NS" <<'PY'
+  python3 - "$INSTINCTS_INDEX" "$INSTINCTS_TARGET" "$rel" "$INDEX_BLOCK_TITLE" "$REPO_URL" "$NS" <<'PY'  # exit-status: exempt set-e-sufficient
 import sys, re
 index_path, topic_path, rel, title, repo, ns = sys.argv[1:7]
 start, end = f"<!-- memory-sync:{title}:start -->", f"<!-- memory-sync:{title}:end -->"
@@ -516,12 +516,12 @@ cmd_promote() {
   # in every one of these, so say so.
   mkdir -p "$CLONE/$(dirname -- "$dst")"
   cp -- "$src" "$CLONE/$dst"
-  git -C "$CLONE" add -- "$dst"
+  git -C "$CLONE" add -- "$dst"  # exit-status: exempt set-e-sufficient
   if git -C "$CLONE" diff --cached --quiet; then
     note "no change to promote (already up to date)."; return 0
   fi
-  git -C "$CLONE" commit --quiet -m "memory: promote $(basename -- "$dst")"
-  git_or_die "git push" git -C "$CLONE" push --quiet "$(authed_url)" HEAD:refs/heads/"$(git -C "$CLONE" rev-parse --abbrev-ref HEAD)"
+  git -C "$CLONE" commit --quiet -m "memory: promote $(basename -- "$dst")"  # exit-status: exempt set-e-sufficient
+  git_or_die "git push" git -C "$CLONE" push --quiet "$(authed_url)" HEAD:refs/heads/"$(git -C "$CLONE" rev-parse --abbrev-ref HEAD)"  # exit-status: exempt set-e-sufficient
   note "promoted $dst -> $REPO_URL"
 }
 

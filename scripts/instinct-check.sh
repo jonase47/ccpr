@@ -34,7 +34,7 @@ count_entries() {
     local total=0 f n
     for f in "$@"; do
         [ -f "$f" ] || continue
-        n=$(grep -cE "${ENTRY_PATTERN}" "$f" 2>/dev/null || true)
+        n=$(grep -cE "${ENTRY_PATTERN}" "$f" 2>/dev/null || true)  # exit-status: exempt grep-empty-is-valid
         total=$(( total + ${n:-0} ))
     done
     echo "$total"
@@ -46,7 +46,7 @@ count_index_bullets() {
     local f="$1" n
     [ -f "$f" ] || { echo 0; return; }
     # grep -c prints "0" AND exits 1 on no match — swallow the status, keep the count.
-    n=$(grep -cE '^- .*\[0\.[0-9]\]' "$f" 2>/dev/null || true)
+    n=$(grep -cE '^- .*\[0\.[0-9]\]' "$f" 2>/dev/null || true)  # exit-status: exempt grep-empty-is-valid
     echo "${n:-0}"
 }
 
@@ -75,7 +75,7 @@ extract_ids() {
     # remaining args = files
     local prefix="$1"; shift
     grep -hoE "^${prefix}[A-Z][A-Z0-9-]*-[0-9]{3}" "$@" 2>/dev/null \
-        | sed -E "s/^${prefix}//" | sort -u || true
+        | sed -E "s/^${prefix}//" | sort -u || true  # exit-status: exempt grep-empty-is-valid
 }
 
 # --- global Tier-1 ----------------------------------------------------------
@@ -129,14 +129,14 @@ if [ "${#TOPIC_FILES[@]}" -gt 0 ]; then
     if [ -n "${UNLISTED}" ]; then
         echo ""
         echo "INFO: in a topic file but not listed individually in the index:"
-        echo "${UNLISTED}" | sed 's/^/  /'
+        echo "${UNLISTED}" | sed 's/^/  /'  # exit-status: exempt set-e-sufficient
         echo "  Expected for frozen/superseded overlays (e.g. imported-*.md)."
         echo "  Unexpected for native entries — those should carry an index bullet."
     fi
     if [ -n "${DANGLING}" ]; then
         echo ""
         echo "WARNING: listed in the index but no matching entry in any topic file:"
-        echo "${DANGLING}" | sed 's/^/  /'
+        echo "${DANGLING}" | sed 's/^/  /'  # exit-status: exempt set-e-sufficient
         echo "  The index points at content that does not exist. Fix via /instinct."
     fi
 fi

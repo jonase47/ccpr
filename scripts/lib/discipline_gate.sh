@@ -236,7 +236,7 @@ gate_config_path() {
 }
 
 _gate_read_config() {
-  python3 - "$1" <<'PY' 2>/dev/null || true
+  python3 - "$1" <<'PY' 2>/dev/null || true  # exit-status: exempt optional-config-read
 import json, sys
 try:
     cfg = json.load(open(sys.argv[1], encoding="utf-8"))
@@ -287,10 +287,10 @@ gate_load_config() {
   if [ -n "${CCPR_GATE_DENY_NAMES:-}" ]; then
     local pre out rc=0
     pre="$(printf '%s\n' "$CCPR_GATE_DENY_NAMES" | tr ',' '\n' \
-      | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+      | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"  # exit-status: exempt set-e-sufficient
     out="$(_gate_checked "config/CCPR_GATE_DENY_NAMES blank-line-filter" "$pre" -v '^$')" || rc=$?
     if [ "$rc" -ge 2 ]; then
-      printf 'gate: %s\n' "$(printf '%s\n' "$out" | awk -F'\t' '$2 == "_error" { print $3 }')" >&2
+      printf 'gate: %s\n' "$(printf '%s\n' "$out" | awk -F'\t' '$2 == "_error" { print $3 }')" >&2  # exit-status: exempt internal-record-parsing
       exit 2
     fi
     GATE_DENY_NAMES="$out"
@@ -417,7 +417,7 @@ _gate_needs_unicode() {
 _GATE_UNICODE_NO_MATCH=2
 _gate_unicode_py() {
   GATE_U_MODE="$1" GATE_U_SUBJECT="$2" GATE_U_NAMES="$GATE_DENY_NAMES" \
-    GATE_U_NO_MATCH="$_GATE_UNICODE_NO_MATCH" python3 - <<'PY'
+    GATE_U_NO_MATCH="$_GATE_UNICODE_NO_MATCH" python3 - <<'PY'  # exit-status: exempt propagates-as-function-return
 import os, re, sys, unicodedata
 
 def nfc(s):
@@ -540,7 +540,7 @@ gate_redact_path() {
         s = out rest
       }
       printf "%s", s
-    }'
+    }'  # exit-status: exempt propagates-as-function-return
 }
 
 # --- deny-listed names in FILE CONTENT ----------------------------------------
@@ -600,7 +600,7 @@ for lineno, line in enumerate(text.split("\n"), start=1):
         sys.stdout.write(str(lineno) + "\n")
         found = True
 sys.exit(0 if found else no_match)
-'
+'  # exit-status: exempt propagates-as-function-return
 }
 
 # --- scanning -----------------------------------------------------------------
@@ -628,7 +628,7 @@ _gate_emit() { printf '%s\t%s\t%s\n' "$1" "$2" "$3"; }
 # directly.
 _gate_hits() {
   local content="$1"; shift
-  printf '%s\n' "$content" | grep "$@"
+  printf '%s\n' "$content" | grep "$@"  # exit-status: exempt propagates-as-function-return
 }
 
 # _gate_checked <label> <content> <grep-flags...> — _gate_hits, plus the
@@ -673,8 +673,8 @@ gate_scan_file() {
   GATE_LAST_EXEMPT_LINES=0
 
   if [ "$(_gate_abspath "$f")" = "$_GATE_PATTERN_SOURCE" ]; then
-    content="$(LC_ALL=C awk -v m="$GATE_EXEMPT_MARKER" 'index($0,m){print "";next}{print}' "$f")"
-    GATE_LAST_EXEMPT_LINES="$(LC_ALL=C awk -v m="$GATE_EXEMPT_MARKER" 'index($0,m){n++}END{print n+0}' "$f")"
+    content="$(LC_ALL=C awk -v m="$GATE_EXEMPT_MARKER" 'index($0,m){print "";next}{print}' "$f")"  # exit-status: exempt set-e-sufficient
+    GATE_LAST_EXEMPT_LINES="$(LC_ALL=C awk -v m="$GATE_EXEMPT_MARKER" 'index($0,m){n++}END{print n+0}' "$f")"  # exit-status: exempt set-e-sufficient
     # Callers capture this function's stdout in a command substitution, so the
     # count has to travel as a record, not as a variable. Category "_exempt" is
     # bookkeeping, not a finding: it never sets `found`.

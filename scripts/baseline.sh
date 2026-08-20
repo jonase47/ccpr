@@ -94,18 +94,18 @@ GIT_TAGS=""
 
 # Phase Status Tracker from CLAUDE.md
 if [ -f "${CLAUDE_MD}" ]; then
-    PHASE_TRACKER=$(sed -n '/Phase Status Tracker/,/^##/p' "${CLAUDE_MD}" | head -n -1)
-    TECH_STACK=$(sed -n '/Tech Stack/,/^##/p' "${CLAUDE_MD}" | head -n -1)
+    PHASE_TRACKER=$(sed -n '/Phase Status Tracker/,/^##/p' "${CLAUDE_MD}" | head -n -1)  # exit-status: exempt doc-field-extraction
+    TECH_STACK=$(sed -n '/Tech Stack/,/^##/p' "${CLAUDE_MD}" | head -n -1)  # exit-status: exempt doc-field-extraction
 fi
 
 # Milestones from PROJECT_PLAN.md
 if [ -f "${PROJECT_PLAN}" ]; then
-    MILESTONES=$(sed -n '/Milestone/,/^##/p' "${PROJECT_PLAN}" | head -n 30)
+    MILESTONES=$(sed -n '/Milestone/,/^##/p' "${PROJECT_PLAN}" | head -n 30)  # exit-status: exempt doc-field-extraction
 fi
 
 # Git tags
 if git -C "${PROJECT_DIR}" rev-parse --git-dir &>/dev/null; then
-    GIT_TAGS=$(git -C "${PROJECT_DIR}" tag -l --sort=-v:refname 2>/dev/null | head -n 10)
+    GIT_TAGS=$(git -C "${PROJECT_DIR}" tag -l --sort=-v:refname 2>/dev/null | head -n 10)  # exit-status: exempt best-effort-status-display
 fi
 
 # 5. Write output

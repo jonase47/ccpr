@@ -93,7 +93,7 @@ if [[ -n "$SCOPE_GLOB" ]]; then
         if [[ "$p" == $SCOPE_GLOB ]]; then
             FILES+=("$DOCS_DIR/$p")
         fi
-    done < <(cd "$DOCS_DIR" && find . -type f -name "*.md" 2>/dev/null | sed 's|^\./||')
+    done < <(cd "$DOCS_DIR" && find . -type f -name "*.md" 2>/dev/null | sed 's|^\./||')  # exit-status: exempt proc-subst-unobservable
 else
     for folder in "${PHASE_FOLDERS[@]}"; do
         [[ -d "$DOCS_DIR/$folder" ]] || continue

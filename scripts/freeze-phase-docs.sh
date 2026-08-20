@@ -154,7 +154,7 @@ while IFS= read -r file; do
             else
                 # In-place YAML edit — anchor to line start, exact status match.
                 # macOS sed needs the empty backup arg.
-                sed -i '' -E "s/^status:[[:space:]]*(draft|active)[[:space:]]*$/status: frozen/" "$file"
+                sed -i '' -E "s/^status:[[:space:]]*(draft|active)[[:space:]]*$/status: frozen/" "$file"  # exit-status: exempt set-e-sufficient
                 echo "  frozen: $file (was: $status)"
             fi
             CHANGED=$((CHANGED + 1))

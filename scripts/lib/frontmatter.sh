@@ -22,7 +22,7 @@ fm_has() {
     awk 'NR==1 && $0=="---" {found_open=1; next}
          found_open && $0=="---" {found_close=1; exit}
          NR>50 {exit}
-         END {exit !found_close}' "$file"
+         END {exit !found_close}' "$file"  # exit-status: exempt propagates-as-function-return
 }
 
 # fm_extract — Outputs the frontmatter lines (without `---` markers).
@@ -30,7 +30,7 @@ fm_extract() {
     local file="$1"
     awk 'NR==1 && $0=="---" {in_fm=1; next}
          in_fm && $0=="---" {exit}
-         in_fm {print}' "$file"
+         in_fm {print}' "$file"  # exit-status: exempt propagates-as-function-return
 }
 
 # fm_field — Returns the value for `key:` (trims whitespace, strips surrounding quotes).
@@ -48,7 +48,7 @@ fm_field() {
             else if (match($0, /^'\''(.*)'\''$/)) { $0 = substr($0, 2, length($0)-2) }
             print
             exit
-        }'
+        }'  # exit-status: exempt propagates-as-function-return
 }
 
 # fm_list — Outputs list entries.
@@ -93,7 +93,7 @@ fm_list() {
         }
         in_block && !/^[[:space:]]/ {
             in_block = 0
-        }'
+        }'  # exit-status: exempt propagates-as-function-return
 }
 
 # fm_validate_required — Checks required fields. Prints missing fields to stdout.

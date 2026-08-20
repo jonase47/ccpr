@@ -99,7 +99,7 @@ date_to_epoch() {
         return 0
     fi
     local iso
-    iso="$(printf '%s' "$d" | awk -F. '{print $3"-"$2"-"$1}')"
+    iso="$(printf '%s' "$d" | awk -F. '{print $3"-"$2"-"$1}')"  # exit-status: exempt downstream-checks-result
     date -d "$iso" "+%s" 2>/dev/null || echo "0"
 }
 
@@ -267,7 +267,7 @@ if [[ -d "$MEMORY_DIR" ]]; then
         body_bytes=0
         if fm_has "$silo_memory"; then
             # Find second '---' line and count bytes after it
-            close_line=$(awk 'NR==1 && $0=="---" {found=1; next} found && $0=="---" {print NR; exit}' "$silo_memory")
+            close_line=$(awk 'NR==1 && $0=="---" {found=1; next} found && $0=="---" {print NR; exit}' "$silo_memory")  # exit-status: exempt downstream-checks-result
             if [[ -n "$close_line" ]]; then
                 body_bytes=$(tail -n +$((close_line + 1)) "$silo_memory" | wc -c | tr -d ' ')
             fi
@@ -295,7 +295,7 @@ if [[ -d "$TIER1_GLOBAL_TOPIC_DIR" ]]; then
     done < <(find "$TIER1_GLOBAL_TOPIC_DIR" -maxdepth 1 -type f -name "*.md" 2>/dev/null)
 fi
 if (( ${#tier1_low_conf_files[@]} > 0 )); then
-    low_conf=$(grep -chE '^\*\*Confidence: 0\.[34]\*\*' "${tier1_low_conf_files[@]}" 2>/dev/null | paste -sd+ - | bc 2>/dev/null || true)
+    low_conf=$(grep -chE '^\*\*Confidence: 0\.[34]\*\*' "${tier1_low_conf_files[@]}" 2>/dev/null | paste -sd+ - | bc 2>/dev/null || true)  # exit-status: exempt grep-empty-is-valid
     low_conf=${low_conf:-0}
     if (( low_conf > 0 )); then
         if [[ -d "$TIER1_GLOBAL_TOPIC_DIR" ]]; then
@@ -870,7 +870,7 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
             if (in_fence) print fence_sentinel fence_open_line
             if (in_html_comment) print html_comment_sentinel html_comment_open_line
         }
-    ' "$INDEX_FILE")
+    ' "$INDEX_FILE")  # exit-status: exempt proc-subst-unobservable
 done
 
 # Report

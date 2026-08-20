@@ -33,7 +33,7 @@ collect_git_status() {
     local branch uncommitted last_commit
 
     branch=$(git -C "${PROJECT_DIR}" branch --show-current 2>/dev/null || echo "detached")
-    uncommitted=$(git -C "${PROJECT_DIR}" status --porcelain 2>/dev/null | wc -l | tr -d ' ')
+    uncommitted=$(git -C "${PROJECT_DIR}" status --porcelain 2>/dev/null | wc -l | tr -d ' ')  # exit-status: exempt best-effort-status-display
     last_commit=$(git -C "${PROJECT_DIR}" log -1 --format="%s (%cr)" 2>/dev/null || echo "No commit")
 
     echo "- Branch: ${branch}"
@@ -42,11 +42,11 @@ collect_git_status() {
 
     if [ "${uncommitted}" -gt 0 ]; then
         echo "- Changed files:"
-        git -C "${PROJECT_DIR}" status --porcelain 2>/dev/null | head -10 | while read -r line; do
+        git -C "${PROJECT_DIR}" status --porcelain 2>/dev/null | head -10 | while read -r line; do  # exit-status: exempt best-effort-status-display
             echo "  - ${line}"
         done
         local total
-        total=$(git -C "${PROJECT_DIR}" status --porcelain 2>/dev/null | wc -l | tr -d ' ')
+        total=$(git -C "${PROJECT_DIR}" status --porcelain 2>/dev/null | wc -l | tr -d ' ')  # exit-status: exempt best-effort-status-display
         if [ "${total}" -gt 10 ]; then
             echo "  - ... and $((total - 10)) more"
         fi
@@ -65,22 +65,22 @@ collect_handover() {
     local phase status last_agent next_step
 
     # Strip markdown bold (**) and extract value after colon
-    phase=$(sed -n 's/^[* ]*Phase[* ]*:[[:space:]]*//p' "${HANDOVER_FILE}" 2>/dev/null | sed 's/\*//g; s/^[[:space:]]*//' | head -1) || true
+    phase=$(sed -n 's/^[* ]*Phase[* ]*:[[:space:]]*//p' "${HANDOVER_FILE}" 2>/dev/null | sed 's/\*//g; s/^[[:space:]]*//' | head -1) || true  # exit-status: exempt doc-field-extraction
     phase="${phase:-Unknown}"
 
     # Status: try dedicated field first, fall back to parenthetical in phase line
-    status=$(sed -n 's/^[* ]*Status[* ]*:[[:space:]]*//p' "${HANDOVER_FILE}" 2>/dev/null | sed 's/\*//g' | head -1) || true
+    status=$(sed -n 's/^[* ]*Status[* ]*:[[:space:]]*//p' "${HANDOVER_FILE}" 2>/dev/null | sed 's/\*//g' | head -1) || true  # exit-status: exempt doc-field-extraction
     if [ -z "${status}" ]; then
         # Extract from phase line, e.g. "P2 Validation (completed, Gate GO)"
-        status=$(echo "${phase}" | sed -n 's/.*(\(.*\)).*/\1/p') || true
+        status=$(echo "${phase}" | sed -n 's/.*(\(.*\)).*/\1/p') || true  # exit-status: exempt doc-field-extraction
     fi
     status="${status:-Unknown}"
 
     # "Next Steps" inline field (not the ## section)
     local next_inline
-    next_inline=$(sed -n 's/^[* ]*Next Steps[* ]*:[[:space:]]*//p' "${HANDOVER_FILE}" 2>/dev/null | sed 's/\*//g' | head -1) || true
+    next_inline=$(sed -n 's/^[* ]*Next Steps[* ]*:[[:space:]]*//p' "${HANDOVER_FILE}" 2>/dev/null | sed 's/\*//g' | head -1) || true  # exit-status: exempt doc-field-extraction
 
-    last_agent=$(sed -n 's/^[* ]*Last Active[* ]*:[[:space:]]*//p' "${HANDOVER_FILE}" 2>/dev/null | sed 's/\*//g; s/^[[:space:]]*//' | head -1) || true
+    last_agent=$(sed -n 's/^[* ]*Last Active[* ]*:[[:space:]]*//p' "${HANDOVER_FILE}" 2>/dev/null | sed 's/\*//g; s/^[[:space:]]*//' | head -1) || true  # exit-status: exempt doc-field-extraction
     last_agent="${last_agent:-Unknown}"
 
     echo "- Phase: ${phase}"
@@ -92,7 +92,7 @@ collect_handover() {
 
     # Extract next steps from ## Next Steps section
     local next_lines
-    next_lines=$(sed -n '/## Next/,/^##/p' "${HANDOVER_FILE}" 2>/dev/null | grep -v '^##' | grep -E '^[0-9]+\.|^-|^/' | head -3) || true
+    next_lines=$(sed -n '/## Next/,/^##/p' "${HANDOVER_FILE}" 2>/dev/null | grep -v '^##' | grep -E '^[0-9]+\.|^-|^/' | head -3) || true  # exit-status: exempt doc-field-extraction
     if [ -n "${next_lines}" ]; then
         echo "- Next Steps:"
         echo "${next_lines}" | while read -r line; do
@@ -102,7 +102,7 @@ collect_handover() {
 
     # Extract context for next session
     local context_lines
-    context_lines=$(sed -n '/## Context/,/^##/p' "${HANDOVER_FILE}" 2>/dev/null | grep -v '^##' | head -5) || true
+    context_lines=$(sed -n '/## Context/,/^##/p' "${HANDOVER_FILE}" 2>/dev/null | grep -v '^##' | head -5) || true  # exit-status: exempt doc-field-extraction
     if [ -n "${context_lines}" ]; then
         echo ""
         echo "### Context from last session"
@@ -148,7 +148,7 @@ collect_artefacts() {
     local phase="p0"
     if [ -f "${HANDOVER_FILE}" ]; then
         local p
-        p=$(sed -n 's/.*\(P[0-8]\).*/\1/p' "${HANDOVER_FILE}" 2>/dev/null | head -1) || true
+        p=$(sed -n 's/.*\(P[0-8]\).*/\1/p' "${HANDOVER_FILE}" 2>/dev/null | head -1) || true  # exit-status: exempt doc-field-extraction
         if [ -n "${p}" ]; then
             phase=$(echo "${p}" | tr '[:upper:]' '[:lower:]')
         fi
@@ -203,7 +203,7 @@ collect_instincts() {
     fi
 
     # List instinct IDs with confidence
-    grep -E '^### \[' "${INSTINCTS_FILE}" 2>/dev/null | head -5 | while read -r line; do
+    grep -E '^### \[' "${INSTINCTS_FILE}" 2>/dev/null | head -5 | while read -r line; do  # exit-status: exempt known-risk-not-yet-fixed
         echo "  ${line}"
     done
 }

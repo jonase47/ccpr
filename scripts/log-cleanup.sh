@@ -149,7 +149,7 @@ with open('${filepath}') as f_in, open('${tmpfile}', 'w') as f_out:
                 f_out.write(line)
         except:
             pass  # Discard broken lines
-" 2>/dev/null
+" 2>/dev/null  # exit-status: exempt known-risk-not-yet-fixed
         lines_after=$(wc -l < "${tmpfile}" | tr -d ' ')
         LINES_AFTER=$((LINES_AFTER + lines_after))
         mv "${tmpfile}" "${filepath}"

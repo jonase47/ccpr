@@ -70,7 +70,7 @@ usage() {
   # any other file, so it is the one output that is printed verbatim rather than
   # through the deny-list mask below — masking it would corrupt the usage text
   # for a name the sweep would already have reported.
-  sed -n '2,/^$/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  sed -n '2,/^$/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'  # exit-status: exempt set-e-sufficient
 }
 
 # Loaded before the arguments are parsed: die() masks configured names, and it
@@ -165,7 +165,7 @@ else
   [ -d "$REPO" ] || die "not a directory: $REPO"
   git -C "$REPO" rev-parse --show-toplevel >/dev/null 2>&1 || die "not a git repository: $REPO"
   git -C "$REPO" ls-files -z 2>/dev/null \
-    | while IFS= read -r -d '' rel; do printf '%s\n' "$REPO/$rel"; done > "$TMP"
+    | while IFS= read -r -d '' rel; do printf '%s\n' "$REPO/$rel"; done > "$TMP"  # exit-status: exempt set-e-sufficient
 fi
 
 # --- scan ---------------------------------------------------------------------
@@ -274,16 +274,16 @@ while IFS= read -r f; do
         scan_rc=$?
       fi
       if [ "$scan_rc" -ge 2 ]; then
-        die "$(printf '%s\n' "$out" | awk -F'\t' '$2 == "_error" { print $3; exit }')"
+        die "$(printf '%s\n' "$out" | awk -F'\t' '$2 == "_error" { print $3; exit }')"  # exit-status: exempt internal-record-parsing
       fi
 
       # Split the bookkeeping record off before anything is counted as a finding.
       if [ -n "$out" ]; then
-        exempt_here="$(printf '%s\n' "$out" | awk -F'\t' '$2 == "_exempt" { print $3 }')"
+        exempt_here="$(printf '%s\n' "$out" | awk -F'\t' '$2 == "_exempt" { print $3 }')"  # exit-status: exempt internal-record-parsing
         if [ -n "$exempt_here" ]; then
           exempt_lines=$((exempt_lines + exempt_here))
           exempt_file="$f"
-          out="$(printf '%s\n' "$out" | awk -F'\t' '$2 != "_exempt"')"
+          out="$(printf '%s\n' "$out" | awk -F'\t' '$2 != "_exempt"')"  # exit-status: exempt internal-record-parsing
         fi
       fi
     fi
