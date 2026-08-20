@@ -474,8 +474,20 @@ cmd_promote() {
   # meaningless, because it would be matching a string that is not the one
   # that ships.
   require_file_destination "$dst"
-  local dst_idx
-  dst_idx="$(gate_path_deny_index "$dst" || true)"
+  # WI-0053: `|| true` swallowed "no match" (1) and "the ASCII matcher
+  # crashed" (>=2) alike -- exactly the shape it fixed at artifact-gate.sh's
+  # own call site of this same function. Captured explicitly so a crash here
+  # aborts instead of letting an unchecked destination through the one path
+  # in this tool that cannot be taken back.
+  local dst_idx dst_rc=0
+  if dst_idx="$(gate_path_deny_index "$dst")"; then
+    dst_rc=0
+  else
+    dst_rc=$?
+  fi
+  if [[ "$dst_rc" -ge 2 ]]; then
+    die "PATH deny-list check did not run — grep exited $dst_rc: $dst"
+  fi
   if [[ -n "$dst_idx" ]]; then
     # Redacted like every finding line: the name is what must not travel, and a
     # terminal, a shell history and a CI log are all places it would travel to.

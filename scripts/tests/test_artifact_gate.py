@@ -987,6 +987,73 @@ class GatePathDenyIndexBrokenInterpreterTest(GateTestBase):
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
 
 
+# ---------------------------------------------------------------------------
+# 3d. WI-0053 — gate_path_deny_index's OWN ASCII loop must not read "grep
+# could not run" as "no match" either. Distinct from WI-0049 above: that item
+# is about the UNICODE escalation reading a broken interpreter as no-match;
+# this is the ASCII fallback loop underneath it, which is the LAST matcher on
+# the PATH side (nothing sits below it), so a crash here takes WI-0051's
+# answer -- abort, returning grep's own exit status -- not a dedicated
+# sentinel and not a fall back to a third matcher (there isn't one).
+# ---------------------------------------------------------------------------
+class GatePathDenyIndexAsciiCrashContractTest(GateTestBase):
+    """Direct pin on gate_path_deny_index's exit-status contract for its
+    ASCII loop: 0 = match (stdout the 1-based index), 1 = no match (empty
+    stdout, the ordinary case for every configured name that isn't in the
+    subject), >=2 = grep itself did not run to completion, and the function's
+    own return status IS that grep status (unlike the unicode branch, which
+    has a dedicated no-match sentinel because 1 is already taken by a broken
+    interpreter's own start-up exit code)."""
+
+    NAME = "Zorblatt"  # pure ASCII: keeps this test off the unicode escalation
+
+    def grep_stub_dir(self, crash_on):
+        stub_dir = Path(tempfile.mkdtemp(prefix="ccpr-fake-grep-pdi-ascii-"))
+        self.addCleanup(shutil.rmtree, stub_dir, ignore_errors=True)
+        stub = stub_dir / "grep"
+        stub.write_text(
+            "#!/bin/sh\n"
+            f"marker={shlex.quote(crash_on)}\n"
+            'for a in "$@"; do\n'
+            '  case "$a" in\n'
+            '    *"$marker"*) echo "fake-grep: simulated crash" >&2; exit 2 ;;\n'
+            "  esac\n"
+            "done\n"
+            'exec /usr/bin/grep "$@"\n'
+        )
+        stub.chmod(0o755)
+        return stub_dir
+
+    def call(self, subject, names, path=None):
+        script = (
+            f"source {shlex.quote(str(LIB))}; gate_load_config; "
+            f"gate_path_deny_index {shlex.quote(subject)}"
+        )
+        env = self.env(CCPR_GATE_DENY_NAMES=names)
+        if path is not None:
+            env["PATH"] = path
+        return subprocess.run(["bash", "-c", script], capture_output=True, text=True, env=env)
+
+    def test_a_match_returns_zero_and_prints_the_one_based_index(self):
+        r = self.call(self.NAME + "-notes.md", self.NAME)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(r.stdout, "1")
+
+    def test_a_healthy_no_match_returns_one_silently(self):
+        r = self.call("clean-notes.md", self.NAME)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertEqual(r.stdout, "")
+        self.assertNotIn("did not run", r.stderr)
+
+    def test_a_crashing_grep_returns_its_own_exit_status_and_no_stdout(self):
+        stub_dir = f"{self.grep_stub_dir(self.NAME)}:/usr/bin:/bin:/usr/sbin:/sbin"
+        r = self.call(self.NAME + "-notes.md", self.NAME, path=stub_dir)
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertEqual(r.stdout, "")
+        self.assertIn("PATH deny-list check did not run", r.stderr)
+        self.assertIn("exited 2", r.stderr)
+
+
 class GateRedactPathBrokenInterpreterTest(GateTestBase):
     """gate_redact_path (the fail-closed sibling call site) is untouched by
     this fix — pinned so a future change to the shared python block cannot
@@ -2047,25 +2114,47 @@ class SymlinkTest(GateTestBase):
 # breakage.
 # ---------------------------------------------------------------------------
 class GrepCrashAbortsInsteadOfReadingAsCleanTest(GateTestBase):
-    def grep_stub_dir(self, crash_on):
+    def grep_stub_dir(self, crash_on, require_flag=None):
         stub_dir = Path(tempfile.mkdtemp(prefix="ccpr-fake-grep-"))
         self.addCleanup(shutil.rmtree, stub_dir, ignore_errors=True)
         stub = stub_dir / "grep"
-        stub.write_text(
-            "#!/bin/sh\n"
-            f"marker={shlex.quote(crash_on)}\n"
-            'for a in "$@"; do\n'
-            '  case "$a" in\n'
-            '    *"$marker"*) echo "fake-grep: simulated crash" >&2; exit 2 ;;\n'
-            "  esac\n"
-            "done\n"
-            'exec /usr/bin/grep "$@"\n'
-        )
+        if require_flag is None:
+            stub.write_text(
+                "#!/bin/sh\n"
+                f"marker={shlex.quote(crash_on)}\n"
+                'for a in "$@"; do\n'
+                '  case "$a" in\n'
+                '    *"$marker"*) echo "fake-grep: simulated crash" >&2; exit 2 ;;\n'
+                "  esac\n"
+                "done\n"
+                'exec /usr/bin/grep "$@"\n'
+            )
+        else:
+            # WI-0053: gate_path_deny_index's ASCII loop and gate_scan_file's
+            # denylist/name content check both call grep with the SAME
+            # deny-name argument, so a marker keyed on the name alone would
+            # crash both call sites at once and a test could no longer tell
+            # which one aborted. This variant additionally requires grep's
+            # OWN FIRST argument (the flag bundle, e.g. "-nFi" vs "-qFi") to
+            # match, so a fixture proves one call site, not both.
+            stub.write_text(
+                "#!/bin/sh\n"
+                f"marker={shlex.quote(crash_on)}\n"
+                f"want_flag={shlex.quote(require_flag)}\n"
+                'if [ "$1" = "$want_flag" ]; then\n'
+                '  for a in "$@"; do\n'
+                '    case "$a" in\n'
+                '      *"$marker"*) echo "fake-grep: simulated crash" >&2; exit 2 ;;\n'
+                "    esac\n"
+                "  done\n"
+                "fi\n"
+                'exec /usr/bin/grep "$@"\n'
+            )
         stub.chmod(0o755)
         return stub_dir
 
-    def grep_stub(self, crash_on):
-        return f"{self.grep_stub_dir(crash_on)}:/usr/bin:/bin:/usr/sbin:/sbin"
+    def grep_stub(self, crash_on, require_flag=None):
+        return f"{self.grep_stub_dir(crash_on, require_flag)}:/usr/bin:/bin:/usr/sbin:/sbin"
 
     def path_without_python3(self, stub_dir):
         """A PATH containing the grep stub plus every /usr/bin, /bin,
@@ -2096,8 +2185,8 @@ class GrepCrashAbortsInsteadOfReadingAsCleanTest(GateTestBase):
             capture_output=True, text=True, env=self.env(**extra_env),
         )
 
-    def assert_artifact_check_crash_aborts(self, path, marker, label, deny_names=None):
-        extra = {"PATH": self.grep_stub(marker)}
+    def assert_artifact_check_crash_aborts(self, path, marker, label, deny_names=None, require_flag=None):
+        extra = {"PATH": self.grep_stub(marker, require_flag)}
         if deny_names is not None:
             extra["CCPR_GATE_DENY_NAMES"] = deny_names
         r = self.run_gate(path, **extra)
@@ -2182,9 +2271,21 @@ class GrepCrashAbortsInsteadOfReadingAsCleanTest(GateTestBase):
         self.assert_artifact_check_crash_aborts(p, r"{1,3}\.){3}", "network/ipv4")
 
     # --- deny-list (direct grep -nFi, the ASCII branch) ----------------------
+    #
+    # WI-0053: since gate_path_deny_index's own ASCII fallback (grep -qFi)
+    # started aborting on a crash too, these fixtures' filename ("tenant.md")
+    # never containing the configured name is not enough on its own to keep
+    # the PATH check from firing -- the stub crashes on the ARGUMENT (the
+    # deny name, passed to grep regardless of whether it is found), not on
+    # a successful match. `require_flag="-nFi"` scopes the crash to this
+    # content check's own invocation shape, leaving the PATH check's `-qFi`
+    # call to the real grep -- see PathDenyIndexCrashAbortsTest below for
+    # that call site's own dedicated coverage.
     def test_denylist_name_check_crash_aborts(self):
         p = self.write("tenant.md", "mentions Zorblatt in prose\n")
-        self.assert_artifact_check_crash_aborts(p, "Zorblatt", "denylist/name", deny_names="Zorblatt")
+        self.assert_artifact_check_crash_aborts(
+            p, "Zorblatt", "denylist/name", deny_names="Zorblatt", require_flag="-nFi"
+        )
 
     def test_denylist_unicode_fallback_check_crash_aborts(self):
         # WI-0049 shape: python3 IS present but ITS OWN comparison crashes
@@ -2196,7 +2297,7 @@ class GrepCrashAbortsInsteadOfReadingAsCleanTest(GateTestBase):
         p = self.write("tenant.md", f"mentions {name} in prose\n")
         r = self.run_gate(
             p, CCPR_GATE_DENY_NAMES=name, PYTHONHOME="/nonexistent",
-            PATH=self.grep_stub(name),
+            PATH=self.grep_stub(name, require_flag="-nFi"),
         )
         out = r.stdout + r.stderr
         self.assertEqual(r.returncode, 2, out)
@@ -2210,12 +2311,84 @@ class GrepCrashAbortsInsteadOfReadingAsCleanTest(GateTestBase):
         # clean if IT crashes.
         name = "Quüxcorp"
         p = self.write("tenant.md", f"mentions {name} in prose\n")
-        path_no_python3 = self.path_without_python3(self.grep_stub_dir(name))
+        path_no_python3 = self.path_without_python3(self.grep_stub_dir(name, require_flag="-nFi"))
         r = self.run_gate(p, CCPR_GATE_DENY_NAMES=name, PATH=path_no_python3)
         out = r.stdout + r.stderr
         self.assertEqual(r.returncode, 2, out)
         self.assertIn("denylist/name #1 (ascii-only, no python3)", out)
         self.assertIn("exited 2", out)
+
+    # --- WI-0053 site (a): gate_path_deny_index's OWN ASCII fallback (the
+    # PATH side, not the content side above). It is the LAST matcher on that
+    # side -- WI-0049's unicode fallback sits above it, nothing sits below --
+    # so a crash here takes WI-0051's answer (abort), not WI-0049's (warn and
+    # fall back). require_flag="-qFi" scopes the stub to THIS call site's own
+    # invocation, leaving the content check's "-nFi" call (also carrying
+    # "Zorblatt" as an argument) to the real grep.
+    def test_path_deny_index_ascii_check_crash_aborts(self):
+        p = self.write("Zorblatt-report.md", "clean prose, no deny name in the body\n")
+        r = self.run_gate(
+            p, CCPR_GATE_DENY_NAMES="Zorblatt",
+            PATH=self.grep_stub("Zorblatt", require_flag="-qFi"),
+        )
+        out = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 2, out)
+        self.assertIn("PATH deny-list check did not run", out)
+        self.assertIn("exited 2", out)
+        self.assertNotIn("0 findings", out)
+
+    # --- WI-0053 site (b): the FILES argument-list filter. It parses
+    # arguments, not content, so it cannot hide a leak by itself -- but a
+    # crash silently shrinks WHAT GETS SCANNED. This stub crashes mid-stream
+    # (after "clean.md" has already been kept, ON "leak.md") to prove the
+    # shrink rather than the all-blank case the empty-scope guard already
+    # catches on its own terms.
+    def test_files_list_filter_check_crash_aborts(self):
+        clean_path = self.write("clean.md", CLEAN_TEXT)
+        leak_path = self.write("leak.md", CREDENTIAL + "\n")
+        stub_dir = Path(tempfile.mkdtemp(prefix="ccpr-fake-grep-filelist-"))
+        self.addCleanup(shutil.rmtree, stub_dir, ignore_errors=True)
+        stub = stub_dir / "grep"
+        stub.write_text(
+            "#!/bin/sh\n"
+            'if [ "$1" = "-v" ] && [ "$2" = "^$" ]; then\n'
+            "  while IFS= read -r line; do\n"
+            '    case "$line" in\n'
+            '      *leak.md) echo "fake-grep: simulated mid-stream crash" >&2; exit 2 ;;\n'
+            '      "") : ;;\n'
+            "      *) printf '%s\\n' \"$line\" ;;\n"
+            "    esac\n"
+            "  done\n"
+            "  exit 0\n"
+            "fi\n"
+            'exec /usr/bin/grep "$@"\n'
+        )
+        stub.chmod(0o755)
+        r = self.run_gate(clean_path, leak_path, PATH=f"{stub_dir}:/usr/bin:/bin:/usr/sbin:/sbin")
+        out = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 2, out)
+        self.assertIn("file-list filter did not run", out)
+        self.assertIn("exited 2", out)
+        # The crash-hidden defect this pins: without the fix, leak.md drops
+        # out of the scan SET silently and the run reports clean.
+        self.assertNotIn("0 findings", out)
+
+    # --- WI-0053 site (c), a sweep finding not named by the item's text: the
+    # text/binary classifier's own grep -qI. Not a "content-scanning grep" in
+    # the WI-0051 sense, but the same defect shape -- a crash used to read
+    # back as "binary", so a file already in the scan LIST was silently
+    # skipped, one file at a time, without even the empty-scope guard
+    # noticing (this run's scope stays non-empty either way). The marker is
+    # "" because is_text's own pattern argument is the empty string; any
+    # "-qI" invocation is this call site.
+    def test_binary_text_classification_check_crash_aborts(self):
+        p = self.write("leak.md", CREDENTIAL + "\n")
+        r = self.run_gate(p, PATH=self.grep_stub("", require_flag="-qI"))
+        out = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 2, out)
+        self.assertIn("text/binary classification did not run", out)
+        self.assertIn("exited 2", out)
+        self.assertNotIn("0 findings", out)
 
     # --- memory-only categories (context, type: user, work-item markers) ----
     def test_context_marker_check_crash_aborts(self):

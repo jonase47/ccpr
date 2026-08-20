@@ -33,6 +33,7 @@ measure.
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -264,6 +265,51 @@ class DestinationDenyListTest(PromoteTestBase):
         src = self.write_src()
         r = self.promote(src, "instincts/xx-org.md")
         self.assertEqual(r.returncode, 0, self.output(r))
+
+
+# ---------------------------------------------------------------------------
+# 1b. WI-0053 — this check's OWN grep must not read "could not run" as "no
+# match". `gate_path_deny_index`'s ASCII fallback is shared with
+# artifact-gate.sh's FILE PATH finding; this is the destination's own call
+# site, exercised through THIS entry point rather than duplicating the
+# function-level pin (GatePathDenyIndexAsciiCrashContractTest in
+# test_artifact_gate.py).
+# ---------------------------------------------------------------------------
+class DestinationDenyIndexCrashAbortsTest(PromoteTestBase):
+    def grep_stub_dir(self, crash_on, require_flag):
+        stub_dir = self.tmp / "fake-grep"
+        stub_dir.mkdir()
+        stub = stub_dir / "grep"
+        stub.write_text(
+            "#!/bin/sh\n"
+            f"marker={shlex.quote(crash_on)}\n"
+            f"want_flag={shlex.quote(require_flag)}\n"
+            'if [ "$1" = "$want_flag" ]; then\n'
+            '  for a in "$@"; do\n'
+            '    case "$a" in\n'
+            '      *"$marker"*) echo "fake-grep: simulated crash" >&2; exit 2 ;;\n'
+            "    esac\n"
+            "  done\n"
+            "fi\n"
+            'exec /usr/bin/grep "$@"\n'
+        )
+        stub.chmod(0o755)
+        return stub_dir
+
+    def test_a_crashing_ascii_check_aborts_instead_of_promoting(self):
+        self.write_config(denyNames=[DENY_NAME])
+        src = self.write_src()
+        before = self.remote_state()
+        stub_dir = self.grep_stub_dir(DENY_NAME, "-qFi")
+        r = self.run_sync(
+            "promote", src, "instincts/notes.md",
+            extra_env={"PATH": f"{stub_dir}:/usr/bin:/bin:/usr/sbin:/sbin"},
+        )
+        out = self.output(r)
+        self.assertEqual(r.returncode, 2, out)
+        self.assertIn("PATH deny-list check did not run", out)
+        self.assertIn("exited 2", out)
+        self.assert_nothing_published(before, r)
 
 
 # ---------------------------------------------------------------------------

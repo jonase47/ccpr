@@ -7,6 +7,35 @@ All notable changes to this project are documented in this file. The format is b
 ## [Unreleased]
 
 ### Fixed
+- **Two more discipline-gate call sites collapsed "no match" into "the tool failed", plus a third
+  found while sweeping for the same class (WI-0053).** WI-0051 closed twenty sites where a crashing
+  `grep` inside `gate_scan_file` read as "0 findings" instead of "this check did not run"; two sites
+  were deliberately left out of that item's scope, and a sweep of the same three files found a
+  third. **(a)** `gate_path_deny_index`'s ASCII fallback for PATH matching (`grep -qFi`) had no
+  `|| true` at all, but that did not save it: the call sat inside an `if`, which suspends `errexit`
+  the same way a `|| true` does, so a crash there was indistinguishable from "the configured name
+  isn't in this path" — measured with a grep that fails only for that invocation shape, a file
+  literally named after a configured tenant/project name passed the artifact gate clean. This is
+  the LAST matcher on the PATH side — WI-0049's unicode-vs-ASCII fallback sits above it, not below —
+  so the fix takes WI-0051's answer (abort, exit 2, naming the check and grep's exit status) rather
+  than WI-0049's warn-and-fall-back: there is no third matcher to fall back to. Both callers of
+  `gate_path_deny_index` (`artifact-gate.sh`'s own FILE PATH finding, and `memory-sync.sh promote`'s
+  destination check — the one irreversible push in either tool) previously routed the function's
+  result through `|| true` as well, which would have swallowed the newly-distinguished crash status
+  right back into "no name found"; both now capture the real status and abort on it. **(b)**
+  `artifact-gate.sh`'s command-line `FILES` list was filtered through `grep -v '^$' | ... || true`.
+  This parses arguments, not content, so it cannot hide a leak directly — but a crash there silently
+  shrinks WHAT GETS SCANNED, one file dropping out of the scan set without a trace; a file with a
+  real credential in it, listed after the file whose path happened to crash the filter, was scanned
+  0 times and the run reported clean. **(c)**, found by the sweep and not named in the item's text:
+  `is_text()`'s own binary/text classifier (`grep -qI ''`) had the identical shape — a crash read
+  back as "not text", which the caller counts as `skipped_binary` and moves past silently, so a file
+  already in the scan list was never scanned for content at all. This is the more dangerous of the
+  three: (b) only trims the file list before scanning starts, (c) skips a file's content check after
+  it was already selected for scanning. All three now fail loudly (exit 2, naming the check and
+  grep's exit status) instead of scanning less without saying so — the same answer this repository
+  has given every time it has met this shape (WI-0015's dangling-symlink counter, the unreadable-
+  file guard, the empty-scope guard, and WI-0051 itself).
 - **A crashing `grep` inside the discipline gate's checks used to read as "no findings", not as
   "this check did not run" (WI-0051).** Every check in `gate_scan_file` — and the deny-list's own
   config parsing in `gate_load_config` — routed its `grep` through a trailing `|| true`, which

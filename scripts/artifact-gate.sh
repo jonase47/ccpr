@@ -110,14 +110,50 @@ fi
 is_text() {
   # -I makes grep report no match for binary content; an empty file has nothing
   # to leak but is still text.
-  LC_ALL=C grep -qI '' "$1" 2>/dev/null || [ ! -s "$1" ]
+  #
+  # WI-0053 sweep finding (site (c), not named by the item, found while
+  # sweeping this file for the same defect class): a crash here used to be
+  # swallowed by `||` and read back as "not text", the SAME misclassification
+  # a genuine binary produces -- so the caller counted it as `skipped_binary`
+  # and moved on, content never scanned, no error anywhere. Measured: a file
+  # with a real credential in it, whose only classification grep crashes,
+  # came back "scanned 1 files, 0 findings", exit 0, with a "1 binary
+  # file(s) skipped" line that reads as routine housekeeping rather than a
+  # failure. This is the more dangerous shape of the two sites the item DID
+  # name -- (b)'s grep only trims the file LIST, this one skips a file that
+  # is already in it -- so it takes the same answer: fail loudly.
+  local rc=0
+  LC_ALL=C grep -qI '' "$1" 2>/dev/null || rc=$?
+  case "$rc" in
+    0) return 0 ;;
+    1) [ ! -s "$1" ] ;;
+    *) die "text/binary classification did not run — grep exited $rc: $1" ;;
+  esac
 }
 
 TMP="$(mktemp -t artifact-gate.XXXXXX)"
 trap 'rm -f "$TMP"' EXIT
 
 if [ -n "$FILES" ]; then
-  printf '%s' "$FILES" | grep -v '^$' > "$TMP" || true
+  # WI-0053: this filters the ARGUMENT list, not file content, so it cannot
+  # hide a leak the way a content-scanning grep can -- but a crash here
+  # silently shrinks WHAT GETS SCANNED, one command-line argument at a time,
+  # exactly the shape WI-0015's dangling-symlink counter and the unreadable-
+  # file guard below already refuse. `|| true` used to fold that together
+  # with the ordinary case (every argument was blank, so `grep -v` finds
+  # nothing to keep and exits 1 -- not a failure, an empty scope the guard
+  # further down already reports on its own terms). The `if`-around-the-
+  # assignment shape distinguishes the two the same way the content scan and
+  # the PATH deny-list check below do.
+  files_rc=0
+  if printf '%s' "$FILES" | grep -v '^$' > "$TMP"; then
+    files_rc=0
+  else
+    files_rc=$?
+  fi
+  if [ "$files_rc" -ge 2 ]; then
+    die "file-list filter did not run — grep exited $files_rc"
+  fi
   while IFS= read -r f; do
     [ -n "$f" ] || continue
     [ -f "$f" ] || die "file not found: $f"
@@ -177,7 +213,22 @@ while IFS= read -r f; do
   # symlink too -- a dangling link whose own filename carries a deny name must
   # still be reported, or the fix below reproduces the silent-scope-loss
   # defect it exists to close.
-  path_idx="$(gate_path_deny_index "$rel" || true)"
+  # WI-0053: `|| true` used to swallow ANY nonzero status from
+  # gate_path_deny_index alike -- "no match" (1, the ordinary case) and "the
+  # ASCII matcher itself crashed" (>=2, see the function's own comment for
+  # why the PATH side takes WI-0051's abort answer there). Capturing the real
+  # status first, the same `if`-around-the-assignment shape the content scan
+  # below already uses, is what lets the distinction survive past this line
+  # instead of being read back as "no name found".
+  path_rc=0
+  if path_idx="$(gate_path_deny_index "$rel")"; then
+    path_rc=0
+  else
+    path_rc=$?
+  fi
+  if [ "$path_rc" -ge 2 ]; then
+    die "PATH deny-list check did not run — grep exited $path_rc: $rel"
+  fi
   if [ -n "$path_idx" ]; then rel="$(gate_redact_path "$rel")"; fi
 
   out=""

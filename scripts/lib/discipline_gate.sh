@@ -477,10 +477,26 @@ gate_path_deny_index() {
     # A here-string, not a pipe: under `set -o pipefail` a `printf | grep -q`
     # can report the pipeline as failed via SIGPIPE precisely when grep exits
     # early on a match, which would turn a hit into a miss.
-    if LC_ALL=C grep -qFi -- "$name" <<<"$1"; then
-      printf '%s' "$idx"
-      return 0
-    fi
+    #
+    # WI-0053: the status is captured explicitly instead of read through an
+    # `if`, which suspends `errexit` for everything inside it and would fold
+    # ANY grep failure into the same "no match, keep looping" outcome this
+    # loop already produces for the ordinary case (status 1, this name isn't
+    # in the path). On the PATH side this ASCII loop IS the last matcher --
+    # WI-0049's fallback sits above it, not below (see the comment at this
+    # function's top) -- so a crash here takes WI-0051's answer, not
+    # WI-0049's: abort, rather than let a path that could not be checked read
+    # as a path that has nothing to find.
+    local grc=0
+    LC_ALL=C grep -qFi -- "$name" <<<"$1" || grc=$?
+    case "$grc" in
+      0) printf '%s' "$idx"; return 0 ;;
+      1) : ;;
+      *)
+        printf 'gate: PATH deny-list check did not run — grep exited %s\n' "$grc" >&2
+        return "$grc"
+        ;;
+    esac
   done <<EOF
 $GATE_DENY_NAMES
 EOF
