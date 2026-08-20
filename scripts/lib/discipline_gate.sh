@@ -336,13 +336,24 @@ _gate_needs_unicode() {
 }
 
 # _gate_unicode_py <index|redact> <subject> — the shared Unicode implementation.
-# index:  print the 1-based index of the first matching name, exit 1 if none.
-# redact: print the subject with every match replaced by the mask.
+# index:  print the 1-based index of the first matching name, exit
+#         GATE_U_NO_MATCH (2) if none. WI-0049: "no match" used to be sys.exit(1),
+#         the same status a fatally broken interpreter never gets the chance to
+#         override (measured: `PYTHONHOME=/nonexistent python3 -c pass` exits 1
+#         before this script ever runs) -- so a dead interpreter was
+#         indistinguishable from a clean comparison. 2 is reserved for this one
+#         meaning; every OTHER non-zero status, whatever it is, means the
+#         comparison did not run to completion.
+# redact: print the subject with every match replaced by the mask. Never exits
+#         via the no-match sentinel -- redact has no "no match" outcome, only
+#         "done" (0) or "did not run" (anything else).
 # Bytes travel through ENVIRON and are written back with surrogateescape, so a
 # path that is not valid UTF-8 comes out as the bytes that went in instead of
 # aborting the comparison.
+_GATE_UNICODE_NO_MATCH=2
 _gate_unicode_py() {
-  GATE_U_MODE="$1" GATE_U_SUBJECT="$2" GATE_U_NAMES="$GATE_DENY_NAMES" python3 - <<'PY'
+  GATE_U_MODE="$1" GATE_U_SUBJECT="$2" GATE_U_NAMES="$GATE_DENY_NAMES" \
+    GATE_U_NO_MATCH="$_GATE_UNICODE_NO_MATCH" python3 - <<'PY'
 import os, re, sys, unicodedata
 
 def nfc(s):
@@ -367,7 +378,11 @@ for name in os.environ.get("GATE_U_NAMES", "").split("\n"):
         subject = pat.sub("<redacted>", subject)
 
 if mode == "index":
-    sys.exit(1)
+    # WI-0049: this used to be sys.exit(1), colliding with the status a
+    # broken interpreter produces before this line ever runs. The sentinel
+    # travels from the shell (_GATE_UNICODE_NO_MATCH) instead of being
+    # hard-coded twice, so the two sides of the contract cannot drift apart.
+    sys.exit(int(os.environ["GATE_U_NO_MATCH"]))
 sys.stdout.buffer.write(subject.encode("utf-8", "surrogateescape"))
 PY
 }
@@ -384,8 +399,9 @@ gate_path_deny_index() {
     uidx="$(_gate_unicode_py index "$1")" || rc=$?
     case "$rc" in
       0) printf '%s' "$uidx"; return 0 ;;
-      1) return 1 ;;
-      # Any other status means the comparison did not happen. Say so and let
+      "$_GATE_UNICODE_NO_MATCH") return 1 ;;
+      # Any other status (including 1, a broken interpreter's start-up exit
+      # code -- WI-0049) means the comparison did not happen. Say so and let
       # the ASCII matcher below answer what it can, rather than reporting a
       # clean path because a helper crashed.
       *) printf 'gate: unicode matcher failed (status %s) — falling back to ASCII folding\n' "$rc" >&2 ;;

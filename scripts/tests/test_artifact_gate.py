@@ -765,6 +765,174 @@ class NonAsciiPathDenyTest(GateTestBase):
 
 
 # ---------------------------------------------------------------------------
+# 3c. WI-0049 — a fatally broken python3 must not read as "no match".
+#
+# gate_path_deny_index's python escalation signalled "no match" with the same
+# exit status (1) a broken interpreter produces on start-up failure (measured:
+# `PYTHONHOME=/nonexistent python3 -c pass` exits 1). The `*)` case arm written
+# to catch "the comparison did not happen" and fall back to the ASCII matcher
+# was therefore unreachable for the most likely fault, and a dead matcher read
+# as a clean path. PO decision (WI-0049, 20.08.2026): keep the existing
+# fail-warn-and-fall-back shape, make the arm it was written for reachable —
+# not a hard abort, not a third verdict.
+#
+# The function-level tests below (UnicodePyIndexExitContractTest,
+# GatePathDenyIndexBrokenInterpreterTest) pin the internal python<->shell
+# signalling contract the fix changes. BrokenInterpreterEndToEndTest proves the
+# regression itself through the same entry point WI-0049 measured it through.
+# All of them break python3 with PYTHONHOME=/nonexistent, the way the item
+# measured it — a fake python3 planted on PATH proves less (see the item's
+# second, downgraded finding) and is deliberately not used here.
+# ---------------------------------------------------------------------------
+class UnicodePyIndexExitContractTest(GateTestBase):
+    """Direct pin on _gate_unicode_py's exit-status contract in index mode:
+    0 = match (stdout carries the 1-based index), a dedicated sentinel = no
+    match, anything else = the helper did not run to completion. This is the
+    signal gate_path_deny_index's case arms are keyed on."""
+
+    NAME = "Quüxcorp"
+    NO_MATCH_SENTINEL = 2
+
+    def call(self, subject, names, python_home=None):
+        # GATE_DENY_NAMES is reset to "" on every source of the library (see
+        # discipline_gate.sh:182), so it is populated the way every real
+        # caller populates it: via gate_load_config reading CCPR_GATE_DENY_NAMES.
+        script = (
+            f"source {shlex.quote(str(LIB))}; gate_load_config; "
+            f"_gate_unicode_py index {shlex.quote(subject)}"
+        )
+        extra = {"CCPR_GATE_DENY_NAMES": names}
+        if python_home is not None:
+            extra["PYTHONHOME"] = python_home
+        return subprocess.run(
+            ["bash", "-c", script], capture_output=True, text=True,
+            env=self.env(**extra),
+        )
+
+    def test_a_match_exits_zero_and_prints_the_one_based_index(self):
+        r = self.call(self.NAME + "-notes.md", self.NAME)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(r.stdout, "1")
+
+    def test_a_healthy_no_match_exits_with_the_dedicated_sentinel_not_one(self):
+        # The regression: the old no-match signal (1) collides with a broken
+        # interpreter's start-up exit status. Pinning it away from 1 is the
+        # fix.
+        r = self.call("grün-notes.md", self.NAME)
+        self.assertEqual(r.returncode, self.NO_MATCH_SENTINEL, r.stdout + r.stderr)
+        self.assertEqual(r.stdout, "")
+
+    def test_a_broken_interpreter_exits_one_distinct_from_the_no_match_sentinel(self):
+        r = self.call(self.NAME + "-notes.md", self.NAME, python_home="/nonexistent")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertNotEqual(r.returncode, self.NO_MATCH_SENTINEL)
+
+
+class GatePathDenyIndexBrokenInterpreterTest(GateTestBase):
+    """gate_path_deny_index's own external return contract (0/idx on match, 1
+    and no stdout on no match) must survive a broken interpreter — the fix
+    only changes the INTERNAL python<->shell signal, per WI-0049."""
+
+    NAME = "Quüxcorp"
+
+    def call(self, subject, names, python_home=None):
+        script = (
+            f"source {shlex.quote(str(LIB))}; gate_load_config; "
+            f"gate_path_deny_index {shlex.quote(subject)}"
+        )
+        extra = {"CCPR_GATE_DENY_NAMES": names}
+        if python_home is not None:
+            extra["PYTHONHOME"] = python_home
+        return subprocess.run(
+            ["bash", "-c", script], capture_output=True, text=True,
+            env=self.env(**extra),
+        )
+
+    def test_healthy_interpreter_no_match_returns_one_silently(self):
+        # The path most likely to break by this fix: a genuine no-match with a
+        # working interpreter must still say "no match", not "matcher failed".
+        r = self.call("grün-notes.md", self.NAME)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertEqual(r.stdout, "")
+        self.assertNotIn("unicode matcher failed", r.stderr)
+
+    def test_broken_interpreter_falls_back_and_still_finds_a_literal_match(self):
+        # Same casing/normalisation on both sides means the ASCII fallback's
+        # plain byte-literal grep still finds it once the warning fires.
+        r = self.call(self.NAME + "-notes.md", self.NAME, python_home="/nonexistent")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(r.stdout, "1")
+        self.assertIn("unicode matcher failed", r.stderr)
+
+    def test_broken_interpreter_does_not_silently_report_a_clean_path(self):
+        # The regression itself, at function level: a subject the ASCII
+        # fallback also cannot see (case-folding only reachable via python)
+        # must NOT come back as "no match" without the warning that says the
+        # comparison did not fully happen.
+        r = self.call(self.NAME.upper() + "-notes.md", self.NAME, python_home="/nonexistent")
+        self.assertIn("unicode matcher failed", r.stderr)
+
+
+class GateRedactPathBrokenInterpreterTest(GateTestBase):
+    """gate_redact_path (the fail-closed sibling call site) is untouched by
+    this fix — pinned so a future change to the shared python block cannot
+    silently regress it."""
+
+    NAME = "Quüxcorp"
+
+    def call(self, subject, names, python_home=None):
+        script = (
+            f"source {shlex.quote(str(LIB))}; gate_load_config; "
+            f"gate_redact_path {shlex.quote(subject)}"
+        )
+        extra = {"CCPR_GATE_DENY_NAMES": names}
+        if python_home is not None:
+            extra["PYTHONHOME"] = python_home
+        return subprocess.run(
+            ["bash", "-c", script], capture_output=True, text=True,
+            env=self.env(**extra),
+        )
+
+    def test_result_is_unchanged_by_a_broken_interpreter(self):
+        subject = self.NAME + "-notes.md"
+        healthy = self.call(subject, self.NAME)
+        broken = self.call(subject, self.NAME, python_home="/nonexistent")
+        self.assertEqual(healthy.stdout, broken.stdout)
+        self.assertIn("<redacted>", healthy.stdout)
+        self.assertIn("unicode masker failed", broken.stderr)
+
+
+class BrokenInterpreterEndToEndTest(GateTestBase):
+    """The regression as WI-0049 measured it: through artifact-gate.sh itself,
+    on the entry point a CI job actually calls."""
+
+    NAME = "Quüxcorp"
+
+    def test_a_broken_interpreter_does_not_report_a_clean_pass(self):
+        p = self.write(self.NAME + "-notes.md", "clean prose\n")
+        r = self.run_gate(p, CCPR_GATE_DENY_NAMES=self.NAME, PYTHONHOME="/nonexistent")
+
+        # Assert the verdict AND the warning text, not just a non-zero exit —
+        # a non-zero exit alone could equally mean the gate crashed for an
+        # unrelated reason.
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("denylist", self.categories(r))
+        self.assertIn("unicode matcher failed", r.stdout + r.stderr)
+        self.assertNotIn("scanned 1 files, 0 findings", r.stdout)
+
+    def test_an_ascii_only_subject_never_invokes_python_at_all(self):
+        # _gate_needs_unicode's ASCII fast path means a broken interpreter
+        # changes nothing here — python3 is never started.
+        p = self.write("acme-notes.md", "clean prose\n")
+        r = self.run_gate(p, CCPR_GATE_DENY_NAMES="acme", PYTHONHOME="/nonexistent")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("denylist", self.categories(r))
+        out = r.stdout + r.stderr
+        self.assertNotIn("unicode matcher failed", out)
+        self.assertNotIn("Fatal Python error", out)
+
+
+# ---------------------------------------------------------------------------
 # 4. The self-match case — the file that defines the patterns.
 # ---------------------------------------------------------------------------
 class SelfMatchTest(GateTestBase):

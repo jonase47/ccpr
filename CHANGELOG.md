@@ -7,6 +7,20 @@ All notable changes to this project are documented in this file. The format is b
 ## [Unreleased]
 
 ### Fixed
+- **A fatally broken `python3` made the deny-list name check pass clean instead of failing.**
+  `gate_path_deny_index`'s non-ASCII escalation reads `_gate_unicode_py`'s exit status: 0 for a
+  match, and a case arm written to catch "the comparison did not happen" and fall back to the
+  ASCII matcher for anything else. That fallback arm signalled "no match" with `sys.exit(1)` — the
+  same status a fatally broken interpreter produces on start-up (measured:
+  `PYTHONHOME=/nonexistent python3 -c pass` exits 1), before the script's own no-match line ever
+  runs. So the arm written for exactly this fault was unreachable for the most likely one, and a
+  dead matcher read as a clean path: on a repo with one tracked file named after a configured
+  deny-listed name, a working interpreter reported 1 finding and exit 1, a broken one reported
+  "scanned 1 files, 0 findings" and exit 0, with the documented "unicode matcher failed" warning
+  never printed. "No match" now exits with a dedicated sentinel instead, so every other status —
+  including a broken interpreter's 1 — falls through to the existing warn-and-fall-back arm, which
+  is now reachable. `gate_redact_path`, the sibling call site that already trusted only `rc -eq 0`
+  and fell back to `awk` for everything else, was already correct and is unaffected.
 - **`templates/ci/artifact-gate.ci.sh` shipped without any execution check.** Nothing ran the
   template — not even a syntax check — so the first team to activate it in CI would have been the
   first to discover whether it actually worked. Added a `sh -n` syntax test plus a fixture-repo
