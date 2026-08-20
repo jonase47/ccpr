@@ -2,7 +2,7 @@
 kind: system-doc-detail
 parent_index: ../SYSTEM_OVERVIEW.md
 section: memory-doc-splitting-instincts
-last_updated: 15.05.2026
+last_updated: 20.08.2026
 ---
 
 # Memory, Document Splitting & Instincts
@@ -83,6 +83,35 @@ Indexes are listings — no frontmatter required.
 | `templates/MEMORY_PAGE_TEMPLATE.md` | Starter for a new memory file |
 | `templates/MEMORY_INDEX_TEMPLATE.md` | Starter for `MEMORY.md` index |
 | `templates/MEMORY_LINT_REPORT_TEMPLATE.md` | Lint output format reference |
+
+### Team Sharing (Org Tier)
+
+Shipped since v0.2.0-beta. `~/.claude/scripts/memory-sync.sh` shares
+instincts/memory across a team through a shared Git repository (the org
+tier), materialised locally as a **read-only overlay**.
+
+| Verb | Effect |
+|---|---|
+| `pull` | Fetch the shared repo and materialise the overlay: shared instincts → `~/.claude/instincts/<shared>.md` (plus an autoloaded index-block entry per instinct), shared persona instincts → `~/.claude/memory/{agent}/<shared>.md`, shared facts → `~/.claude/memory/<namespace>/` |
+| `promote <src> <dst>` | Run the discipline gate on `<src>`, copy it into the shared clone at repo-relative `<dst>` (must be a file path, never a directory), commit, push |
+| `gate <file>` | Run the discipline gate on `<file>` only, no side effects — exit 0 clean |
+| `status` | Show config + clone state, no network mutation |
+
+Config: `$MEMORY_SYNC_CONFIG` or `~/.claude/memory-sync.json` — personal,
+**never** committed to any repository (template:
+`templates/memory-sync.example.json`). Key fields: `repo`/`repoUrl`/
+`apiBase`, `tokenFile` (path to the access-token file), `clonePath`,
+`namespace`, `gate.denyNames`/`gate.ipAllowlist`, `overlay.*` (where shared
+content materialises locally).
+
+`promote` runs the discipline gate first and refuses on a finding — see
+[discipline-gate.md](discipline-gate.md) for what it checks and how to
+configure the deny list.
+
+Namespaces keep sources from colliding and re-syncs idempotent: native
+`G-NNN`, imported foreign-contributor `{SRC}-G-NNN` (externally maintained),
+shared org-tier `{ORG}-G-NNN` (team-maintained by push, not by your own
+`/postmortem` decay clock).
 
 ---
 

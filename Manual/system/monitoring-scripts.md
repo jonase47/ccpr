@@ -2,7 +2,7 @@
 kind: system-doc-detail
 parent_index: ../SYSTEM_OVERVIEW.md
 section: monitoring-scripts-llm
-last_updated: 15.05.2026
+last_updated: 20.08.2026
 ---
 
 # Monitoring, Local Scripts & Ollama
@@ -95,6 +95,10 @@ Periods: `today`, `week`, `all`
 
 Shell and Python scripts in `~/.claude/scripts/` for mechanical tasks. Save Claude tokens because they run outside the session.
 
+> Editing one of these scripts (in the repo's `scripts/`, not the installed
+> `~/.claude/scripts/` copy)? Two conventions are enforced by tests before a
+> change ships — see [scripts-conventions.md](scripts-conventions.md).
+
 ### Before Session Start
 
 | Script | Usage | Result |
@@ -122,13 +126,21 @@ Scopes for quality-scan: `all`, `deps`, `sast`, `config`, `dsgvo`
 | `logs-summary.py` | `~/.claude/scripts/logs-summary.py [focus] [period]` | Analyze session logs |
 | `setup-ollama.sh` | `~/.claude/scripts/setup-ollama.sh` | Install Ollama + gemma3:4b, generate wrapper scripts |
 | `instinct-check.sh` | `~/.claude/scripts/instinct-check.sh` | Check instinct decay (no LLM needed) |
+| `memory-sync.sh` | `~/.claude/scripts/memory-sync.sh pull\|promote\|gate\|status` | Sync a shared org-tier memory/instincts repo into `~/.claude` (read-only overlay); share local entries via a discipline gate. Details: [memory-instincts.md → Team Sharing (Org Tier)](memory-instincts.md) |
+
+### Not Yet Released
+
+| Script | Usage | Purpose |
+|---|---|---|
+| `artifact-gate.sh` | `~/.claude/scripts/artifact-gate.sh [--repo <dir>] [--require-denylist] [<file> ...]` | Sweeps a repository's tracked files for secrets, personal data and configured tenant/project names (Constitution Inviolable enforcement). **Absent from `v0.2.1-beta`, CCPR's most recent tag — ships with the next release.** Details: [discipline-gate.md](discipline-gate.md) |
 
 ### Shared Libraries
 
-Python modules in `~/.claude/scripts/lib/`:
+Python and shell modules in `~/.claude/scripts/lib/`:
 - `next_steps.py` – Phase-to-commands mapping, HANDOVER.md parser
 - `artefacts.py` – Phase-to-expected-files mapping
 - `gate_checklists.py` – Gate checklists with required sections + content pattern checks (regex)
+- `discipline_gate.sh` – shared secret/personal-data/deny-list pattern library, sourced by `artifact-gate.sh` and `memory-sync.sh promote` — see [discipline-gate.md](discipline-gate.md)
 
 ### Shell Aliases
 

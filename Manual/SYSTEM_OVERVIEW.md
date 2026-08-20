@@ -3,7 +3,7 @@
 Comprehensive documentation of the entire workflow, all processes, mechanisms, and infrastructure.
 For the quick reference, see [WORKFLOW_CHEATSHEET.md](WORKFLOW_CHEATSHEET.md).
 
-Last updated: 12.05.2026
+Last updated: 20.08.2026
 
 ---
 
@@ -516,13 +516,21 @@ Scopes for quality-scan: `all`, `deps`, `sast`, `config`, `dsgvo`
 | `logs-summary.py` | `~/.claude/scripts/logs-summary.py [focus] [period]` | Analyze session logs |
 | `setup-ollama.sh` | `~/.claude/scripts/setup-ollama.sh` | Install Ollama + gemma3:4b, generate wrapper scripts |
 | `instinct-check.sh` | `~/.claude/scripts/instinct-check.sh` | Check instinct decay (no LLM needed) |
+| `memory-sync.sh` | `~/.claude/scripts/memory-sync.sh pull\|promote\|gate\|status` | Sync a shared org-tier memory/instincts repo into `~/.claude` (read-only overlay); share local entries via a discipline gate. Details: [system/memory-instincts.md → Team Sharing (Org Tier)](system/memory-instincts.md) |
+
+### Not Yet Released
+
+| Script | Usage | Purpose |
+|---|---|---|
+| `artifact-gate.sh` | `~/.claude/scripts/artifact-gate.sh [--repo <dir>] [--require-denylist] [<file> ...]` | Sweeps a repository's tracked files for secrets, personal data and configured tenant/project names (Constitution Inviolable enforcement). **Absent from `v0.2.1-beta`, CCPR's most recent tag — ships with the next release.** Details: [system/discipline-gate.md](system/discipline-gate.md) |
 
 ### Shared Libraries
 
-Python modules in `~/.claude/scripts/lib/`:
+Python and shell modules in `~/.claude/scripts/lib/`:
 - `next_steps.py` – Phase-to-commands mapping, HANDOVER.md parser
 - `artefacts.py` – Phase-to-expected-files mapping
 - `gate_checklists.py` – Gate checklists with required sections + content pattern checks (regex)
+- `discipline_gate.sh` – shared secret/personal-data/deny-list pattern library, sourced by `artifact-gate.sh` and `memory-sync.sh promote` — see [system/discipline-gate.md](system/discipline-gate.md)
 
 ### Shell Aliases
 
@@ -935,3 +943,4 @@ my-project/
 | 06.03.2026 | Initial creation; Ollama integration (qwen3.5), instinct-check.sh, install-git-hook.sh |
 | 06.03.2026 | Ollama model: qwen3.5 -> gemma3:4b (performance: 22 min -> 12s). Gate preflight: content patterns + Ollama summaries. gate-p4: Preflight-centered, 1 agent instead of 2 (~60% token savings). Command count: 103 commands (80 phase + 12 gates + 2 learning + 9 utility) |
 | 13.05.2026 | Lean-Track introduced (parallel to Full-Track): /track-decision entry point, /lean-frame + /lean-learn + /lean-promote (4 skills, no gates). Constitution as mandatory Full-Track artifact: /constitution skill (Hybrid mode with 5 domain bootstraps), gate-preflight.py extracts Inviolables, all 8 gates load them as binding input. /cross-check as optional pre-gate consistency check (7 initial rules). 6 new commands, 6 new templates + 5 bootstraps. Command count: 109 -> 115. |
+| 20.08.2026 | Documented `memory-sync.sh` (org-tier memory/instincts sharing, shipped since v0.2.0-beta) and the discipline gate (`artifact-gate.sh` + `lib/discipline_gate.sh` + CI template) — none of the three had appeared anywhere under `Manual/` before. New detail page `system/discipline-gate.md`; `system/memory-instincts.md` gained a "Team Sharing (Org Tier)" subsection. The discipline gate itself is **not yet in any tagged release** (absent from `v0.2.1-beta`) — noted at every mention. |
