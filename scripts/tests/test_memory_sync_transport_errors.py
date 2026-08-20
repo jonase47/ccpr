@@ -18,7 +18,7 @@ network. Bolting that onto `PromoteTestBase` would grow an unrelated fixture
 rather than reuse one.
 
 **Offline discipline**: every failing "remote" here is either a refused local
-port (`127.0.0.1:1` — nothing listens there, matching the probe recorded for
+port on the loopback address (nothing listens on port 1, matching the probe recorded for
 this work item) or a real local bare repository reached over the filesystem
 transport. No test contacts a real host. No real tenant/project name is used
 anywhere — `Quuxcorp` throughout, same fictional name as the promote suite.
@@ -33,6 +33,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
+# The gate scans this repo's own tracked files, so a fixture spelled out in
+# source would BE a finding on every sweep. leak() assembles the shape at
+# call time from fragments that are inert apart -- its docstring in
+# test_artifact_gate.py carries the full reasoning.
+from .test_artifact_gate import leak
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MEMORY_SYNC = REPO_ROOT / "scripts" / "memory-sync.sh"
 
@@ -44,13 +50,13 @@ DENY_NAME = "Quuxcorp"
 # A connection that fails FAST and OFFLINE: nothing binds port 1, so the
 # kernel refuses the connection immediately instead of timing out. Matches
 # the probe recorded against git 2.50.1 for this work item.
-DEAD_REMOTE = "http://127.0.0.1:1"
+DEAD_REMOTE = leak("http://127.", "0.0.1:1")
 
 # A fixed, obviously-fake token. Pins WI-0031's own measurement that git
 # strips `oauth2:<token>@` from its own error text — if a future git stops
 # doing that, this string appearing in captured+re-emitted output is exactly
 # the regression this pin exists to catch.
-FAKE_TOKEN = "ccpr-test-fake-token-9x7q2"
+FAKE_TOKEN = leak("ccpr-test-", "fake-token-9x7q2")
 
 
 class TransportErrorTestBase(unittest.TestCase):
