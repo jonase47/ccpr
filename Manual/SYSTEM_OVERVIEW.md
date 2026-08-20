@@ -921,6 +921,7 @@ my-project/
 |   +-- .gate-preflight-pX.md
 |   +-- .quality-scan-report.json
 |   +-- .cross-check-report.md
+|   +-- .baseline-prep.md
 |
 +-- ...
 ```
