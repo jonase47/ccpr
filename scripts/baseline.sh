@@ -14,7 +14,9 @@ DOCS_DIR="${PROJECT_DIR}/docs"
 HANDOVER="${DOCS_DIR}/HANDOVER.md"
 CLAUDE_MD="${PROJECT_DIR}/.claude/CLAUDE.md"
 PROJECT_PLAN="${DOCS_DIR}/planning/PROJECT_PLAN.md"
-ARCHIVE_DIR="${DOCS_DIR}/handover-archive"
+ARCHIVE_DIR="${DOCS_DIR}/.handover-archive"
+ARCHIVE_DIR_REL="${ARCHIVE_DIR#${PROJECT_DIR}/}"
+LEGACY_ARCHIVE_DIR="${DOCS_DIR}/handover-archive"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OUTPUT="${DOCS_DIR}/.baseline-prep.md"
 TODAY=$(date +%d.%m.%Y)
@@ -38,6 +40,15 @@ fi
 
 echo "=== Baseline preparation for ${VERSION} ==="
 echo "Project directory: ${PROJECT_DIR}"
+
+# 0. Report (but do not touch) a pre-existing undotted archive directory --
+# an older run may have created it before this script switched to the
+# dotted convention every other archive-writer in this project already uses.
+if [ -d "${LEGACY_ARCHIVE_DIR}" ]; then
+    echo "[NOTE] Found an existing undotted archive directory: ${LEGACY_ARCHIVE_DIR}"
+    echo "       This script now writes to ${ARCHIVE_DIR} instead."
+    echo "       Its contents were left untouched -- move them manually if desired."
+fi
 
 # 1. Archive directory
 mkdir -p "${ARCHIVE_DIR}"
@@ -116,7 +127,7 @@ cat > "${OUTPUT}" << PREP_EOF
 **Project directory**: ${PROJECT_DIR}
 
 ## HANDOVER Archive
-$(if [ -n "${ARCHIVE_NAME}" ]; then echo "Archived as: \`docs/handover-archive/${ARCHIVE_NAME}\`"; else echo "No HANDOVER.md present"; fi)
+$(if [ -n "${ARCHIVE_NAME}" ]; then echo "Archived as: \`${ARCHIVE_DIR_REL}/${ARCHIVE_NAME}\`"; else echo "No HANDOVER.md present"; fi)
 
 ## HANDOVER Summary
 $(if [ -n "${HANDOVER_SUMMARY}" ]; then echo "${HANDOVER_SUMMARY}"; else echo "_Not available (Ollama not reachable or HANDOVER.md not present)_"; fi)

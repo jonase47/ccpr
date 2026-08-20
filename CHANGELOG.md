@@ -7,6 +7,22 @@ All notable changes to this project are documented in this file. The format is b
 ## [Unreleased]
 
 ### Fixed
+- **`scripts/baseline.sh` archived HANDOVER.md into an undotted `docs/handover-archive/`
+  directory no convention named (WI-0059).** Found by WI-0058's implementer as out-of-scope drift:
+  three other places already agreed on the dotted spelling — `.gitignore` ignores
+  `docs/.handover-archive/`, `commands/cleanup.md` documents it twice as the established
+  convention, and the only such directory that exists on disk in a real project is the dotted one.
+  `scripts/baseline.sh` was the outlier, and duplicated the wrong path a second time as a hardcoded
+  literal string in its generated report rather than deriving it from the directory it actually
+  wrote to — the duplication is how the two drifted without either being individually wrong-looking.
+  Fixed by pointing `ARCHIVE_DIR` at the dotted directory and deriving the report line from that
+  same variable instead of a second literal, so the two can no longer disagree. A pre-existing
+  undotted directory from an older run is reported by name (contents listed nowhere are moved) and
+  left completely untouched — moving a user's files without asking is the action that needs
+  consent, leaving them alone does not. New `scripts/tests/test_baseline_archive_directory.py`
+  covers the dotted destination, the report/actual-path agreement, the legacy-directory report +
+  untouched-contents guarantee, and the pre-existing `docs/.baseline-prep.md` regression path, with
+  inline mutation-proof tests for all three changed sites.
 - **Twelve generated `docs/` artifacts were not gitignored anywhere they land (WI-0058).** A
   sweep of every `docs/.<name>` path shipped scripts and commands write literally (gate-preflight
   notes for P0–P7, session-context, quality-scan-report, cross-check-report, baseline-prep) found
