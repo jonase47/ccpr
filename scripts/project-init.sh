@@ -98,6 +98,8 @@ target/
 docs/.session-context.md
 docs/.gate-preflight-*.md
 docs/.quality-scan-report.json
+docs/.cross-check-report.md
+docs/.baseline-prep.md
 
 # Build output
 dist/

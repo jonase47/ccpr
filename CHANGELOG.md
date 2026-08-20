@@ -7,6 +7,33 @@ All notable changes to this project are documented in this file. The format is b
 ## [Unreleased]
 
 ### Fixed
+- **Twelve generated `docs/` artifacts were not gitignored anywhere they land (WI-0058).** A
+  sweep of every `docs/.<name>` path shipped scripts and commands write literally (gate-preflight
+  notes for P0–P7, session-context, quality-scan-report, cross-check-report, baseline-prep) found
+  three independent gaps, not the one the item's own title named. (1) This repository's own
+  `.gitignore` covered none of them — the shape that left `docs/.session-context.md` untracked
+  after a verification run, carrying this repo's own git status and paths into the exact class of
+  content the artifact gate exists to keep out. (2) `scripts/project-init.sh`'s generated
+  `.gitignore` (what a new project actually receives) missed `docs/.cross-check-report.md`, even
+  though that path is named explicitly in the "Standard block for `.gitignore` in CCPR projects"
+  CCPR itself ships as instinct G-049 — the generator contradicted the rule the framework hands its
+  users. (3) `docs/.baseline-prep.md` was in neither the generator nor the shipped standard block,
+  newer than both — exactly the drift G-049 exists to prevent, and the block existed in two places
+  (`templates/STARTER_INSTINCTS.md`, `instincts/workflow.md`) that had to be fixed together or stay
+  disagreeing. Fixed with two different shapes deliberately: this repo's `.gitignore` uses a broad
+  `docs/.*` pattern (verified no dotfile under `docs/` is tracked here today, so nothing is
+  swallowed, and future generated artifacts need no further edit), while
+  `scripts/project-init.sh`'s generated block stays an enumeration (a user's project may
+  legitimately track a dotfile under `docs/` that this repo does not, so a broad pattern there
+  would be a silent, unrequested behaviour change on every new project). A new
+  `scripts/tests/test_docs_dotfile_gitignore_coverage.py` derives its expected set from the same
+  sweep method rather than a hand-maintained list, so a script or command added tomorrow that
+  writes a new `docs/.<name>` path fails the suite until it is listed in `.gitignore`, the
+  generator, and both instinct-block carriers. Documented limitation: the sweep only finds paths
+  spelled out literally in source — `scripts/gate-preflight.py`'s actual output path is built from
+  an f-string variable, so the eight concrete `docs/.gate-preflight-pN.md` hits it finds come
+  entirely from each `commands/gate-pN.md` file documenting that path, not from the generator
+  itself; a path assembled purely at runtime and never spelled out anywhere would not be caught.
 - **`scripts/log-cleanup.sh` could silently replace a real log with garbage instead of a trimmed
   copy (WI-0056).** Found and deliberately left unfixed by WI-0054's classifier as
   `known-risk-not-yet-fixed`: the trimmed log was written to a tmpfile by a bare

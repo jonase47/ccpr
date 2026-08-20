@@ -178,6 +178,7 @@ Behavioural rules for sequencing skills, holding gate preconditions, planning mu
 >   docs/.session-context.md
 >   docs/.quality-scan-report.json
 >   docs/.cross-check-report.md
+>   docs/.baseline-prep.md
 >   ```
 
 ---

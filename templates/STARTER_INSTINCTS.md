@@ -203,6 +203,7 @@ Pick whichever layout fits your workflow:
 >   docs/.session-context.md
 >   docs/.quality-scan-report.json
 >   docs/.cross-check-report.md
+>   docs/.baseline-prep.md
 >   ```
 
 ### G-050: Doc coverage via Glob list, not from memory
