@@ -316,6 +316,27 @@ All notable changes to this project are documented in this file. The format is b
   the index and all theme files.
 
 ### Added
+- **`scripts/anchor.sh` — stage 1 of the anchored state check (WI-0021).** `anchor status` and
+  `anchor check` compute the delta between a recorded `anchor_commit` and the last **production-code**
+  commit, and nothing else: no severity, no verdict, and **exit 0 whenever data was produced**, drift
+  included — a non-zero exit means an operational failure only. That is the property the whole design
+  rests on, since the event that fires constantly (staleness) must never reach the user as a verdict.
+  The comparison point is not `HEAD`, because a third to a half of commits in real projects touch only
+  documentation. Every report names the classification in force and its source, and **how many of the
+  eight phase folders were actually found** — without that line, "0 anchored" on a project with no
+  phase folders reads exactly like a fully anchored, drift-free one. Anchor resolution is the
+  document's own before the index's, in both subcommands, so a document whose own anchor is current is
+  not reported as affected; a scope with no index still reports its own-anchored documents rather than
+  swallowing them, which matters because `quality/QA.md` is absent in all three reference projects
+  while the folder exists. Six git edge cases are data, not crashes: no repository, shallow clone,
+  unresolvable anchor, detached HEAD, dirty tree, and a repository with no commits. `ack` and `set` are
+  explicit stubs for the write path. Three bugs were found while building it, each reproduced before
+  it was fixed: `git log --pretty=format:` omits the trailing newline, so `while read` silently drops
+  the last entry — invisible except in the single-commit case, i.e. exactly a `--depth 1` clone;
+  a `[[ cond ]] && assignment` as the last command of a function leaves that function's exit status
+  non-zero and kills the script under `set -e`; and `"${arr[@]:-}"` on an empty array in bash 3.2
+  yields one phantom empty element rather than none — a silent wrong answer, distinct from the known
+  crash on a bare `[@]`. 47 tests, suite 958 → 1020.
 - **ADR-0009's one open design question is decided (Addendum 2).** The ADR anchors at the Gate-Go
   freeze and makes the scope index carry the bulk acknowledgement, while `freeze-phase-docs.sh` skips
   every index by design — so the freeze event could not write the anchor the design puts there. The

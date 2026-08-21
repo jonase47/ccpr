@@ -714,23 +714,46 @@ class ExternalToolExitStatusTest(unittest.TestCase):
         when WI-0020's commit-anchor-family check added one
         `git rev-parse --verify -q ... ^{commit}` call to
         phase-docs-lint.sh, tested directly by its `if [[ ... ]] && ! git
-        ...; then` condition -- `checked-condition` gains one site). 129
-        invocations total across the 15 shipped files, split as below. A
-        change in these numbers means either a script changed shape or the
-        scanner's own logic changed -- worth a deliberate look either way,
-        not a silent drift."""
+        ...; then` condition -- `checked-condition` gains one site; updated
+        again the same day when WI-0021 added scripts/anchor.sh, a new
+        16th shipped file, with 11 invocations of its own: two `git
+        rev-parse --verify -q` calls each tested directly by their own `if`
+        condition (`checked-condition` +2); a `sed -n ... | sed ...` pipe
+        in usage() and a `diff --name-only`/`diff-tree --name-only`/`log`
+        trio feeding `while read` loops via process substitution, none of
+        them observable from the reading `while` under bash's own rules
+        (`bare-needs-exemption` +5, all five marked
+        `proc-subst-unobservable`/`set-e-sufficient`); a `status
+        --porcelain`, an `is-shallow-repository` and a `show --format`
+        each captured via `$(... || true)` and either branched on by their
+        OWN caller's next line or used only for cosmetic display, plus one
+        `python3 -` JSON config read already following
+        lib/discipline_gate.sh's `_gate_read_config` shape
+        (`discard-needs-exemption` +4, marked `downstream-checks-result` x2,
+        `best-effort-status-display` x1, `optional-config-read` x1 --
+        pre-existing site, not new); updated once more the same day when
+        anchor.sh's `status` report grew a per-scope commit-DISTANCE field
+        ("Abstand in Commits", ADR-0009's own wording for what `status`
+        must show alongside the delta) via one more `git rev-list --count
+        anchor..last-prod` call, captured through the same `$(... ||
+        true)` shape as the adjacent `git show` display line and marked
+        `best-effort-status-display` the same way (`discard-needs-exemption`
+        +1)). 141 invocations total across the 16 shipped files, split as
+        below. A change in these numbers means
+        either a script changed shape or the scanner's own logic changed
+        -- worth a deliberate look either way, not a silent drift."""
         invocations = scan_tree()
         by_disposition = {}
         for inv in invocations:
             by_disposition[inv.disposition] = by_disposition.get(inv.disposition, 0) + 1
-        self.assertEqual(129, len(invocations))
+        self.assertEqual(141, len(invocations))
         self.assertEqual(
             {
-                "checked-condition": 17,
+                "checked-condition": 19,
                 "checked-captured": 5,
                 "checked-chain": 16,
-                "discard-needs-exemption": 32,
-                "bare-needs-exemption": 59,
+                "discard-needs-exemption": 37,
+                "bare-needs-exemption": 64,
             },
             by_disposition,
         )
@@ -739,11 +762,13 @@ class ExternalToolExitStatusTest(unittest.TestCase):
         """Pins the file-enumeration side of "cannot be forgotten": the glob
         is scripts/*.sh + scripts/lib/*.sh, re-evaluated on every run, so a
         FILE added later is picked up automatically -- this only pins that
-        the glob itself still reaches the 15 files known at write time."""
+        the glob itself still reaches the 16 files known at write time
+        (updated 21.08.2026 when WI-0021 added scripts/anchor.sh)."""
         files = sorted(SCRIPTS_DIR.glob("*.sh")) + sorted((SCRIPTS_DIR / "lib").glob("*.sh"))
         names = sorted(f.relative_to(SCRIPTS_DIR).as_posix() for f in files)
         self.assertEqual(
             [
+                "anchor.sh",
                 "artifact-gate.sh",
                 "baseline.sh",
                 "bootstrap.sh",

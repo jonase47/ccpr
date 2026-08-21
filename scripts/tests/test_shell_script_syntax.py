@@ -81,6 +81,7 @@ class ShellScriptSyntaxTest(unittest.TestCase):
         names = sorted(f.relative_to(SCRIPTS_DIR).as_posix() for f in shipped_scripts())
         self.assertEqual(
             [
+                "anchor.sh",
                 "artifact-gate.sh",
                 "baseline.sh",
                 "bootstrap.sh",
