@@ -34,9 +34,19 @@ Phase docs have **no stale detection** (unlike Memory). Instead:
 
 ## Index-↔-detail consistency
 
-The lint also checks:
-1. Every file with frontmatter under `docs/<phase>/**` is listed in the phase index or a sub-index.
-2. If a detail file declares `parent_index: SECURITY.md`, then `SECURITY.md` must exist and list it.
+The lint enforces **one** part of this:
+
+- If a detail file declares `parent_index: SECURITY.md`, then `SECURITY.md` must **exist** — a path
+  check, resolved relative to the detail file's own directory.
+
+Two further expectations are **conventions, not validations**. Nothing checks them:
+
+1. Every file with frontmatter under `docs/<phase>/**` should be listed in the phase index or a
+   sub-index.
+2. The index named by `parent_index:` should list the detail file back.
+
+Both would require the lint to parse an index's contents, which it does not do. Do not read a clean
+lint run as evidence that either holds.
 
 ## Example (sub-index)
 

@@ -222,7 +222,7 @@ for `/p3-sec-*`).
 
 Full spec, schemas, and rationale: `~/.claude/docs/PROJECT_PHASES.md` ("Document Splitting Convention").
 
-**Frontmatter schema and lint:** phase-detail and sub-index files follow the schema in `~/.claude/templates/PHASE_DOC_SCHEMA.md` (`phase`, `subskill`, `status ∈ {skeleton, draft, active, frozen, archived}`, `last_updated DD.MM.YYYY`; optional `related:`, `parent_index:`). Validation: `bash ~/.claude/scripts/phase-docs-lint.sh [<project-dir>] [--scope <glob>]`. Doc-volume watcher: `bash ~/.claude/scripts/doc-volume-check.sh [<docs-root>]` — lists files ≥25/40/50 KB with a splitting suggestion.
+**Frontmatter schema and lint:** phase-detail and sub-index files follow the schema in `~/.claude/templates/PHASE_DOC_SCHEMA.md` (`phase`, `subskill`, `status ∈ {skeleton, draft, active, frozen, archived, living}`, `last_updated DD.MM.YYYY`; optional `related:`, `parent_index:`). Validation: `bash ~/.claude/scripts/phase-docs-lint.sh [<project-dir>] [--scope <glob>]`. Doc-volume watcher: `bash ~/.claude/scripts/doc-volume-check.sh [<docs-root>]` — lists files ≥25/40/50 KB with a splitting suggestion.
 
 ## Next-Steps Recommendations
 

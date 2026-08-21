@@ -92,7 +92,7 @@ On session changes, `docs/HANDOVER.md` is automatically updated. New sessions re
 ## Phase Documents (Index + Detail Files)
 Every phase produces a slim **phase index** plus one **detail file per subskill** (Document Splitting Convention — full spec in `~/.claude/docs/PROJECT_PHASES.md`). Subskill commands write detail files; the gate command reads the index first and pulls detail files only as needed. P3 and P6 add a sub-index level (e.g. `architecture/SECURITY.md` as sub-index for the `/p3-sec-*` subskills).
 
-**Schema & Lint:** Phase-detail and sub-index files follow `~/.claude/templates/PHASE_DOC_SCHEMA.md` (required fields: `phase`, `subskill`, `status ∈ {skeleton, draft, active, frozen, archived}`, `last_updated`). Validation: `bash ~/.claude/scripts/phase-docs-lint.sh [--scope <glob>]`. Doc-volume watcher: `bash ~/.claude/scripts/doc-volume-check.sh` (warns for files ≥25/40/50 KB with a splitting suggestion).
+**Schema & Lint:** Phase-detail and sub-index files follow `~/.claude/templates/PHASE_DOC_SCHEMA.md` (required fields: `phase`, `subskill`, `status ∈ {skeleton, draft, active, frozen, archived, living}`, `last_updated`). Validation: `bash ~/.claude/scripts/phase-docs-lint.sh [--scope <glob>]`. Doc-volume watcher: `bash ~/.claude/scripts/doc-volume-check.sh` (warns for files ≥25/40/50 KB with a splitting suggestion).
 
 ## Directory Structure
 ```

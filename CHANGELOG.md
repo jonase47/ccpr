@@ -7,6 +7,22 @@ All notable changes to this project are documented in this file. The format is b
 ## [Unreleased]
 
 ### Fixed
+- **Two shipped documents stated a five-value `status` enum the schema and the linter never had.**
+  `templates/PHASE_DOC_SCHEMA.md` and `phase-docs-lint.sh` both carry six values — `living` is a real,
+  documented status for detail files designed to keep growing (SPRINT-XX.md, RISKS.md) — while
+  `CLAUDE.md` and `templates/PROJECT_CLAUDE_TEMPLATE.md` listed five. Found while measuring the
+  precondition for ADR-0009, whose severity model keys off exactly this field: read through the short
+  list, the design's `living` row would look like it rests on an invalid value. Every other statement
+  of the enum in the repo — the Manual, all phase-command templates — already listed six, so these two
+  were the outliers, not the majority. Corrected to six.
+- **`PHASE_DOC_SCHEMA.md` claimed two index-consistency checks the linter does not perform.** It said
+  "the lint also checks" that every frontmatter-carrying file is listed in its phase index, and that a
+  `parent_index:` target must "exist **and list it**". The lint checks path existence and nothing more;
+  neither index is ever parsed, and no other script does it either (verified — `parent_index` appears
+  in exactly two files, one of them an example block). A statement about the code that was simply
+  untrue, and the dangerous direction: a clean lint run read as evidence that index membership holds.
+  The section now separates the one enforced check from the two conventions and says plainly that
+  nothing validates them.
 - **`install.sh --dry-run` announced a wholesale `docs/` copy the real run has not performed since
   WI-0018 (WI-0064).** Found by offering the dry-run as the cheap proof that the docs/ allowlist
   holds, then reading the branch: it exits 0 *before* the artifact loop and prints one
