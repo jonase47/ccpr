@@ -151,19 +151,40 @@ Does the document's claim still hold?  [asserted/updated/abort]
 Reason: _
 ```
 
-It writes five flat keys: the new `anchor_commit` and `anchor_date`, plus `anchor_ack`
-(`asserted` — reviewed, nothing changed — or `updated` — the documentation was brought in
-line), `anchor_ack_from` (the old SHA), and `anchor_ack_note`. `asserted` and `updated`
-stay two separate values on purpose: collapsing them into one field would make it
-impossible to ask later *which anchors rest on nothing but an assertion* — different
-grades of evidence do not belong in one field. A reason is mandatory in both the
-interactive and the flagged (`--assert`/`--update`) path; without a delta to acknowledge,
-`ack` refuses outright (exit 2) rather than let acknowledging-nothing look like a review.
+It writes six flat keys, in one atomic group: the new `anchor_commit` and `anchor_date`,
+plus `anchor_ack` (`asserted` — reviewed, nothing changed — or `updated` — the
+documentation was brought in line), `anchor_ack_from` (the old SHA), `anchor_ack_note`,
+and `anchor_ack_by`. `asserted` and `updated` stay two separate values on purpose:
+collapsing them into one field would make it impossible to ask later *which anchors rest
+on nothing but an assertion* — different grades of evidence do not belong in one field. A
+reason is mandatory in both the interactive and the flagged (`--assert`/`--update`) path;
+without a delta to acknowledge, `ack` refuses outright (exit 2) rather than let
+acknowledging-nothing look like a review.
 
 The acknowledgement's **reach is structural**: whichever file is passed as the target is
 the file that gets acked. Acking a phase index is a bulk acknowledgement because that is
 where the scope anchor lives; acking a document with its own `anchor_commit` acknowledges
 only that document.
+
+### Who acknowledged (`anchor_ack_by`)
+
+`anchor_ack_by` records **who**, in the same `name <email>` shape git itself writes into
+every commit — resolved from the repository's `user.email` (first) and `user.name`
+(travelling along for readability), overridable with `--by <actor>`. `user.email` is the
+key deliberately: the same person can appear under several `user.name` values over a
+project's history, and keying on the display name would record that drift instead of the
+person.
+
+This is **attribution, not restriction** (ADR-0009 Addendum 3). There is no server, no
+authentication and no enforcement point in this framework, so a check that looked like an
+authority gate without being one would be exactly the kind of fake boundary this project
+rejects everywhere else — `ack` does not refuse an acknowledgement because of who claims to
+make it, and `--by` takes any string verbatim, with no allowlist behind it. When no git
+identity is configurable (a CI job, a fresh container), the field records that plainly as
+`unattributable <no-git-identity>` rather than being omitted — a missing field and an
+unattributable acknowledgement must not look alike. A receipt written before this field
+existed simply has no `anchor_ack_by` at all; `anchor status`'s breakdown (below) reports
+that case as `unattributed`, a third, distinct value.
 
 ## The agent clause, and its limit — stated honestly
 
@@ -184,9 +205,22 @@ the script stops an agent with Bash access from calling it that way. So the clau
 ```
 
 A rising ratio of "asserted without doc change" relative to "anchored" is the early
-warning that acknowledgement has turned into ceremony. Prevention without a counter-check
-would be self-report with nothing behind it; only the clause and the statistic **together**
-are the honest construction ADR-0009 asks for. Do not claim a safety that does not exist.
+warning that acknowledgement has turned into ceremony. Once more than one actor has an
+`asserted` acknowledgement anywhere in the project, a second line breaks the count down by
+`anchor_ack_by` (grouped by email, so the same person under several display names still
+counts once — see "Who acknowledged" above):
+
+```
+   asserted by: a@example.org (6), b@example.org (1)
+```
+
+A single actor prints no such line — it would carry no information the count above does
+not already say. This is the same detection idea made actor-aware: one person's assertions
+dominating the count is now visible without anyone having had to declare who was entitled
+to make them (ADR-0009 Addendum 3, "why not a configured authority list"). Prevention
+without a counter-check would be self-report with nothing behind it; only the clause and
+the statistic **together** are the honest construction ADR-0009 asks for. Do not claim a
+safety that does not exist.
 
 ## The protection against silent deletion
 
@@ -201,77 +235,115 @@ risk.
 
 ## A walkthrough, start to finish
 
-> The commands below were **not executed in a live shell this session** — this agent ran
-> without Bash tool access. Every literal line quoted here is either copied verbatim from
-> a passing assertion in `scripts/tests/test_anchor.py` (the shipped script's own test
-> suite) or is the exact `echo`/`printf` format string read directly from
-> `scripts/anchor.sh`'s source with placeholder values filled in — never a free-form
-> invented example. Treat the SHAs and dates as illustrative placeholders; treat the
-> surrounding text as real, sourced output shape.
+> The commands below **were executed live**, this session, in a disposable throwaway
+> repository (`git init` in a scratch directory, torn down afterwards) — every block is the
+> actual stdout of `scripts/anchor.sh`, not a reconstruction. SHAs are git's own 7-character
+> `--short` form of real commits from that repository (not invented placeholders); dates
+> reflect the day the repro ran. Re-running the same sequence against a fresh repository
+> reproduces the same shape, though the SHAs themselves will differ.
 
 **1. Gate-Go freeze sets the anchor.** `freeze-phase-docs.sh` calls `anchor set` on the
 phase index after freezing that phase's detail files (source: `cmd_set` in
 `scripts/anchor.sh`):
 
 ```
-anchor set: docs/architecture/ARCHITECTURE.md -> a3f9c21 (18.08.2026)
+anchor set: docs/architecture/ARCHITECTURE.md -> 997c1f7 (21.08.2026)
 ```
 
-**2. Code changes under that scope.** A later commit touches a path claimed by
-`docs/architecture/AUTH.md`'s `covers: [src/]`.
+**2. Code changes under that scope.** A later commit (`9eed269`) touches `src/a.go`, a path
+claimed by `docs/architecture/AUTH.md`'s `covers: [src/]`.
 
-**3. `/anchor check` shows the delta** (`bash scripts/anchor.sh check <projectdir>` —
-literal lines from `CheckDeltaReportTest`):
+**3. `/anchor check` shows the delta** (`bash scripts/anchor.sh check <projectdir> --scope
+architecture`):
 
 ```
 **Scope:** architecture
 **Scopes found:** 1 of 1 phase folder (scope: architecture)
 **Classification:** exclude prefixes: docs/,.claude/ · exclude suffixes: .md (source: default)
-**Last production-code commit:** b7e1004 (20.08.2026)
+**Last production-code commit:** 9eed269 (21.08.2026)
 
 ## architecture
 
-**Anchor:** a3f9c21 (18.08.2026)
+**Anchor:** 997c1f7 (21.08.2026)
 **Changed production-code paths (1):**
 
 - src/a.go — claimed by docs/architecture/AUTH.md
 
 **Affected documents:**
 
+- docs/architecture/ARCHITECTURE.md — status: living
 - docs/architecture/AUTH.md — status: active
 
 **Exit:** 0 (Stage 1 — data only, never a verdict)
 ```
 
-**4. Stage 2 asks the one question.** "Does this delta invalidate a statement in
-`AUTH.md`?" — for this walkthrough, assume the answer is **no**: the change is an internal
-refactor, no auth-flow claim in the document became false. No finding, no work item —
-staying stale with no invalidated claim is the expected majority case.
+`ARCHITECTURE.md` itself appears in "Affected documents" alongside `AUTH.md`: it carries no
+`covers:` of its own, so it inherits the whole scope's delta rather than claiming nothing
+(ADR-0009 §3) — every document under an affected scope gets its own Stage 2 question below,
+the index included.
 
-**5. Quittance line** (`bash scripts/anchor.sh status <projectdir>` — literal counts from
-`AnchorInheritanceTest`, one scope, index + one inheriting document, nothing acked yet):
+**4. Stage 2 asks one question per affected document.** "Does this delta invalidate a
+statement in `AUTH.md`?" — and the same question for `ARCHITECTURE.md`. For this
+walkthrough, assume the answer is **no** for both: the change is an internal refactor, no
+claim in either document became false. No finding, no work item — staying stale with no
+invalidated claim is the expected majority case.
 
-```
-**Anchors:** 2 anchored · 0 asserted without doc change · 1 stale
-```
-
-**6. The reviewer acknowledges anyway**, to clear the "stale" count deliberately
-(`anchor ack docs/architecture/AUTH.md --assert --note "reviewed, no invalidated claim"` —
-literal echo format from `cmd_ack`):
+**5. Quittance line** (`bash scripts/anchor.sh status <projectdir>`, nothing acked yet):
 
 ```
-Anchor  a3f9c21  (18.08.2026)
-Last production-code commit  b7e1004  (20.08.2026)
+**Anchors:** 2 anchored · 0 asserted without doc change · 2 stale
+```
+
+**6. The reviewer acknowledges the index anyway**, to clear the "stale" count
+deliberately. `AUTH.md` inherits its anchor from the index and carries no `anchor_commit`
+of its own, so the index — `docs/architecture/ARCHITECTURE.md` — is the ackable target here
+(`anchor ack docs/architecture/ARCHITECTURE.md --assert --note "reviewed, no invalidated
+claim"`, run with the repo's `user.name`/`user.email` set to `Ada Example
+<ada@example.org>`):
+
+```
+Anchor  997c1f7  (21.08.2026)
+Last production-code commit  9eed269  (21.08.2026)
 
 Changed production-code paths (1):
   - src/a.go
 
-anchor ack: docs/architecture/AUTH.md -> asserted (a3f9c21 -> b7e1004)
+anchor ack: docs/architecture/ARCHITECTURE.md -> asserted (997c1f7 -> 9eed269)
 ```
 
-A re-run of `status` now reports the same document as `1 asserted without doc change`
-instead of stale — visible, not silently cleared, and countable against the ceremony
-warning in "The agent clause" above.
+`ARCHITECTURE.md`'s frontmatter now carries all six keys: `anchor_commit: 9eed269`,
+`anchor_date`, `anchor_ack: asserted`, `anchor_ack_from: 997c1f7`, `anchor_ack_note`, and
+`anchor_ack_by: Ada Example <ada@example.org>`. A re-run of `status` reports `2 anchored ·
+1 asserted without doc change · 0 stale` — acking the index moved `anchor_commit` itself to
+the last production-code commit, so `AUTH.md`, which inherits the index's anchor and has no
+`anchor_ack` of its own, now has zero drift to be stale about; only the index's own document
+line counts toward "asserted".
+
+**7. A second actor acknowledges a second document.** Code drifts once more (`608ec76`),
+and `AUTH.md` opts into its own anchor (`anchor_commit: 1431b3d`, the commit right after
+Ada's ack) — now a document in its own right, ackable independently of the index. With the
+repo's identity switched to `Bob Example <bob@example.org>`:
+
+```
+Anchor  1431b3d  (21.08.2026)
+Last production-code commit  608ec76  (21.08.2026)
+
+Changed production-code paths (1):
+  - src/a.go
+
+anchor ack: docs/architecture/AUTH.md -> asserted (1431b3d -> 608ec76)
+```
+
+`status` now shows two actors, and the breakdown line appears:
+
+```
+**Anchors:** 2 anchored · 2 asserted without doc change · 0 stale
+   asserted by: ada@example.org (1), bob@example.org (1)
+```
+
+Had both acknowledgements come from the same actor, the breakdown line would not print at
+all — a single actor carries no information the count above does not already say (see "Who
+acknowledged" above).
 
 ## Where this differs from `BASELINE.md` / Baseline Mode
 

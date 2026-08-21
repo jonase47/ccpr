@@ -770,9 +770,18 @@ class ExternalToolExitStatusTest(unittest.TestCase):
         python3/git invocation's SHAPE, only its surrounding logic, so
         they add nothing here. Net +1 invocation (145 total):
         `checked-condition` +1, everything else unchanged.
-        145 invocations total across the 16 shipped files (same file
-        COUNT as before -- no new shipped .sh file, only one new
-        invocation inside an existing one), split as below. A change in
+        Updated once more 21.08.2026 when ADR-0009 Addendum 3
+        (`anchor_ack_by`) added `get_ack_identity()` to anchor.sh: two
+        `git config user.email` / `git config user.name` reads, each
+        captured via the same `$(... || true)` shape as the adjacent
+        git-state probes and marked `downstream-checks-result` the same
+        way -- an unconfigured identity is a legitimate, expected state
+        (ANCHOR_ACK_NO_IDENTITY exists precisely for it), not a failure to
+        surface. Net +2 invocations (147 total): `discard-needs-exemption`
+        +2, everything else unchanged.
+        147 invocations total across the 16 shipped files (same file
+        COUNT as before -- no new shipped .sh file, only two new
+        invocations inside an existing one), split as below. A change in
         these numbers means either a script changed shape or the
         scanner's own logic changed -- worth a deliberate look either
         way, not a silent drift."""
@@ -780,13 +789,13 @@ class ExternalToolExitStatusTest(unittest.TestCase):
         by_disposition = {}
         for inv in invocations:
             by_disposition[inv.disposition] = by_disposition.get(inv.disposition, 0) + 1
-        self.assertEqual(145, len(invocations))
+        self.assertEqual(147, len(invocations))
         self.assertEqual(
             {
                 "checked-condition": 22,
                 "checked-captured": 5,
                 "checked-chain": 17,
-                "discard-needs-exemption": 38,
+                "discard-needs-exemption": 40,
                 "bare-needs-exemption": 63,
             },
             by_disposition,

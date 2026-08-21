@@ -328,6 +328,23 @@ All notable changes to this project are documented in this file. The format is b
   the index and all theme files.
 
 ### Added
+- **Acknowledgements record who made them (ADR-0009 Addendum 3, WI-0022).** The ADR's fourth open
+  point asked what acknowledgement authority means with more than one maintainer. The question hides
+  two: *who made this assertion* and *who is allowed to*. This framework has no server and no
+  enforcement point, so restriction could only ever be a convention — and a check that reads as
+  enforcement without being it is exactly what this ADR refuses to do for agents. So: **record the
+  actor, do not restrict them.** A sixth flat key `anchor_ack_by` joins the acknowledgement group in
+  the same atomic write, filled from the repository's git identity and overridable with `--by`.
+  Identity is keyed on **`user.email`**, and that is the substance of it: in the larger reference
+  project two people appear under five display names while their addresses stay stable, so keying on
+  the name would have recorded the drift instead of the person — verified, two names on one address
+  collapse to one actor. Where no identity is configurable the field says so explicitly
+  (`unattributable <no-git-identity>`, deliberately without an `@` so it can never be mistaken for an
+  address) rather than being omitted, because a missing field and an unattributable acknowledgement
+  must not look alike. And `anchor status` breaks its `asserted` count down by actor once more than
+  one appears — the design's guard against acknowledgement becoming ceremony was always the statistic
+  rather than a permission, and this is what carries that guard into a team. A test pins the
+  **absence** of an authority check, so the decision cannot be quietly reversed into one.
 - **The Manual documents the anchor, and a dormant CI template ships beside it (WI-0021).**
   `Manual/system/anchored-state.md` explains the mechanism the way the other `system/` chapters
   explain theirs — the problem, why the anchor sits on the phase index rather than on each document,

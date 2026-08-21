@@ -8,7 +8,7 @@
 #   bash scripts/anchor.sh status [<project-dir>]
 #   bash scripts/anchor.sh check  [<project-dir>] [--scope <folder>]
 #   bash scripts/anchor.sh set    [<project-dir>] --scope <folder> [--commit <sha>] [--force]
-#   bash scripts/anchor.sh ack    <target> [--assert|--update] --note "<text>"
+#   bash scripts/anchor.sh ack    <target> [--assert|--update] --note "<text>" [--by <actor>]
 #
 # The anchor lives on the phase INDEX (docs/<folder>/<INDEX>.md), not on
 # every detail file (ADR-0009 §2/§3, Addendum 2). A document under that
@@ -493,6 +493,7 @@ parse_ack_args() {
     ASSERT_FLAG=0
     UPDATE_FLAG=0
     NOTE=""
+    ACK_BY_OVERRIDE=""
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --assert)
@@ -510,6 +511,19 @@ parse_ack_args() {
                 ;;
             --note=*)
                 NOTE="${1#--note=}"
+                shift
+                ;;
+            --by)
+                # Overrides the resolved git identity (ADR-0009 Addendum 3,
+                # "attribution, not restriction") -- no validation against
+                # any allowlist, by design: this is a display value, not an
+                # authority check.
+                [[ $# -ge 2 ]] || die "--by needs a value"
+                ACK_BY_OVERRIDE="$2"
+                shift 2
+                ;;
+            --by=*)
+                ACK_BY_OVERRIDE="${1#--by=}"
                 shift
                 ;;
             -*)
@@ -559,6 +573,38 @@ is_in_anchor_scope() {
         case "$target_file" in "$prefix"*) return 0 ;; esac
     done
     return 1
+}
+
+# ANCHOR_ACK_NO_IDENTITY — the anchor_ack_by placeholder written when no
+# git identity is configurable (a CI job, a fresh container: `user.email`
+# empty). Deliberately NOT omitted (ADR-0009 Addendum 3: "a missing field
+# and an unattributable acknowledgement must not look alike") and
+# deliberately containing no "@" -- so it can never be mistaken for, or
+# collide with, a real actor's email when `anchor status` groups by it.
+ANCHOR_ACK_NO_IDENTITY="unattributable <no-git-identity>"
+
+# get_ack_identity <project-dir> — resolves the "name <email>" actor string
+# for anchor_ack_by. Identity is keyed on `user.email` FIRST (ADR-0009
+# Addendum 3: the same person can appear under several `user.name` values
+# over time -- keying on the display name would record the drift instead
+# of the person). `user.name` travels along only for readability, in the
+# same "name <email>" shape git itself writes into every commit.
+get_ack_identity() {
+    local project_dir="$1" name email
+    email="$(git -C "$project_dir" config user.email 2>/dev/null || true)"  # exit-status: exempt downstream-checks-result
+    if [[ -z "$email" ]]; then
+        printf '%s' "$ANCHOR_ACK_NO_IDENTITY"
+        return 0
+    fi
+    name="$(git -C "$project_dir" config user.name 2>/dev/null || true)"  # exit-status: exempt downstream-checks-result
+    if [[ -z "$name" ]]; then
+        # user.email set but user.name not -- git itself normally refuses
+        # to COMMIT in this state, so this is a narrow edge case. Fall back
+        # to the email as its own display name rather than writing a
+        # malformed "<email>" with no name segment.
+        name="$email"
+    fi
+    printf '%s <%s>' "$name" "$email"
 }
 
 # resolve_ack_target <target> — sets TARGET_FILE (absolute path),
@@ -671,21 +717,33 @@ cmd_ack() {
         [[ -n "$note" ]] || die "a reason is required -- acknowledging without one is the ceremony this verb exists to prevent"
     fi
 
-    # ONE atomic group write, not five separate fm_set calls (WI-0021
-    # review, Critical fix). Each fm_set call is individually atomic
-    # (temp file + `mv`), but the GROUP of five was not: an abort between
-    # the first and the second call (signal, full disk, write error)
-    # used to leave the document carrying the NEW anchor_commit but NONE
-    # of the anchor_ack fields -- `status` then reads "no anchor_ack" as
-    # "anchor up to date", and the drift this command exists to record
-    # vanishes without ever having been acknowledged. ADR-0009 §6 names
-    # this "the single highest-risk detail in the whole design".
+    local ack_by
+    if [[ -n "$ACK_BY_OVERRIDE" ]]; then
+        ack_by="$ACK_BY_OVERRIDE"
+    else
+        ack_by="$(get_ack_identity "$PROJECT_DIR")"
+    fi
+
+    # ONE atomic group write, not six separate fm_set calls (WI-0021
+    # review, Critical fix -- anchor_ack_by rides in the SAME group per
+    # ADR-0009 Addendum 3, not a seventh, separate call). Each fm_set call
+    # is individually atomic (temp file + `mv`), but the GROUP was not: an
+    # abort between the first and the second call (signal, full disk,
+    # write error) used to leave the document carrying the NEW
+    # anchor_commit but NONE of the anchor_ack fields -- `status` then
+    # reads "no anchor_ack" as "anchor up to date", and the drift this
+    # command exists to record vanishes without ever having been
+    # acknowledged. ADR-0009 §6 names this "the single highest-risk detail
+    # in the whole design". No authority check on $ack_by anywhere here --
+    # ack records who asserted, it does not gate on it (Addendum 3,
+    # "attribution, not restriction").
     fm_set_many "$TARGET_FILE" \
         "anchor_commit=$LAST_PROD_SHA" \
         "anchor_date=$LAST_PROD_DATE" \
         "anchor_ack=$kind" \
         "anchor_ack_from=$OLD_ANCHOR" \
-        "anchor_ack_note=$note"
+        "anchor_ack_note=$note" \
+        "anchor_ack_by=$ack_by"
 
     echo "anchor ack: $TARGET_REL -> $kind ($OLD_ANCHOR -> $LAST_PROD_SHA)"
     exit 0
@@ -1123,6 +1181,8 @@ cmd_status() {
 
     local anchored=0 asserted=0 stale=0
     local scope_entry folder index_name
+    ASSERTED_ACTOR_KEYS=()
+    ASSERTED_ACTOR_COUNTS=()
     for scope_entry in "${PHASE_SCOPES[@]}"; do
         folder="${scope_entry%%:*}"
         index_name="${scope_entry#*:}"
@@ -1131,7 +1191,9 @@ cmd_status() {
         # report_scope_status_line updates the shared counters below via
         # STATUS_LINE_ANCHORED/ASSERTED/STALE globals (bash 3.2 has no
         # `local -n`, so counters are threaded back through globals rather
-        # than a by-reference parameter).
+        # than a by-reference parameter). ASSERTED_ACTOR_KEYS/COUNTS
+        # accumulate directly (project-wide, not per-scope), so they are
+        # reset once above the loop rather than per scope_entry.
         anchored=$((anchored + STATUS_LINE_ANCHORED))
         asserted=$((asserted + STATUS_LINE_ASSERTED))
         stale=$((stale + STATUS_LINE_STALE))
@@ -1139,6 +1201,7 @@ cmd_status() {
 
     echo
     echo "**Anchors:** ${anchored} anchored · ${asserted} asserted without doc change · ${stale} stale"
+    print_asserted_actor_breakdown
     echo "**Exit:** 0 (Stage 1 — data only, never a verdict)"
     exit 0
 }
@@ -1146,6 +1209,104 @@ cmd_status() {
 STATUS_LINE_ANCHORED=0
 STATUS_LINE_ASSERTED=0
 STATUS_LINE_STALE=0
+
+# --- per-actor breakdown of `asserted` acknowledgements (ADR-0009
+# Addendum 3) --------------------------------------------------------------
+#
+# bash 3.2 has no associative arrays, so counting "how many asserted
+# receipts per actor" uses two parallel INDEXED arrays instead — KEYS[i]
+# and COUNTS[i] describe the same actor at the same index i. Reset once
+# per `status` run (cmd_status, before the scope loop), not per scope: the
+# breakdown is a whole-project statistic, unlike STATUS_LINE_* above.
+ASSERTED_ACTOR_KEYS=()
+ASSERTED_ACTOR_COUNTS=()
+
+# ack_actor_key <doc> — the grouping key for one asserted document: the
+# email out of its own anchor_ack_by ("name <email>"), matching
+# get_ack_identity's "keyed on user.email first" reasoning so the same
+# person under several display names still counts as one actor. A document
+# with no anchor_ack_by at all (a receipt written before this field
+# existed) keys to the literal "unattributed" — distinct from
+# ANCHOR_ACK_NO_IDENTITY's "no-git-identity" placeholder, which IS present
+# as a field value and is grouped like any other (unusual) actor string.
+ack_actor_key() {
+    local doc="$1" ack_by
+    ack_by="$(fm_field "$doc" anchor_ack_by || true)"  # exit-status: exempt downstream-checks-result
+    if [[ -z "$ack_by" ]]; then
+        printf 'unattributed'
+        return 0
+    fi
+    if [[ "$ack_by" == *"<"*">"* ]]; then
+        local email="${ack_by#*<}"
+        email="${email%%>*}"
+        printf '%s' "$email"
+    else
+        # No "name <email>" shape at all (a hand-edited or unusual --by
+        # value) -- fall back to the raw value rather than guessing.
+        printf '%s' "$ack_by"
+    fi
+}
+
+# record_asserted_actor <key> — linear scan over the parallel arrays
+# (small N: one entry per distinct actor in a project, never a hot path).
+# Iterates by numeric index rather than "${!ASSERTED_ACTOR_KEYS[@]}" so an
+# empty array needs no special case under `set -u`.
+record_asserted_actor() {
+    local key="$1" i=0 n="${#ASSERTED_ACTOR_KEYS[@]}"
+    while [[ "$i" -lt "$n" ]]; do
+        if [[ "${ASSERTED_ACTOR_KEYS[$i]}" == "$key" ]]; then
+            ASSERTED_ACTOR_COUNTS[$i]=$((ASSERTED_ACTOR_COUNTS[$i] + 1))
+            return 0
+        fi
+        i=$((i + 1))
+    done
+    ASSERTED_ACTOR_KEYS+=("$key")
+    ASSERTED_ACTOR_COUNTS+=(1)
+}
+
+# print_asserted_actor_breakdown — the "asserted by: ..." line, printed
+# only once more than one distinct actor appears (a single actor carries
+# no information beyond what "N asserted" already said). Order: descending
+# by count, ties broken by first-seen order (stable bubble sort — swap
+# only on STRICT "<", never "<=") — matches the ADR's own worked example
+# ("a@example.org (6), b@example.org (1)").
+print_asserted_actor_breakdown() {
+    local n="${#ASSERTED_ACTOR_KEYS[@]}"
+    [[ "$n" -le 1 ]] && return 0
+
+    local order=() i=0
+    while [[ "$i" -lt "$n" ]]; do
+        order+=("$i")
+        i=$((i + 1))
+    done
+
+    local j a b
+    i=0
+    while [[ "$i" -lt "$n" ]]; do
+        j=0
+        while [[ "$j" -lt $((n - 1 - i)) ]]; do
+            a="${order[$j]}"
+            b="${order[$((j + 1))]}"
+            if [[ "${ASSERTED_ACTOR_COUNTS[$a]}" -lt "${ASSERTED_ACTOR_COUNTS[$b]}" ]]; then
+                order[$j]="$b"
+                order[$((j + 1))]="$a"
+            fi
+            j=$((j + 1))
+        done
+        i=$((i + 1))
+    done
+
+    local parts="" idx first=1
+    for idx in "${order[@]}"; do
+        if [[ "$first" == "1" ]]; then
+            parts="${ASSERTED_ACTOR_KEYS[$idx]} (${ASSERTED_ACTOR_COUNTS[$idx]})"
+            first=0
+        else
+            parts="$parts, ${ASSERTED_ACTOR_KEYS[$idx]} (${ASSERTED_ACTOR_COUNTS[$idx]})"
+        fi
+    done
+    echo "   asserted by: $parts"
+}
 
 report_scope_status_line() {
     local folder="$1" index_name="$2"
@@ -1214,6 +1375,7 @@ report_scope_status_line() {
         doc_ack="$(fm_field "$doc" anchor_ack || true)"
         if [[ "$doc_ack" == "asserted" ]]; then
             STATUS_LINE_ASSERTED=$((STATUS_LINE_ASSERTED + 1))
+            record_asserted_actor "$(ack_actor_key "$doc")"
             continue
         fi
         if [[ "$doc_ack" == "updated" ]]; then

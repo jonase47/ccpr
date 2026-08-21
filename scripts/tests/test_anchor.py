@@ -428,6 +428,16 @@ class AnchorTestBase(unittest.TestCase):
     def init_repo(self):
         subprocess.run(["git", "init", "-q"], cwd=self.project_dir, check=True, env=self.env)
 
+    def set_git_identity(self, name, email):
+        """Repo-LOCAL config, which always wins over whatever global
+        identity happens to be configured on the machine running the
+        tests -- used by the anchor_ack_by tests so they never depend on
+        (or leak) the developer's own git identity."""
+        subprocess.run(["git", "config", "user.name", name],
+                        cwd=self.project_dir, check=True, env=self.env)
+        subprocess.run(["git", "config", "user.email", email],
+                        cwd=self.project_dir, check=True, env=self.env)
+
     def commit(self, message="commit"):
         subprocess.run(["git", "add", "-A"], cwd=self.project_dir, check=True, env=self.env)
         subprocess.run(["git", "commit", "-q", "-m", message], cwd=self.project_dir,
@@ -1505,7 +1515,7 @@ class AckCommandTest(AnchorTestBase):
         m = re.search(rf"^{key}:\s*(.*)$", self._index_text(), re.MULTILINE)
         return m.group(1).strip() if m else None
 
-    def test_assert_writes_the_five_keys(self):
+    def test_assert_writes_the_six_keys(self):
         result = self.run_ack("docs/architecture/ARCHITECTURE.md", "--assert",
                                "--note", "refactor touched only internals")
 
@@ -1515,6 +1525,9 @@ class AckCommandTest(AnchorTestBase):
         self.assertEqual("asserted", self._field("anchor_ack"))
         self.assertEqual("refactor touched only internals", self._field("anchor_ack_note"))
         self.assertIsNotNone(self._field("anchor_date"))
+        # Addendum 3, "the sixth flat key" -- written in the SAME atomic
+        # group as the other five, never as a separate call.
+        self.assertIsNotNone(self._field("anchor_ack_by"))
 
     def test_update_kind_is_distinct_from_assert(self):
         result = self.run_ack("docs/architecture/ARCHITECTURE.md", "--update",
@@ -1631,3 +1644,150 @@ class AckCommandTest(AnchorTestBase):
 
         after = self.run_status()
         self.assertIn("1 asserted without doc change", after.stdout)
+
+
+class AckByFieldTest(AckCommandTest):
+    """ADR-0009 Addendum 3: `anchor_ack_by` records WHO asserted, resolved
+    from the repo's git identity (`user.email` first, per the addendum's
+    "two people appear under five names" reasoning), overridable with
+    `--by`, and NEVER used to refuse the acknowledgement itself --
+    attribution, not restriction."""
+
+    def test_writes_the_ack_by_field_from_git_identity(self):
+        self.set_git_identity("Ada Example", "ada@example.org")
+
+        result = self.run_ack("docs/architecture/ARCHITECTURE.md", "--assert",
+                               "--note", "verified fine")
+
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual("Ada Example <ada@example.org>", self._field("anchor_ack_by"))
+
+    def test_by_flag_overrides_the_git_identity(self):
+        self.set_git_identity("Ada Example", "ada@example.org")
+
+        result = self.run_ack("docs/architecture/ARCHITECTURE.md", "--assert",
+                               "--note", "verified fine",
+                               "--by", "Bob Override <bob@example.org>")
+
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual("Bob Override <bob@example.org>", self._field("anchor_ack_by"))
+
+    def test_by_accepts_any_actor_string_without_restriction(self):
+        """The decision (Addendum 3) is attribution, not restriction: `ack`
+        has no allowlist of who is entitled to acknowledge, and must not
+        refuse an assertion because of who claims to make it -- there is
+        no server and no enforcement point, so a check that LOOKED like
+        one would be exactly the kind of fake boundary this project
+        rejects elsewhere. An unrecognisable, made-up actor string is
+        still accepted verbatim."""
+        result = self.run_ack("docs/architecture/ARCHITECTURE.md", "--assert",
+                               "--note", "verified fine",
+                               "--by", "Nobody Registered <nobody@nowhere.invalid>")
+
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual("Nobody Registered <nobody@nowhere.invalid>",
+                          self._field("anchor_ack_by"))
+
+    def test_no_configurable_identity_records_the_placeholder_and_still_succeeds(self):
+        """No `--by`, and `user.email` unresolvable (a CI job, a fresh
+        container) -- isolated here from BOTH global and system git config
+        via GIT_CONFIG_GLOBAL/GIT_CONFIG_SYSTEM=/dev/null, so the test is
+        deterministic regardless of the host machine's own git identity.
+        The field must record this explicitly (never omitted -- a missing
+        field must not look like an unattributable one) and `ack` must not
+        refuse to write just because no identity was configurable."""
+        result = self.run_ack(
+            "docs/architecture/ARCHITECTURE.md", "--assert", "--note", "verified fine",
+            env_extra={"GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "/dev/null"},
+        )
+
+        self.assertEqual(0, result.returncode, result.stderr)
+        # Exact match, not just "non-empty" -- the placeholder is a chosen
+        # constant (ANCHOR_ACK_NO_IDENTITY in anchor.sh), readable as "not
+        # a real address" and unable to collide with an actual attributed
+        # actor's email precisely because it contains no '@'.
+        self.assertEqual("unattributable <no-git-identity>", self._field("anchor_ack_by"))
+
+
+class AckByStatusBreakdownTest(AnchorTestBase):
+    """`anchor status`'s acknowledgement line breaks down by actor once
+    more than one actor appears (ADR-0009 Addendum 3). Frontmatter is
+    hand-authored here, same convention as AckStatisticsTest, since
+    `status` only ever reads these fields -- it never needs `ack` to have
+    written them."""
+
+    def setUp(self):
+        super().setUp()
+        self.init_repo()
+        (self.project_dir / "src").mkdir()
+        self.write("src/a.go", "package a\n")
+        self.commit("seed code")
+        self.anchor_sha = self.head()
+
+    def test_single_actor_produces_no_breakdown_line(self):
+        self.write_index("architecture", "ARCHITECTURE.md",
+                          extra_lines=[f"anchor_commit: {self.anchor_sha}",
+                                       "anchor_date: 18.08.2026",
+                                       "anchor_ack: asserted",
+                                       "anchor_ack_by: Ada Example <ada@example.org>"])
+        self.commit("assert with a single actor")
+
+        result = self.run_anchor("status", str(self.project_dir))
+
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("1 asserted without doc change", result.stdout)
+        self.assertNotIn("asserted by:", result.stdout)
+
+    def test_two_actors_produce_breakdown_with_counts_keyed_by_email(self):
+        """Two documents share ada@example.org under two DIFFERENT display
+        names (the exact "two people, five names" shape Addendum 3 argues
+        against) plus one document from a second actor -- the breakdown
+        must key on the email, not the full 'name <email>' string, or the
+        same person's count would be split across multiple lines."""
+        self.write_index("architecture", "ARCHITECTURE.md",
+                          extra_lines=[f"anchor_commit: {self.anchor_sha}",
+                                       "anchor_date: 18.08.2026",
+                                       "anchor_ack: asserted",
+                                       "anchor_ack_by: Ada Example <ada@example.org>"])
+        self.write("docs/architecture/AUTH.md", doc_text(
+            subskill="auth", status="active",
+            extra_lines=[f"anchor_commit: {self.anchor_sha}", "anchor_date: 18.08.2026",
+                         "anchor_ack: asserted",
+                         "anchor_ack_by: Ada A. Example <ada@example.org>"],
+        ))
+        self.write("docs/architecture/AUTHZ.md", doc_text(
+            subskill="authz", status="active",
+            extra_lines=[f"anchor_commit: {self.anchor_sha}", "anchor_date: 18.08.2026",
+                         "anchor_ack: asserted",
+                         "anchor_ack_by: Bob Example <bob@example.org>"],
+        ))
+        self.commit("assert with two actors, one under two display names")
+
+        result = self.run_anchor("status", str(self.project_dir))
+
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("3 asserted without doc change", result.stdout)
+        self.assertIn("asserted by: ada@example.org (2), bob@example.org (1)", result.stdout)
+
+    def test_ack_without_the_by_field_is_reported_as_unattributed(self):
+        """A receipt written before this feature existed carries no
+        anchor_ack_by at all -- distinct from `ack`'s own placeholder for
+        an unconfigurable identity. Must show up in the breakdown, not be
+        folded silently into another actor's count and not be omitted."""
+        self.write_index("architecture", "ARCHITECTURE.md",
+                          extra_lines=[f"anchor_commit: {self.anchor_sha}",
+                                       "anchor_date: 18.08.2026",
+                                       "anchor_ack: asserted",
+                                       "anchor_ack_by: Ada Example <ada@example.org>"])
+        self.write("docs/architecture/AUTH.md", doc_text(
+            subskill="auth", status="active",
+            extra_lines=[f"anchor_commit: {self.anchor_sha}", "anchor_date: 18.08.2026",
+                         "anchor_ack: asserted"],  # no anchor_ack_by -- pre-migration shape
+        ))
+        self.commit("one pre-migration receipt, one with an actor")
+
+        result = self.run_anchor("status", str(self.project_dir))
+
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("2 asserted without doc change", result.stdout)
+        self.assertIn("asserted by: ada@example.org (1), unattributed (1)", result.stdout)

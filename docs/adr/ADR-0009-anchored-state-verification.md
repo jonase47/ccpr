@@ -504,3 +504,81 @@ not — the three reference projects have three unrelated code trees (`cmd/ inte
 Measured against all three, the default lands on a real code commit 1, 2 and 6 commits behind `HEAD`
 respectively — which is precisely the documentation-only base rate this design exists to defuse. The
 exclusion list is configurable per project; the default is what ships.
+
+---
+
+## Addendum 3 (21.08.2026): Acknowledgement authority — attribution, not restriction
+
+Follow-up 4 asked what acknowledgement authority means with more than one maintainer. Answered here
+rather than left open, because it is a decision and would not have resolved itself through use.
+
+### The distinction the question hides
+
+Two questions get conflated under "authority":
+
+- **Attribution** — *who made this assertion?*
+- **Restriction** — *who is allowed to make it?*
+
+This framework has no server, no authentication and no enforcement point. Restriction can therefore
+only ever be a convention, and a check that looks like enforcement without being it is precisely what
+this ADR rejects elsewhere when it refuses to claim a boundary for agents that does not exist. The
+same standard applies here. Attribution, on the other hand, is reachable.
+
+### Decision
+
+**Record the actor. Do not restrict them.**
+
+A sixth flat key joins the acknowledgement group:
+
+```yaml
+anchor_ack_by: name <email>
+```
+
+Filled automatically at `ack` time from the repository's git identity, overridable with `--by`. When
+no identity is configurable — a CI job, a fresh container — the field records that plainly rather than
+being omitted, because a missing field and an unattributable acknowledgement must not look alike.
+
+**Identity is taken from `user.email` first.** That is not a detail: in the larger reference project
+two people appear under five names (`olarttro`, `Jonas`, `jonas`, `Oliver Trossen`, `god`) while their
+addresses are stable. Keying on the display name would have recorded the drift instead of the person.
+The name travels with the address for readability, in the same `name <email>` form git already writes
+into every commit touching the file.
+
+**And the statistic learns to count by actor.** Where more than one actor appears, `anchor status`
+breaks its acknowledgement line down:
+
+```
+42 anchored · 7 asserted without doc change · 3 stale
+   asserted by: a@example.org (6), b@example.org (1)
+```
+
+That is the whole authority model, and it is deliberate. The design's guard against acknowledgement
+becoming ceremony was always the statistic, not a permission; making it actor-aware is what carries
+that guard into a team. A single person's assertions dominating the count is visible without anyone
+having had to declare who was entitled to make them.
+
+### Why not a configured authority list
+
+An `anchor.ackAuthority` list in project configuration was considered and rejected on this project's
+own terms. It is bypassable by editing the file it lives in, so it stops an accident and nothing else
+— while *reading* as a control. It also adds a second register that has to be maintained, and drifts
+the moment someone joins. If a team wants a rule about who acknowledges, that rule belongs in the
+team's working agreement, where it is honestly a convention, and the per-actor statistic is what makes
+adherence visible.
+
+### Why git blame is not sufficient
+
+Requirement 7 of the acknowledgement design already stores acknowledgements durably and diffably in
+frontmatter, so `git log -p` on the document shows the change. That is not the same as knowing who
+acknowledged. An `ack` produces a working-tree change; the commit that carries it may be made by
+someone else, later, bundled with unrelated work — a pattern this project produces routinely, since
+delegated work is committed by whoever is orchestrating. The committer is evidence about the commit,
+not about the assertion.
+
+### Consequence
+
+One more flat key on documents that carry an acknowledgement, and one more line in the status report
+when a project has more than one acknowledging actor. No schema break: the field appears only where an
+acknowledgement exists, and an acknowledgement written before this addendum simply has no actor
+recorded — which the statistic reports as unattributed rather than silently folding into someone's
+count.

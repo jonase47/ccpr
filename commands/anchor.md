@@ -117,14 +117,27 @@ bash ~/.claude/scripts/anchor.sh status [projectdir]
 and reporting its closing line verbatim:
 
 ```
-Anchors: N anchored · M asserted without doc change · K stale
+**Anchors:** N anchored · M asserted without doc change · K stale
 ```
 
-This is not optional and not a separate invocation the user has to remember to run — ADR-0009
-§6 requires it as the detector against the mechanism turning into ceremony. A rising count of
+If more than one actor has an `asserted` acknowledgement anywhere in the project, a second
+line follows, breaking the count down by who acknowledged (`anchor_ack_by`, grouped by
+email — ADR-0009 Addendum 3):
+
+```
+   asserted by: a@example.org (6), b@example.org (1)
+```
+
+Report that line too, verbatim, when it appears; a single actor prints none. This is not
+optional and not a separate invocation the user has to remember to run — ADR-0009 §6
+requires it as the detector against the mechanism turning into ceremony. A rising count of
 `asserted without doc change` relative to `anchored` is the early warning; call it out
 explicitly if the ratio looks high (no fixed threshold is defined yet — use judgement and say
-why you flagged it).
+why you flagged it). The per-actor breakdown is the same detector made actor-aware: one
+person's assertions dominating the count is now visible without `ack` refusing anyone or
+checking who they are — acknowledgement authority is **attribution, not restriction**
+(ADR-0009 Addendum 3), so do not read a lopsided breakdown as a permission problem to fix in
+the script; it is a working-agreement question for the team.
 
 ## The agent clause — binding, and stated honestly
 
