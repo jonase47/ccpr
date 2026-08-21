@@ -112,6 +112,13 @@ Load `~/.claude/templates/TRACK_DECISION_TEMPLATE.md` as the structural template
 - Clear recommendation for next skill
 
 ### Handover Epilogue
+**Before writing.** `docs/HANDOVER.md` is capped — the file states its own limit in its header
+(default: ≤5 KB / ~150 lines). Two rules follow from that, and neither is optional:
+- **Replace this command's previous epilogue block, do not append a second one.** Stacking is what
+  pushes the file over; one skill run has been measured adding 1021 B, ~20 % of the cap.
+- **If the file is already near its cap, shorten before you add.** Reading the cap sentence is not
+  the same as measuring: check the actual size, and when there is no room, condense existing content
+  or hand the user `/cleanup` instead of growing the file further.
 
 Update `docs/HANDOVER.md`:
 - Track decision (initial or re-assessment #N)

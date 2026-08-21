@@ -7,6 +7,27 @@ All notable changes to this project are documented in this file. The format is b
 ## [Unreleased]
 
 ### Fixed
+- **96 skill epilogues told the model to update `docs/HANDOVER.md` without ever telling it to
+  replace its own previous block, or what to do when the file is already full (WI-0070).** Measured
+  rather than assumed, after a first crude count got the right verdict for the wrong reason: of 115
+  commands, 113 write to the HANDOVER and exactly one — `cleanup.md`, the command that enforces the
+  cap — mentions it. The other seven apparent hits all referred to a different file's limit
+  (CONSTITUTION.md's 8/25 KB, FRAME.md's 5 KB at the same number, the README body,
+  `docs/planning/.handover-archive` as a different directory, `/cleanup`'s inbox marker,
+  memory-lint's 30 KB topic cap). The obvious diagnosis is nonetheless wrong and is recorded in the
+  work item so nobody fixes the wrong thing: `templates/HANDOVER_TEMPLATE.md` line 3 carries the cap
+  as a blockquote, so every HANDOVER states it in its third line and any agent reading the file sees
+  it. What was missing is that no epilogue names **stacking** as the growth mechanism — appending a
+  second block per run rather than replacing the previous one — and none says to measure before
+  adding. One run has been clocked at 1021 B, ~20 % of the cap, so five runs take a file from empty
+  to breach, which is what the hook's 80 % warn threshold is calibrated against. All 96 epilogue
+  sections now open with the same two rules, and the 88 that were boilerplate are normalised to one
+  wording (they had drifted into four near-identical variants over `Next Steps`/`Next steps`,
+  `useful`/`sensible`, `allowed`/`permitted`, `match`/`fit`). The eight command-specific epilogues
+  (`constitution`, `cross-check`, `lean-frame`, `lean-learn`, `lean-promote`, `release-baseline`,
+  `specialize`, `track-decision`) keep their own body verbatim and gain only the shared paragraph —
+  flattening them into the boilerplate would have silently dropped instructions no other command has.
+
 - **`/postmortem` told users to file ambiguous knowledge one memory tier too high, and refused to
   run on a session whose summary file was missing or stale (WI-0065, WI-0066).** Both found by
   auditing the skill against a run that had just worked around it. §5 instructed "When in doubt,
