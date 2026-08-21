@@ -16,7 +16,14 @@ Find the last session **for the current project**, not simply the most recent gl
    `~/.claude/logs/sessions/` (backwards compatible)
 
 - Read `session-summary.json`, `errors.jsonl`, and `activity.jsonl`
-- If no session-summary.json is present: inform the user and abort
+- **Abort only when there is no usable data** — that is, all three are missing or unreadable.
+  A missing `session-summary.json` alone is not a reason to stop: it is written at session end, so
+  analysing a session that is still running is a normal case, and `activity.jsonl` + `errors.jsonl`
+  carry the material.
+- **A summary that IS present may be a mid-session snapshot.** Sanity-check its tool-call count
+  against `wc -l` on `activity.jsonl` before reporting any of its numbers; a stale summary is worse
+  than an absent one, because its figures look plausible. When they disagree, `activity.jsonl` wins
+  and the discrepancy belongs in the report.
 
 ### 2. Analyze error patterns
 Search the session data for recurring patterns:
@@ -28,7 +35,8 @@ Search the session data for recurring patterns:
 - **Tool failures**: Repeated errors on specific tools
 
 ### 3. Generate instinct proposals (0-3 per session)
-For each recognized pattern, propose an instinct in the following format:
+For each recognized pattern, propose an instinct. This is the **proposal format shown to the user**
+for confirmation — the *stored* block written in §6 has a different, richer shape:
 
 ```markdown
 ### [ID] Short title
@@ -65,7 +73,12 @@ Read the slim index `~/.claude/instincts.md` first (one-liner per instinct + con
     `docs/memory/{type}_{slug}.md` (type: feedback/project/reference), update `docs/memory/MEMORY.md`
   - **Tier 2 (persona-specific)** — only meaningful inside one agent's domain →
     `docs/memory/{agent}/{topic}.md`, update `docs/memory/{agent}/MEMORY.md`
-  - When in doubt, prefer Tier 1 (visibility wins over isolation)
+  - **When in doubt, do NOT default to Tier 1** — that tiebreaker was withdrawn because it caused
+    Tier-1 drift (persona-specific patterns leaking into the global file). Decision order:
+    1. Does the rule name a specific agent, file path, skill, or tool-chain symbol? → **Tier 2**.
+    2. Do **≥2 agent domains genuinely consume it today** (not "might one day")? → **Tier 1**.
+    3. Still uncertain → **Tier 2** of the persona that surfaced it; promote to Tier 1 at the
+       **3rd cross-reference from a different domain**.
 - Create `docs/memory/` and `docs/memory/MEMORY.md` if necessary
   (template: `~/.claude/templates/MEMORY_INDEX_TEMPLATE.md`)
 - If an agent instinct appears universally applicable: suggest cross-agent promotion
@@ -78,13 +91,50 @@ Present to the user:
 4. **Promotion proposals**: Agent instincts that could become global
 
 Wait for confirmation. Only update after explicit OK:
-- **Global instincts**: append/update the full Rule block in the matching topic file `~/.claude/instincts/{agents,files,workflow,shell-git,external}.md`, then add or update the one-liner in `~/.claude/instincts.md` (the slim index). Pick the topic file by domain:
+- **Global instincts**: append/update the full Rule block in the matching topic file under
+  `~/.claude/instincts/`, then add or update the one-liner in `~/.claude/instincts.md` (the slim index).
+
+  The **stored** block shape (not §3's proposal format) — match the file you are appending to:
+
+  ```markdown
+  ### G-NNN: One-line rule as the heading, after a colon
+  **Confidence: 0.4** | Source: Session from DD.MM.YYYY | Last confirmed: DD.MM.YYYY — what confirmed it
+
+  **Rule:** [one sentence: what to do or avoid]
+
+  **Why:** [the evidence event — what went wrong, concretely]
+
+  **How to apply:** [bullets: the checks that make the rule operational]
+
+  **Related:** [other IDs and how they differ from this one]
+
+  **Context:** [when the rule applies]
+  ```
+
+  Older files wrap Rule/Why/How to apply in a `>` blockquote — follow whichever form the target file
+  already uses, so one file never mixes both.
+
+  **Choosing the file.** The shipped starter set has five themes — this list is the starting point,
+  **not exhaustive**:
   - `agents.md` — subagent orchestration, briefing, wingman, parallel/sequential shapes
   - `files.md` — Read/Edit discipline, large-file handling, path verification before Read
   - `workflow.md` — skill pipelines, gates, plan-mode, sprint mechanics, PO decisions, push policy, memory override
   - `shell-git.md` — Bash CWD, mass-substitution tooling, commit-hook conventions, tranche-based mass-edits, destructive-action verification
   - `external.md` — WebFetch fallbacks, MCP-server registration, OS-specific filename quirks, PII protection in external HTTP
-- The long postmortem-narrative block (sprint summary, tool-call counts, bumps, decay-watch) goes into `~/.claude/instincts-archive/HISTORY.md` under the existing "Header Snapshot" section — append a new `Previous: DD.MM.YYYY (...)`-style block at the top of that section. **Do not** prepend a new header block to `~/.claude/instincts.md`; the slim index keeps only `Last updated: ...` + the two most recent `Previous:` bullets.
+
+  A mature set outgrows these: `memory-lint.sh` warns at a 30 KB soft cap and `/postmortem` is what
+  pushes files there, so themes get split and renamed over time. **List the directory
+  (`ls ~/.claude/instincts/`) and pick by theme** rather than assuming the five names above still
+  describe the local set — one of them may no longer exist. If no file fits, propose a new topic file
+  to the user instead of forcing the entry into the nearest one.
+- The long postmortem-narrative block (sprint summary, tool-call counts, bumps, decay-watch) goes into
+  `~/.claude/instincts-archive/HISTORY.md` under the existing "Header Snapshot" section. The write is
+  **two moves, not one**: the new block goes on top as the current head, and the block that *was* the
+  head is demoted to `Previous:`. The archive states this convention itself — follow the section's own
+  description there rather than this summary if the two ever diverge. The demotion is what makes the
+  archive complete: the slim index keeps only `Last updated: ...` plus the two most recent `Previous:`
+  bullets, so every head it drops has to be caught here. **Do not** prepend a new header block to
+  `~/.claude/instincts.md`.
 - `docs/memory/{agent}/instincts.md` for agent instincts
 - `docs/instincts.md` for project instincts
 - `docs/memory/{type}_{slug}.md` for Tier-1 memory entries (and update `docs/memory/MEMORY.md`)

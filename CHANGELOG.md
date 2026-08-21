@@ -7,6 +7,43 @@ All notable changes to this project are documented in this file. The format is b
 ## [Unreleased]
 
 ### Fixed
+- **`/postmortem` told users to file ambiguous knowledge one memory tier too high, and refused to
+  run on a session whose summary file was missing or stale (WI-0065, WI-0066).** Both found by
+  auditing the skill against a run that had just worked around it. §5 instructed "When in doubt,
+  prefer Tier 1 (visibility wins over isolation)" while pointing two lines earlier at CLAUDE.md as
+  the "full definition" — and CLAUDE.md names that exact phrase as the tiebreaker it withdrew,
+  because it caused persona-specific patterns to leak into the globally autoloaded file. The damage
+  was directional and silent: nothing fails, the Tier-1 index just accretes, and the cost lands on
+  every later session rather than the run that misfiled. Replaced with CLAUDE.md's three-step
+  decision order verbatim, including the promotion threshold (3rd cross-reference from a different
+  domain), so the two documents cannot drift apart again. Separately, §1 aborted on a missing
+  `session-summary.json` — but that file is written at session end, so every postmortem of a running
+  session hit it, and on the run before this one the file existed while holding a mid-session
+  snapshot (190 tool calls against the session's actual ~3.500). The abort now fires only when all
+  three log inputs are unusable, and the skill names the stale-summary case explicitly: a present
+  summary is sanity-checked against `activity.jsonl` before its numbers are reported, because
+  plausible-looking wrong figures are worse than none.
+
+- **`/postmortem` documented a stored-instinct format that no shipped instinct uses, an archive
+  write that `HISTORY.md` describes differently, and a closed list of five topic files
+  (WI-0067, WI-0068, WI-0069).** §3's template (`### [ID] Short title` plus a bullet list of
+  Confidence/Source/Rule/Context) matches nothing in `instincts/`, where blocks carry a colon in the
+  heading, one pipe-separated metadata line, and **Why** plus **How to apply** — the two sections
+  that make a stored rule operational, and the two the template omitted entirely. §3 is now labelled
+  as the proposal format shown to the user for confirmation, and §6 carries the stored shape it was
+  silently assuming, with a note to follow whichever form the target file already uses so one file
+  never mixes both. §6 also said to "append a new `Previous:`-style block" to the archive, while
+  `instincts-archive/HISTORY.md` states the convention as two moves — new block on top as the
+  current head, previous head demoted to `Previous:` — which is what keeps the archive complete once
+  the slim index drops a head; the skill now describes both moves and defers to the archive's own
+  section. Finally, the write target was hard-coded as
+  `~/.claude/instincts/{agents,files,workflow,shell-git,external}.md`. That is correct for the
+  shipped starter set and wrong as a permanent contract: the set is designed to grow, and the growth
+  pressure comes from inside this system (`memory-lint.sh` warns at a 30 KB soft cap; `/postmortem`
+  adds the blocks that get a file there). The five are now presented as the starter themes,
+  explicitly not exhaustive, with the instruction to list the directory and pick by theme — and to
+  propose a new topic file rather than force an entry into the nearest fit.
+
 - **`memory-lint.sh` check (n) both missed a dead angle-bracket link (WI-0060) and misreported a
   non-link as one (WI-0061) — the same shell-side target-handling case blocks, fixed together.**
   Found in sequence while settling `docs/memory/reference_commonmark-conformance.md`'s table for
