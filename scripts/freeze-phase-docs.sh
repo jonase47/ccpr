@@ -152,9 +152,13 @@ while IFS= read -r file; do
             if $DRY_RUN; then
                 echo "  [dry-run] would freeze: $file (status: $status → frozen)"
             else
-                # In-place YAML edit — anchor to line start, exact status match.
-                # macOS sed needs the empty backup arg.
-                sed -i '' -E "s/^status:[[:space:]]*(draft|active)[[:space:]]*$/status: frozen/" "$file"  # exit-status: exempt set-e-sufficient
+                # Portable frontmatter write (WI-0076): fm_set stops at the
+                # closing `---`, so a BODY line that happens to read like
+                # "status: active" is never touched -- the BSD-only
+                # `sed -i '' -E "s/^status:.../..."` this replaced applied
+                # its per-line anchors across the WHOLE file, not just the
+                # frontmatter block, and rewrote such a body line too.
+                fm_set "$file" status frozen
                 echo "  frozen: $file (was: $status)"
             fi
             CHANGED=$((CHANGED + 1))
@@ -172,6 +176,72 @@ while IFS= read -r file; do
             ;;
     esac
 done <<< "$FILE_LIST"
+
+# --- anchor hook (WI-0021 wave 4b, ADR-0009 Addendum 2 "A7 resolved") -----
+#
+# A SECOND, deliberate write path onto the phase INDEX -- the very file
+# the Index-File-Skip above always leaves active. One gate pass produces
+# one anchor for the whole scope, regardless of how few detail files
+# happened to be freezable this run (the freeze-hook coverage problem
+# ADR-0009's own A7/Addendum-2 discussion is written against).
+#
+# Delegates to `anchor set` rather than re-implementing "the last
+# production-code commit" here: one classification, one refusal-on-
+# overwrite rule, shared by this write path and the read path
+# (`anchor status`/`check`). `anchor set` ALREADY refuses when the index
+# carries an anchor, which is exactly the "only write if unanchored" rule
+# this hook needs -- re-anchoring on drift is `anchor ack`'s job, never a
+# side effect of a freeze (ADR-0009 SS6: never a side effect of another
+# command).
+#
+# Best-effort and NON-FATAL by design: freezing the detail files is this
+# script's PRIMARY job and must keep succeeding outside a git repository
+# or without a phase index -- neither is this script's own precondition
+# to enforce, and a --dry-run run must not write anything at all.
+if ! $DRY_RUN; then
+    INDEX_NAME=""
+    case "$FOLDER" in
+        discovery)    INDEX_NAME="DISCOVERY.md" ;;
+        concept)      INDEX_NAME="CONCEPT.md" ;;
+        validation)   INDEX_NAME="VALIDATION.md" ;;
+        architecture) INDEX_NAME="ARCHITECTURE.md" ;;
+        planning)     INDEX_NAME="PROJECT_PLAN.md" ;;
+        quality)      INDEX_NAME="QA.md" ;;
+        launch)       INDEX_NAME="LAUNCH.md" ;;
+    esac
+
+    ANCHOR_SCRIPT="$SCRIPT_DIR/anchor.sh"
+    if [[ -n "$INDEX_NAME" && -f "$ANCHOR_SCRIPT" ]]; then
+        # `set +e` around the capture: under this script's own
+        # `set -euo pipefail`, a `VAR="$(cmd)"` assignment whose command
+        # substitution exits nonzero aborts the WHOLE script immediately --
+        # the "already anchored" refusal (anchor.sh's normal, expected
+        # outcome on a second run) is not an error THIS script should die
+        # on.
+        set +e
+        ANCHOR_OUTPUT="$(bash "$ANCHOR_SCRIPT" set "$PROJECT_DIR" --scope "$FOLDER" 2>&1)"
+        ANCHOR_RC=$?
+        set -e
+
+        if [[ $ANCHOR_RC -eq 0 ]]; then
+            echo "  $ANCHOR_OUTPUT"
+        elif [[ $ANCHOR_RC -eq 3 ]]; then
+            # Exit code 3 is `anchor set`'s DEDICATED "already anchored"
+            # code (WI-0021 review, small fix #2) -- the CONTRACT this
+            # branch gates on. The grep below is a redundant sanity
+            # check only, logged but never gating, so the two scripts
+            # are not coupled through message text alone.
+            if ! printf '%s' "$ANCHOR_OUTPUT" | grep -q "already carries an anchor"; then
+                echo "  anchor: unexpected message for exit code 3: $ANCHOR_OUTPUT" >&2
+            fi
+            EXISTING_SHA="$(fm_field "docs/$FOLDER/$INDEX_NAME" anchor_commit 2>/dev/null || true)"  # exit-status: exempt downstream-checks-result
+            EXISTING_DATE="$(fm_field "docs/$FOLDER/$INDEX_NAME" anchor_date 2>/dev/null || true)"  # exit-status: exempt downstream-checks-result
+            echo "  anchor already present ($EXISTING_SHA, $EXISTING_DATE) — re-anchoring is \`anchor ack\`"
+        else
+            echo "  anchor not set: $ANCHOR_OUTPUT"
+        fi
+    fi
+fi
 
 echo ""
 if $DRY_RUN; then

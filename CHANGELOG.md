@@ -7,6 +7,18 @@ All notable changes to this project are documented in this file. The format is b
 ## [Unreleased]
 
 ### Fixed
+- **`freeze-phase-docs.sh` rewrote prose it had no business touching, and could not run on Linux at all
+  (WI-0076).** Its single in-place edit was `sed -i '' -E "s/^status:…/status: frozen/"`. Two defects in
+  one line. The empty argument after `-i` is BSD syntax — GNU sed reads a separate `''` as the script
+  and pushes the real script into the filename slot, so on Linux the call fails, at the moment a gate
+  passes. And `sed` works line-wise with no notion of where the frontmatter block ends: reproduced
+  against the committed original, a **body** line reading `status: active` — the kind that appears in
+  any document quoting a frontmatter example, as this repo's own schema does — was silently rewritten
+  to `status: frozen`. Neither was caught by anything, because the shell sweep only runs `bash -n` and
+  the script had no behavioural test module at all. Replaced by a portable `fm_set` (below) and covered
+  by `scripts/tests/test_freeze_phase_docs.py`, 20 tests including the four terminal states it must
+  skip, the index skip, the P5/P8 no-ops, and the body-protection case that was red against the
+  original before the rewrite existed.
 - **`related:` and `parent_index:` rejected paths that point at files which exist (WI-0071).** The
   schema documents these as document-relative and the lint resolved them that way; in the field authors
   write them from the repository root. Measured in one project: 13 findings of the form
@@ -316,6 +328,48 @@ All notable changes to this project are documented in this file. The format is b
   the index and all theme files.
 
 ### Added
+- **`fm_set` and `fm_set_many` in `scripts/lib/frontmatter.sh`** — the first write path in a library
+  that was read-only, and now the only in-place writer in the shipped scripts. Temp file in the same
+  directory plus `mv`, never `sed -i`; scanning stops at the closing `---`, so the body is left
+  byte-for-byte alone; a file without frontmatter is an error rather than a silent create; setting the
+  same key twice is byte-identical. `fm_set_many` writes a whole group of keys in **one** awk pass and
+  **one** rename, which is what makes an acknowledgement atomic as a unit rather than only per key.
+  Four hardening fixes came out of review, three of them confirmed at the terminal before being
+  believed: values reach awk through `ENVIRON` rather than `-v`, because `-v` applies escape
+  processing — `awk -v v='a\nb'` yields a string of length **3** containing a real newline, so a
+  reason mentioning a Windows-style path would have broken the frontmatter block one processing stage
+  after the guard that exists to prevent exactly that; the original file's mode is carried onto the
+  temp file before the rename, since `mktemp` creates at `0600` and a document checked out at `644`
+  was silently becoming `600` on every write; a source file without a trailing newline keeps none,
+  because awk's `print` adds one regardless; and keys are matched literally rather than as a regex.
+- **`anchor set` and the freeze hook (WI-0021).** `freeze-phase-docs.sh` now writes `anchor_commit` and
+  `anchor_date` onto the phase index — the one file it deliberately skips for `status:` — after
+  freezing that phase's detail files. **It writes only when no anchor is there yet.** A second gate
+  pass leaves the existing anchor alone and says so, because refreshing it silently would clear every
+  accumulated drift without anyone having seen it, and ADR-0009 names that the highest-risk detail in
+  the whole design. Verified end-to-end and by mutation: adding `--force` to the hook's call moves the
+  anchor, wipes the drift, and turns exactly one test red.
+- **`anchor ack` — the acknowledgement verb.** Renders the delta **before** it clears it, then writes
+  five flat keys: the new `anchor_commit`, `anchor_date`, `anchor_ack` (`asserted` or `updated`),
+  `anchor_ack_from` (the **old** SHA), and `anchor_ack_note`. `asserted` and `updated` stay separate
+  fields on purpose — collapsing them would destroy the ability to ask later which anchors rest on
+  nothing but an assertion, which is exactly what `anchor status` counts. A reason is mandatory in both
+  the flag form and the interactive one; there is nothing to acknowledge without a delta, and the verb
+  refuses then. Reach is declared structurally by the target file: an index is a bulk acknowledgement,
+  a document with its own anchor is not. Measured: the acknowledgement counter really moves from 0 to
+  1, so the detector against the mechanism turning into ceremony is live rather than planned. On a
+  non-terminal stdin the interactive form reads EOF as **abort** and writes nothing — but a pipe does
+  drive it, so the prompt is no barrier to a script or an agent. That is the ADR's own position: this
+  harness has no hard boundary, so agents are kept out by an explicit clause plus the visible
+  statistic, and the prompt is not a gate. Three review findings hardened it: the five keys are one
+  atomic group write (an interrupt after a per-key `anchor_commit` would have left a document with a
+  fresh anchor and no acknowledgement, which the status report reads as clean — drift gone with no
+  record it was ever cleared, the exact failure ADR-0009 calls its highest-risk detail); a target
+  outside the eight phase scopes is refused, because acknowledging one there succeeded while staying
+  invisible to the very statistic that is the design's only detection fallback; and a non-terminal
+  stdin without `--assert`/`--update` fails fast instead of blocking on a prompt nobody can answer.
+  `anchor set` returns a distinct exit code **3** for "already anchored", so the freeze hook reads a
+  contract rather than grepping another script's error text.
 - **`scripts/anchor.sh` — stage 1 of the anchored state check (WI-0021).** `anchor status` and
   `anchor check` compute the delta between a recorded `anchor_commit` and the last **production-code**
   commit, and nothing else: no severity, no verdict, and **exit 0 whenever data was produced**, drift

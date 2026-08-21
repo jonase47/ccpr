@@ -7,8 +7,8 @@
 # Usage:
 #   bash scripts/anchor.sh status [<project-dir>]
 #   bash scripts/anchor.sh check  [<project-dir>] [--scope <folder>]
-#   bash scripts/anchor.sh ack    …   (WI-0021 wave 4b — not implemented yet)
-#   bash scripts/anchor.sh set    …   (WI-0021 wave 4b — not implemented yet)
+#   bash scripts/anchor.sh set    [<project-dir>] --scope <folder> [--commit <sha>] [--force]
+#   bash scripts/anchor.sh ack    <target> [--assert|--update] --note "<text>"
 #
 # The anchor lives on the phase INDEX (docs/<folder>/<INDEX>.md), not on
 # every detail file (ADR-0009 §2/§3, Addendum 2). A document under that
@@ -24,9 +24,16 @@
 #   phase-docs-lint's 0/1/2 severity scale; that scale answers a different
 #   question than this script does.
 #
-#   0  a report was produced (with or without drift)
+#   0  status/check: a report was produced (with or without drift).
+#      set/ack: the anchor was written/acknowledged.
 #   2  the run could not be performed as asked (bad usage, no git repo,
-#      no docs/ structure, `ack`/`set` — not yet implemented in this wave)
+#      no docs/ structure, no drift to acknowledge, a target with no
+#      anchor of its own, a target outside every phase scope, or an
+#      interactive `ack` aborted by the user)
+#   3  set: the index already carries an anchor and --force was not
+#      given -- a DEDICATED code (WI-0021 review), not folded into 2, so
+#      freeze-phase-docs.sh's anchor hook can tell this apart from every
+#      other `set` failure by exit code alone rather than a message grep.
 
 set -euo pipefail
 
@@ -467,12 +474,343 @@ print_git_notes() {
     fi
 }
 
-# --- ack / set (WI-0021 wave 4b) -------------------------------------------
+# --- ack (WI-0021 wave 4b) ---------------------------------------------
+#
+# Usage: bash anchor.sh ack <target> [--assert|--update] --note "<text>"
+# No <project-dir> — the target path is resolved against $(pwd), matching
+# how a human runs this from inside their checkout.
+#
+# ADR-0009 §6: acknowledgement renders the delta BEFORE it clears it, and
+# is NEVER a side effect of another command — the single highest-risk
+# detail in the whole design. Reach is structural: whichever file is
+# passed as <target> IS the file that gets acked (a phase index -> bulk
+# acknowledgement, a document with its own anchor_commit -> a document
+# acknowledgement) — there is deliberately no --scope option that would
+# let the two blur together.
 
-cmd_not_implemented() {
-    local sub="$1"
-    echo "$PROG $sub: not implemented yet (planned for WI-0021 wave 4b) — see docs/adr/ADR-0009-anchored-state-verification.md §6" >&2
-    exit 2
+parse_ack_args() {
+    TARGET=""
+    ASSERT_FLAG=0
+    UPDATE_FLAG=0
+    NOTE=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --assert)
+                ASSERT_FLAG=1
+                shift
+                ;;
+            --update)
+                UPDATE_FLAG=1
+                shift
+                ;;
+            --note)
+                [[ $# -ge 2 ]] || die "--note needs a value"
+                NOTE="$2"
+                shift 2
+                ;;
+            --note=*)
+                NOTE="${1#--note=}"
+                shift
+                ;;
+            -*)
+                die "unknown argument '$1'"
+                ;;
+            *)
+                if [[ -z "$TARGET" ]]; then
+                    TARGET="$1"
+                else
+                    die "unknown argument '$1'"
+                fi
+                shift
+                ;;
+        esac
+    done
+    # All argument-shape validation happens HERE, before require_git_repo
+    # ever runs -- the same ordering `set`'s parser already uses for its
+    # own bad-usage cases.
+    [[ -n "$TARGET" ]] || die "anchor ack requires a target path (docs/<folder>/<INDEX>.md or a document carrying its own anchor_commit)"
+    if [[ "$ASSERT_FLAG" == "1" && "$UPDATE_FLAG" == "1" ]]; then
+        die "--assert and --update are mutually exclusive"
+    fi
+    if [[ "$ASSERT_FLAG" == "1" || "$UPDATE_FLAG" == "1" ]]; then
+        # Non-interactive mode has no prompt to fall back on -- a reason
+        # is not optional, it is the ceremony this verb exists to prevent
+        # (ADR-0009 §6).
+        [[ -n "$NOTE" ]] || die "--note is required and must not be empty when using --assert/--update"
+    fi
+}
+
+# is_in_anchor_scope <target-file> — true iff <target-file> lives under
+# docs/<folder>/ for one of the eight PHASE_SCOPES folders, relative to
+# the CURRENT working directory (the same base resolve_ack_target itself
+# resolves a relative target against). ADR-0009 §6: the scope-line's
+# "X anchored · Y asserted · Z stale" count IS the fallback detection net
+# in the absence of a hard technical block on agents -- scope_documents()
+# only ever WALKS the eight folders, so a target outside all of them
+# would silently never appear in that count, whether or not `ack`
+# accepted it (WI-0021 review, Important 3, reproduced directly: a
+# document under docs/somewhere/ carrying its own anchor_commit could be
+# acked successfully and stayed invisible to `status`'s statistics).
+is_in_anchor_scope() {
+    local target_file="$1" scope_entry folder prefix
+    for scope_entry in "${PHASE_SCOPES[@]}"; do
+        folder="${scope_entry%%:*}"
+        prefix="$(pwd)/docs/$folder/"
+        case "$target_file" in "$prefix"*) return 0 ;; esac
+    done
+    return 1
+}
+
+# resolve_ack_target <target> — sets TARGET_FILE (absolute path),
+# TARGET_REL (relative to $(pwd)), OLD_ANCHOR, OLD_DATE. Structural reach:
+# the target's OWN anchor_commit is what gets acknowledged, whether that
+# file is a phase index (bulk) or a document with its own opt-in anchor
+# (ADR-0009 §3/§6) — no separate index-vs-document branch is needed
+# because both shapes store the SAME field on the SAME file.
+resolve_ack_target() {
+    local target="$1" target_file
+    if [[ "$target" = /* ]]; then
+        target_file="$target"
+    else
+        target_file="$(pwd)/$target"
+    fi
+    [[ -f "$target_file" ]] || die "no such document: $target"
+
+    is_in_anchor_scope "$target_file" || die "$target is outside every phase scope (docs/<discovery|concept|validation|architecture|planning|quality|launch|operations>/) -- acknowledging it would be invisible to 'anchor status's anchored/asserted/stale count (ADR-0009 §6)"
+
+    TARGET_FILE="$target_file"
+    TARGET_REL="$target"
+
+    OLD_ANCHOR="$(fm_field "$target_file" anchor_commit || true)"  # exit-status: exempt downstream-checks-result
+    [[ -n "$OLD_ANCHOR" ]] || die "$TARGET_REL carries no anchor_commit of its own -- nothing to acknowledge here (a phase index needs 'anchor set' first; a document needs its own opt-in anchor_commit)"
+    OLD_DATE="$(fm_field "$target_file" anchor_date || true)"  # exit-status: exempt downstream-checks-result
+}
+
+cmd_ack() {
+    parse_ack_args "$@"
+    PROJECT_DIR="$(pwd)"
+    require_git_repo "$PROJECT_DIR"
+    require_docs_dir "$PROJECT_DIR"
+    load_exclude_config "$PROJECT_DIR"
+    compute_git_state "$PROJECT_DIR"
+    find_last_prod_commit "$PROJECT_DIR" || true
+
+    resolve_ack_target "$TARGET"
+
+    anchor_compare_state "$PROJECT_DIR" "$OLD_ANCHOR"
+    case "$ANCHOR_COMPARE_STATE" in
+        shallow)
+            die "cannot compare -- shallow clone (anchor $OLD_ANCHOR on $TARGET_REL)"
+            ;;
+        unresolvable)
+            die "anchor_commit '$OLD_ANCHOR' on $TARGET_REL does not resolve to a commit in this repository"
+            ;;
+        no-prod-commit)
+            die "no production-code commit found in this repository -- nothing to compare $TARGET_REL's anchor against"
+            ;;
+    esac
+
+    if [[ ${#CHANGED_PROD_PATHS[@]} -eq 0 ]]; then
+        die "$TARGET_REL has no drift against its anchor ($OLD_ANCHOR) -- no drift means nothing to acknowledge"
+    fi
+
+    # "Renders the delta before it clears it" (ADR-0009 §6) — printed
+    # BEFORE the interactive prompt (or, in flagged mode, before the
+    # write), in both modes alike.
+    echo "Anchor  $OLD_ANCHOR  ($OLD_DATE)"
+    echo "Last production-code commit  $LAST_PROD_SHA  ($LAST_PROD_DATE)"
+    echo
+    echo "Changed production-code paths (${#CHANGED_PROD_PATHS[@]}):"
+    local changed_path
+    for changed_path in "${CHANGED_PROD_PATHS[@]}"; do
+        echo "  - $changed_path"
+    done
+    echo
+
+    local kind note
+    if [[ "$ASSERT_FLAG" == "1" ]]; then
+        kind="asserted"
+        note="$NOTE"
+    elif [[ "$UPDATE_FLAG" == "1" ]]; then
+        kind="updated"
+        note="$NOTE"
+    else
+        # A closed/non-interactive stdin still reaches this branch (a
+        # background CI job, an agent tool call that never redirects
+        # stdin) -- without --assert/--update there is no fallback but
+        # `read`, which BLOCKS FOREVER on a pipe that is open but never
+        # fed. A CLOSED pipe is different: it hits EOF immediately and
+        # already exits cleanly via the `read || choice=""` -> "aborted,
+        # nothing written" path a few lines down. A fast, clear failure
+        # beats an invisible hang in automation (WI-0021 review,
+        # Important 4).
+        #
+        # CCPR_ANCHOR_FORCE_INTERACTIVE is a TEST-ONLY escape hatch
+        # (never documented in usage(), never read anywhere else in this
+        # script): it lets the test suite drive the interactive
+        # asserted/abort flow through a piped stdin (no real TTY)
+        # without weakening this guard for a genuine non-interactive
+        # run.
+        if [[ ! -t 0 && -z "${CCPR_ANCHOR_FORCE_INTERACTIVE:-}" ]]; then
+            die "ack requires --assert or --update when stdin is not a terminal"
+        fi
+        echo "Does the document's claim still hold?  [asserted/updated/abort]"
+        local choice
+        IFS= read -r choice || choice=""
+        case "$choice" in
+            asserted|updated)
+                kind="$choice"
+                ;;
+            *)
+                echo "anchor ack: aborted, nothing written" >&2
+                exit 2
+                ;;
+        esac
+        echo "Reason:"
+        IFS= read -r note || note=""
+        [[ -n "$note" ]] || die "a reason is required -- acknowledging without one is the ceremony this verb exists to prevent"
+    fi
+
+    # ONE atomic group write, not five separate fm_set calls (WI-0021
+    # review, Critical fix). Each fm_set call is individually atomic
+    # (temp file + `mv`), but the GROUP of five was not: an abort between
+    # the first and the second call (signal, full disk, write error)
+    # used to leave the document carrying the NEW anchor_commit but NONE
+    # of the anchor_ack fields -- `status` then reads "no anchor_ack" as
+    # "anchor up to date", and the drift this command exists to record
+    # vanishes without ever having been acknowledged. ADR-0009 §6 names
+    # this "the single highest-risk detail in the whole design".
+    fm_set_many "$TARGET_FILE" \
+        "anchor_commit=$LAST_PROD_SHA" \
+        "anchor_date=$LAST_PROD_DATE" \
+        "anchor_ack=$kind" \
+        "anchor_ack_from=$OLD_ANCHOR" \
+        "anchor_ack_note=$note"
+
+    echo "anchor ack: $TARGET_REL -> $kind ($OLD_ANCHOR -> $LAST_PROD_SHA)"
+    exit 0
+}
+
+# --- set ---------------------------------------------------------------
+
+parse_set_args() {
+    PROJECT_DIR=""
+    SCOPE_FOLDER=""
+    COMMIT_SHA=""
+    FORCE=0
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --scope)
+                [[ $# -ge 2 ]] || die "--scope needs a folder name"
+                SCOPE_FOLDER="$2"
+                shift 2
+                ;;
+            --scope=*)
+                SCOPE_FOLDER="${1#--scope=}"
+                shift
+                ;;
+            --commit)
+                [[ $# -ge 2 ]] || die "--commit needs a SHA"
+                COMMIT_SHA="$2"
+                shift 2
+                ;;
+            --commit=*)
+                COMMIT_SHA="${1#--commit=}"
+                shift
+                ;;
+            --force)
+                FORCE=1
+                shift
+                ;;
+            -*)
+                die "unknown argument '$1'"
+                ;;
+            *)
+                if [[ -z "$PROJECT_DIR" ]]; then
+                    PROJECT_DIR="$1"
+                else
+                    die "unknown argument '$1'"
+                fi
+                shift
+                ;;
+        esac
+    done
+    PROJECT_DIR="${PROJECT_DIR:-$(pwd)}"
+    # Argument-shape validation happens HERE, before require_git_repo ever
+    # runs — same ordering parse_check_args/parse_status_args already use
+    # for their own bad-usage cases, so a missing --scope is a usage error
+    # that needs no repository to detect.
+    [[ -n "$SCOPE_FOLDER" ]] || die "set requires --scope <folder>"
+}
+
+# resolve_scope_index <folder> — sets INDEX_NAME to the phase index's
+# filename for <folder> per PHASE_SCOPES, or dies naming the known scopes.
+resolve_scope_index() {
+    local folder="$1" scope_entry candidate
+    INDEX_NAME=""
+    for scope_entry in "${PHASE_SCOPES[@]}"; do
+        candidate="${scope_entry%%:*}"
+        if [[ "$candidate" == "$folder" ]]; then
+            INDEX_NAME="${scope_entry#*:}"
+            return 0
+        fi
+    done
+    die "unknown scope '$folder' (expected one of: discovery, concept, validation, architecture, planning, quality, launch, operations)"
+}
+
+# cmd_set — writes anchor_commit/anchor_date onto the phase INDEX of
+# --scope (ADR-0009 Addendum 2: the scope anchor lives on the index, not
+# on every detail file). Refuses when the index already carries an
+# anchor unless --force is given: a silent overwrite discards drift
+# nobody has reviewed yet, the same risk ADR-0009 §6 names as the
+# highest-risk detail in the whole design for `ack` — a bare `set`
+# overwrite is the same shape of mistake, one command earlier.
+cmd_set() {
+    parse_set_args "$@"
+    require_git_repo "$PROJECT_DIR"
+    require_docs_dir "$PROJECT_DIR"
+
+    resolve_scope_index "$SCOPE_FOLDER"
+    local index_file="$PROJECT_DIR/docs/$SCOPE_FOLDER/$INDEX_NAME"
+    [[ -f "$index_file" ]] || die "no phase index found at docs/$SCOPE_FOLDER/$INDEX_NAME -- anchor set does not create one"
+
+    local commit_sha="$COMMIT_SHA" commit_date
+    if [[ -n "$commit_sha" ]]; then
+        git -C "$PROJECT_DIR" rev-parse --verify -q "${commit_sha}^{commit}" >/dev/null 2>&1 \
+            || die "--commit '$commit_sha' does not resolve to a commit in this repository"
+    else
+        # Without --commit: the last PRODUCTION-CODE commit, never HEAD —
+        # the same "the comparison point, measured" classification `check`
+        # and `status` already use, so `set` and the read side never
+        # disagree about what "the code" means.
+        load_exclude_config "$PROJECT_DIR"
+        compute_git_state "$PROJECT_DIR"
+        find_last_prod_commit "$PROJECT_DIR" || true
+        [[ -n "$LAST_PROD_SHA" ]] || die "no production-code commit found -- pass --commit <sha> explicitly"
+        commit_sha="$LAST_PROD_SHA"
+    fi
+
+    local existing_anchor
+    existing_anchor="$(fm_field "$index_file" anchor_commit || true)"  # exit-status: exempt downstream-checks-result
+    if [[ -n "$existing_anchor" && "$FORCE" != "1" ]]; then
+        # Exit code 3, NOT the generic bad-usage 2 `die` uses (WI-0021
+        # review, small fix #2): freeze-phase-docs.sh's anchor hook needs
+        # to tell "already anchored" (its own normal, expected
+        # second-run outcome) apart from every OTHER `set` failure. The
+        # exit code IS the contract; a message grep may still run
+        # alongside it as a redundant sanity check, but never as the
+        # sole signal coupling the two scripts together.
+        echo "$PROG: docs/$SCOPE_FOLDER/$INDEX_NAME already carries an anchor ($existing_anchor) -- re-anchoring without review would silently discard drift nobody has seen; pass --force to overwrite, or use 'anchor ack' to acknowledge it deliberately" >&2
+        exit 3
+    fi
+
+    commit_date="$(git -C "$PROJECT_DIR" show -s --format=%ad --date=format:%d.%m.%Y "$commit_sha" 2>/dev/null || true)"  # exit-status: exempt best-effort-status-display
+
+    fm_set "$index_file" anchor_commit "$commit_sha"
+    fm_set "$index_file" anchor_date "$commit_date"
+
+    echo "anchor set: docs/$SCOPE_FOLDER/$INDEX_NAME -> $commit_sha ($commit_date)"
+    exit 0
 }
 
 # --- check ------------------------------------------------------------------
@@ -925,10 +1263,10 @@ case "$SUBCOMMAND" in
         cmd_check "$@"
         ;;
     ack)
-        cmd_not_implemented "ack"
+        cmd_ack "$@"
         ;;
     set)
-        cmd_not_implemented "set"
+        cmd_set "$@"
         ;;
     -h|--help|"")
         usage

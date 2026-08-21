@@ -738,22 +738,56 @@ class ExternalToolExitStatusTest(unittest.TestCase):
         anchor..last-prod` call, captured through the same `$(... ||
         true)` shape as the adjacent `git show` display line and marked
         `best-effort-status-display` the same way (`discard-needs-exemption`
-        +1)). 141 invocations total across the 16 shipped files, split as
-        below. A change in these numbers means
-        either a script changed shape or the scanner's own logic changed
-        -- worth a deliberate look either way, not a silent drift."""
+        +1)); updated once more 21.08.2026 when WI-0021 wave 4b (`anchor
+        set`/`anchor ack`, the portable `fm_set` writer, and the
+        freeze-phase-docs.sh anchor hook) added three invocations and
+        removed one: `anchor.sh` gains a `git rev-parse --verify -q
+        ...^{commit}` for `--commit` validation, itself followed by a real
+        `|| die` on the SAME statement rather than being an `if`'s own
+        tested command (`checked-chain` +1), and a `git show -s
+        --format=%ad` commit-date lookup captured via the same `$(... ||
+        true)` shape as the adjacent display lines (`discard-needs-exemption`
+        +1, `best-effort-status-display`); `freeze-phase-docs.sh` LOSES its
+        one BSD-only `sed -i ''` entirely (WI-0076: replaced by `fm_set`,
+        a bash function in a different file, invisible to this scanner)
+        and GAINS a `grep -q` inside the anchor hook's own `elif` condition
+        (`bare-needs-exemption` -1, `checked-condition` +1, net 0 for this
+        file); `lib/frontmatter.sh` gains `fm_set`'s own `if ! awk ...;
+        then` guard, tested directly by the `if` (`checked-condition` +1)
+        -- the awk failure must not fall through to the following `mv` and
+        silently overwrite the original with an empty temp file. Net +3
+        invocations (144 total): `checked-condition` +2, `checked-chain`
+        +1, `discard-needs-exemption` +1, `bare-needs-exemption` -1);
+        updated once more the same day when the still-uncommitted wave 4b
+        went through review (WI-0021 review): the Critical fix adds
+        `fm_set_many` to `lib/frontmatter.sh`, a second general-purpose
+        writer alongside `fm_set` with the exact same "if the awk pass
+        fails, do not fall through to `mv`" shape -- one more `if ! awk
+        ...; then` guard, tested directly by the `if` (`checked-condition`
+        +1). None of the OTHER review fixes (the ENVIRON switch inside
+        fm_set's existing awk call, the TTY guard and scope check in
+        anchor.sh, the dedicated exit code 3) touch a grep/awk/sed/
+        python3/git invocation's SHAPE, only its surrounding logic, so
+        they add nothing here. Net +1 invocation (145 total):
+        `checked-condition` +1, everything else unchanged.
+        145 invocations total across the 16 shipped files (same file
+        COUNT as before -- no new shipped .sh file, only one new
+        invocation inside an existing one), split as below. A change in
+        these numbers means either a script changed shape or the
+        scanner's own logic changed -- worth a deliberate look either
+        way, not a silent drift."""
         invocations = scan_tree()
         by_disposition = {}
         for inv in invocations:
             by_disposition[inv.disposition] = by_disposition.get(inv.disposition, 0) + 1
-        self.assertEqual(141, len(invocations))
+        self.assertEqual(145, len(invocations))
         self.assertEqual(
             {
-                "checked-condition": 19,
+                "checked-condition": 22,
                 "checked-captured": 5,
-                "checked-chain": 16,
-                "discard-needs-exemption": 37,
-                "bare-needs-exemption": 64,
+                "checked-chain": 17,
+                "discard-needs-exemption": 38,
+                "bare-needs-exemption": 63,
             },
             by_disposition,
         )
