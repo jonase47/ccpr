@@ -430,3 +430,77 @@ the commit-anchor family, since the family lives there.
 Nothing in the decision itself is withdrawn. The anchor, the granularity, the two-stage shape, the
 severity model and the acknowledgement verb all stand as decided; A7 is the one open design question
 the implementation must close before it writes an anchor anywhere.
+
+---
+
+## Addendum 2 (21.08.2026): A7 resolved — where the scope anchor lives
+
+A7 in the first addendum named the one open design question: the ADR anchors at the Gate-Go freeze
+and makes the scope index the carrier of the bulk acknowledgement, while `freeze-phase-docs.sh`
+skips every phase index and sub-index by design. Decided now, because everything downstream depends
+on it.
+
+### Decision
+
+**The scope anchor lives on the phase index. Severity comes from each document's own `status`.**
+
+- `freeze-phase-docs.sh` gains a **second, deliberate write path** that targets the phase index it
+  otherwise skips, writing `anchor_commit` and `anchor_date` there after the detail files of that
+  phase have been frozen. The existing skip stays — the index's `status` is still not touched.
+- Every document under that scope **inherits** the index's anchor.
+- A document may carry its **own** `anchor_commit`, opt-in, typically alongside `covers:`. Resolution
+  is: the document's own anchor if present, otherwise its phase index's. No third tier — sub-indexes
+  are documents like any other and opt in the same way.
+- **Severity reads the document's own `status`,** never the index's: `living` info, `active` warning
+  plus a work item, `frozen` error. The severity table above is unchanged; what is now settled is
+  *which* document's status it reads.
+
+### Why not the alternative
+
+Writing the anchor onto each frozen detail file was the cheaper build — the freeze already writes
+`status:` into exactly those files, so it is one more line in an existing write, and the ADR's
+cost objection to per-document granularity (226 documents) was about **hand** maintenance, which does
+not apply to a machine-written field.
+
+It fails on coverage. The freeze runs only on a Go verdict and is a no-op for P5 and P8, and the
+frozen share is 12 %, 6 % and 90 % across the three reference projects. In two of the three, the large
+majority of documents would never receive an anchor at all. With the anchor on the index, **one gate
+pass per phase produces one anchor for the whole scope**, regardless of how few detail files happened
+to be in a freezable state. The coverage problem named in A7 is solved by the same decision that
+resolves A7's conflict, rather than being carried forward.
+
+It also removes the bulk acknowledgement, which requirement 4 of the acknowledgement design meets
+*structurally* — an ack on a scope index is a bulk ack because of where it is written. Per-document
+anchors leave that requirement with nothing to stand on.
+
+### Three measurements that shaped it
+
+**The index's `status` is not machine-guaranteed, so severity must not read it.** In one reference
+project all five phase indexes carry `status: frozen`, even though `freeze-phase-docs.sh` skips them
+by name — they were frozen some other way, by hand or by an earlier version. Had severity keyed off
+the index, that project would treat every drift finding in every scope as error-grade, and the two
+other projects — whose indexes are `active` — would never produce an error at all. Reading the
+document's own status makes the model independent of a field nothing maintains.
+
+**An index may not exist.** `quality/QA.md` is absent in two of the three projects while
+`docs/quality/` exists and holds documents. A scope with no index has nowhere to carry an anchor, and
+that resolves to the ADR's own first-class state: **"not verified"** — neither pass nor fail. It must
+not be an error, and it must not be silence either; the check reports the scope as unanchored.
+
+**The phase-index naming convention holds where the index exists.** `DISCOVERY.md`, `CONCEPT.md`,
+`VALIDATION.md`, `ARCHITECTURE.md` and `PROJECT_PLAN.md` are present under their respective folders in
+all three projects. So the index can be resolved by convention rather than by a new registry — which
+matters, because a registry would be the second register this ADR rejects elsewhere.
+
+### The comparison point, measured
+
+Stage 1 compares the anchor against the last **production-code** commit rather than `HEAD`. That
+commit needs a definition, and the repository had none. The default is an **exclusion**: a commit is
+production-code if it touches at least one path that is neither under `docs/` nor `.claude/` nor a
+Markdown file. Defining what is *not* code travels between projects; enumerating what *is* code does
+not — the three reference projects have three unrelated code trees (`cmd/ internal/ frontend/`,
+`src/ alembic/`, `src/ poc/ tools/`).
+
+Measured against all three, the default lands on a real code commit 1, 2 and 6 commits behind `HEAD`
+respectively — which is precisely the documentation-only base rate this design exists to defuse. The
+exclusion list is configurable per project; the default is what ships.

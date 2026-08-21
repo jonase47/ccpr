@@ -316,6 +316,25 @@ All notable changes to this project are documented in this file. The format is b
   the index and all theme files.
 
 ### Added
+- **ADR-0009's one open design question is decided (Addendum 2).** The ADR anchors at the Gate-Go
+  freeze and makes the scope index carry the bulk acknowledgement, while `freeze-phase-docs.sh` skips
+  every index by design — so the freeze event could not write the anchor the design puts there. The
+  scope anchor now lives on the **phase index**, written by a second, deliberate write path in the
+  freeze; documents inherit it, may opt into their own, and **severity reads each document's own
+  `status`, never the index's**. Three measurements settled it. The index's status is not
+  machine-guaranteed: in one reference project all five phase indexes carry `frozen` although the
+  freeze script skips them by name, so keying severity off the index would make every finding in that
+  project error-grade and none in the other two. An index may be absent — `quality/QA.md` is missing in
+  two of three projects while the folder exists — which resolves to the ADR's own "not verified" state
+  rather than to silence. And the naming convention holds where an index exists, so the scope resolves
+  by convention instead of by a registry, which would have been the second register the ADR rejects.
+  The alternative — anchoring each frozen detail file — was cheaper to build and fails on coverage: the
+  freeze runs only on a Go verdict, and at frozen shares of 12 %, 6 % and 90 % most documents would
+  never receive an anchor. On the index, one gate pass per phase anchors the whole scope. Also settled:
+  the comparison point is the last **production-code** commit, defined by **exclusion** (not under
+  `docs/` or `.claude/`, not a Markdown file) because that travels between projects while a list of
+  code directories does not — measured, it lands 1, 2 and 6 commits behind `HEAD` in the three
+  projects, which is exactly the documentation-only base rate the design exists to defuse.
 - **`covers:` — an optional, lint-validated list of the code paths a phase document describes
   (WI-0020).** Resolved against the **project root** only, with no document-relative fallback: these
   are code paths, not doc references. A path that does not exist is an error; a path that exists but
