@@ -2,7 +2,7 @@
 kind: adr
 adr_id: ADR-0009
 status: proposed
-last_updated: 18.08.2026
+last_updated: 21.08.2026
 related:
   - ADR-0002-workitem-backend-contract.md
   - ADR-0008-typed-workitem-links.md
@@ -267,3 +267,166 @@ token and no vendor.
 4. **Acknowledgement authority with more than one maintainer** is undefined.
 5. **`covers:` decay under a refactoring-heavy working style** is unmeasured; the observed rate comes
    from two projects with stable paths.
+
+---
+
+## Addendum (21.08.2026): what the measurement changed before the first line of code
+
+### Context
+
+This ADR was written on 18.08.2026 from measurements taken on two CCPR-driven projects. Before
+implementing it, both preconditions and the mechanism itself were re-measured — this time against
+**three** projects, and against the shipped scripts rather than against their descriptions. Project A
+(mid-sized) and project B (large, actively developed) are the two already cited above; project C is a
+third CCPR-driven project, comparable to B in documentation volume but with a small, sharply layered
+code tree.
+
+Nine statements did not survive that pass. Six of them are in this ADR or in the two precondition
+items; three are gaps nobody had recorded. They are listed here rather than silently corrected in
+place, because the precondition items were written against the original wording and an implementer
+reading only the body would build the wrong thing.
+
+### A1 — The `status` enum is already enforced, hard
+
+Precondition 1 states that the linter "validates the field today but does not reject unknown values
+hard enough to have prevented this". It does. Check (d) in `phase-docs-lint.sh` raises an **error**
+and the script exits 2. Run against project B today it reports four such errors, and has been doing so
+unnoticed.
+
+The drift therefore survives for two entirely different reasons, and only these two matter for the
+work:
+
+1. **Scan scope.** `PHASE_FOLDERS` names eight directories. Review reports live outside them and are
+   never read, which is where **six of the ten** invalid values sit.
+2. **Nothing consumes the exit code** — already recorded in this ADR's context as the fourth
+   constraint, but not connected to precondition 1 when it was written. An enforced enum whose verdict
+   nobody reads enforces nothing.
+
+Consequence: precondition 1 is still required, but the work is scope plus correction, not stricter
+validation.
+
+### A2 — The enum has six values, not five
+
+Both this ADR's precondition and the source measurement quote the schema as
+`{skeleton, draft, active, frozen, archived}`. The schema and the linter both carry a sixth value,
+`living`, with its own documented meaning. The five-value list appears in the project `CLAUDE.md` and
+in the shipped project-CLAUDE template — **that** is the drifting statement, not the schema.
+
+This matters for the severity table above: its `living` row is sound, because `living` is a real,
+schema-valid status. Left uncorrected, an implementer reading the short list would conclude the
+severity table keys off an invalid value.
+
+Three further off-schema values were found that the original measurement missed: `superseded` and
+`superseded-within` (both in memory files, which follow a different schema and are out of scope here)
+and one more `final` in project C.
+
+### A3 — The frozen share is not one number, and the spread inverts the argument
+
+Measured share of phase documents at `status: frozen`:
+
+| | Project A | Project B | Project C |
+|---|---|---|---|
+| frozen | **90 %** | 12 % | 6 % |
+
+This ADR argues from the 12 % figure that "a blocking carve-out limited to frozen documents covers
+very little of a live project". That holds for two of the three projects and is **inverted** in the
+third, where nearly every phase document is frozen and therefore nearly every drift finding would be
+error-grade. The severity model is not wrong, but its practical effect is a property of the project,
+not of the design. An implementation must not assume the 12 % regime.
+
+### A4 — `covers:` is not an extension of the `related:` check
+
+Precondition 2 calls the path-existence check "an extension of an existing check rather than a new
+mechanism". Two differences make it a new one:
+
+- `related:` resolves against the **document's own directory**; `covers:` entries are code paths from
+  the **repository root**. Different base.
+- `related:` tests with a file predicate. `covers:` entries are typically **directories**, for which a
+  file test always fails. It also needs a decision on whether a directory that exists but is empty
+  counts as covered.
+
+And the base question is already live for `related:` itself: in project B, `related:` entries are
+written repository-root-relative in review documents while the linter resolves them
+document-relative, producing **13 findings against files that exist**. The two keys must be decided
+together — one answer, two keys — which is why this is now tracked as its own item alongside
+precondition 2.
+
+### A5 — The `covers:` decay rate is understated by roughly a factor of five
+
+This ADR records "1 rename and 9 deletions across 2080 commits" for project B. Measured across that
+project's actual code directories over its full history: **15 renames and 57 deletions**. Project A
+shows 0/0 and project C 3/3, so the spread between projects is larger than the spread this ADR
+assumed between "slow but real" and "useless".
+
+The direction of the correction favours the design — path-existence checking earns its place as a
+precondition more clearly than before — but it also raises the upkeep cost of `covers:`, which is the
+side of the trade-off the granularity decision leaned on.
+
+### A6 — The anchor already exists, under other names, written by CCPR itself
+
+`/p4-sprint` writes `base_commit: <sha>` into sprint frontmatter. `/p5-review-sprint` reads it and
+records `reviewed_head`. `/gate-p5` compares `reviewed_head` against the current `HEAD` and re-runs
+the review when they differ. That is a recorded SHA on a phase document, spanning a delta, used as a
+staleness detector — the same mechanism this ADR proposes, already shipped and already in the field:
+**26 documents in project B, 8 in project C**, across roughly ten spellings
+(`base_commit`, `reviewed_head`, `reviewed_base`, `commits`, `scope_commits`, and several one-off
+pass-specific variants), none of them validated.
+
+This is precisely the unvalidated-key rot pattern precondition 2 cites as its warning example — and
+CCPR generates it. Placing `anchor_commit` beside it without further action would make the new key the
+next unvalidated spelling.
+
+**Decision:** `anchor_commit` stays as a distinct key — a sprint base and a freeze point are different
+moments and conflating them would break the sprint review — **and** the linter validates the existing
+family (`base_commit`, `reviewed_head`, `reviewed_base`) for SHA form and resolvability whenever the
+key is present. The new key ships together with validation of the old ones, or the second-register
+objection this ADR raises elsewhere applies to its own field.
+
+### A7 — The freeze event cannot write a scope-level anchor
+
+This ADR anchors the mechanism at the Gate-Go freeze and makes the scope index the carrier of a bulk
+acknowledgement. `freeze-phase-docs.sh` **explicitly skips every phase index and sub-index** — by name
+list and by a `## Detail Files` heading — so that they stay active for cross-phase updates. The freeze
+hook therefore never touches the document the design puts the scope anchor on.
+
+Two further limits of the same hook: it is a no-op for P5 and P8, and it runs only on a Go verdict. In
+the two projects with a 6–12 % frozen share, most documents would never receive an anchor through this
+path.
+
+Open for the implementation wave, and it is a design question rather than an implementation detail:
+either the anchor is written on the frozen detail documents (per-document granularity, which this ADR
+rejected on cost) or the scope anchor needs a second, deliberate write path onto the index.
+
+### A8 — The existing frontmatter writer is not portable
+
+`freeze-phase-docs.sh` edits in place with a BSD-only `sed -i ''` invocation. The acknowledgement verb
+writes five keys and must not copy that pattern; a shipped framework cannot assume the maintainer's
+platform.
+
+### A9 — "The last production-code commit" has no definition and no implementation
+
+The two-stage check compares the anchor against the last production-code commit rather than `HEAD`,
+which is what defuses the documentation-only base rate. Nothing in the repository classifies a path as
+production code or not, and the three reference projects have three unrelated code trees. This needs a
+per-project, configurable path classification with a documented default, and it belongs in the first
+implementation sub-wave rather than being discovered inside it.
+
+### Consequences for the preconditions
+
+Both preconditions stand. Their content changes:
+
+- **Precondition 1** becomes: introduce per-directory check profiles so review reports can be scanned
+  for the status enum **only**, correct the invalid values, and re-measure the frozen share.
+  Backwards compatibility is binding and is a **measurement**, not an assurance: no project may move
+  from a clean exit to a failing one except through the invalid values being sought.
+- **Precondition 2** becomes: the `covers:` check with root-relative resolution and directory support,
+  decided together with the `related:` base question, and shipped alongside validation of the existing
+  commit-anchor family (A6).
+
+Two items are added: the frontmatter path-base defect (A4) and a schema plus migration script for
+review reports, which are a genre of their own and were never phase documents — that item also owns
+the commit-anchor family, since the family lives there.
+
+Nothing in the decision itself is withdrawn. The anchor, the granularity, the two-stage shape, the
+severity model and the acknowledgement verb all stand as decided; A7 is the one open design question
+the implementation must close before it writes an anchor anywhere.

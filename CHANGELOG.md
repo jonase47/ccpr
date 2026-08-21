@@ -288,6 +288,24 @@ All notable changes to this project are documented in this file. The format is b
   the index and all theme files.
 
 ### Added
+- **ADR-0009 gained an addendum before a line of it was implemented (21.08.2026).** The decision was
+  written from measurements on two CCPR-driven projects; re-measuring against three, and against the
+  shipped scripts rather than their descriptions, falsified nine statements. The two that change the
+  work most: the `status` enum is **already** enforced hard — check (d) errors and the script exits 2,
+  and does so today against a real project — so the precondition is scope plus correction, not stricter
+  validation; and **the anchor already exists under other names, written by CCPR itself** —
+  `/p4-sprint` writes `base_commit`, `/p5-review-sprint` records `reviewed_head`, `/gate-p5` compares
+  `reviewed_head` against `HEAD` as a staleness detector, across 34 documents in two projects and
+  roughly ten unvalidated spellings. That is the same unvalidated-key rot the ADR cites as its warning
+  example. `anchor_commit` stays a distinct key — a sprint base and a freeze point are different
+  moments — but it now ships together with validation of the existing family, or the second-register
+  objection would apply to its own field. Also corrected: the enum has six values, not five (`living`
+  is in the schema and the linter; the five-value list in `CLAUDE.md` is the drifting statement), the
+  frozen share is 90/12/6 percent across the three projects rather than one number, `covers:` is not an
+  extension of the `related:` check (different base, different node type), and the `covers:` decay rate
+  is understated by roughly a factor of five. One open design question is named rather than papered
+  over: `freeze-phase-docs.sh` skips every index, so the freeze event cannot write the scope-level
+  anchor the design puts there. **Design only — still no shipped surface changes.**
 - **Every external-tool invocation in the shipped shell scripts is now pinned to a consumed exit
   status (`scripts/tests/test_external_tool_exit_status.py`, WI-0054).** Three prior rounds
   (WI-0049, WI-0051, WI-0053) closed one recurring defect — a crashing `grep`/`sed`/`awk`/`python3`/
