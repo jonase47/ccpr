@@ -498,6 +498,24 @@ All notable changes to this project are documented in this file. The format is b
   self-detection by location cannot distinguish "the same location" from "CCPR's project identity".
 
 ### Changed
+- **`phase-docs-lint.sh` scans `docs/reviews/`, with a check profile of its own (WI-0019).** The
+  status enum was never the weak part — check (d) already errors and exits 2, and had been doing so
+  unnoticed against a real project for months. What let invalid values survive is that the scan only
+  ever visited eight hard-coded folders, and `docs/reviews/` was not one of them. Taking it in with the
+  full check set was measured first and rejected: it yields 47 errors in one project and 54 in another,
+  almost all "required field missing" against a schema review reports never followed — only 13 of 30
+  carry all four required fields, and in a third project four carry no frontmatter at all. Review
+  reports are a genre of their own; their schema is tracked separately. So `reviews` gets a profile
+  that runs **only** the status enum, and only when `status:` is set — including silence on missing
+  frontmatter, without which one project would have moved from a clean exit to exit 1. The profile is
+  derived from the file's path **after** the two collection paths converge, so `--scope 'reviews/*'`
+  and the default walk agree on the same file (measured: that invocation went from 47 findings to 6).
+  Implemented as a `case` dispatch, not an associative array — the platform's `/bin/bash` is 3.2.
+  Backwards compatibility was measured, not asserted, before and after on three projects: one stays at
+  exit 0, one gains exactly the six invalid values it was hiding and no other finding class, one gains
+  exactly one. A mutation that lets the frontmatter check into the reviews profile turns four tests red
+  **and** moves the clean project to exit 1 — the regression the constraint forbids is caught by the
+  suite, not only by the manual run.
 - **The Handover-Epilogue "Open points"/"Open items" bullet, shipped identically in 104 command
   prompts, named a destination without saying which of the two `docs/HANDOVER.md` sections it
   meant.** The template offers two places for a mid-task finding: the `## Open Decisions` table

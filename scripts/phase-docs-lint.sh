@@ -44,10 +44,32 @@ done
 PROJECT_DIR="${PROJECT_DIR:-$(pwd)}"
 DOCS_DIR="$PROJECT_DIR/docs"
 
-PHASE_FOLDERS=(discovery concept validation architecture planning quality launch operations)
+PHASE_FOLDERS=(discovery concept validation architecture planning quality launch operations reviews)
 LIVING_FILES="HANDOVER.md BASELINE.md BACKLOG.md SPRINT.md MEMORY.md instincts.md"
 VALID_STATUS="skeleton draft active frozen archived living"
 VALID_PHASES="P0 P1 P2 P3 P4 P5 P6 P7 P8"
+
+# doc_profile_for — assigns each file (by its path relative to docs/) to the
+# set of checks it must satisfy. bash 3.2 (macOS default) has no associative
+# arrays, so this is a case dispatch rather than a lookup table — extend the
+# case (not a new array) when another folder needs its own profile, e.g.
+# WI-0072's planned dedicated review-report schema.
+#
+# Profiles:
+#   full    — checks (a)-(g), the PHASE_DOC_SCHEMA default.
+#   reviews — only check (d) (status enum), and only when status: is set.
+#             Review reports predate PHASE_DOC_SCHEMA and follow their own
+#             frontmatter shape (kind, sprint, base_commit, reviewer,
+#             methodology — WI-0072). Enforcing (a)-(c)/(e)-(g) against them
+#             today raises dozens of "required field missing" findings
+#             against a schema they were never written for.
+doc_profile_for() {
+    local rel_to_docs="$1"
+    case "$rel_to_docs" in
+        reviews/*) echo "reviews" ;;
+        *)         echo "full" ;;
+    esac
+}
 
 errors=()
 warnings=()
@@ -114,52 +136,64 @@ for file in ${FILES[@]+"${FILES[@]}"}; do
         continue
     fi
 
-    # (a) Frontmatter present?
-    if ! fm_has "$file"; then
-        warn "$rel — no YAML frontmatter (--- block at start). Migration to PHASE_DOC_SCHEMA recommended."
-        continue
+    # Profile is derived from the file's path relative to docs/ — not from
+    # which collection path (default PHASE_FOLDERS walk vs. --scope's find)
+    # found it, so both routes agree on the same file.
+    rel_to_docs="${file#$DOCS_DIR/}"
+    profile="$(doc_profile_for "$rel_to_docs")"
+
+    if [[ "$profile" == "full" ]]; then
+        # (a) Frontmatter present?
+        if ! fm_has "$file"; then
+            warn "$rel — no YAML frontmatter (--- block at start). Migration to PHASE_DOC_SCHEMA recommended."
+            continue
+        fi
+
+        # (b) Required fields
+        missing="$(fm_validate_required "$file" "phase,subskill,status,last_updated" || true)"
+        if [[ -n "$missing" ]]; then
+            while IFS= read -r m; do
+                err "$rel — required field missing: $m"
+            done <<< "$missing"
+        fi
+
+        # (c) phase enum
+        phase_val="$(fm_field "$file" phase || true)"
+        if [[ -n "$phase_val" ]] && ! is_valid_phase "$phase_val"; then
+            err "$rel — phase='$phase_val' is not in {P0…P8}"
+        fi
     fi
 
-    # (b) Required fields
-    missing="$(fm_validate_required "$file" "phase,subskill,status,last_updated" || true)"
-    if [[ -n "$missing" ]]; then
-        while IFS= read -r m; do
-            err "$rel — required field missing: $m"
-        done <<< "$missing"
-    fi
-
-    # (c) phase enum
-    phase_val="$(fm_field "$file" phase || true)"
-    if [[ -n "$phase_val" ]] && ! is_valid_phase "$phase_val"; then
-        err "$rel — phase='$phase_val' is not in {P0…P8}"
-    fi
-
-    # (d) status enum
+    # (d) status enum — runs in every profile, but only fires when status:
+    # is actually set (fm_field returns empty on a file without frontmatter
+    # too, so this stays silent there).
     status_val="$(fm_field "$file" status || true)"
     if [[ -n "$status_val" ]] && ! is_valid_status "$status_val"; then
         err "$rel — status='$status_val' is not in {$VALID_STATUS}"
     fi
 
-    # (e) last_updated: DD.MM.YYYY, optionally followed by " (note)"
-    last_updated="$(fm_field "$file" last_updated || true)"
-    if [[ -n "$last_updated" ]] && ! [[ "$last_updated" =~ ^[0-9]{2}\.[0-9]{2}\.[0-9]{4}([[:space:]]+\(.*\))?$ ]]; then
-        err "$rel — last_updated='$last_updated' not in format 'DD.MM.YYYY' or 'DD.MM.YYYY (note)'"
-    fi
-
-    # (f) related: cross-refs
-    base_dir="$(dirname "$file")"
-    while IFS= read -r rel_entry; do
-        [[ -z "$rel_entry" ]] && continue
-        if [[ ! -f "$base_dir/$rel_entry" ]]; then
-            err "$rel — related:'$rel_entry' points to non-existent file ($base_dir/$rel_entry)"
+    if [[ "$profile" == "full" ]]; then
+        # (e) last_updated: DD.MM.YYYY, optionally followed by " (note)"
+        last_updated="$(fm_field "$file" last_updated || true)"
+        if [[ -n "$last_updated" ]] && ! [[ "$last_updated" =~ ^[0-9]{2}\.[0-9]{2}\.[0-9]{4}([[:space:]]+\(.*\))?$ ]]; then
+            err "$rel — last_updated='$last_updated' not in format 'DD.MM.YYYY' or 'DD.MM.YYYY (note)'"
         fi
-    done < <(fm_list "$file" related)
 
-    # (g) parent_index — if set, the file must exist
-    parent_idx="$(fm_field "$file" parent_index || true)"
-    if [[ -n "$parent_idx" ]]; then
-        if [[ ! -f "$base_dir/$parent_idx" ]]; then
-            err "$rel — parent_index='$parent_idx' points to non-existent file"
+        # (f) related: cross-refs
+        base_dir="$(dirname "$file")"
+        while IFS= read -r rel_entry; do
+            [[ -z "$rel_entry" ]] && continue
+            if [[ ! -f "$base_dir/$rel_entry" ]]; then
+                err "$rel — related:'$rel_entry' points to non-existent file ($base_dir/$rel_entry)"
+            fi
+        done < <(fm_list "$file" related)
+
+        # (g) parent_index — if set, the file must exist
+        parent_idx="$(fm_field "$file" parent_index || true)"
+        if [[ -n "$parent_idx" ]]; then
+            if [[ ! -f "$base_dir/$parent_idx" ]]; then
+                err "$rel — parent_index='$parent_idx' points to non-existent file"
+            fi
         fi
     fi
 done

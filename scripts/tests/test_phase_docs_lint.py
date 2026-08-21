@@ -479,15 +479,19 @@ class ArgumentAndEnvironmentEdgeCasesTest(PhaseDocsLintTestBase):
 
 
 class DefaultScopeIsLimitedToPhaseFoldersTest(PhaseDocsLintTestBase):
-    """Scope pin (not a feature test): a document outside the eight
-    PHASE_FOLDERS is invisible to a scopeless run today, even with broken
-    frontmatter that would otherwise be a hard error. WI-0020 is expected to
-    widen the scan; pinning today's boundary here makes that widening show
-    up as a deliberate, visible test change instead of a silent one.
+    """Scope pin (not a feature test): a document outside the phase folders
+    is invisible to a scopeless run today, even with broken frontmatter that
+    would otherwise be a hard error. WI-0019 widened PHASE_FOLDERS to include
+    `reviews` (with its own restricted check profile -- see
+    ReviewsFolderProfileTest below), so this pin now uses `docs/api/` -- a
+    folder that stays genuinely outside every profile -- as its "outside"
+    example. WI-0020 is expected to widen the scan further; pinning today's
+    boundary here makes that widening show up as a deliberate, visible test
+    change instead of a silent one.
     """
 
     def test_document_outside_phase_folders_produces_no_finding_by_default(self):
-        self.write_doc("reviews/outside.md", doc_text(status=None))
+        self.write_doc("api/outside.md", doc_text(status=None))
 
         result = self.run_lint()
 
@@ -496,27 +500,117 @@ class DefaultScopeIsLimitedToPhaseFoldersTest(PhaseDocsLintTestBase):
         self.assertEqual(result.returncode, 0, result.stdout)
 
     def test_scope_glob_reaches_the_same_folder_the_default_scan_cannot_see(self):
-        """The other edge of the same pin: the two collection paths at
-        phase-docs-lint.sh:86-104 diverge on purpose -- the default scan
-        walks only PHASE_FOLDERS, but --scope's `find` walks the entire
-        docs/ tree and filters by glob afterwards, so it already reaches a
-        folder the default scan is blind to. WI-0019/WI-0020 are about to
-        touch this exact collection switch; pinning both edges here (this
-        test + the default-scope test above) makes any future widening of
-        either path show up as a deliberate test change instead of a
-        silent one.
+        """The other edge of the same pin, still anchored on `reviews/` --
+        WI-0019 added `reviews` to PHASE_FOLDERS, so a scopeless run reaches
+        it too now (see ReviewsFolderProfileTest), but the *profile* a file
+        gets is decided by its path relative to docs/, not by which of the
+        two collection paths at phase-docs-lint.sh found it (the default
+        PHASE_FOLDERS walk vs. --scope's `find` over the whole docs/ tree).
+        This test pins that: reached via --scope, `docs/reviews/*` still
+        gets the reviews profile -- (b) required-fields stays silent, but
+        (d) status enum still fires on an invalid value.
         """
-        self.write_doc("reviews/outside.md", doc_text(status=None))
+        self.write_doc(
+            "reviews/outside.md",
+            doc_text(phase=None, subskill=None, status="obsolete", last_updated=None),
+        )
 
         result = self.run_lint("--scope", "reviews/*")
 
         errors = self.findings(result.stdout, "Errors")
+        self.assertFalse(any("required field missing" in e for e in errors), errors)
         self.assertTrue(
-            any("outside.md" in e and "required field missing: status" in e for e in errors),
+            any("outside.md" in e and "status='obsolete' is not in {" in e for e in errors),
             errors,
         )
         self.assertEqual(self.files_scanned(result.stdout), 1)
         self.assertEqual(result.returncode, 2, result.stdout)
+
+
+class ReviewsFolderProfileTest(PhaseDocsLintTestBase):
+    """WI-0019: `docs/reviews/**` gets a restricted profile -- only check
+    (d) (status enum) applies, and only when `status:` is actually set.
+    Checks (a) no-frontmatter, (b) required fields, (c) phase enum, (e) date
+    format, (f) related:, (g) parent_index all stay silent there, because
+    review reports predate PHASE_DOC_SCHEMA and follow their own frontmatter
+    shape (kind, sprint, base_commit, reviewer, methodology -- WI-0072).
+    """
+
+    def test_valid_status_in_reviews_produces_no_findings(self):
+        self.write_doc(
+            "reviews/clean.md",
+            doc_text(phase=None, subskill=None, status="active", last_updated=None),
+        )
+
+        result = self.run_lint()
+
+        self.assertEqual(self.findings(result.stdout, "Errors"), [], result.stdout)
+        self.assertEqual(self.findings(result.stdout, "Warnings"), [], result.stdout)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_invalid_status_in_reviews_is_still_reported_as_error(self):
+        self.write_doc(
+            "reviews/bad-status.md",
+            doc_text(phase=None, subskill=None, status="final", last_updated=None),
+        )
+
+        result = self.run_lint()
+
+        errors = self.findings(result.stdout, "Errors")
+        self.assertTrue(
+            any("bad-status.md" in e and "status='final' is not in {" in e for e in errors),
+            errors,
+        )
+        self.assertEqual(result.returncode, 2, result.stdout)
+
+    def test_missing_frontmatter_in_reviews_produces_no_findings(self):
+        self.write_doc("reviews/no-frontmatter.md", "# Review\n\nNo frontmatter at all.\n")
+
+        result = self.run_lint()
+
+        self.assertEqual(self.findings(result.stdout, "Errors"), [], result.stdout)
+        self.assertEqual(self.findings(result.stdout, "Warnings"), [], result.stdout)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(self.files_scanned(result.stdout), 1)
+
+    def test_reviews_folder_is_reached_by_the_default_scan(self):
+        """Point 1 of WI-0019: `reviews` joins PHASE_FOLDERS, so a scopeless
+        run counts it in Files scanned -- unlike the pre-WI-0019 baseline
+        pinned in DefaultScopeIsLimitedToPhaseFoldersTest."""
+        self.write_doc(
+            "reviews/clean.md",
+            doc_text(phase=None, subskill=None, status="active", last_updated=None),
+        )
+
+        result = self.run_lint()
+
+        self.assertEqual(self.files_scanned(result.stdout), 1)
+
+    def test_dead_related_entry_is_silenced_in_reviews_but_still_reported_in_phase_folders(self):
+        self.write_doc(
+            "reviews/dead-related.md",
+            doc_text(
+                phase=None, subskill=None, status="active", last_updated=None,
+                extra_lines=["related: [GHOST.md]"],
+            ),
+        )
+        self.write_doc(
+            "architecture/dead-related.md",
+            doc_text(extra_lines=["related: [GHOST2.md]"]),
+        )
+
+        result = self.run_lint()
+
+        errors = self.findings(result.stdout, "Errors")
+        self.assertFalse(any("reviews/dead-related.md" in e for e in errors), errors)
+        self.assertTrue(
+            any(
+                "architecture/dead-related.md" in e
+                and "related:'GHOST2.md' points to non-existent file" in e
+                for e in errors
+            ),
+            errors,
+        )
 
 
 if __name__ == "__main__":
