@@ -191,7 +191,7 @@ Pick whichever layout fits your workflow:
 
 > **Rule**: when a skill writes generator output to `docs/.<name>-report.md`, `docs/.<name>-preflight-*.md`, or similar dotfiles, simultaneously produce a `.gitignore` pattern suggestion — either in the skill output or as a warning to the user.
 >
-> **Why**: pre-commit hooks in the project may accidentally stage volatile dotfiles. Retroactive `.gitignore` extension costs an extra commit. Known skills with volatile output: `gate-preflight`, `cross-check`, `quality-scan`, `bootstrap` (`docs/.session-context.md`).
+> **Why**: pre-commit hooks in the project may accidentally stage volatile dotfiles. Retroactive `.gitignore` extension costs an extra commit. Known skills with volatile output: `gate-preflight`, `cross-check`, `anchor`, `quality-scan`, `bootstrap` (`docs/.session-context.md`).
 >
 > **How to apply**:
 > - **During skill design**: if the skill produces output under `docs/.<...>` → potentially volatile → `.gitignore` recommendation in the skill's "result" block
@@ -203,6 +203,7 @@ Pick whichever layout fits your workflow:
 >   docs/.session-context.md
 >   docs/.quality-scan-report.json
 >   docs/.cross-check-report.md
+>   docs/.anchor-report.md
 >   docs/.baseline-prep.md
 >   ```
 

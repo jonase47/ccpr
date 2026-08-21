@@ -137,10 +137,13 @@ class DocsDotfileSweepTest(unittest.TestCase):
     """Characterises the sweep method itself, independent of any fix below --
     a regression here means the sweep's own scope silently changed."""
 
-    def test_sweep_finds_the_twelve_concrete_artifacts_the_wi_0058_sweep_found(self):
+    def test_sweep_finds_the_thirteen_concrete_artifacts_after_wi_0021s_anchor_report(self):
+        """Was twelve at WI-0058; WI-0021 (Teilwelle 4c) added docs/.anchor-report.md,
+        named literally in commands/anchor.md's ## Result section."""
         self.assertEqual(
             concrete_artifact_paths(),
             {
+                "docs/.anchor-report.md",
                 "docs/.baseline-prep.md",
                 "docs/.cross-check-report.md",
                 "docs/.quality-scan-report.json",
@@ -156,10 +159,12 @@ class DocsDotfileSweepTest(unittest.TestCase):
             },
         )
 
-    def test_sweep_normalises_to_the_five_block_patterns_the_generator_uses(self):
+    def test_sweep_normalises_to_the_six_block_patterns_the_generator_uses(self):
+        """Was five at WI-0058; see the thirteen-artifact test above for the addition."""
         self.assertEqual(
             block_patterns(),
             {
+                "docs/.anchor-report.md",
                 "docs/.baseline-prep.md",
                 "docs/.cross-check-report.md",
                 "docs/.quality-scan-report.json",

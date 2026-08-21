@@ -72,8 +72,18 @@ Rejected ADRs (`status: rejected` or `status: superseded`) must not be actively 
 
 **Check:** Filter ADRs with `status: rejected|superseded`; grep COMPONENTS/ARCHITECTURE for ADR IDs. Report active references to rejected ADRs.
 
-### R6: CONSTITUTION.md (Inviolable) ↔ ADRs / Implementation
-No ADR and no phase decision may violate an Inviolable.
+### R6: CONSTITUTION.md (Inviolable) ↔ ADRs — decisions only, not code
+
+No ADR and no phase decision may violate an Inviolable. **This rule reads Markdown only —
+it never opens a code path**, despite the "/ Implementation" the title once carried
+unqualified. It catches an ADR that *decides* something contradicting an Inviolable (e.g.
+"cloud provider" against a "local-only" Inviolable); it cannot and does not catch the
+implementation later drifting away from that decision. That check is `/anchor`'s job
+(`docs/adr/ADR-0009-anchored-state-verification.md`): it compares a phase document's declared
+anchor commit against the repository's actual history, scoped to the delta rather than the
+whole document, and is the source for anything claiming CONSTITUTION-vs-code currency. Run
+`/anchor` alongside this rule when the question is "does the code still do what we decided?",
+not "did we decide something self-contradictory?".
 
 **Sources:**
 - `docs/CONSTITUTION.md` (Inviolable section)
@@ -153,6 +163,9 @@ Structure:
 - **After significant doc updates** (e.g. new ADR, new threats, changed Constitution)
 - **On suspected drift** (doc-volume-check reports rapidly growing files)
 - **On promotion Lean → Full** (beyond `/lean-promote` for consistency verification)
+- **Alongside `/anchor`** as a sensible neighbour run — `/cross-check` finds Markdown-vs-Markdown
+  drift, `/anchor` finds docs-vs-implementation drift (see R6 above); neither substitutes for the
+  other
 
 ## When NOT to use
 

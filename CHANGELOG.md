@@ -328,6 +328,24 @@ All notable changes to this project are documented in this file. The format is b
   the index and all theme files.
 
 ### Added
+- **`/anchor` — the skill that turns the mechanical delta into a verdict (WI-0021).** Stage 1 is the
+  script call and carries no severity; Stage 2 asks one narrow question per affected document — *does
+  this delta invalidate a statement here?* — scoped to the changed paths rather than to the whole
+  document, which is what keeps the common case (stale) from drowning the rare one (invalidated).
+  Severity comes from the document's **own** `status`, never the index's. A confirmed invalidation at
+  `active` or `frozen` opens one work item through the existing contract — no contract change — and a
+  project that has not adopted the structured store gets the finding in its HANDOVER inbox instead.
+  Every run closes with the acknowledgement statistic, because ADR-0009 requires it as the detector
+  against the mechanism becoming ceremony. The skill states the exit-code contract explicitly, since
+  `check` exits 0 **with** drift and non-zero only on an operational failure — read the other way
+  round, a broken run would look like a clean one. The agent clause is binding and stated without
+  varnish: `ack` refuses its interactive prompt without a terminal, but the flagged path needs none
+  and nothing stops an agent with shell access from calling it, so the clause is prevention, the
+  statistic is detection, and only both together are honest.
+- **`/cross-check`'s R6 says what it does and what it does not.** The rule is titled
+  "CONSTITUTION.md (Inviolable) ↔ ADRs / **Implementation**" and has never opened a code file — the gap
+  that prompted ADR-0009 in the first place. Rather than bolt a code rule onto a Markdown-to-Markdown
+  checker, R6 now names its own limit and points at `/anchor` for the half it does not cover.
 - **`fm_set` and `fm_set_many` in `scripts/lib/frontmatter.sh`** — the first write path in a library
   that was read-only, and now the only in-place writer in the shipped scripts. Temp file in the same
   directory plus `mv`, never `sed -i`; scanning stops at the closing `---`, so the body is left

@@ -100,6 +100,7 @@ docs/.gate-preflight-*.md
 docs/.quality-scan-report.json
 docs/.cross-check-report.md
 docs/.baseline-prep.md
+docs/.anchor-report.md
 
 # Build output
 dist/
