@@ -1,7 +1,7 @@
 # Sections & Commands – Overview
 
 ## Decisions
-- **115 Commands** – full granularity, full control (P0–P8 Full-Track + Lean-Track + cross-cutting)
+- **116 Commands** – full granularity, full control (P0–P8 Full-Track + Lean-Track + cross-cutting)
 - **Gate convention**: `/gate-pX` (dedicated prefix, e.g. `/gate-p6`)
 - **Sprint number**: tracked in project context (SPRINT.md), not in command
 - **Language**: all command names in English
@@ -191,12 +191,13 @@ Meta-commands for capturing session insight back into the system.
 | `/instinct` | Instinct Management | Manage instincts (confidence-based rules from session experience). |
 | `/postmortem` | Session Postmortem | Analyze the last session and extract instinct proposals. |
 
-## Utility (13 commands)
+## Utility (14 commands)
 
 Cross-cutting commands that operate outside the phase flow.
 
 | Command | Title | Description |
 |---|---|---|
+| `/anchor` | Anchored State Verification (Docs vs. Implementation) | Checks phase documents against the code they describe, not against other documents. Stage 1 is a mechanical delta (`anchor status`/`check`) between a document's `anchor_commit` and the last production-code commit — always exit 0, staleness is data, never a verdict. Stage 2 asks, scoped to the delta only, whether it invalidates a statement in the document; only "yes" opens a work item. `anchor ack` acknowledges drift deliberately (never a side effect of another command); `anchor set` (normally via the freeze hook on Gate-Go) writes the anchor onto the phase index. Design: `docs/adr/ADR-0009-anchored-state-verification.md`. |
 | `/cleanup` | Doc Hygiene: HANDOVER cap + lint aggregator | Runs a one-shot hygiene pass on a project's docs to keep them lean and machine-readable: HANDOVER inbox triage and size cap enforcement plus the three existing lint scripts (memory-lint.sh, phase-docs-lint.sh, doc-volume-check.sh) bundled into one consolidated drift report. Use this between phases (after a Gate) or whenever the project-guide warns about HANDOVER size, an unprocessed inbox, stale memory or doc volume drift. |
 | `/decision` | Develop a decision basis | This command analyzes an open decision question, automatically determines which perspectives are relevant, assembles the appropriate analysis agents, and develops a structured decision basis (Decision Basis) – without making the decision itself. That is the PO's responsibility. |
 | `/epic` | Create an epic | This command creates one or more epics – either derived from an existing concept or roadmap, or standalone from a free description. An epic can already contain rough associated user stories or be created as a pure high-level shell – this is selectable per call. |
@@ -213,7 +214,7 @@ Cross-cutting commands that operate outside the phase flow.
 
 ---
 
-## Summary: 115 Commands
+## Summary: 116 Commands
 
 | Category | Count |
 |---|---|
@@ -229,9 +230,9 @@ Cross-cutting commands that operate outside the phase flow.
 | **Subtotal — phase commands** | **82** |
 | Gates (main + sub-gates) | 12 |
 | Continuous Learning | 2 |
-| Utility | 13 |
+| Utility | 14 |
 | Track + Cross-Cutting (`/track-decision`, `/constitution`, `/lean-frame`, `/lean-learn`, `/lean-promote`, `/cross-check`) | 6 |
-| **Total** | **115** |
+| **Total** | **116** |
 
 ---
 

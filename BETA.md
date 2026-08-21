@@ -52,7 +52,7 @@ needed. Reports of *anything else* are very welcome.
 - **Lean-Track is transient.** It exists for fast internal experimentation and as
   a bridge into Full-Track; it is scheduled to be sunset after v1.0. Mandant/team
   projects should start on Full-Track.
-- **Large skill surface.** ~115 slash commands; some sub-skills always run in
+- **Large skill surface.** ~116 slash commands; some sub-skills always run in
   sequence. Consolidation is planned (tracked as an Aspirational goal, reviewed at
   each `/postmortem`).
 - **Multi-tenant / multi-person use is not yet "without local patches".** Running

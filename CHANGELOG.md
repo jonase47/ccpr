@@ -328,6 +328,18 @@ All notable changes to this project are documented in this file. The format is b
   the index and all theme files.
 
 ### Added
+- **The Manual documents the anchor, and a dormant CI template ships beside it (WI-0021).**
+  `Manual/system/anchored-state.md` explains the mechanism the way the other `system/` chapters
+  explain theirs — the problem, why the anchor sits on the phase index rather than on each document,
+  why severity reads the document's own `status`, why the check is two-stage, and what "not verified"
+  means — with each design choice carrying the measurement that settled it rather than an assertion.
+  It states the agent clause's limit as plainly as the skill does. `templates/ci/anchor-check.ci.sh`
+  follows the shipped precedent: POSIX `sh`, no forge named, nothing runs until someone wires it up.
+  Two constraints are in its header because leaving them out would produce the message nobody reads:
+  **CI can only do stage 1** — the judgement needs an agent, so the template reports a delta and is
+  explicitly not a substitute for `/anchor` — and `check` **exits 0 with drift by design**, so a job
+  reading only the exit code would report nothing, ever. It therefore reads the output, and says why.
+  A run where every scope reports "not verified" is called out rather than passing quietly.
 - **`/anchor` — the skill that turns the mechanical delta into a verdict (WI-0021).** Stage 1 is the
   script call and carries no severity; Stage 2 asks one narrow question per affected document — *does
   this delta invalidate a statement here?* — scoped to the changed paths rather than to the whole

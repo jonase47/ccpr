@@ -3,7 +3,7 @@
 Comprehensive documentation of the entire workflow, all processes, mechanisms, and infrastructure.
 For the quick reference, see [WORKFLOW_CHEATSHEET.md](WORKFLOW_CHEATSHEET.md).
 
-Last updated: 20.08.2026
+Last updated: 21.08.2026
 
 ---
 
@@ -254,9 +254,9 @@ Detailed gate checklists are in [PROJECT_PHASES.md](../docs/PROJECT_PHASES.md).
 - **82 phase commands** (P0: 3, P1: 5, P2: 4, P3: 23, P4: 4, P5: 12, P6: 22, P7: 5, P8: 4)
 - **12 gates** (8 main gates + 4 sub-gates for P6/P7)
 - **2 learning commands** (/postmortem, /instinct)
-- **13 utility commands** (/konzept, /konzept-update, /decision, /epic, /user-stories, /roadmap, /roadmap-update, /project-init, /logs-summary, /guide, /release-baseline, /cleanup, /specialize)
+- **14 utility commands** (/konzept, /konzept-update, /decision, /epic, /user-stories, /roadmap, /roadmap-update, /project-init, /logs-summary, /guide, /release-baseline, /cleanup, /specialize, /anchor)
 - **6 track + cross-cutting commands** (/track-decision, /constitution, /lean-frame, /lean-learn, /lean-promote, /cross-check)
-- **Total: 115 commands**
+- **Total: 116 commands**
 
 ### Naming Convention
 
@@ -359,6 +359,30 @@ Optional pre-gate consistency check across phases. 7 initial rules:
 
 **Output**: `docs/.cross-check-report.md` (volatile, regenerated per run).
 **Recommendation, not mandatory** — gates list `/cross-check` as a suggested pre-step. Iterative rule expansion expected.
+
+### Anchored State Verification (`/anchor`)
+
+> Not shipped in any tagged release yet — see [system/anchored-state.md](system/anchored-state.md).
+
+Where `/cross-check` compares Markdown to Markdown, `/anchor` compares a phase document's
+recorded `anchor_commit`/`anchor_date` frontmatter against the repository's actual git
+history — docs-vs-implementation drift, the gap `/cross-check`'s R6 rule names but never
+closes (its own source list contains no code). Two stages:
+
+| Stage | Does | Produces |
+|---|---|---|
+| 1 — mechanical (`anchor status`/`check`) | anchor vs. last **production-code** commit (exclusion-based: not under `docs/`, not under `.claude/`, not `*.md`, configurable via `.claude/settings.json`) | data — always exit 0, staleness is never itself a verdict |
+| 2 — agent, scoped to the delta only | "does this delta invalidate a statement in this document?" | severity, read from the affected document's **own** `status` (`living` info · `active`/`frozen` warning/error + work item) |
+
+The anchor lives on the **phase index**, written by the Gate-Go freeze hook; documents
+under that scope inherit it unless they opt into their own (typically alongside
+`covers:`). `anchor ack` acknowledges drift deliberately — never a side effect of another
+command, and never run by an agent (a prevention clause, backed by a per-run
+"N anchored · M asserted without doc change · K stale" statistic as detection, since no
+hard technical boundary stops a scripted call).
+
+**Design**: `docs/adr/ADR-0009-anchored-state-verification.md` (incl. both addenda).
+**Full chapter**: [system/anchored-state.md](system/anchored-state.md).
 
 ### Handover (HANDOVER.md)
 
@@ -944,3 +968,4 @@ my-project/
 | 06.03.2026 | Ollama model: qwen3.5 -> gemma3:4b (performance: 22 min -> 12s). Gate preflight: content patterns + Ollama summaries. gate-p4: Preflight-centered, 1 agent instead of 2 (~60% token savings). Command count: 103 commands (80 phase + 12 gates + 2 learning + 9 utility) |
 | 13.05.2026 | Lean-Track introduced (parallel to Full-Track): /track-decision entry point, /lean-frame + /lean-learn + /lean-promote (4 skills, no gates). Constitution as mandatory Full-Track artifact: /constitution skill (Hybrid mode with 5 domain bootstraps), gate-preflight.py extracts Inviolables, all 8 gates load them as binding input. /cross-check as optional pre-gate consistency check (7 initial rules). 6 new commands, 6 new templates + 5 bootstraps. Command count: 109 -> 115. |
 | 20.08.2026 | Documented `memory-sync.sh` (org-tier memory/instincts sharing, shipped since v0.2.0-beta) and the discipline gate (`artifact-gate.sh` + `lib/discipline_gate.sh` + CI template) — none of the three had appeared anywhere under `Manual/` before. New detail page `system/discipline-gate.md`; `system/memory-instincts.md` gained a "Team Sharing (Org Tier)" subsection. The discipline gate itself is **not yet in any tagged release** (absent from `v0.2.1-beta`) — noted at every mention. |
+| 21.08.2026 | Documented anchored state verification (`/anchor`, `scripts/anchor.sh`, ADR-0009) — checks phase documents against the code they describe rather than against other documents, closing the gap `/cross-check`'s R6 rule names but never closes. New detail page `system/anchored-state.md`; new "Anchored State Verification (`/anchor`)" subsection alongside Cross-Check in §5. `/anchor` is **not yet in any tagged release** (absent from `v0.2.1-beta`) — noted at every mention. Command count 115 → 116 (Utility 13 → 14). |

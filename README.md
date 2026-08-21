@@ -332,7 +332,7 @@ Your `memory/` and `scripts/local-llm/` are out of scope and never touched.
 +-- instincts-archive/     # HISTORY.md — rolling postmortem stream (not autoloaded)
 +-- settings.json          # Permissions & hooks
 +-- agents/                # 13 domain agents + project-guide + wingman = 15
-+-- commands/              # 115 slash commands (P0-P8 + Lean-Track + cross-cutting)
++-- commands/              # 116 slash commands (P0-P8 + Lean-Track + cross-cutting)
 +-- scripts/               # Automation scripts (save tokens)
 |   +-- lib/               # Shared libraries (Python + Bash helpers)
 |   +-- memory-lint.sh     # Validate docs/memory/** against schema
@@ -397,7 +397,7 @@ work stay in `docs/`.
 | [`Manual/GETTING_STARTED.md`](Manual/GETTING_STARTED.md) | Read-along onboarding (quickstart + full walkthrough) |
 | [`Manual/WORKFLOW_CHEATSHEET.md`](Manual/WORKFLOW_CHEATSHEET.md) | Quick reference for daily work (commands + scripts) |
 | [`Manual/SYSTEM_OVERVIEW.md`](Manual/SYSTEM_OVERVIEW.md) | Agent-system architecture + all mechanics in depth |
-| [`Manual/SECTIONS_COMMANDS.md`](Manual/SECTIONS_COMMANDS.md) | All 115 commands, grouped by section |
+| [`Manual/SECTIONS_COMMANDS.md`](Manual/SECTIONS_COMMANDS.md) | All 116 commands, grouped by section |
 | [`Manual/LEAN_TRACK.md`](Manual/LEAN_TRACK.md) | Lean-Track spec (transient, sunset at v1.0) |
 | [`docs/PROJECT_PHASES.md`](docs/PROJECT_PHASES.md) | Detailed phase descriptions with theory *(runtime doc)* |
 | [`docs/CONSTITUTION.md`](docs/CONSTITUTION.md) | CCPR's own binding Inviolables *(runtime doc)* |

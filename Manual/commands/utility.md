@@ -2,15 +2,16 @@
 kind: commands-doc-detail
 parent_index: ../SECTIONS_COMMANDS.md
 section: utility
-last_updated: 15.05.2026
+last_updated: 21.08.2026
 ---
 
-# Utility (13 commands)
+# Utility (14 commands)
 
 Cross-cutting commands that operate outside the phase flow.
 
 | Command | Title | Description |
 |---|---|---|
+| `/anchor` | Anchored State Verification (Docs vs. Implementation) | Checks phase documents against the code they describe, not against other documents. Stage 1 is a mechanical delta (`anchor status`/`check`) between a document's `anchor_commit` and the last production-code commit — always exit 0, staleness is data, never a verdict. Stage 2 asks, scoped to the delta only, whether it invalidates a statement in the document; only "yes" opens a work item. `anchor ack` acknowledges drift deliberately (never a side effect of another command); `anchor set` (normally via the freeze hook on Gate-Go) writes the anchor onto the phase index. Design: `docs/adr/ADR-0009-anchored-state-verification.md`. |
 | `/cleanup` | Doc Hygiene: HANDOVER cap + lint aggregator | Runs a one-shot hygiene pass on a project's docs to keep them lean and machine-readable: HANDOVER inbox triage and size cap enforcement plus the three existing lint scripts (memory-lint.sh, phase-docs-lint.sh, doc-volume-check.sh) bundled into one consolidated drift report. Use this between phases (after a Gate) or whenever the project-guide warns about HANDOVER size, an unprocessed inbox, stale memory or doc volume drift. |
 | `/decision` | Develop a decision basis | This command analyzes an open decision question, automatically determines which perspectives are relevant, assembles the appropriate analysis agents, and develops a structured decision basis (Decision Basis) – without making the decision itself. That is the PO's responsibility. |
 | `/epic` | Create an epic | This command creates one or more epics – either derived from an existing concept or roadmap, or standalone from a free description. An epic can already contain rough associated user stories or be created as a pure high-level shell – this is selectable per call. |
@@ -22,4 +23,5 @@ Cross-cutting commands that operate outside the phase flow.
 | `/release-baseline` | Set project state as baseline | Makes a "cut" after a release: project state is documented as given, HANDOVER is archived and summarized, docs are split into Frozen/Active. |
 | `/roadmap-update` | Update an existing roadmap | This command updates an existing roadmap based on new findings, completed milestones, changed priorities, or new decisions. Each revision is versioned and timestamped with date + time. |
 | `/roadmap` | Create an initial roadmap | This command creates a first roadmap based on an existing rough concept. The roadmap structures epics, milestones, and dependencies either time-based (quarters/months) or phase-based (MVP, Phase 1, Phase 2...) – selectable depending on the project character. |
+| `/specialize` | Adapt agents to the project's tech stack | Writes project-local specialized copies of the technical agents (`senior-developer`, `code-reviewer`, `qa-tester`, `debugger`, `devops`, …) under `.claude/agents/` and injects a marker-delimited Project Tech Context block with stack-specific correctness/security/idiom rules per persona. `docs` mode reads the P3 `TECH_STACK.md` + ADRs; `codebase` mode scans an existing codebase's manifests + CI config. No auto-commit, no blind overwrite, `⚠ verify` instead of invented facts. |
 | `/user-stories` | Create or elaborate user stories | This command creates detailed user stories – either derived from an existing epic, roadmap, or concept, or standalone from a free description. Each story contains acceptance criteria, priority, dependencies, and a definition of done. |

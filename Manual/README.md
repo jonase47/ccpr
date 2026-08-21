@@ -23,7 +23,7 @@ phase system, the agent team, installation). The runtime references Claude reads
 
 - [`system/`](system/) — `SYSTEM_OVERVIEW.md` split into agents, phases-gates,
   commands, cross-cutting, monitoring-scripts, memory-instincts, file-structure,
-  scripts-conventions, discipline-gate.
+  scripts-conventions, discipline-gate, anchored-state.
 - [`commands/`](commands/) — `SECTIONS_COMMANDS.md` split into phases, gates,
   track, learning, utility.
 

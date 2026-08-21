@@ -2,7 +2,7 @@
 kind: system-doc-detail
 parent_index: ../SYSTEM_OVERVIEW.md
 section: command-system
-last_updated: 12.06.2026
+last_updated: 21.08.2026
 ---
 
 # Command System
@@ -12,9 +12,9 @@ last_updated: 12.06.2026
 - **82 phase commands** (P0: 3, P1: 5, P2: 4, P3: 23, P4: 4, P5: 12, P6: 22, P7: 5, P8: 4)
 - **12 gates** (8 main gates + 4 sub-gates for P6/P7)
 - **2 learning commands** (/postmortem, /instinct)
-- **13 utility commands** (/konzept, /konzept-update, /decision, /epic, /user-stories, /roadmap, /roadmap-update, /project-init, /logs-summary, /guide, /release-baseline, /cleanup, /specialize)
+- **14 utility commands** (/konzept, /konzept-update, /decision, /epic, /user-stories, /roadmap, /roadmap-update, /project-init, /logs-summary, /guide, /release-baseline, /cleanup, /specialize, /anchor)
 - **6 track + cross-cutting commands** (/track-decision, /constitution, /lean-frame, /lean-learn, /lean-promote, /cross-check)
-- **Total: 115 commands**
+- **Total: 116 commands**
 
 ## Naming Convention
 
