@@ -43,6 +43,18 @@ docs/decisions/
 docs/workitems/
 docs/memory/
 
+# Social-preview renders under docs/logo/. The tracked logo assets (icon SVGs,
+# wordmark PNGs) are referenced from the README; these two are not referenced
+# from anywhere in the repo -- they exist for a platform's repo-preview slot,
+# which is configured in the host's settings rather than from a file. Untracked
+# so they stop showing up in `git status` on the maintainer's checkout.
+# NOTE: this does not stop install.sh from shipping them. docs/logo/ is
+# allowlisted as a whole in scripts/lib/docs-framework-allowlist.txt, and
+# install_docs() reads the FILESYSTEM, not the git index -- an ignored file in
+# an allowlisted directory is still copied into ~/.claude/docs/logo/.
+docs/logo/ccpr-social-dark.png
+docs/logo/ccpr-social-light.png
+
 # WI-0058: volatile generator outputs directly under docs/ (session snapshots,
 # gate-preflight notes, quality-scan / cross-check / baseline-prep reports --
 # scripts/tests/test_docs_dotfile_gitignore_coverage.py sweeps the shipped
