@@ -21,9 +21,11 @@
 
 | Field | Values | Description |
 |---|---|---|
-| `related` | YAML list (inline or block) | Paths to related phase docs, **relative to the file's own directory**. Lint checks cross-ref existence. |
-| `parent_index` | Path | Sub-indexes link to their phase index (e.g. `ARCHITECTURE.md`). Phase indexes leave this field empty. |
+| `related` | YAML list (inline or block) | Paths to related phase docs. **Document-relative** (relative to the file's own directory) is the documented, preferred form. The lint also accepts a **project-root-relative** path (e.g. `docs/architecture/SECURITY.md`) as a fallback when the document-relative resolution misses — reported as an `info` finding, not silently, so root-relative usage stays visible instead of unnoticed drift (WI-0071). |
+| `parent_index` | Path | Sub-indexes link to their phase index (e.g. `ARCHITECTURE.md`). Phase indexes leave this field empty. Resolved the same document-relative-first, project-root-fallback way as `related` above. |
+| `base_commit`, `reviewed_head`, `reviewed_base` | Commit SHA | Written by `/p4-sprint` (`base_commit`, the sprint's starting `HEAD`) and by `/p5-review-sprint` (`reviewed_head`, the `HEAD` the review covered); `/gate-p5` compares `reviewed_head` against the current `HEAD` to decide whether a sprint review is stale. When present, the lint checks the **form** (7–40 hex characters, error) and, in a git repository, whether the SHA **resolves** to a commit (warning — a shallow clone, a rewritten history or a SHA from another repository are legitimate reasons to miss). Not to be confused with the anchor of ADR-0009, which is a separate key. |
 | `gate` | `pending` \| `conditional_go` \| `go` \| `no_go` | Only meaningful for `GATE_PX.md` files. |
+| `covers` | YAML list (inline or block) | **Code** paths (not doc paths) this document describes, e.g. `internal/auth/`, `src/domain/` — **relative to the project root**, exclusively (no document-relative fallback, unlike `related`/`parent_index` above). Lint checks path existence and flags an existing-but-empty directory. |
 
 ## Status semantics (vs. Memory schema)
 
@@ -37,7 +39,8 @@ Phase docs have **no stale detection** (unlike Memory). Instead:
 The lint enforces **one** part of this:
 
 - If a detail file declares `parent_index: SECURITY.md`, then `SECURITY.md` must **exist** — a path
-  check, resolved relative to the detail file's own directory.
+  check, resolved document-relative first and against the project root as a fallback (see the
+  `parent_index` row above; a root-relative hit is reported as `info`).
 
 Two further expectations are **conventions, not validations**. Nothing checks them:
 

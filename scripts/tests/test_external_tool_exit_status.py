@@ -710,19 +710,23 @@ class ExternalToolExitStatusTest(unittest.TestCase):
         under `|| true` with a `downstream-checks-result` marker (its
         output is tested for emptiness two lines later), two real `||`
         fallback-assignment branches, so `discard-needs-exemption` gains
-        one site and `checked-chain` gains two). 128 invocations total
-        across the 15 shipped files, split as below. A change in these
-        numbers means either a script changed shape or the scanner's own
-        logic changed -- worth a deliberate look either way, not a silent
-        drift."""
+        one site and `checked-chain` gains two; updated again 21.08.2026
+        when WI-0020's commit-anchor-family check added one
+        `git rev-parse --verify -q ... ^{commit}` call to
+        phase-docs-lint.sh, tested directly by its `if [[ ... ]] && ! git
+        ...; then` condition -- `checked-condition` gains one site). 129
+        invocations total across the 15 shipped files, split as below. A
+        change in these numbers means either a script changed shape or the
+        scanner's own logic changed -- worth a deliberate look either way,
+        not a silent drift."""
         invocations = scan_tree()
         by_disposition = {}
         for inv in invocations:
             by_disposition[inv.disposition] = by_disposition.get(inv.disposition, 0) + 1
-        self.assertEqual(128, len(invocations))
+        self.assertEqual(129, len(invocations))
         self.assertEqual(
             {
-                "checked-condition": 16,
+                "checked-condition": 17,
                 "checked-captured": 5,
                 "checked-chain": 16,
                 "discard-needs-exemption": 32,

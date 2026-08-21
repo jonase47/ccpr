@@ -7,6 +7,18 @@ All notable changes to this project are documented in this file. The format is b
 ## [Unreleased]
 
 ### Fixed
+- **`related:` and `parent_index:` rejected paths that point at files which exist (WI-0071).** The
+  schema documents these as document-relative and the lint resolved them that way; in the field authors
+  write them from the repository root. Measured in one project: 13 findings of the form
+  `related:'docs/CONSTITUTION.md' points to non-existent file (…/docs/reviews/docs/CONSTITUTION.md)` —
+  the doubled `docs/` is the entire defect, and every one of those targets exists. False positives at
+  error severity, the direction that breaks a correct run. Resolution is now document-relative first,
+  then project-root, and a hit on the second attempt is reported as an **`info`** naming both
+  candidates. Silence was the cheaper option and was rejected: two silently permitted bases are the
+  unvalidated spread this package exists to stop, and an info finding costs nothing on the exit code
+  while keeping the drift countable. Verified against the real project rather than only against
+  fixtures — with the reviews profile temporarily widened, those 13 errors become 0 errors and 13 info
+  findings.
 - **Two shipped documents stated a five-value `status` enum the schema and the linter never had.**
   `templates/PHASE_DOC_SCHEMA.md` and `phase-docs-lint.sh` both carry six values — `living` is a real,
   documented status for detail files designed to keep growing (SPRINT-XX.md, RISKS.md) — while
@@ -304,6 +316,26 @@ All notable changes to this project are documented in this file. The format is b
   the index and all theme files.
 
 ### Added
+- **`covers:` — an optional, lint-validated list of the code paths a phase document describes
+  (WI-0020).** Resolved against the **project root** only, with no document-relative fallback: these
+  are code paths, not doc references. A path that does not exist is an error; a path that exists but
+  contains no file at any depth is a warning, because ADR-0009 requires that a list which has quietly
+  stopped covering anything cannot report clean — the first implementation answered "does this
+  directory contain any entry", which let a tree of empty subdirectories pass, and now answers "does
+  this path cover any code". A directory whose only content is a `.gitkeep` counts as covered; that is
+  a deliberate non-decision recorded in place, since treating dotfiles specially is a rule nobody made.
+  The check runs in every profile because it is purely opt-in — measured: `covers:` appears zero times
+  across three real projects, so it costs a project nothing until it adopts the field.
+- **The commit-anchor family CCPR already writes is validated (`base_commit`, `reviewed_head`,
+  `reviewed_base`).** `/p4-sprint` writes `base_commit`, `/p5-review-sprint` records `reviewed_head`,
+  and `/gate-p5` compares it against `HEAD` to decide whether a sprint review is stale — a recorded SHA
+  on a phase document spanning a delta, shipped for months and never checked. In the field: 34
+  documents across two projects, roughly ten spellings, none validated. When one of the three keys is
+  set, the form is now checked (7–40 hex, error) and, inside a git repository, whether it resolves to a
+  commit (warning — a shallow clone, a rewritten history or a foreign SHA are legitimate misses).
+  Measured before shipping: all 47 occurrences are well-formed and resolvable, so the check costs zero
+  findings today. The repository test initially missed linked worktrees and submodules, where `.git` is
+  a **file** — the same unresolvable SHA warned in a main repo and stayed silent in its worktree.
 - **`phase-docs-lint.sh` has test coverage for the first time (`scripts/tests/test_phase_docs_lint.py`,
   28 tests).** 207 lines that every CCPR project runs, shipped with nothing but the generic `bash -n`
   sweep and the exit-status inventory pointing at it. Two work items are about to change this exact

@@ -25,6 +25,7 @@ original text. The mutation-to-test mapping is reported in the session
 summary, not encoded here.
 """
 
+import os
 import shutil
 import subprocess
 import tempfile
@@ -95,6 +96,56 @@ class PhaseDocsLintTestBase(unittest.TestCase):
             ["bash", str(SCRIPT_PATH), str(project_dir or self.project_dir), *args],
             capture_output=True, text=True,
         )
+
+    def init_git_repo(self):
+        """Turns self.project_dir into a one-commit git repo, for the
+        commit-anchor-family resolvability checks. Returns the HEAD SHA.
+        Pattern borrowed from test_artifact_gate.py -- no HOME sandboxing
+        needed here (see module docstring), so this uses the real
+        environment plus author/committer identity overrides."""
+        env = {
+            **os.environ,
+            "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@host.invalid",
+            "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@host.invalid",
+        }
+        subprocess.run(["git", "init", "-q"], cwd=self.project_dir, check=True, env=env)
+        (self.project_dir / "README.md").write_text("seed\n", encoding="utf-8")
+        subprocess.run(["git", "add", "-A"], cwd=self.project_dir, check=True, env=env)
+        subprocess.run(["git", "commit", "-qm", "seed"], cwd=self.project_dir, check=True, env=env)
+        head = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=self.project_dir, check=True,
+            capture_output=True, text=True, env=env,
+        ).stdout.strip()
+        return head
+
+    def add_worktree(self, branch="wt-branch"):
+        """Adds a linked worktree of self.project_dir (which must already be
+        a git repo via init_git_repo()) at a fresh temp directory and returns
+        its path. This is the reproduction vehicle for the `.git`-is-a-file
+        case: a linked worktree's `.git` is a FILE containing `gitdir: ...`,
+        not a directory -- the same is true for a git submodule's checkout.
+        Both are the case GIT_CHECKABLE's `-d "$PROJECT_DIR/.git"` guard
+        historically missed."""
+        env = {
+            **os.environ,
+            "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@host.invalid",
+            "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@host.invalid",
+        }
+        worktree_dir = Path(tempfile.mkdtemp(prefix="ccpr-phase-docs-lint-wt-"))
+        subprocess.run(
+            ["git", "worktree", "add", "-q", str(worktree_dir), "-b", branch],
+            cwd=self.project_dir, check=True, env=env,
+        )
+
+        def cleanup():
+            subprocess.run(
+                ["git", "worktree", "remove", "--force", str(worktree_dir)],
+                cwd=self.project_dir, env=env, capture_output=True,
+            )
+            shutil.rmtree(worktree_dir, ignore_errors=True)
+
+        self.addCleanup(cleanup)
+        return worktree_dir
 
     @staticmethod
     def findings(output, heading):
@@ -312,7 +363,15 @@ class CheckFRelatedCrossRefsTest(PhaseDocsLintTestBase):
         result = self.run_lint()
 
         errors = self.findings(result.stdout, "Errors")
+        infos = self.findings(result.stdout, "Info")
         self.assertFalse(any("related:" in e for e in errors), errors)
+        # A document-relative hit must stay completely silent -- no root
+        # fallback info (WI-0071). The order-swap regression this guards
+        # against is exercised more precisely in
+        # WI0071RootFallbackTest.test_related_entry_resolvable_document_relative_produces_no_info,
+        # where a root-relative hit also exists so a "check root first"
+        # implementation would be forced to disagree with this assertion.
+        self.assertEqual(infos, [], infos)
 
     def test_inline_related_pointing_to_a_missing_file_is_reported(self):
         self.write_doc(
@@ -339,7 +398,9 @@ class CheckFRelatedCrossRefsTest(PhaseDocsLintTestBase):
         result = self.run_lint()
 
         errors = self.findings(result.stdout, "Errors")
+        infos = self.findings(result.stdout, "Info")
         self.assertFalse(any("related:" in e for e in errors), errors)
+        self.assertEqual(infos, [], infos)
 
     def test_block_related_pointing_to_a_missing_file_is_reported(self):
         self.write_doc(
@@ -370,7 +431,9 @@ class CheckGParentIndexTest(PhaseDocsLintTestBase):
         result = self.run_lint()
 
         errors = self.findings(result.stdout, "Errors")
+        infos = self.findings(result.stdout, "Info")
         self.assertFalse(any("parent_index=" in e for e in errors), errors)
+        self.assertEqual(infos, [], infos)
 
     def test_parent_index_pointing_to_a_missing_file_is_reported(self):
         self.write_doc(
@@ -385,6 +448,553 @@ class CheckGParentIndexTest(PhaseDocsLintTestBase):
             any("detail-bad.md" in e and "parent_index='GHOST_INDEX.md' points to "
                 "non-existent file" in e for e in errors),
             errors,
+        )
+
+
+class WI0071RootFallbackTest(PhaseDocsLintTestBase):
+    """WI-0071: related:/parent_index: entries are resolved document-relative
+    first (the documented, preferred form) -- but when that misses, a
+    project-root-relative resolution is tried before declaring the entry
+    dead. PO decision 21.08.2026: a root-relative hit is `info`, not silence
+    and not `err` -- silently accepting two bases would be exactly the kind
+    of unvalidated frontmatter drift this lint exists to catch. Root-cause:
+    real projects write entries like `docs/CONSTITUTION.md`, meaning "from
+    the repo root", not "from this file's own directory"."""
+
+    def test_related_entry_resolvable_only_at_project_root_is_info_not_error(self):
+        self.write_doc("architecture/ROOT_TARGET.md", doc_text())
+        self.write_doc(
+            "architecture/main-root.md",
+            doc_text(extra_lines=["related: [docs/architecture/ROOT_TARGET.md]"]),
+        )
+
+        result = self.run_lint()
+
+        errors = self.findings(result.stdout, "Errors")
+        infos = self.findings(result.stdout, "Info")
+        self.assertFalse(any("related:" in e for e in errors), errors)
+        self.assertTrue(
+            any(
+                "main-root.md" in i
+                and "related:'docs/architecture/ROOT_TARGET.md'" in i
+                and "root fallback" in i
+                for i in infos
+            ),
+            infos,
+        )
+
+    def test_related_entry_resolvable_at_neither_base_stays_an_error(self):
+        self.write_doc(
+            "architecture/main-neither.md",
+            doc_text(extra_lines=["related: [docs/architecture/GHOST3.md]"]),
+        )
+
+        result = self.run_lint()
+
+        errors = self.findings(result.stdout, "Errors")
+        infos = self.findings(result.stdout, "Info")
+        self.assertTrue(
+            any(
+                "main-neither.md" in e
+                and "related:'docs/architecture/GHOST3.md' points to non-existent file" in e
+                for e in errors
+            ),
+            errors,
+        )
+        self.assertFalse(any("main-neither.md" in i for i in infos), infos)
+
+    def test_related_entry_resolvable_document_relative_produces_no_info(self):
+        """Order guard: the entry resolves at BOTH bases (document-relative
+        AND project-root), so a "check root first" resolution-order
+        regression would still succeed silently -- but would do so via the
+        wrong branch. Pinning "no info" here only proves the fallback
+        wasn't needed; the entry text intentionally does not collide with
+        the wording pinned in the Info-branch tests above, so this test
+        cannot pass by accident if the info() call fires unconditionally."""
+        self.write_doc("architecture/DOC_RELATIVE_SIDECAR.md", doc_text())
+        # Root-relative would resolve against $PROJECT_DIR (not docs/) for an
+        # entry with no "docs/" prefix -- plant it there, not via write_doc
+        # (which always writes under docs/).
+        (self.project_dir / "DOC_RELATIVE_SIDECAR.md").write_text(doc_text(), encoding="utf-8")
+        self.write_doc(
+            "architecture/main-doc-relative.md",
+            doc_text(extra_lines=["related: [DOC_RELATIVE_SIDECAR.md]"]),
+        )
+
+        result = self.run_lint()
+
+        infos = self.findings(result.stdout, "Info")
+        errors = self.findings(result.stdout, "Errors")
+        self.assertEqual(infos, [], infos)
+        self.assertFalse(any("related:" in e for e in errors), errors)
+
+    def test_parent_index_entry_resolvable_only_at_project_root_is_info_not_error(self):
+        self.write_doc("architecture/ROOT_INDEX.md", doc_text())
+        self.write_doc(
+            "architecture/detail-root.md",
+            doc_text(extra_lines=["parent_index: docs/architecture/ROOT_INDEX.md"]),
+        )
+
+        result = self.run_lint()
+
+        errors = self.findings(result.stdout, "Errors")
+        infos = self.findings(result.stdout, "Info")
+        self.assertFalse(any("parent_index=" in e for e in errors), errors)
+        self.assertTrue(
+            any(
+                "detail-root.md" in i
+                and "parent_index='docs/architecture/ROOT_INDEX.md'" in i
+                and "root fallback" in i
+                for i in infos
+            ),
+            infos,
+        )
+
+    def test_parent_index_entry_resolvable_at_neither_base_stays_an_error(self):
+        self.write_doc(
+            "architecture/detail-neither.md",
+            doc_text(extra_lines=["parent_index: docs/architecture/GHOST_INDEX3.md"]),
+        )
+
+        result = self.run_lint()
+
+        errors = self.findings(result.stdout, "Errors")
+        infos = self.findings(result.stdout, "Info")
+        self.assertTrue(
+            any(
+                "detail-neither.md" in e
+                and "parent_index='docs/architecture/GHOST_INDEX3.md' points to "
+                "non-existent file" in e
+                for e in errors
+            ),
+            errors,
+        )
+        self.assertFalse(any("detail-neither.md" in i for i in infos), infos)
+
+    def test_parent_index_entry_resolvable_document_relative_produces_no_info(self):
+        """Same order guard as the related: case above, for parent_index:."""
+        self.write_doc("architecture/DOC_RELATIVE_INDEX.md", doc_text())
+        (self.project_dir / "DOC_RELATIVE_INDEX.md").write_text(doc_text(), encoding="utf-8")
+        self.write_doc(
+            "architecture/detail-doc-relative.md",
+            doc_text(extra_lines=["parent_index: DOC_RELATIVE_INDEX.md"]),
+        )
+
+        result = self.run_lint()
+
+        infos = self.findings(result.stdout, "Info")
+        errors = self.findings(result.stdout, "Errors")
+        self.assertEqual(infos, [], infos)
+        self.assertFalse(any("parent_index=" in e for e in errors), errors)
+
+
+class CheckHCoversTest(PhaseDocsLintTestBase):
+    """(h) covers: is a new optional field (WI-0020) naming code paths (not
+    doc paths) a document describes -- resolved *exclusively* against
+    $PROJECT_DIR, no document-relative fallback (unlike WI-0071's
+    related:/parent_index: above -- these are code paths, not doc
+    cross-refs, so there is no "file's own directory" to fall back from).
+    Entries are typically directories, so the existence test must be `-e`,
+    not `-f` (a directory always fails `-f`). An existing-but-empty
+    directory is a `warn`, not an `err` -- it is not a broken reference,
+    but a degenerate one: the list covers nothing (ADR-0009). The check is
+    opt-in and runs in every profile, including `reviews` -- it only ever
+    fires when `covers:` is actually set, so it cannot regress the "reviews
+    only enforces status enum" contract for documents that don't use it."""
+
+    def test_covers_entry_pointing_to_an_existing_nonempty_directory_produces_no_findings(self):
+        (self.project_dir / "src" / "domain").mkdir(parents=True)
+        (self.project_dir / "src" / "domain" / "widget.py").write_text("# code\n")
+        self.write_doc(
+            "architecture/covers-ok.md",
+            doc_text(extra_lines=["covers: [src/domain/]"]),
+        )
+
+        result = self.run_lint()
+
+        errors = self.findings(result.stdout, "Errors")
+        warnings = self.findings(result.stdout, "Warnings")
+        self.assertFalse(any("covers:" in e for e in errors), errors)
+        self.assertFalse(any("covers:" in w for w in warnings), warnings)
+
+    def test_covers_entry_block_syntax_existing_nonempty_directory_produces_no_findings(self):
+        (self.project_dir / "src" / "adapters").mkdir(parents=True)
+        (self.project_dir / "src" / "adapters" / "http.py").write_text("# code\n")
+        self.write_doc(
+            "architecture/covers-block-ok.md",
+            doc_text(extra_lines=["covers:", "  - src/adapters/"]),
+        )
+
+        result = self.run_lint()
+
+        errors = self.findings(result.stdout, "Errors")
+        warnings = self.findings(result.stdout, "Warnings")
+        self.assertFalse(any("covers:" in e for e in errors), errors)
+        self.assertFalse(any("covers:" in w for w in warnings), warnings)
+
+    def test_covers_entry_nonexistent_path_is_reported_as_error(self):
+        self.write_doc(
+            "architecture/covers-missing.md",
+            doc_text(extra_lines=["covers: [src/ghost/]"]),
+        )
+
+        result = self.run_lint()
+
+        errors = self.findings(result.stdout, "Errors")
+        self.assertTrue(
+            any(
+                "covers-missing.md" in e
+                and "covers:'src/ghost/' points to non-existent path" in e
+                for e in errors
+            ),
+            errors,
+        )
+
+    def test_covers_entry_existing_empty_directory_is_reported_as_warning(self):
+        (self.project_dir / "src" / "empty").mkdir(parents=True)
+        self.write_doc(
+            "architecture/covers-empty.md",
+            doc_text(extra_lines=["covers: [src/empty/]"]),
+        )
+
+        result = self.run_lint()
+
+        errors = self.findings(result.stdout, "Errors")
+        warnings = self.findings(result.stdout, "Warnings")
+        self.assertFalse(any("covers:" in e for e in errors), errors)
+        self.assertTrue(
+            any(
+                "covers-empty.md" in w and "covers:'src/empty/' is an empty directory" in w
+                for w in warnings
+            ),
+            warnings,
+        )
+
+    def test_covers_entry_pointing_to_an_existing_file_produces_no_findings(self):
+        """Guards `-e` vs `-f`: a single-file covers: entry must stay
+        silent. `-f` alone would also accept this case -- the discriminator
+        against a `-f`-only implementation is the directory test above,
+        which `-f` would wrongly flag as non-existent."""
+        (self.project_dir / "src").mkdir(parents=True)
+        (self.project_dir / "src" / "single_module.py").write_text("# code\n")
+        self.write_doc(
+            "architecture/covers-file.md",
+            doc_text(extra_lines=["covers: [src/single_module.py]"]),
+        )
+
+        result = self.run_lint()
+
+        errors = self.findings(result.stdout, "Errors")
+        warnings = self.findings(result.stdout, "Warnings")
+        self.assertFalse(any("covers:" in e for e in errors), errors)
+        self.assertFalse(any("covers:" in w for w in warnings), warnings)
+
+    def test_covers_entry_is_resolved_exclusively_against_project_root(self):
+        """No document-relative fallback for covers: -- plant the entry so
+        it WOULD resolve under a (wrong) document-relative attempt, and
+        assert it is still reported dead because only $PROJECT_DIR counts."""
+        (self.docs_dir / "architecture" / "src-lookalike").mkdir(parents=True)
+        (self.docs_dir / "architecture" / "src-lookalike" / "x.py").write_text("# code\n")
+        self.write_doc(
+            "architecture/covers-doc-relative-must-not-resolve.md",
+            doc_text(extra_lines=["covers: [src-lookalike/]"]),
+        )
+
+        result = self.run_lint()
+
+        errors = self.findings(result.stdout, "Errors")
+        self.assertTrue(
+            any(
+                "covers-doc-relative-must-not-resolve.md" in e
+                and "covers:'src-lookalike/' points to non-existent path" in e
+                for e in errors
+            ),
+            errors,
+        )
+
+    def test_covers_field_absent_produces_no_findings(self):
+        self.write_doc("architecture/no-covers.md", doc_text())
+
+        result = self.run_lint()
+
+        self.assertFalse(any("covers" in e for e in self.findings(result.stdout, "Errors")))
+        self.assertFalse(any("covers" in w for w in self.findings(result.stdout, "Warnings")))
+
+    def test_covers_check_runs_in_the_reviews_profile_too(self):
+        self.write_doc(
+            "reviews/covers-in-reviews.md",
+            doc_text(
+                phase=None, subskill=None, status="active", last_updated=None,
+                extra_lines=["covers: [src/ghost-in-reviews/]"],
+            ),
+        )
+
+        result = self.run_lint()
+
+        errors = self.findings(result.stdout, "Errors")
+        self.assertTrue(
+            any(
+                "covers-in-reviews.md" in e
+                and "covers:'src/ghost-in-reviews/' points to non-existent path" in e
+                for e in errors
+            ),
+            errors,
+        )
+
+
+class CheckHCoversEmptyDirectoryDetectionTest(PhaseDocsLintTestBase):
+    """is_empty_dir() answers "does this directory contain zero entries at
+    all" via `find -mindepth 1 -print -quit`, but that probe matches ANY
+    entry, including a subdirectory. A directory tree that consists solely
+    of nested empty subdirectories therefore counts as non-empty and stays
+    silent -- even though it covers zero files, exactly what ADR-0009
+    forbids a `covers:` entry from doing unnoticed. Reproduced directly at
+    the terminal (21.08.2026) before this test was written: `covers:
+    src/leer/` where `src/leer/` contains only the empty `src/leer/
+    tiefer_leer/` produced 0 errors, 0 warnings.
+
+    The right question is not "does this directory contain any entry" but
+    "does this path cover any actual file" -- so the fix probes for regular
+    files at any depth (`find -type f -print -quit`), not just any entry at
+    depth 1.
+    """
+
+    def test_directory_containing_only_empty_nested_subdirectories_is_reported_as_warning(self):
+        (self.project_dir / "src" / "leer" / "tiefer_leer").mkdir(parents=True)
+        self.write_doc(
+            "architecture/covers-nested-empty.md",
+            doc_text(extra_lines=["covers: [src/leer/]"]),
+        )
+
+        result = self.run_lint()
+
+        errors = self.findings(result.stdout, "Errors")
+        warnings = self.findings(result.stdout, "Warnings")
+        self.assertFalse(any("covers:" in e for e in errors), errors)
+        self.assertTrue(
+            any(
+                "covers-nested-empty.md" in w and "covers:'src/leer/' is an empty directory" in w
+                for w in warnings
+            ),
+            warnings,
+        )
+
+    def test_directory_with_a_file_several_levels_deep_produces_no_findings(self):
+        deep = self.project_dir / "src" / "tief" / "a" / "b" / "c"
+        deep.mkdir(parents=True)
+        (deep / "file.py").write_text("# code\n")
+        self.write_doc(
+            "architecture/covers-deep-file.md",
+            doc_text(extra_lines=["covers: [src/tief/]"]),
+        )
+
+        result = self.run_lint()
+
+        errors = self.findings(result.stdout, "Errors")
+        warnings = self.findings(result.stdout, "Warnings")
+        self.assertFalse(any("covers:" in e for e in errors), errors)
+        self.assertFalse(any("covers:" in w for w in warnings), warnings)
+
+    def test_directory_whose_only_content_is_a_gitkeep_file_is_not_reported_as_empty(self):
+        """Deliberate non-decision, kept as documented behaviour, not a
+        gap: a directory whose sole content is a `.gitkeep` counts as
+        non-empty, same as any other file. `.gitkeep` is a convention, not
+        something the filesystem or `find -type f` treats specially -- a
+        file is a file. Carving out dotfiles would be a rule nobody asked
+        for."""
+        gitkeep_dir = self.project_dir / "src" / "gitkeep-only"
+        gitkeep_dir.mkdir(parents=True)
+        (gitkeep_dir / ".gitkeep").write_text("")
+        self.write_doc(
+            "architecture/covers-gitkeep-only.md",
+            doc_text(extra_lines=["covers: [src/gitkeep-only/]"]),
+        )
+
+        result = self.run_lint()
+
+        errors = self.findings(result.stdout, "Errors")
+        warnings = self.findings(result.stdout, "Warnings")
+        self.assertFalse(any("covers:" in e for e in errors), errors)
+        self.assertFalse(any("covers:" in w for w in warnings), warnings)
+
+
+class CommitAnchorFamilyTest(PhaseDocsLintTestBase):
+    """New check for the commit-anchor family: base_commit, reviewed_head,
+    reviewed_base -- CCPR-generated commit-SHA pointers (/p4-sprint sets
+    base_commit, /p5-review-sprint sets reviewed_head, /gate-p5 compares
+    reviewed_head against HEAD; reviewed_base is a field variant seen in
+    the wild). None of the three was validated before this check -- the
+    same unvalidated-frontmatter pattern WI-0020 warns about, just
+    CCPR-authored rather than user-authored. Form (hex, 7-40 chars) is an
+    `err`; unresolvability against the project's git history is a `warn`
+    (a shallow clone, rewritten history, or a foreign-repo SHA are all
+    legitimate reasons a lint run should not hard-fail on). If the project
+    is not a git repository, the resolvability half is skipped entirely
+    and silently -- only the form check still applies."""
+
+    ANCHOR_FIELDS = ("base_commit", "reviewed_head", "reviewed_base")
+
+    def test_each_anchor_field_with_malformed_value_is_reported_as_error(self):
+        for field in self.ANCHOR_FIELDS:
+            with self.subTest(field=field):
+                rel = f"architecture/anchor-bad-{field}.md"
+                self.write_doc(rel, doc_text(extra_lines=[f"{field}: not-a-sha"]))
+
+                result = self.run_lint()
+
+                errors = self.findings(result.stdout, "Errors")
+                self.assertTrue(
+                    any(
+                        rel in e and f"{field}='not-a-sha' is not a valid commit SHA" in e
+                        for e in errors
+                    ),
+                    (field, errors),
+                )
+                (self.docs_dir / rel).unlink()
+
+    def test_each_anchor_field_with_too_short_hex_value_is_reported_as_error(self):
+        for field in self.ANCHOR_FIELDS:
+            with self.subTest(field=field):
+                rel = f"architecture/anchor-short-{field}.md"
+                # 6 hex chars -- one short of the documented 7-char minimum.
+                self.write_doc(rel, doc_text(extra_lines=[f"{field}: abc123"]))
+
+                result = self.run_lint()
+
+                errors = self.findings(result.stdout, "Errors")
+                self.assertTrue(
+                    any(
+                        rel in e and f"{field}='abc123' is not a valid commit SHA" in e
+                        for e in errors
+                    ),
+                    (field, errors),
+                )
+                (self.docs_dir / rel).unlink()
+
+    def test_each_anchor_field_with_valid_hex_in_a_non_git_project_produces_no_findings(self):
+        """self.project_dir deliberately stays a non-git directory here --
+        the resolvability half must be skipped entirely (not attempted and
+        somehow swallowed), or a "check root guard removed" mutation would
+        make `git rev-parse` fail against a non-repository and turn this
+        into a false warning."""
+        for field in self.ANCHOR_FIELDS:
+            with self.subTest(field=field):
+                rel = f"architecture/anchor-nongit-{field}.md"
+                self.write_doc(rel, doc_text(extra_lines=[f"{field}: abc1234"]))  # 7 hex chars
+
+                result = self.run_lint()
+
+                errors = self.findings(result.stdout, "Errors")
+                warnings = self.findings(result.stdout, "Warnings")
+                self.assertFalse(any(field in e for e in errors), (field, errors))
+                self.assertFalse(any(field in w for w in warnings), (field, warnings))
+                (self.docs_dir / rel).unlink()
+
+    def test_anchor_resolvable_to_an_actual_commit_produces_no_findings(self):
+        head = self.init_git_repo()
+        self.write_doc(
+            "architecture/anchor-resolvable.md",
+            doc_text(extra_lines=[f"base_commit: {head}"]),
+        )
+
+        result = self.run_lint()
+
+        errors = self.findings(result.stdout, "Errors")
+        warnings = self.findings(result.stdout, "Warnings")
+        self.assertFalse(any("base_commit" in e for e in errors), errors)
+        self.assertFalse(any("base_commit" in w for w in warnings), warnings)
+
+    def test_anchor_valid_form_but_unresolvable_commit_is_a_warning_not_an_error(self):
+        self.init_git_repo()
+        fake_sha = "d" * 40  # valid hex, astronomically unlikely to exist
+        self.write_doc(
+            "architecture/anchor-unresolvable.md",
+            doc_text(extra_lines=[f"reviewed_head: {fake_sha}"]),
+        )
+
+        result = self.run_lint()
+
+        errors = self.findings(result.stdout, "Errors")
+        warnings = self.findings(result.stdout, "Warnings")
+        self.assertFalse(any("reviewed_head" in e for e in errors), errors)
+        self.assertTrue(
+            any(
+                "anchor-unresolvable.md" in w
+                and f"reviewed_head='{fake_sha}' does not resolve to a commit" in w
+                for w in warnings
+            ),
+            warnings,
+        )
+
+    def test_anchor_fields_absent_produce_no_findings(self):
+        self.write_doc("architecture/no-anchors.md", doc_text())
+
+        result = self.run_lint()
+
+        errors = self.findings(result.stdout, "Errors")
+        warnings = self.findings(result.stdout, "Warnings")
+        for field in self.ANCHOR_FIELDS:
+            self.assertFalse(any(field in e for e in errors), (field, errors))
+            self.assertFalse(any(field in w for w in warnings), (field, warnings))
+
+    def test_anchor_check_runs_in_the_reviews_profile_too(self):
+        self.write_doc(
+            "reviews/anchor-in-reviews.md",
+            doc_text(
+                phase=None, subskill=None, status="active", last_updated=None,
+                extra_lines=["base_commit: not-a-sha"],
+            ),
+        )
+
+        result = self.run_lint()
+
+        errors = self.findings(result.stdout, "Errors")
+        self.assertTrue(
+            any(
+                "anchor-in-reviews.md" in e
+                and "base_commit='not-a-sha' is not a valid commit SHA" in e
+                for e in errors
+            ),
+            errors,
+        )
+
+
+class GitCheckableGuardTest(PhaseDocsLintTestBase):
+    """The commit-anchor family's resolvability half (check (i)) is gated by
+    GIT_CHECKABLE, which the script derives once per run from
+    `-d "$PROJECT_DIR/.git"`. That test is true for a normal repository's
+    `.git` directory, but FALSE for a linked worktree's or a submodule's
+    `.git` -- both are a FILE (`gitdir: /path/to/real/.git/worktrees/...`).
+    Before the fix, running the lint from inside a worktree silently skipped
+    the resolvability check: same unresolvable base_commit, zero warnings,
+    which looks like a clean result rather than a skipped check. Reproduced
+    directly at the terminal (21.08.2026) before this test was written."""
+
+    def test_unresolvable_anchor_is_still_warned_from_a_linked_worktree(self):
+        self.init_git_repo()
+        worktree_dir = self.add_worktree()
+        self.assertTrue(
+            (worktree_dir / ".git").is_file(),
+            "test setup assumption broken: a linked worktree's .git must be "
+            "a file, not a directory -- otherwise this test doesn't "
+            "reproduce the bug it's meant to catch",
+        )
+        docs_dir = worktree_dir / "docs" / "architecture"
+        docs_dir.mkdir(parents=True)
+        (docs_dir / "anchor.md").write_text(
+            doc_text(extra_lines=["base_commit: deadbeef"]), encoding="utf-8"
+        )
+
+        result = self.run_lint(project_dir=worktree_dir)
+
+        warnings = self.findings(result.stdout, "Warnings")
+        self.assertTrue(
+            any(
+                "anchor.md" in w
+                and "base_commit='deadbeef' does not resolve to a commit" in w
+                for w in warnings
+            ),
+            warnings,
         )
 
 

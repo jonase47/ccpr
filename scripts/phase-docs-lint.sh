@@ -44,6 +44,20 @@ done
 PROJECT_DIR="${PROJECT_DIR:-$(pwd)}"
 DOCS_DIR="$PROJECT_DIR/docs"
 
+# Commit-anchor-family resolvability is only attempted once per run, not
+# once per file — computed here, consumed by check (i) inside the loop.
+# `-e "$PROJECT_DIR/.git"` deliberately checks the given project dir
+# itself, not an upward search (`git rev-parse --is-inside-work-tree`
+# would climb past PROJECT_DIR into an unrelated enclosing repo). `-e`,
+# not `-d`: in a linked worktree or a submodule checkout, `.git` is a FILE
+# (`gitdir: /path/to/real/.git/worktrees/...`), not a directory — `-d`
+# silently left GIT_CHECKABLE at 0 there, skipping check (i) with no
+# indication.
+GIT_CHECKABLE=0
+if [[ -e "$PROJECT_DIR/.git" ]] && command -v git >/dev/null 2>&1; then
+    GIT_CHECKABLE=1
+fi
+
 PHASE_FOLDERS=(discovery concept validation architecture planning quality launch operations reviews)
 LIVING_FILES="HANDOVER.md BASELINE.md BACKLOG.md SPRINT.md MEMORY.md instincts.md"
 VALID_STATUS="skeleton draft active frozen archived living"
@@ -100,6 +114,19 @@ is_valid_phase() {
         [[ "$p" == "$v" ]] && return 0
     done
     return 1
+}
+
+# is_empty_dir — the question is not "does this directory contain any
+# entry" but "does it cover any actual file": a tree consisting solely of
+# nested empty subdirectories must still count as empty. `find -type f
+# -print -quit` is the portable (bash 3.2 has no bulk-line-into-array
+# builtins) single-file-or-nothing probe, at any depth. A directory whose
+# only content is a `.gitkeep` therefore counts as non-empty — a file is a
+# file, and carving out dotfiles as a special case would be a rule nobody
+# decided.
+is_empty_dir() {
+    local d="$1"
+    [[ -z "$(find "$d" -type f -print -quit 2>/dev/null)" ]]
 }
 
 if [[ ! -d "$DOCS_DIR" ]]; then
@@ -179,23 +206,79 @@ for file in ${FILES[@]+"${FILES[@]}"}; do
             err "$rel — last_updated='$last_updated' not in format 'DD.MM.YYYY' or 'DD.MM.YYYY (note)'"
         fi
 
-        # (f) related: cross-refs
+        # (f) related: cross-refs — resolved document-relative first (the
+        # documented form: PHASE_DOC_SCHEMA.md says "relative to the file's
+        # own directory"). Authors in the field write these entries
+        # project-root-relative instead (e.g. `docs/CONSTITUTION.md`), so a
+        # miss falls back to $PROJECT_DIR before being declared dead
+        # (WI-0071, PO decision 21.08.2026). A root-relative hit is `info`,
+        # not silence — accepting two bases without saying so would be
+        # exactly the unvalidated drift this lint exists to catch.
         base_dir="$(dirname "$file")"
         while IFS= read -r rel_entry; do
             [[ -z "$rel_entry" ]] && continue
-            if [[ ! -f "$base_dir/$rel_entry" ]]; then
+            if [[ -f "$base_dir/$rel_entry" ]]; then
+                : # document-relative hit — the documented, silent case
+            elif [[ -f "$PROJECT_DIR/$rel_entry" ]]; then
+                info "$rel — related:'$rel_entry' resolved via project-root fallback ($PROJECT_DIR/$rel_entry), not found relative to $base_dir"
+            else
                 err "$rel — related:'$rel_entry' points to non-existent file ($base_dir/$rel_entry)"
             fi
         done < <(fm_list "$file" related)
 
-        # (g) parent_index — if set, the file must exist
+        # (g) parent_index — same document-relative-first, root-fallback
+        # resolution as (f) above, same key/schema statement.
         parent_idx="$(fm_field "$file" parent_index || true)"
         if [[ -n "$parent_idx" ]]; then
-            if [[ ! -f "$base_dir/$parent_idx" ]]; then
+            if [[ -f "$base_dir/$parent_idx" ]]; then
+                : # document-relative hit — the documented, silent case
+            elif [[ -f "$PROJECT_DIR/$parent_idx" ]]; then
+                info "$rel — parent_index='$parent_idx' resolved via project-root fallback ($PROJECT_DIR/$parent_idx), not found relative to $base_dir"
+            else
                 err "$rel — parent_index='$parent_idx' points to non-existent file"
             fi
         fi
     fi
+
+    # (h) covers: code paths this document describes (WI-0020) — resolved
+    # *exclusively* against $PROJECT_DIR, no document-relative fallback:
+    # these are code paths, not doc cross-refs, so there is no "file's own
+    # directory" to fall back from (unlike (f)/(g) above). Runs in every
+    # profile — opt-in, only fires when covers: is actually set, so it
+    # costs a project nothing until it adopts the field. Measured: covers:
+    # appears in zero documents across all three CCPR reference projects.
+    while IFS= read -r covers_entry; do
+        [[ -z "$covers_entry" ]] && continue
+        covers_path="$PROJECT_DIR/$covers_entry"
+        if [[ ! -e "$covers_path" ]]; then
+            err "$rel — covers:'$covers_entry' points to non-existent path ($covers_path)"
+        elif [[ -d "$covers_path" ]] && is_empty_dir "$covers_path"; then
+            warn "$rel — covers:'$covers_entry' is an empty directory ($covers_path) — the list covers nothing"
+        fi
+    done < <(fm_list "$file" covers)
+
+    # (i) Commit-anchor family: base_commit (/p4-sprint), reviewed_head
+    # (/p5-review-sprint, compared against HEAD by /gate-p5), reviewed_base
+    # (field variant) — all optional, all CCPR-generated, none validated
+    # before this check. Runs in every profile — opt-in, only fires when
+    # one of the three keys is actually set. Form (hex, 7-40 chars) is an
+    # err; unresolvability against the project's git history is a warn —
+    # a shallow clone, rewritten history, or a foreign-repo SHA are all
+    # legitimate reasons not to hard-fail a lint run on it. If the project
+    # isn't a git repository (or git isn't on PATH), the resolvability
+    # half is skipped entirely and silently; the form check still runs.
+    for anchor_key in base_commit reviewed_head reviewed_base; do
+        anchor_val="$(fm_field "$file" "$anchor_key" || true)"
+        [[ -z "$anchor_val" ]] && continue
+        if ! [[ "$anchor_val" =~ ^[0-9a-fA-F]{7,40}$ ]]; then
+            err "$rel — $anchor_key='$anchor_val' is not a valid commit SHA (7-40 hex chars)"
+            continue
+        fi
+        if [[ "$GIT_CHECKABLE" == "1" ]] \
+            && ! git -C "$PROJECT_DIR" rev-parse --verify -q "${anchor_val}^{commit}" >/dev/null 2>&1; then
+            warn "$rel — $anchor_key='$anchor_val' does not resolve to a commit in this repository"
+        fi
+    done
 done
 
 # Report output
