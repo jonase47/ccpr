@@ -328,6 +328,10 @@ All notable changes to this project are documented in this file. The format is b
   the index and all theme files.
 
 ### Added
+- **ADR-0009 is `accepted`.** Decided 18.08.2026, implemented across WI-0019…WI-0022, and completed
+  by three addenda: the first correcting nine of its own statements against the shipped code before
+  anything was built, the second resolving where the scope anchor lives, the third settling
+  acknowledgement authority. Package B is closed.
 - **Acknowledgements record who made them (ADR-0009 Addendum 3, WI-0022).** The ADR's fourth open
   point asked what acknowledgement authority means with more than one maintainer. The question hides
   two: *who made this assertion* and *who is allowed to*. This framework has no server and no

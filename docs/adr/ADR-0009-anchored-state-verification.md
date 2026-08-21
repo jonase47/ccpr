@@ -1,7 +1,7 @@
 ---
 kind: adr
 adr_id: ADR-0009
-status: proposed
+status: accepted
 last_updated: 21.08.2026
 related:
   - ADR-0002-workitem-backend-contract.md
@@ -11,7 +11,8 @@ related:
 
 # ADR-0009: Anchored state verification for phase documents
 
-**Status:** Proposed (18.08.2026)
+**Status:** Accepted (21.08.2026) — decided 18.08.2026, implemented across WI-0019…WI-0022;
+three addenda below correct and complete the decision
 **Decision-makers:** Repo owner (Jonas)
 
 ## Context
