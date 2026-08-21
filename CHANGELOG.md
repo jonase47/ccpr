@@ -7,6 +7,25 @@ All notable changes to this project are documented in this file. The format is b
 ## [Unreleased]
 
 ### Fixed
+- **`install.sh --dry-run` announced a wholesale `docs/` copy the real run has not performed since
+  WI-0018 (WI-0064).** Found by offering the dry-run as the cheap proof that the docs/ allowlist
+  holds, then reading the branch: it exits 0 *before* the artifact loop and prints one
+  `$SRC/$item -> $DEST/$item` line per entry. Accurate for the five wholesale artifacts, wrong for
+  the sixth — `docs` is the one the loop special-cases into `install_docs()`, which filters every
+  top-level child against `scripts/lib/docs-framework-allowlist.txt`. The offered proof would have
+  shown the opposite of what it was offered for. The error direction is what made it worth fixing
+  rather than noting: a preview exists so an adopter can see what an install will do, and this one
+  *overstated* the blast radius in the single place where the answer is subtle, announcing exactly
+  the copy the allowlist prevents. A maintainer reading it concludes their working state is about to
+  ship and falls back to the clean-clone ritual WI-0018 made unnecessary — the feature stays
+  invisible to the audience looking for it. `install_docs()` decided and copied in one pass, so the
+  dry-run had nothing to call; the classification is now a side-effect-free `docs_partition()` and
+  the skip paragraph a shared `docs_report_skips()`, so preview and run read one verdict and cannot
+  drift. The dry-run lists what it would install, what it would skip, and still writes nothing. Six
+  tests cover it, including a parity test asserting the dry-run's skip set equals the real run's on
+  the same tree, and dotfile coverage (`.handover-archive`, `.DS_Store`) — `dotglob` handling moved
+  with the loop, and a mutation removing it turns three tests red.
+
 - **96 skill epilogues told the model to update `docs/HANDOVER.md` without ever telling it to
   replace its own previous block, or what to do when the file is already full (WI-0070).** Measured
   rather than assumed, after a first crude count got the right verdict for the wrong reason: of 115

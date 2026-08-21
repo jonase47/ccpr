@@ -345,3 +345,90 @@ class AllowlistAgreementTest(unittest.TestCase):
         install_ok = self.install_accepts(name, is_dir=False)
         self.assertFalse(gate_ok, "artifact-gate.sh accepted a non-allowlisted docs/ path")
         self.assertFalse(install_ok, "install.sh installed a non-allowlisted docs/ path")
+
+
+def skipped_names(stdout):
+    """The names install.sh reports as skipped, parsed from its own report
+    lines (`      - docs/<name>`) rather than by substring search, so the
+    dry-run and the real run can be compared as SETS. A substring assertion
+    would pass on a report that merely mentions a name somewhere in its
+    prose -- the parity this pins is about which entries each side actually
+    classified, so it has to read the classification, not the paragraph."""
+    names = set()
+    for line in stdout.splitlines():
+        s = line.strip()
+        if s.startswith("- docs/"):
+            names.add(s[len("- docs/"):])
+    return names
+
+
+class DryRunReportsTheDocsPartitionTest(InstallTestBase):
+    """WI-0064: --dry-run exits before the artifact loop and prints one
+    `$SRC/$item -> $DEST/$item` line per ARTIFACTS entry. That is accurate
+    for the five wholesale artifacts and WRONG for the sixth: "docs" is the
+    one entry the real run does not copy wholesale, because the loop
+    special-cases it into install_docs(), which filters against
+    scripts/lib/docs-framework-allowlist.txt.
+
+    The error direction is what makes this worth a test rather than a note.
+    The dry-run exists so an adopter can see what an install will do before
+    it does it, and it OVERSTATES the blast radius in the one place where
+    the answer is subtle -- announcing exactly the wholesale copy WI-0018
+    was built to prevent. A maintainer reading it concludes their working
+    state is about to be shipped, and falls back to the clean-clone ritual
+    the allowlist made unnecessary: the feature is invisible precisely to
+    the audience that would look for it.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.add_working_state()
+        (self.docs / ".handover-archive").mkdir()
+        (self.docs / ".handover-archive" / "old.md").write_text("x\n", encoding="utf-8")
+        (self.docs / ".DS_Store").write_bytes(b"\x00\x01")
+
+    def test_the_dry_run_does_not_announce_a_wholesale_docs_copy(self):
+        r = self.run_install("--dry-run", "--update")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertNotIn(
+            f"{self.src / 'docs'} -> {self.dest / 'docs'}", r.stdout,
+            "the dry-run still promises a wholesale docs/ copy the real run does not perform",
+        )
+
+    def test_the_dry_run_names_the_entries_it_would_install(self):
+        r = self.run_install("--dry-run", "--update")
+        for name in ("adr", "logo", "CONSTITUTION.md",
+                     "NEXT_STEPS_REFERENCE.md", "PROJECT_PHASES.md"):
+            self.assertIn(name, r.stdout, f"dry-run did not name installable docs/{name}")
+
+    def test_the_dry_run_names_the_working_state_it_would_skip(self):
+        r = self.run_install("--dry-run", "--update")
+        self.assertEqual(skipped_names(r.stdout),
+                         {"workitems", "memory", "HANDOVER.md", ".handover-archive", ".DS_Store"})
+
+    def test_dotfile_entries_appear_in_the_dry_runs_skip_list(self):
+        # install_docs() sets and restores `dotglob` deliberately; a
+        # reporting loop that forgets it would under-report exactly the
+        # entries the skip report exists to surface.
+        r = self.run_install("--dry-run", "--update")
+        names = skipped_names(r.stdout)
+        self.assertIn(".handover-archive", names)
+        self.assertIn(".DS_Store", names)
+
+    def test_the_dry_run_still_writes_nothing(self):
+        r = self.run_install("--dry-run", "--update")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertFalse(self.dest.exists(),
+                         "the dry-run created the destination it only promised to describe")
+
+    def test_the_dry_runs_docs_verdict_matches_the_real_runs(self):
+        # The acceptance criterion of WI-0064: not that the dry-run says
+        # something about docs/, but that it says the SAME thing the real
+        # run does on the same tree.
+        dry = self.run_install("--dry-run", "--update")
+        real = self.run_install("--yes")
+        self.assertEqual(real.returncode, 0, real.stdout + real.stderr)
+        self.assertEqual(skipped_names(dry.stdout), skipped_names(real.stdout))
+        installed = {p.name for p in (self.dest / "docs").iterdir()}
+        self.assertFalse(installed & skipped_names(dry.stdout),
+                         "the dry-run listed as skipped something the real run installed")

@@ -89,19 +89,21 @@ docs_entry_is_allowlisted() {
 # DOCS_ALLOWLIST_FILE from $SRC/docs into $DEST/docs, and reports whatever it
 # skipped (name + approximate size) instead of leaving the operator to
 # wonder later where files went.
-install_docs() {
-  local src_docs="$SRC/docs" dest_docs="$DEST/docs"
-  [[ -d "$src_docs" ]] || { echo "  (skip: docs not present in source)"; return; }
+# docs_partition -- classify every top-level child of $SRC/docs into framework
+# (installable) and working state (skipped), WITHOUT touching the filesystem.
+# WI-0064: install_docs() used to decide and copy in one pass, which left
+# --dry-run no way to report the split and made it announce a wholesale copy
+# the real run never performs. Both callers now read the same verdict from
+# here, so the preview cannot disagree with the run it previews.
+# Results land in DOCS_PART_INSTALL / DOCS_PART_SKIP / DOCS_PART_SKIP_KB.
+docs_partition() {
+  local src_docs="$SRC/docs" name size
+  DOCS_PART_INSTALL=() DOCS_PART_SKIP=() DOCS_PART_SKIP_KB=0
+  [[ -d "$src_docs" ]] || return 1
   if [[ ! -r "$DOCS_ALLOWLIST_FILE" ]]; then
     echo "ERROR: docs/ framework allowlist not found: $DOCS_ALLOWLIST_FILE" >&2
     exit 1
   fi
-
-  echo "  installing docs"
-  rm -rf "${dest_docs:?}"
-  mkdir -p "$dest_docs"
-
-  local skipped_names=() skipped_kb=0 name size
   # dotglob: a plain `*` never matches a dotfile, and docs/ is where the
   # project's OWN dotfiles/dot-directories accumulate (docs/.DS_Store,
   # docs/.handover-archive/) -- without it those entries are neither copied
@@ -115,25 +117,51 @@ install_docs() {
     [[ -e "$entry_path" ]] || continue
     name="$(basename "$entry_path")"
     if docs_entry_is_allowlisted "$name"; then
-      cp -R "$entry_path" "$dest_docs/$name"
+      DOCS_PART_INSTALL+=("$name")
     else
       size="$(du -sk "$entry_path" 2>/dev/null | cut -f1)"
-      skipped_names+=("$name")
-      skipped_kb=$((skipped_kb + ${size:-0}))
+      DOCS_PART_SKIP+=("$name")
+      DOCS_PART_SKIP_KB=$((DOCS_PART_SKIP_KB + ${size:-0}))
     fi
   done
   [[ "$had_dotglob" -eq 1 ]] || shopt -u dotglob
-
-  if [[ ${#skipped_names[@]} -gt 0 ]]; then
-    echo "    skipped ${#skipped_names[@]} working-state path(s) under docs/ (~${skipped_kb}K, not installed):"
-    for name in "${skipped_names[@]}"; do
-      echo "      - docs/$name"
-    done
-    echo "    (likely a checkout predating the docs/.gitignore rule -- see .gitignore and"
-    echo "     scripts/lib/docs-framework-allowlist.txt. If one of these IS framework"
-    echo "     documentation, add it to the allowlist and re-run.)"
-  fi
+  return 0
 }
+
+# docs_report_skips <indent> -- the shared skip paragraph, so the dry-run and
+# the real run cannot drift into two different reports of one verdict.
+docs_report_skips() {
+  local indent="$1" name
+  [[ ${#DOCS_PART_SKIP[@]} -gt 0 ]] || return 0   # also the set -u guard, see install_docs()
+  echo "${indent}skipped ${#DOCS_PART_SKIP[@]} working-state path(s) under docs/ (~${DOCS_PART_SKIP_KB}K, not installed):"
+  for name in "${DOCS_PART_SKIP[@]}"; do
+    echo "${indent}  - docs/$name"
+  done
+  echo "${indent}(likely a checkout predating the docs/.gitignore rule -- see .gitignore and"
+  echo "${indent} scripts/lib/docs-framework-allowlist.txt. If one of these IS framework"
+  echo "${indent} documentation, add it to the allowlist and re-run.)"
+}
+
+install_docs() {
+  local src_docs="$SRC/docs" dest_docs="$DEST/docs" name
+  [[ -d "$src_docs" ]] || { echo "  (skip: docs not present in source)"; return; }
+  docs_partition
+
+  echo "  installing docs"
+  rm -rf "${dest_docs:?}"
+  mkdir -p "$dest_docs"
+
+  # Guarded: under `set -u`, bash 3.2 (the macOS default) treats "${arr[@]}"
+  # on an EMPTY array as an unbound variable. A docs/ tree with no allowlisted
+  # entry is legitimate, so this list really can be empty.
+  if [[ ${#DOCS_PART_INSTALL[@]} -gt 0 ]]; then
+    for name in "${DOCS_PART_INSTALL[@]}"; do
+      cp -R "$src_docs/$name" "$dest_docs/$name"
+    done
+  fi
+  docs_report_skips "    "
+}
+
 
 ASSUME_YES=0
 DRY_RUN=0
@@ -244,6 +272,21 @@ fi
 if [[ "$DRY_RUN" -eq 1 ]]; then
   echo "[dry-run] Would back up $DEST (if it exists) and copy:"
   for item in "${ARTIFACTS[@]}"; do
+    # WI-0064: "docs" is the one artifact the real run does NOT copy wholesale
+    # -- the loop special-cases it into install_docs(). Printing the plain
+    # "$SRC/docs -> $DEST/docs" line here announced exactly the wholesale copy
+    # the allowlist exists to prevent, so the preview contradicted the run.
+    if [[ "$item" == "docs" ]] && docs_partition; then
+      echo "  docs: filtered per scripts/lib/docs-framework-allowlist.txt, not copied wholesale"
+      echo "    would install ${#DOCS_PART_INSTALL[@]} framework entr$([[ ${#DOCS_PART_INSTALL[@]} -eq 1 ]] && echo y || echo ies):"
+      if [[ ${#DOCS_PART_INSTALL[@]} -gt 0 ]]; then
+        for name in "${DOCS_PART_INSTALL[@]}"; do
+          echo "      + docs/$name -> $DEST/docs/$name"
+        done
+      fi
+      docs_report_skips "    "
+      continue
+    fi
     echo "  $SRC/$item -> $DEST/$item"
   done
   echo "[dry-run] No changes made."
