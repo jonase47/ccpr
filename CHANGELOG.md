@@ -304,6 +304,20 @@ All notable changes to this project are documented in this file. The format is b
   the index and all theme files.
 
 ### Added
+- **`phase-docs-lint.sh` has test coverage for the first time (`scripts/tests/test_phase_docs_lint.py`,
+  28 tests).** 207 lines that every CCPR project runs, shipped with nothing but the generic `bash -n`
+  sweep and the exit-status inventory pointing at it. Two work items are about to change this exact
+  script — a per-directory check profile and a new `covers:` check — so the surface those changes get
+  measured against had to exist first. Covers all seven checks (a)–(g) individually with a negative
+  control beside each, every required field on its own, **every** value of both enums separately
+  (`P0`…`P8`, and the six statuses), both `related:` list syntaxes, all six `LIVING_FILES` names, the
+  exit-code precedence, the report's own counts, and the argument edge cases. Every test was seen red
+  through a mutation of the **script** — never by deleting the assertion — and the mutations were
+  restored byte-identically (md5-checked). Two of them are deliberate boundary **pins** rather than
+  requirements, and say so in place: today a document outside the eight `PHASE_FOLDERS` produces no
+  finding by default, and `--scope` **does** reach it, because the two collection paths differ (the
+  scoped one walks all of `docs/`). The upcoming profile work rewires exactly that switch, so both
+  sides of the fence are now marked and it cannot move unnoticed in either direction.
 - **ADR-0009 gained an addendum before a line of it was implemented (21.08.2026).** The decision was
   written from measurements on two CCPR-driven projects; re-measuring against three, and against the
   shipped scripts rather than their descriptions, falsified nine statements. The two that change the
