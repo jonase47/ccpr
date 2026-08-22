@@ -7,6 +7,18 @@ All notable changes to this project are documented in this file. The format is b
 ## [Unreleased]
 
 ### Fixed
+- **Ten divergences between check (n) and CommonMark, found by that corpus (WI-0079…WI-0083).** Two
+  were predicted from the matcher `\[[^][]*\]\([^)]*\)` before the round ran and both confirmed: an
+  escaped bracket pair `\[not a link\](x.md)` is reported although it is not a link (**false
+  positive**, the direction that blocks promotion), and a label containing brackets `[a [b] c](x.md)`
+  is missed although it is one. Eight were new. The destination is taken literally where CommonMark
+  resolves it — an escaped `)` truncates the reported path, and a decimal entity `&#35;` is mangled
+  into `dead&` by the fragment-stripping that exists for `#anchor` suffixes, a path that appears
+  neither in the input nor in the reference's answer. A setext underline and a thematic break are not
+  block boundaries, so a code span pairs across them and swallows a link. And a reference definition
+  whose destination sits on the next line is not recognised at all, isolated by a single-line control
+  that is found. **Not fixed here** — the round's product is the measurement, and the fix order is a
+  decision that wants the whole table on the table first.
 - **`memory-lint.sh` told readers to set a value that did nothing (WI-0074).** Its age warning read
   "consider setting `status='stale'`" — and `stale` was not in the suppression list, so following the
   advice produced the same warning on the very next run. Measured across all five cases: unset warns,
@@ -360,6 +372,18 @@ All notable changes to this project are documented in this file. The format is b
   the index and all theme files.
 
 ### Added
+- **A differential corpus measures check (n) against the CommonMark reference (WI-0005).** The
+  promotion of the memory index's dead-link check from `warn` to `err` has been held three times on a
+  criterion that is a **rate**, not a state — "a round that produces no new items" — and no round had
+  been run since the last fix, so the criterion was neither met nor missed but untested. It is tested
+  now. 23 constructs the six previous rounds never touched, each frozen with the reference parser's
+  answer in `scripts/tests/fixtures/`, and a test that compares check (n) against that table **without
+  importing the parser** — the suite has no third-party dependency, and a `skipIf` on a machine
+  without the module would be silently green by skipping, which is the failure this repo keeps
+  finding. Divergences are held as named `known_divergence` entries carrying their direction and work
+  item, so they are counted rather than tolerated, and any behaviour change trips the test in both
+  directions. That turns the promotion criterion into something measurable instead of remembered: a
+  round with no new items now means the corpus grew and no new divergence appeared.
 - **ADR-0009 is `accepted`.** Decided 18.08.2026, implemented across WI-0019…WI-0022, and completed
   by three addenda: the first correcting nine of its own statements against the shipped code before
   anything was built, the second resolving where the scope anchor lives, the third settling
