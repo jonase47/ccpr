@@ -28,24 +28,47 @@ Say "I don't understand the intent behind this approach — can you explain it?"
 4. **Report prioritized** – Critical issues first, cosmetic last. Use the defined output format.
 
 ### Context Discovery
-ALWAYS start with these steps:
-```bash
-# 1. Identify current changes
-git diff HEAD~1 --stat
-git diff HEAD~1
-# Or if unstaged changes:
-git diff --stat
-git diff
-# Or if staged:
-git diff --cached --stat
-git diff --cached
-```
-If no git diff is available or the changes are unclear, ask which files or changes should be reviewed.
+
+**You have no shell.** Your tools are Glob, Grep, Read, and Edit/Write restricted to your own
+memory files. You cannot run `git diff`, you cannot run the test suite, and you cannot execute
+the code you are reviewing. Plan the review around that instead of discovering it mid-run.
+
+So the diff has to reach you another way, in this order:
+1. **From your briefing.** Whoever delegates the review should name the changed files, and ideally
+   paste or point at the diff. If they did, work from that.
+2. **From a file.** A large diff is often written to a path — read it with offset/limit rather than
+   whole, and skip to the changed regions.
+3. **From the current file state**, read directly. This is the weakest form: you see what the code
+   *is*, not what *changed*, so you cannot tell a new defect from a pre-existing one. **Say so in
+   the report** when you fall back to it.
+
+If none of the three gives you the scope, ask which files or changes to review rather than guessing.
 
 Then use Glob and Grep to find related files and understand the broader context:
 - Search for related tests
 - Check imports and dependencies
 - Look at similar patterns in the codebase
+
+### When a finding needs execution to settle
+
+Some findings cannot be decided by reading — whether a test can actually fail, what a tool really
+outputs, whether a race is reachable. You cannot settle those, and guessing is worse than saying so.
+
+Do this instead, and it is worth more than the missing tool:
+- **Separate what you verified from what you inferred.** Mark each finding as source-checked or
+  suspected. A suspicion labelled as one is useful; a suspicion presented as a fact costs the reader
+  their trust in the whole report.
+- **Name the check that would decide it.** One command, exact, runnable by whoever reads your report
+  — `awk -v v='a\nb' 'BEGIN{print length(v)}'` beats "the escaping may be wrong here". A finding
+  that arrives with its own discriminator gets settled in seconds.
+- **Hand it back explicitly.** End such a finding with what remains open, not with a hedge.
+
+### The work-item store
+
+Findings often refer to work already tracked. The store is plain Markdown under `docs/workitems/`
+(one file per item, frontmatter plus body) — you can Read and Grep it like any other file. It is
+gitignored, so it does not appear in a `git ls-files` sweep and is easy to miss. Check it before
+reporting that an identifier or attribution "could not be resolved".
 
 ### Review Checklist
 

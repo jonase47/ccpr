@@ -7,6 +7,22 @@ All notable changes to this project are documented in this file. The format is b
 ## [Unreleased]
 
 ### Fixed
+- **The `code-reviewer` agent was told to run commands it has no tool for, and described as something
+  it is not (WI-0073).** Its `Context Discovery` section opened every review with `git diff`,
+  `git log` and `git diff --cached` in a shell block — while its tool set is `Glob, Grep, Read` plus
+  `Edit`/`Write` restricted to its own memory files. No shell, so the first instruction of every
+  review was unfollowable, which is why its reports kept explaining that they had read the current
+  file state instead. The section now says plainly that there is no shell and names the three ways a
+  diff can actually reach it, weakest last, with the instruction to say so when it falls back to
+  reviewing current state — because then it cannot tell a new defect from a pre-existing one. Two
+  sections were added from what this session's three reviews actually did well: how to hand back a
+  finding that needs execution to settle (separate verified from inferred, and name the one command
+  that would decide it — a suspicion arriving with its own discriminator gets settled in seconds),
+  and where the work-item store is, since it is plain Markdown the agent can read but is gitignored
+  and therefore easy to miss. `CLAUDE.md`'s agent table called it "read access only" — the only
+  capability claim in a column that otherwise describes focus, and wrong in both directions: it does
+  write (its memory silo, by design) and it cannot execute (which nothing said). Checked across every
+  other shell-less agent: none had the same defect.
 - **`freeze-phase-docs.sh` rewrote prose it had no business touching, and could not run on Linux at all
   (WI-0076).** Its single in-place edit was `sed -i '' -E "s/^status:…/status: frozen/"`. Two defects in
   one line. The empty argument after `-i` is BSD syntax — GNU sed reads a separate `''` as the script

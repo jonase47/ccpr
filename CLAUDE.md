@@ -50,7 +50,7 @@
 | **project-planner** | Milestones, sprints, backlog, prioritization, scheduling |
 | **ux-designer** | UI concepts, user flows, accessibility, dark mode |
 | **senior-developer** | Implementation (TDD), clean code, feature development |
-| **code-reviewer** | Code review, quality, best practices (read access only) |
+| **code-reviewer** | Code review, quality, best practices. Never writes source, tests or project docs — only its own memory silo. Has no shell: it cannot run the tests it reviews, so give it the diff in the briefing |
 | **qa-tester** | Test strategy, test cases, exploratory tests, acceptance tests |
 | **debugger** | Error analysis, root cause, systematic troubleshooting |
 | **devops** | CI/CD, deployment, hosting (Hetzner), monitoring |
