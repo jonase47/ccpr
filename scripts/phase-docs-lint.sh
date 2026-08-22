@@ -66,17 +66,21 @@ VALID_PHASES="P0 P1 P2 P3 P4 P5 P6 P7 P8"
 # doc_profile_for — assigns each file (by its path relative to docs/) to the
 # set of checks it must satisfy. bash 3.2 (macOS default) has no associative
 # arrays, so this is a case dispatch rather than a lookup table — extend the
-# case (not a new array) when another folder needs its own profile, e.g.
-# WI-0072's planned dedicated review-report schema.
+# case (not a new array) when another folder needs its own profile.
 #
 # Profiles:
 #   full    — checks (a)-(g), the PHASE_DOC_SCHEMA default.
-#   reviews — only check (d) (status enum), and only when status: is set.
+#   reviews — check (d) (status enum, only when status: is set) plus check
+#             (j) (WI-0072's review-specific required fields — sprint,
+#             base_commit, reviewed_head, reviewer, last_updated — but ONLY
+#             once the document opts into the genre via `kind: review`; a
+#             document without that marker, or with a different `kind:`
+#             such as `story-review`/`review-convention`, stays silent).
 #             Review reports predate PHASE_DOC_SCHEMA and follow their own
-#             frontmatter shape (kind, sprint, base_commit, reviewer,
-#             methodology — WI-0072). Enforcing (a)-(c)/(e)-(g) against them
-#             today raises dozens of "required field missing" findings
-#             against a schema they were never written for.
+#             frontmatter shape; checks (a)-(c)/(e)-(g) stay off for this
+#             profile — enforcing them against pre-WI-0072 reports would
+#             raise dozens of "required field missing" findings against a
+#             schema they were never written for.
 doc_profile_for() {
     local rel_to_docs="$1"
     case "$rel_to_docs" in
@@ -188,6 +192,43 @@ for file in ${FILES[@]+"${FILES[@]}"}; do
         phase_val="$(fm_field "$file" phase || true)"
         if [[ -n "$phase_val" ]] && ! is_valid_phase "$phase_val"; then
             err "$rel — phase='$phase_val' is not in {P0…P8}"
+        fi
+    elif [[ "$profile" == "reviews" ]]; then
+        # (j) Review-specific required fields (WI-0072). Fires ONLY when the
+        # document self-identifies as the genre via `kind: review` — every
+        # other document under docs/reviews/ (no `kind:` at all, or a
+        # different `kind:` such as `story-review`/`review-convention`,
+        # KONVENTION.md's per-story template) stays silent. That is what
+        # makes backward compatibility structural rather than assumed: not
+        # one document in the three CCPR reference projects carries the
+        # literal `kind: review` today, so this branch cannot fire against
+        # the existing corpus, only against documents future commands (or
+        # a migration) opt into the genre for.
+        kind_val="$(fm_field "$file" kind || true)"
+        if [[ "$kind_val" == "review" ]]; then
+            missing="$(fm_validate_required "$file" "sprint,reviewed_head,reviewer,last_updated" || true)"
+            if [[ -n "$missing" ]]; then
+                while IFS= read -r m; do
+                    err "$rel — required field missing: $m"
+                done <<< "$missing"
+            fi
+
+            # The base-of-reviewed-range field is validated as base_commit
+            # OR reviewed_base (WI-0072 correction, 22.08.2026), not
+            # base_commit alone -- both are already accepted, equally
+            # validated names in the (i) commit-anchor-family check below.
+            # The real erfinderwerkstatt corpus writes reviewed_base for
+            # every review it authored under this schema and never
+            # base_commit; requiring one specific name would fail a
+            # document that carries everything the schema asks for, just
+            # under the project's own name for it. Fires once per
+            # document, naming both accepted keys, so a reader does not
+            # have to guess which one is meant.
+            base_commit_val="$(fm_field "$file" base_commit || true)"
+            reviewed_base_val="$(fm_field "$file" reviewed_base || true)"
+            if [[ -z "$base_commit_val" && -z "$reviewed_base_val" ]]; then
+                err "$rel — required field missing: base_commit (or reviewed_base)"
+            fi
         fi
     fi
 

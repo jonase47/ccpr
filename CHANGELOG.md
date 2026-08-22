@@ -372,6 +372,52 @@ All notable changes to this project are documented in this file. The format is b
   the index and all theme files.
 
 ### Added
+- **Sprint-review reports get a decided header schema (WI-0072).** `/p5-review-sprint` prescribed
+  nothing more than "record the reviewed range in the report header" — measured in the field: five
+  different header shapes across two real projects, including a bare `key: value` body with no `---`
+  block at all (NutriMatch, 4/4 files) and a project that had already written itself a convention
+  document reacting to the same drift. `commands/p5-review-sprint.md` now prescribes YAML frontmatter
+  (`kind: review`, `sprint`, `base_commit`, `reviewed_head`, `reviewer`, `last_updated`) in its write
+  step and repeats it as a `## Result` acceptance criterion, mirroring `constitution.md`'s pattern.
+  `templates/REVIEW_REPORT_TEMPLATE.md` is the skeleton. `phase-docs-lint.sh`'s `reviews` profile
+  gains a required-fields check that fires **only** once a document self-identifies via `kind: review`
+  — structural backward compatibility, not an assumed one: not one document in the three reference
+  projects carries that literal value today, measured before and after the lint change. The base-of-
+  reviewed-range field is validated as `base_commit` **or** `reviewed_base` — both already accepted,
+  equally validated names in the pre-existing commit-anchor-family check — not `base_commit` alone;
+  the template and command still prescribe `base_commit` for new reports (one form, not a choice), the
+  alias exists purely so a corpus that already wrote `reviewed_base` under this exact schema is not
+  forced into a rewrite. A migration script (`scripts/migrate-review-headers.sh`) backfills
+  `kind`+`sprint` onto the exact `SPRINT-<N>-review.md` shape only — never the suffix variants.
+  RECONSTRUCTING `base_commit`/`reviewed_head`/`reviewed_base` (inferring a value that is genuinely
+  absent) stays forbidden — a wrong guess there lets `/gate-p5` treat a stale review as current, worse
+  than the avoidable re-run a missing field costs — but MOVING a value the author already wrote is not
+  a guess: a bare `<key>: <value>` body line for one of those three keys, matched only at the exact
+  start of a line, is hoisted into frontmatter (the body line itself is never removed; a pre-existing
+  frontmatter value is never overwritten, and a body value that contradicts one is reported, not
+  silently dropped). `kind: review` is only ever set once every required field is present, counting
+  both what the file already had and what this run just hoisted — a document that would still fail
+  the required-fields check immediately after being marked is left unmigrated and reported by name
+  instead, so a clean lint run never turns into a permanently red one with no path back. The script
+  creates the frontmatter block itself where none exists, since `fm_set`/`fm_set_many` refuse to write
+  into a file that has none. Running it against the real erfinderwerkstatt corpus caught a live defect
+  before any file was written: its zero-padded filenames (`SPRINT-03-review.md`) compared as a string
+  against the project's own unpadded `sprint: 3`, producing a false conflict warning — fixed via
+  base-10 arithmetic normalisation (`10#$n`, not a bare leading-zero literal, which bash reads as
+  octal). A second run against the same corpus then caught the reconstruction-vs-moving conflation and
+  the missing base-field alias above (22.08.2026 correction) before either had reached a shipped
+  commit. A third pass, still before any commit, caught two more defects in the hoist step itself: a
+  fenced code block illustrating the header schema (`commands/p5-review-sprint.md` is itself an
+  example) was hoisted verbatim as if it were a real value — `reviewed_head` is exactly the field
+  `/gate-p5` trusts for staleness detection, so a wrongly hoisted example is worse than a missing
+  field — fixed with two independent checks: fence-tracking in the body extractor (mirroring
+  `memory-lint.sh`'s own fence state machine) and a commit-SHA shape check (`^[0-9a-fA-F]{7,40}$`, the
+  same form `phase-docs-lint.sh` already enforces) on whatever a fence gap lets through. The other two:
+  the script's own temp-file write and the final `mv` into place were both unchecked — a write or move
+  failure left an unexplained orphaned file in the caller's project tree with no error message tying
+  it to what happened; both are now checked and named in the failure message, mirroring `fm_set`'s own
+  write guard (`scripts/lib/frontmatter.sh`, which gained the equivalent `mv` check for the same
+  reason).
 - **A differential corpus measures check (n) against the CommonMark reference (WI-0005).** The
   promotion of the memory index's dead-link check from `warn` to `err` has been held three times on a
   criterion that is a **rate**, not a state — "a round that produces no new items" — and no round had

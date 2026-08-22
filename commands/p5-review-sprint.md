@@ -11,6 +11,7 @@ This is **complementary** to `/p5-review-code`, not a repeat of it. The per-stor
 - With a git ref (e.g. a tag or SHA): use it as the diff base.
 
 ## Prerequisites
+- Template: `~/.claude/templates/REVIEW_REPORT_TEMPLATE.md`
 - Sprint implementation complete (all stories at least through `/p5-review` per story).
 - Either run manually before `/gate-p5`, or let `/gate-p5` run it automatically (the gate triggers this review on opus when no current report exists). Mirrors `/cross-check` for docs, but unlike `/cross-check` the sprint gate runs it for you.
 - Working tree committed, so the diff reflects the committed sprint work.
@@ -60,8 +61,16 @@ Orchestrator gathers and provides inline:
 >
 > **Output Format**:
 > ```markdown
+> ---
+> kind: review
+> sprint: [N]
+> base_commit: <sprint-base-sha>
+> reviewed_head: <HEAD-sha>
+> reviewer: code-reviewer @ opus
+> last_updated: DD.MM.YYYY
+> ---
+>
 > # Sprint [N] — Holistic Code Review (code-reviewer @ opus)
-> _Reviewed range: `<sprint-base>..<HEAD-sha>` — record both SHAs (esp. `reviewed_head`) so `/gate-p5` can detect staleness._
 >
 > ## Verdict
 > [2-3 sentences: overall posture, biggest risk]
@@ -95,8 +104,15 @@ Orchestrator gathers and provides inline:
 
 ## Output
 - Sprint review report: `docs/reviews/SPRINT-[N]-review.md`
-- Record the reviewed range in the report header — the base commit and the **reviewed `HEAD` SHA** (`reviewed_head`). `/gate-p5` reuses the report only while `reviewed_head` matches the current `HEAD`, and re-runs this review otherwise (e.g. after a `/p5-bugfix`).
+- YAML frontmatter: `kind: review`, `sprint`, `base_commit`, `reviewed_head`, `reviewer`, `last_updated`
+- Always write `base_commit` here — one form, not a choice. `phase-docs-lint.sh` also accepts `reviewed_base` for this field, but only so grown corpora that already used that name are not forced into a rewrite; new reports never need it.
+- `reviewed_head` is the reviewed `HEAD` SHA. `/gate-p5` reuses the report only while `reviewed_head` matches the current `HEAD`, and re-runs this review otherwise (e.g. after a `/p5-bugfix`).
 - This report is the input for `/gate-p5` (read under "Code review: no open critical findings"). `/gate-p5` runs this review automatically when no current report exists, so running it manually here is optional — an early look before the gate; the gate then reuses the fresh report rather than spending opus twice.
+
+## Result
+- `docs/reviews/SPRINT-[N]-review.md` created or updated
+- Frontmatter consistent (`kind: review`, `sprint`, `base_commit`, `reviewed_head`, `reviewer`, `last_updated`)
+- `reviewed_head` matches the reviewed diff's `HEAD` SHA, so `/gate-p5` can detect staleness and reuse the report without re-spending opus
 
 ### Handover Epilog
 Update `docs/HANDOVER.md`:

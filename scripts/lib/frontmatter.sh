@@ -239,7 +239,10 @@ fm_set() {
 
     _fm_strip_trailing_newline_if_source_had_none "$file" "$tmp"
     _fm_preserve_mode "$file" "$tmp"
-    mv "$tmp" "$file"
+    if ! mv "$tmp" "$file"; then
+        echo "fm_set: failed to move $tmp into place for $file — left behind for inspection" >&2
+        return 1
+    fi
 }
 
 # fm_set_many <file> <key1=value1> [<key2=value2> …] — writes MULTIPLE
@@ -342,5 +345,8 @@ fm_set_many() {
     unset "${export_names[@]}"
     _fm_strip_trailing_newline_if_source_had_none "$file" "$tmp"
     _fm_preserve_mode "$file" "$tmp"
-    mv "$tmp" "$file"
+    if ! mv "$tmp" "$file"; then
+        echo "fm_set_many: failed to move $tmp into place for $file — left behind for inspection" >&2
+        return 1
+    fi
 }

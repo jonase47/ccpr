@@ -1143,7 +1143,9 @@ class ReviewsFolderProfileTest(PhaseDocsLintTestBase):
     Checks (a) no-frontmatter, (b) required fields, (c) phase enum, (e) date
     format, (f) related:, (g) parent_index all stay silent there, because
     review reports predate PHASE_DOC_SCHEMA and follow their own frontmatter
-    shape (kind, sprint, base_commit, reviewer, methodology -- WI-0072).
+    shape (kind, sprint, base_commit or reviewed_base, reviewed_head,
+    reviewer, last_updated -- WI-0072, corrected 22.08.2026). `methodology`
+    was never part of the validated field set.
     """
 
     def test_valid_status_in_reviews_produces_no_findings(self):
@@ -1221,6 +1223,216 @@ class ReviewsFolderProfileTest(PhaseDocsLintTestBase):
             ),
             errors,
         )
+
+
+# The five keys WI-0072's review-report header schema requires once a
+# document self-identifies as the genre via `kind: review` -- the sixth key
+# of that schema, `kind` itself, is the trigger, not one of the fields it
+# gates.
+REVIEW_REQUIRED_FIELDS = ("sprint", "base_commit", "reviewed_head", "reviewer", "last_updated")
+
+
+def review_doc_text(kind="review", **overrides):
+    """Builds a docs/reviews/ document with every WI-0072 field present by
+    default, `kind` overridable/omittable (pass None) via the `kind`
+    keyword, any REVIEW_REQUIRED_FIELDS entry overridable/omittable the same
+    way via **overrides, and any additional key passed through verbatim.
+    frontmatter_block()'s own `phase`/`subskill` params are deliberately
+    unset (None) -- the `reviews` profile predates and does not use them."""
+    defaults = {
+        "sprint": "3",
+        # Computed, not a literal 40-char hex string in the source -- a
+        # literal one trips the artifact gate's token-blob heuristic
+        # (scripts/lib/discipline_gate.sh GATE_RE_SECRET_BLOB), the same
+        # reason test_phase_docs_lint.py's own CommitAnchorFamilyTest uses
+        # `"d" * 40` rather than a hardcoded SHA-looking string.
+        "base_commit": "1" * 40,
+        "reviewed_head": "2" * 40,
+        "reviewer": "code-reviewer @ opus",
+    }
+    defaults.update(overrides)
+    extra_lines = []
+    if kind is not None:
+        extra_lines.append(f"kind: {kind}")
+    for key in ("sprint", "base_commit", "reviewed_head", "reviewer"):
+        val = defaults.get(key)
+        if val is not None:
+            extra_lines.append(f"{key}: {val}")
+    last_updated = defaults.get("last_updated", VALID_DATE)
+    return doc_text(
+        phase=None, subskill=None, status=None,
+        last_updated=last_updated, extra_lines=extra_lines,
+    )
+
+
+class ReviewsProfileKindReviewRequiredFieldsTest(PhaseDocsLintTestBase):
+    """WI-0072: the review-specific required fields (sprint, base_commit,
+    reviewed_head, reviewer, last_updated) are mandatory ONLY once a
+    document self-identifies as the genre via `kind: review` -- every other
+    document under docs/reviews/ (no `kind:` at all, or a different `kind:`
+    such as `story-review`/`review-convention`) stays silent on this check,
+    which is what keeps today's real corpus (zero documents carry the
+    literal `kind: review`) finding-free without a migration."""
+
+    def test_kind_review_with_all_fields_present_produces_no_findings(self):
+        self.write_doc("reviews/complete.md", review_doc_text())
+
+        result = self.run_lint()
+
+        self.assertEqual(self.findings(result.stdout, "Errors"), [], result.stdout)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_kind_review_missing_one_required_field_is_reported_once_per_field(self):
+        for field in REVIEW_REQUIRED_FIELDS:
+            with self.subTest(field=field):
+                self.write_doc("reviews/incomplete.md", review_doc_text(**{field: None}))
+
+                result = self.run_lint()
+
+                errors = self.findings(result.stdout, "Errors")
+                self.assertTrue(
+                    any(
+                        "incomplete.md" in e and f"required field missing: {field}" in e
+                        for e in errors
+                    ),
+                    errors,
+                )
+                self.assertEqual(result.returncode, 2, result.stdout)
+
+    def test_kind_review_missing_all_fields_reports_each_once(self):
+        self.write_doc(
+            "reviews/bare-kind.md",
+            doc_text(phase=None, subskill=None, status=None, last_updated=None,
+                      extra_lines=["kind: review"]),
+        )
+
+        result = self.run_lint()
+
+        errors = self.findings(result.stdout, "Errors")
+        for field in REVIEW_REQUIRED_FIELDS:
+            self.assertTrue(
+                any("bare-kind.md" in e and f"required field missing: {field}" in e for e in errors),
+                errors,
+            )
+        self.assertEqual(result.returncode, 2, result.stdout)
+
+    def test_no_kind_field_stays_silent_even_without_any_required_field(self):
+        """The pre-WI-0072 baseline: none of the three CCPR reference
+        projects' review reports carry a `kind:` field at all today -- this
+        pins that the new check does not retroactively fail them."""
+        self.write_doc(
+            "reviews/legacy-no-kind.md",
+            doc_text(phase=None, subskill=None, status=None, last_updated=None, extra_lines=[]),
+        )
+
+        result = self.run_lint()
+
+        self.assertEqual(self.findings(result.stdout, "Errors"), [], result.stdout)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_different_kind_value_stays_silent_even_without_any_required_field(self):
+        """kind: story-review (the per-story-review template in
+        docs/reviews/KONVENTION.md) and kind: review-convention (that file
+        itself) are a different genre with a different, unvalidated field
+        set -- forcing WI-0072's holistic-sprint-review fields onto them
+        would be wrong, exactly as the field-set decision says."""
+        for other_kind in ("story-review", "review-convention"):
+            with self.subTest(kind=other_kind):
+                self.write_doc(
+                    "reviews/other-kind.md",
+                    doc_text(phase=None, subskill=None, status=None, last_updated=None,
+                              extra_lines=[f"kind: {other_kind}"]),
+                )
+
+                result = self.run_lint()
+
+                self.assertEqual(self.findings(result.stdout, "Errors"), [], result.stdout)
+                self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_kind_review_check_does_not_leak_into_full_profile(self):
+        """A phase-folder document carrying `kind: review` (unusual, but not
+        forbidden) must not gain the reviews-only required-field check --
+        the branch is keyed off `profile == "reviews"`, not off `kind:`
+        alone."""
+        self.write_doc(
+            "architecture/kind-review-in-full-profile.md",
+            doc_text(extra_lines=["kind: review"]),
+        )
+
+        result = self.run_lint()
+
+        errors = self.findings(result.stdout, "Errors")
+        self.assertFalse(any("required field missing: base_commit" in e for e in errors), errors)
+        self.assertFalse(any("required field missing: reviewed_head" in e for e in errors), errors)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+
+class ReviewsProfileBaseFieldAliasTest(PhaseDocsLintTestBase):
+    """WI-0072 correction (22.08.2026): the base-of-reviewed-range
+    field is NOT `base_commit` specifically -- it is `base_commit` OR
+    `reviewed_base`, exactly the two names the (i) commit-anchor-family
+    check already treats as equally valid. The real erfinderwerkstatt
+    corpus (SPRINT-02, SPRINT-03) writes `reviewed_base` for every review it
+    authored under this schema and never once writes `base_commit` --
+    requiring the latter specifically would fail a document that carries
+    everything the schema asks for, just under the project's own name for
+    it."""
+
+    def _review_doc(self, extra_lines):
+        return doc_text(
+            phase=None, subskill=None, status=None, last_updated=VALID_DATE,
+            extra_lines=[
+                "kind: review", "sprint: 2",
+                *extra_lines,
+                f"reviewed_head: {'2' * 40}",
+                "reviewer: code-reviewer @ opus",
+            ],
+        )
+
+    def test_reviewed_base_alone_satisfies_the_requirement(self):
+        self.write_doc(
+            "reviews/base-alias.md", self._review_doc([f"reviewed_base: {'1' * 40}"])
+        )
+
+        result = self.run_lint()
+
+        errors = self.findings(result.stdout, "Errors")
+        self.assertFalse(any("base_commit" in e for e in errors), errors)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_base_commit_alone_still_satisfies_the_requirement(self):
+        self.write_doc(
+            "reviews/base-classic.md", self._review_doc([f"base_commit: {'1' * 40}"])
+        )
+
+        result = self.run_lint()
+
+        self.assertEqual(self.findings(result.stdout, "Errors"), [], result.stdout)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_both_names_present_satisfies_the_requirement_without_a_duplicate_error(self):
+        self.write_doc(
+            "reviews/base-both.md",
+            self._review_doc([f"base_commit: {'1' * 40}", f"reviewed_base: {'3' * 40}"]),
+        )
+
+        result = self.run_lint()
+
+        self.assertEqual(self.findings(result.stdout, "Errors"), [], result.stdout)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_neither_name_present_reports_one_error_naming_both(self):
+        self.write_doc("reviews/base-missing.md", self._review_doc([]))
+
+        result = self.run_lint()
+
+        errors = self.findings(result.stdout, "Errors")
+        matches = [
+            e for e in errors
+            if "base-missing.md" in e and "base_commit" in e and "reviewed_base" in e
+        ]
+        self.assertEqual(len(matches), 1, errors)
+        self.assertEqual(result.returncode, 2, result.stdout)
 
 
 if __name__ == "__main__":

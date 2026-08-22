@@ -93,6 +93,7 @@ class ShellScriptSyntaxTest(unittest.TestCase):
                 "log-cleanup.sh",
                 "memory-lint.sh",
                 "memory-sync.sh",
+                "migrate-review-headers.sh",
                 "phase-docs-lint.sh",
                 "project-init.sh",
                 "quality-scan.sh",

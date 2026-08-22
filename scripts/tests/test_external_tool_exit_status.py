@@ -779,24 +779,46 @@ class ExternalToolExitStatusTest(unittest.TestCase):
         (ANCHOR_ACK_NO_IDENTITY exists precisely for it), not a failure to
         surface. Net +2 invocations (147 total): `discard-needs-exemption`
         +2, everything else unchanged.
-        147 invocations total across the 16 shipped files (same file
-        COUNT as before -- no new shipped .sh file, only two new
-        invocations inside an existing one), split as below. A change in
-        these numbers means either a script changed shape or the
-        scanner's own logic changed -- worth a deliberate look either
+        Updated once more 22.08.2026 when WI-0072 added
+        scripts/migrate-review-headers.sh, a new 17th shipped file, with
+        exactly one invocation of its own: a `sed -E 's/^SPRINT-.../\1'`
+        filename-number extraction inside a plain `var="$(cmd)"`
+        assignment (no `if`, no `|| true` discard) -- structurally a bare
+        assignment, marked `set-e-sufficient` the same way every other
+        sed/awk/git call in this file set is (this file's own
+        `set -euo pipefail` already aborts on its failure). Net +1
+        invocation (148 total): `bare-needs-exemption` +1, everything else
+        unchanged.
+        Updated once more the same day (22.08.2026, the base_commit-or-
+        reviewed_base correction) when migrate-review-headers.sh gained the
+        Korrektur-2 hoist step: an `awk 'NR==1 && ...'` frontmatter/body
+        splitter (`_body_text`) and a `sed -nE 's/^${key}:.../\1/p' | head
+        -n1` bare-key-line extractor (`_hoist_candidate`) -- both plain
+        pipelines with no `if`/`|| true`/`$?` around them, both marked
+        `set-e-sufficient` for the same reason as the pre-existing
+        sed on this file (no "1 = nothing matched" ambiguity to confuse
+        with a crash; a genuine sed/awk parse failure still aborts under
+        this file's own `set -euo pipefail`, verified directly: a
+        deliberately malformed sed script on the same pipeline shape does
+        abort the whole `f() { ... }; v="$(f)"` assignment, not just log a
+        warning). Net +2 invocations (150 total): `bare-needs-exemption`
+        +2, everything else unchanged.
+        150 invocations total across the 17 shipped files, split as below.
+        A change in these numbers means either a script changed shape or
+        the scanner's own logic changed -- worth a deliberate look either
         way, not a silent drift."""
         invocations = scan_tree()
         by_disposition = {}
         for inv in invocations:
             by_disposition[inv.disposition] = by_disposition.get(inv.disposition, 0) + 1
-        self.assertEqual(147, len(invocations))
+        self.assertEqual(150, len(invocations))
         self.assertEqual(
             {
                 "checked-condition": 22,
                 "checked-captured": 5,
                 "checked-chain": 17,
                 "discard-needs-exemption": 40,
-                "bare-needs-exemption": 63,
+                "bare-needs-exemption": 66,
             },
             by_disposition,
         )
@@ -805,8 +827,9 @@ class ExternalToolExitStatusTest(unittest.TestCase):
         """Pins the file-enumeration side of "cannot be forgotten": the glob
         is scripts/*.sh + scripts/lib/*.sh, re-evaluated on every run, so a
         FILE added later is picked up automatically -- this only pins that
-        the glob itself still reaches the 16 files known at write time
-        (updated 21.08.2026 when WI-0021 added scripts/anchor.sh)."""
+        the glob itself still reaches the 17 files known at write time
+        (updated 21.08.2026 when WI-0021 added scripts/anchor.sh; updated
+        again 22.08.2026 when WI-0072 added scripts/migrate-review-headers.sh)."""
         files = sorted(SCRIPTS_DIR.glob("*.sh")) + sorted((SCRIPTS_DIR / "lib").glob("*.sh"))
         names = sorted(f.relative_to(SCRIPTS_DIR).as_posix() for f in files)
         self.assertEqual(
@@ -823,6 +846,7 @@ class ExternalToolExitStatusTest(unittest.TestCase):
                 "log-cleanup.sh",
                 "memory-lint.sh",
                 "memory-sync.sh",
+                "migrate-review-headers.sh",
                 "phase-docs-lint.sh",
                 "project-init.sh",
                 "quality-scan.sh",
