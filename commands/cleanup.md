@@ -144,7 +144,8 @@ Run `bash ~/.claude/scripts/memory-lint.sh [projectdir]`. Show:
 - Exit code (0 clean / 1 warnings / 2 errors / 3 configuration error — no report was produced, treat as a run failure rather than a findings result)
 - Up to the first 10 issue lines from stdout (truncate the rest with a `… N more` note).
 
-Do not auto-fix. Lint-suggested actions (e.g. `status: stale`) belong to the user.
+Do not auto-fix. Lint-suggested actions (e.g. refreshing `last_updated`, or setting
+`status: archived`/`superseded` on a file that is deliberately no longer maintained) belong to the user.
 
 ### 4. Phase-docs lint (read-only)
 

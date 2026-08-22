@@ -7,6 +7,22 @@ All notable changes to this project are documented in this file. The format is b
 ## [Unreleased]
 
 ### Fixed
+- **`memory-lint.sh` told readers to set a value that did nothing (WI-0074).** Its age warning read
+  "consider setting `status='stale'`" — and `stale` was not in the suppression list, so following the
+  advice produced the same warning on the very next run. Measured across all five cases: unset warns,
+  `stale` warns, `archived` and `superseded` are silent. The consequence is visible in the field —
+  **`status: stale` appears zero times across all five live memory stores**, because setting it never
+  helped anyone. The obvious repair, adding `stale` to the suppression list, was rejected: it buys
+  silence with a self-declaration, and "I know it is old" ending a message about being old is the
+  ceremony this repo's anchor work spent a whole package refusing. Instead the value is **removed from
+  the enum** — it rejects nothing, since nobody uses it — and the message now names the two values
+  that legitimately end it (`archived`, `superseded`, both meaning "deliberately no longer
+  maintained") and otherwise asks for the refresh it actually wants. The enum is enforced for the
+  first time, at **error** severity, and that severity is measured rather than assumed: the single
+  schema-foreign value in the field was corrected first, and a sweep of all five stores afterwards
+  found nothing outside `{active, archived, superseded}`, so the check rejects nothing that exists.
+  Modelled on the neighbouring `type` check rather than invented. `commands/cleanup.md` still cited
+  the old suggestion and was corrected in the same pass.
 - **The `code-reviewer` agent was told to run commands it has no tool for, and described as something
   it is not (WI-0073).** Its `Context Discovery` section opened every review with `git diff`,
   `git log` and `git diff --cached` in a shell block — while its tool set is `Glob, Grep, Read` plus

@@ -674,7 +674,7 @@ name: short-slug-or-title                 # required
 description: one-line summary             # required
 type: feedback|project|reference          # required (user stays global)
 last_updated: DD.MM.YYYY                   # required
-status: active|stale|superseded|archived  # optional
+status: active|superseded|archived        # optional
 related: [other_memory.md]                # optional, paths relative to file
 confidence: 0.4                           # optional, for instinct memories
 ---
@@ -695,7 +695,8 @@ Indexes are listings — no frontmatter required.
 - Required frontmatter fields present
 - Naming convention (`{type}_{slug}.md` for Tier 1)
 - Cross-refs in `related:` resolve to existing files
-- `last_updated` older than 90 days → suggests `status: stale`
+- `status` is one of `active`/`superseded`/`archived` (WI-0074; any other value errors)
+- `last_updated` older than 90 days → warns, unless `status: archived`/`superseded`
 - Each Tier 1 file referenced in `MEMORY.md`
 
 ### Templates

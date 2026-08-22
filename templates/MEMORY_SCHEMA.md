@@ -18,7 +18,7 @@
 
 | Field | Values | Description |
 |---|---|---|
-| `status` | `active` (default) \| `stale` \| `superseded` \| `archived` | Manual status marker. `stale` is suggested automatically by lint when `last_updated` is older than 90 days. |
+| `status` | `active` (default) \| `superseded` \| `archived` | Manual status marker. `archived`/`superseded` suppress lint's stale-age warning (WI-0074) — they mean "intentionally no longer maintained". There is no `stale` value: lint's warning names the file's age, it does not ask for a status label that only restates it. |
 | `related` | YAML list (inline `[a.md, b.md]` or block) | Paths to related memory files, **relative to the file's own directory**. Cross-refs are checked by lint. |
 | `confidence` | float `0.3` … `0.9` | Instincts (behavioral rules) only. See `~/.claude/instincts.md`. |
 

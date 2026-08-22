@@ -156,6 +156,35 @@ for file in "${FILES[@]:-}"; do
         esac
     fi
 
+    # (c2) status enum — same case-block structure as check (c), but no tier
+    # split: `status` describes the file's maintenance state, not its content
+    # type, and that vocabulary is identical on both tiers. `stale` used to be
+    # a legal value even though it was the ONE value the age warning below
+    # (check e) told the reader to set — and setting it did not suppress that
+    # warning, so following the check's own advice reproduced the same
+    # warning on the very next run (WI-0074). Removed from the enum outright,
+    # not added to the suppression list: `archived`/`superseded` legitimately
+    # end the warning because they say "intentionally no longer maintained";
+    # `stale` only ever said "is old", which was the warning's premise, not
+    # an answer to it. Numbered (c2) rather than renumbering every following
+    # letter — the letters after (c) are cross-referenced by later comments
+    # in this file, and inserting a fresh letter between them would have
+    # meant re-deriving and re-checking every one of those references for no
+    # behavioural gain.
+    #
+    # Severity `err` is deliberate, not the schema's looser default: measured
+    # directly before this promotion (21.08.2026) — the one schema-foreign
+    # value found across all five live memory stores was corrected
+    # (superseded-within → active, 606225f), and a full sweep of the same
+    # five stores afterward found no value outside {active,archived,
+    # superseded} anywhere. This check therefore rejects nothing that
+    # currently exists; it only closes the door `stale` left open.
+    status_type_val="$(fm_field "$file" status || true)"
+    case "$status_type_val" in
+        active|archived|superseded|"") ;;
+        *) err "$rel — status='$status_type_val' is not in {active,archived,superseded}" ;;
+    esac
+
     # (d) Tier 1 naming convention: {type}_{slug}.md
     if [[ "$parent_dir" == "memory" ]]; then
         # Tier 1 — filename must start with type_
@@ -174,7 +203,7 @@ for file in "${FILES[@]:-}"; do
             if (( age_days > STALE_DAYS )); then
                 status_val="$(fm_field "$file" status || true)"
                 if [[ "$status_val" != "archived" && "$status_val" != "superseded" ]]; then
-                    warn "$rel — last_updated=$last_updated is ${age_days} days old (>${STALE_DAYS}d) — consider setting status='stale'"
+                    warn "$rel — last_updated=$last_updated is ${age_days} days old (>${STALE_DAYS}d) — refresh last_updated, or set status='archived'/'superseded' if this file is intentionally no longer maintained"
                 fi
             fi
         else

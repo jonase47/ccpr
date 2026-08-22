@@ -29,12 +29,16 @@ import shutil
 import subprocess
 import tempfile
 import unittest
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 SCRIPT_PATH = Path(__file__).resolve().parents[1] / "memory-lint.sh"
 
 TODAY = date.today().strftime("%d.%m.%Y")
+
+# STALE_DAYS in memory-lint.sh is 90 — 200 days back is unambiguously over that
+# threshold regardless of which day the suite happens to run on.
+OLD_DATE = (date.today() - timedelta(days=200)).strftime("%d.%m.%Y")
 
 # The environment variable that selects the severity of check (n). Named here so
 # the default pin can assert that a plain run really does not set it.
@@ -134,6 +138,27 @@ CLEAN_INDEX = """# Memory Index
 - [Titled](project_alpha.md "A Title") — double-quoted Markdown title
 - [Single](project_alpha.md 'A Title') — single-quoted Markdown title
 """
+
+
+def tier1_text(name="status probe", last_updated=TODAY, status=None):
+    """Builds a valid Tier-1 memory file, optionally with a `status:` line.
+
+    Kept as one parametrised builder rather than one fixture constant per
+    status value (WI-0074) — the status/date combination is the axis under
+    test, not the surrounding file shape, and every combination below shares
+    everything except those two fields.
+    """
+    status_line = f"status: {status}\n" if status is not None else ""
+    return (
+        f"---\n"
+        f"name: {name}\n"
+        f"description: A Tier-1 memory file used to probe the status enum / stale check.\n"
+        f"type: project\n"
+        f"last_updated: {last_updated}\n"
+        f"{status_line}"
+        f"---\n\n"
+        f"# {name}\n\nBody.\n"
+    )
 
 
 class MemoryLintTest(unittest.TestCase):
@@ -336,6 +361,143 @@ class MemoryLintTest(unittest.TestCase):
         self.assertFalse(any("type='freeform-notes'" in e for e in errors), errors)
         warnings = self.findings(result.stdout, "Warnings")
         self.assertTrue(any("type='freeform-notes'" in w for w in warnings), warnings)
+
+    # --- status enum (WI-0074): {active, archived, superseded} -------------------
+    # `stale` used to be a legal `status:` value even though it was the ONE value
+    # the age-warning below (previously check e) recommended, and setting it did
+    # not suppress that warning — the reader followed the check's own advice and
+    # got the same warning again on the next run. `stale` is removed from the
+    # enum outright (measured: zero occurrences across all five live memory
+    # stores) rather than added to the suppression list, which would have bought
+    # silence for a status that only ever meant "is old", not "intentionally
+    # unmaintained".
+
+    def write_status_file(self, **kwargs):
+        (self.memory_dir / "project_status.md").write_text(
+            tier1_text(**kwargs), encoding="utf-8"
+        )
+
+    def test_status_active_is_valid(self):
+        self.write_index(CLEAN_INDEX + "- [Status](project_status.md) — probe\n")
+        self.write_status_file(status="active")
+
+        result = self.run_lint()
+
+        errors = self.findings(result.stdout, "Errors")
+        self.assertFalse(any("status=" in e for e in errors), errors)
+
+    def test_status_archived_is_valid(self):
+        self.write_index(CLEAN_INDEX + "- [Status](project_status.md) — probe\n")
+        self.write_status_file(status="archived")
+
+        result = self.run_lint()
+
+        errors = self.findings(result.stdout, "Errors")
+        self.assertFalse(any("status=" in e for e in errors), errors)
+
+    def test_status_superseded_is_valid(self):
+        self.write_index(CLEAN_INDEX + "- [Status](project_status.md) — probe\n")
+        self.write_status_file(status="superseded")
+
+        result = self.run_lint()
+
+        errors = self.findings(result.stdout, "Errors")
+        self.assertFalse(any("status=" in e for e in errors), errors)
+
+    def test_status_absent_is_valid(self):
+        """No `status:` line at all — the field is optional."""
+        self.write_index(CLEAN_INDEX + "- [Status](project_status.md) — probe\n")
+        self.write_status_file(status=None)
+
+        result = self.run_lint()
+
+        errors = self.findings(result.stdout, "Errors")
+        warnings = self.findings(result.stdout, "Warnings")
+        self.assertFalse(any("status=" in e for e in errors), errors)
+        self.assertFalse(any("status=" in w for w in warnings), warnings)
+
+    def test_status_stale_is_no_longer_a_valid_value(self):
+        """The literal defect this item fixes: `stale` used to be legal.
+
+        It must now be rejected the same way any other schema-foreign value is.
+        """
+        self.write_index(CLEAN_INDEX + "- [Status](project_status.md) — probe\n")
+        self.write_status_file(status="stale")
+
+        result = self.run_lint()
+
+        errors = self.findings(result.stdout, "Errors")
+        self.assertTrue(
+            any("project_status.md" in e and "status='stale'" in e for e in errors), errors
+        )
+
+    def test_status_with_an_arbitrary_unknown_value_is_an_error(self):
+        self.write_index(CLEAN_INDEX + "- [Status](project_status.md) — probe\n")
+        self.write_status_file(status="on-hold")
+
+        result = self.run_lint()
+
+        errors = self.findings(result.stdout, "Errors")
+        self.assertTrue(
+            any("project_status.md" in e and "status='on-hold'" in e for e in errors), errors
+        )
+
+    # --- stale-age warning (WI-0074): archived/superseded suppress it, stale ----
+    # does not (that is the defect — see above), and the warning text itself
+    # must name the two values that actually end it.
+
+    def test_old_last_updated_without_status_produces_the_age_warning(self):
+        self.write_index(CLEAN_INDEX + "- [Status](project_status.md) — probe\n")
+        self.write_status_file(last_updated=OLD_DATE, status=None)
+
+        result = self.run_lint()
+
+        warnings = self.findings(result.stdout, "Warnings")
+        self.assertTrue(any("days old" in w and "project_status.md" in w for w in warnings), warnings)
+
+    def test_age_warning_names_the_two_values_that_suppress_it(self):
+        self.write_index(CLEAN_INDEX + "- [Status](project_status.md) — probe\n")
+        self.write_status_file(last_updated=OLD_DATE, status="active")
+
+        result = self.run_lint()
+
+        warnings = self.findings(result.stdout, "Warnings")
+        age_warning = next((w for w in warnings if "days old" in w), None)
+        self.assertIsNotNone(age_warning, warnings)
+        self.assertIn("archived", age_warning)
+        self.assertIn("superseded", age_warning)
+
+    def test_archived_still_suppresses_the_age_warning(self):
+        self.write_index(CLEAN_INDEX + "- [Status](project_status.md) — probe\n")
+        self.write_status_file(last_updated=OLD_DATE, status="archived")
+
+        result = self.run_lint()
+
+        warnings = self.findings(result.stdout, "Warnings")
+        self.assertFalse(any("days old" in w for w in warnings), warnings)
+
+    def test_superseded_still_suppresses_the_age_warning(self):
+        self.write_index(CLEAN_INDEX + "- [Status](project_status.md) — probe\n")
+        self.write_status_file(last_updated=OLD_DATE, status="superseded")
+
+        result = self.run_lint()
+
+        warnings = self.findings(result.stdout, "Warnings")
+        self.assertFalse(any("days old" in w for w in warnings), warnings)
+
+    def test_stale_does_not_suppress_the_age_warning(self):
+        """The regression pin for the defect itself: a `status: stale` file is now
+        BOTH an enum error (invalid value) AND still carries the age warning —
+        before this fix it silently swallowed the age warning instead."""
+        self.write_index(CLEAN_INDEX + "- [Status](project_status.md) — probe\n")
+        self.write_status_file(last_updated=OLD_DATE, status="stale")
+
+        result = self.run_lint()
+
+        errors = self.findings(result.stdout, "Errors")
+        warnings = self.findings(result.stdout, "Warnings")
+        self.assertTrue(any("status='stale'" in e for e in errors), errors)
+        self.assertTrue(any("days old" in w for w in warnings), warnings)
 
     # --- Regression pin for the pre-existing behaviour being extended --------------
 
