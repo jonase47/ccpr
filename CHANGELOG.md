@@ -7,6 +7,18 @@ All notable changes to this project are documented in this file. The format is b
 ## [Unreleased]
 
 ### Fixed
+- **`memory-lint.sh` check (f) resolved `related:` against the file's own directory only, the same
+  question WI-0071 already answered for `phase-docs-lint.sh` (WI-0078).** Authors write `related:`
+  entries project-root-relative (`docs/memory/foo.md`), not document-relative — a document-relative
+  miss now falls back to `$PROJECT_DIR` before the entry is declared dead, mirroring WI-0071's fix
+  exactly: same fallback base, same message wording, same severity split (a root-relative hit is
+  `info`, naming both candidate paths, not silence — two bases without saying so is the unvalidated
+  drift this lint exists to catch). Measured against a real store (productdata): the one file the
+  defect was found on, `docs/memory/project_attribute-mapping-slice-b-gap.md`, still errors after
+  this fix — its `related:` entry (`planning/sprint/S19-VALUEMAP-ARCH.md`) is written relative to
+  `docs/`, not to the project root, so neither base resolves it. That is a genuinely different
+  question from the one WI-0071's convention answers, and mirroring that convention here — rather
+  than inventing a second, docs/-rooted fallback for this linter alone — was the explicit brief.
 - **Ten divergences between check (n) and CommonMark, found by that corpus (WI-0079…WI-0083).** Two
   were predicted from the matcher `\[[^][]*\]\([^)]*\)` before the round ran and both confirmed: an
   escaped bracket pair `\[not a link\](x.md)` is reported although it is not a link (**false

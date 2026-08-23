@@ -161,6 +161,30 @@ def tier1_text(name="status probe", last_updated=TODAY, status=None):
     )
 
 
+def related_text(name="related probe", related_entries=()):
+    """Builds a valid Tier-1 memory file carrying a `related:` block (WI-0078,
+    check (f)'s cross-ref field). Block-list form only — the real-world
+    fixture this fix was measured against (docs/memory/
+    project_attribute-mapping-slice-b-gap.md in productdata) uses the block
+    form, and fm_list's two spellings are already exercised for phase-docs-lint
+    (test_phase_docs_lint.py CheckFRelatedCrossRefsTest) against the same
+    shared lib/frontmatter.sh — re-proving both here would test the library,
+    not this check's resolution order.
+    """
+    related_block = "".join(f"  - {entry}\n" for entry in related_entries)
+    related_line = f"related:\n{related_block}" if related_entries else ""
+    return (
+        f"---\n"
+        f"name: {name}\n"
+        f"description: A Tier-1 memory file used to probe the related: cross-ref check.\n"
+        f"type: project\n"
+        f"last_updated: {TODAY}\n"
+        f"{related_line}"
+        f"---\n\n"
+        f"# {name}\n\nBody.\n"
+    )
+
+
 class MemoryLintTest(unittest.TestCase):
     def setUp(self):
         self.project_dir = Path(tempfile.mkdtemp(prefix="ccpr-memory-lint-"))
@@ -498,6 +522,139 @@ class MemoryLintTest(unittest.TestCase):
         warnings = self.findings(result.stdout, "Warnings")
         self.assertTrue(any("status='stale'" in e for e in errors), errors)
         self.assertTrue(any("days old" in w for w in warnings), warnings)
+
+    # --- (f) related: cross-refs — document-relative-first, project-root fallback --
+    # WI-0078: check (f) used to resolve related: exclusively against the file's own
+    # directory. Authors in the field write entries project-root-relative instead
+    # (e.g. 'docs/memory/foo.md' from a file that itself lives two levels deeper),
+    # so a document-relative miss now falls back to $PROJECT_DIR before the entry is
+    # declared dead — mirrors the WI-0071 fix already shipped for the identical
+    # question in phase-docs-lint.sh check (f)/(g) (PO decision 21.08.2026), same
+    # wording, same severity split (root-relative hit is `info`, not silence — two
+    # bases without saying so would be the unvalidated drift this lint exists to
+    # catch). Deliberately the same fallback base ($PROJECT_DIR, not e.g. the docs/
+    # folder) as phase-docs-lint.sh uses — "no second convention for the second
+    # linter" (WI-0078 briefing).
+
+    def test_related_entry_resolved_document_relative_stays_silent(self):
+        """The pre-existing, documented case: an entry that resolves relative to
+        the file's own directory must stay completely silent — no err, no info."""
+        self.write_index(CLEAN_INDEX + "- [Main](project_main-doc-relative.md) — probe\n")
+        (self.memory_dir / "project_sidecar-doc-relative.md").write_text(
+            related_text(name="sidecar"), encoding="utf-8"
+        )
+        (self.memory_dir / "project_main-doc-relative.md").write_text(
+            related_text(
+                name="main",
+                related_entries=["project_sidecar-doc-relative.md"],
+            ),
+            encoding="utf-8",
+        )
+
+        result = self.run_lint()
+
+        errors = self.findings(result.stdout, "Errors")
+        infos = self.findings(result.stdout, "Info")
+        self.assertFalse(any("related:" in e for e in errors), errors)
+        self.assertFalse(any("related:" in i for i in infos), infos)
+
+    def test_related_entry_resolvable_only_at_project_root_is_info_not_error(self):
+        """A file nested under a Tier-2 silo writes a related: entry rooted at the
+        repo's docs/ tree (matching how phase-docs-lint's own WI-0071 fixture is
+        built) — document-relative misses, the project-root fallback hits."""
+        silo_dir = self.memory_dir / "senior-developer"
+        (self.memory_dir / "project_root-target.md").write_text(
+            related_text(name="root target"), encoding="utf-8"
+        )
+        (silo_dir / "project_main-root.md").write_text(
+            related_text(
+                name="main",
+                related_entries=["docs/memory/project_root-target.md"],
+            ),
+            encoding="utf-8",
+        )
+        self.write_persona_index(
+            "---\nname: senior-developer project memory index\n"
+            "description: Index of senior-developer notes.\ntype: index\n"
+            "last_updated: 01.01.2026\n---\n\n"
+            "# Senior-Developer Memory\n\n"
+            "- [patterns.md](patterns.md) — conventions.\n"
+            "- [main-root](project_main-root.md) — probe.\n"
+        )
+
+        result = self.run_lint()
+
+        errors = self.findings(result.stdout, "Errors")
+        infos = self.findings(result.stdout, "Info")
+        self.assertFalse(any("related:" in e for e in errors), errors)
+        self.assertTrue(
+            any(
+                "project_main-root.md" in i
+                and "related:'docs/memory/project_root-target.md'" in i
+                and "project-root fallback" in i
+                for i in infos
+            ),
+            infos,
+        )
+
+    def test_related_entry_resolvable_at_neither_base_stays_an_error(self):
+        self.write_index(CLEAN_INDEX + "- [Main](project_main-neither.md) — probe\n")
+        (self.memory_dir / "project_main-neither.md").write_text(
+            related_text(name="main", related_entries=["docs/memory/project_ghost.md"]),
+            encoding="utf-8",
+        )
+
+        result = self.run_lint()
+
+        errors = self.findings(result.stdout, "Errors")
+        infos = self.findings(result.stdout, "Info")
+        self.assertTrue(
+            any(
+                "project_main-neither.md" in e
+                and "related:'docs/memory/project_ghost.md' points to non-existent file" in e
+                for e in errors
+            ),
+            errors,
+        )
+        self.assertFalse(any("project_main-neither.md" in i for i in infos), infos)
+
+    def test_related_entry_resolvable_at_both_bases_resolves_document_relative_and_stays_silent(self):
+        """Order guard: the entry resolves at BOTH bases (document-relative AND
+        project-root), so a 'check root first' resolution-order regression would
+        still succeed silently — but via the wrong branch. Pinning 'no info' here
+        only proves the fallback wasn't needed; this cannot pass by accident
+        because the two prior tests already pin the wording each branch prints."""
+        (self.memory_dir / "project_sidecar-both.md").write_text(
+            related_text(name="sidecar"), encoding="utf-8"
+        )
+        self.write_index(
+            CLEAN_INDEX + "- [Main](project_main-both.md) — probe\n"
+        )
+        (self.memory_dir / "project_main-both.md").write_text(
+            related_text(
+                name="main",
+                # No 'docs/memory/' prefix: resolves document-relative (base_dir
+                # IS docs/memory here) *and* — since PROJECT_DIR/project_sidecar-
+                # both.md does not exist — only via the document-relative base.
+                # To genuinely hit both bases, the entry must also exist relative
+                # to PROJECT_DIR: mirror the sidecar file there too.
+                related_entries=["project_sidecar-both.md"],
+            ),
+            encoding="utf-8",
+        )
+        # Plant the same filename at PROJECT_DIR root so a root-relative
+        # resolution would ALSO succeed — proving the document-relative branch,
+        # not the fallback, is what actually fired.
+        (self.project_dir / "project_sidecar-both.md").write_text(
+            related_text(name="root sidecar"), encoding="utf-8"
+        )
+
+        result = self.run_lint()
+
+        errors = self.findings(result.stdout, "Errors")
+        infos = self.findings(result.stdout, "Info")
+        self.assertFalse(any("related:" in e for e in errors), errors)
+        self.assertFalse(any("related:" in i for i in infos), infos)
 
     # --- Regression pin for the pre-existing behaviour being extended --------------
 

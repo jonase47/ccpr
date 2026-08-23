@@ -211,11 +211,25 @@ for file in "${FILES[@]:-}"; do
         fi
     fi
 
-    # (f) related: cross-refs pointing to existing files
+    # (f) related: cross-refs — resolved document-relative first (the
+    # documented form: MEMORY_SCHEMA.md says relative to the file's own
+    # directory). Authors in the field write these entries project-root-
+    # relative instead (e.g. `docs/memory/foo.md`), so a miss falls back to
+    # $PROJECT_DIR before being declared dead (WI-0078, mirroring the WI-0071
+    # fix already shipped for the identical question in phase-docs-lint.sh
+    # check (f)/(g), PO decision 21.08.2026). A root-relative hit is `info`,
+    # not silence — accepting two bases without saying so would be exactly
+    # the unvalidated drift this lint exists to catch. Deliberately the same
+    # fallback base ($PROJECT_DIR) and message wording as phase-docs-lint.sh
+    # uses — no second convention for the second linter.
     base_dir="$(dirname "$file")"
     while IFS= read -r rel_entry; do
         [[ -z "$rel_entry" ]] && continue
-        if [[ ! -f "$base_dir/$rel_entry" ]]; then
+        if [[ -f "$base_dir/$rel_entry" ]]; then
+            : # document-relative hit — the documented, silent case
+        elif [[ -f "$PROJECT_DIR/$rel_entry" ]]; then
+            info "$rel — related:'$rel_entry' resolved via project-root fallback ($PROJECT_DIR/$rel_entry), not found relative to $base_dir"
+        else
             err "$rel — related:'$rel_entry' points to non-existent file ($base_dir/$rel_entry)"
         fi
     done < <(fm_list "$file" related)
