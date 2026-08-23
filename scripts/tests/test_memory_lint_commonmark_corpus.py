@@ -24,23 +24,36 @@ Ausfuehren entschieden, nie durch Argumentieren"):
   * `expected_check_n_findings` — what `scripts/memory-lint.sh` check (n)
     ACTUALLY reports today, measured by the generator running it.
 
-Where the two disagree, the entry carries a `known_divergence` block
-(direction, reason, work_item) and this test asserts the CURRENT (divergent)
-behaviour — a frozen, visible snapshot, not a silent xfail. If the real
-script's behaviour later drifts from that frozen snapshot in EITHER
-direction (the bug gets fixed, or a different bug appears), the assertion
-below fails and says so.
+Where the two disagree, the entry carries EXACTLY ONE of two explanation
+blocks, never both (FixtureIntegrityTest pins the mutual exclusion):
+
+  * `known_divergence` (direction, reason, work_item) — an OPEN gap in
+    check (n), tracked for a future fix.
+  * `documented_intent` (reason, po_decision, work_item) — WI-0085: a
+    disagreement the PO explicitly decided is deliberate, not a bug. check
+    (n)'s own contract is narrower than CommonMark conformance ("does the
+    index still point at existing files?"), and this is the field for a
+    case where that narrower contract is the intended behaviour on purpose.
+
+Either way this test asserts the CURRENT (divergent) behaviour — a frozen,
+visible snapshot, not a silent xfail. If the real script's behaviour later
+drifts from that frozen snapshot in EITHER direction (the bug gets fixed, or
+a different bug appears), the assertion below fails and says so.
 """
 
+import hashlib
 import json
 import re
+import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 
 SCRIPT_PATH = Path(__file__).resolve().parents[1] / "memory-lint.sh"
 FIXTURE_PATH = Path(__file__).resolve().parent / "fixtures" / "commonmark_corpus.json"
+GENERATOR_PATH = Path(__file__).resolve().parent / "fixtures" / "generate_commonmark_corpus.py"
 
 FINDING_RE = re.compile(r"link target '([^']*)' does not exist")
 
@@ -87,11 +100,19 @@ class FixtureIntegrityTest(unittest.TestCase):
             f"{sorted(n for n in _ENTRY_NAMES if _ENTRY_NAMES.count(n) > 1)}",
         )
 
-    def test_every_known_divergence_is_tagged_wi_0005(self):
+    # Closed set of work items allowed to own a `known_divergence` block. WI-0005
+    # is the original adversarial-corpus round; WI-0081 (remainder, 23.08.2026)
+    # reclassified the named-entity destination row from a "wrong-target" bug
+    # into a documented, deliberate non-claim (see that entry's own reason text)
+    # -- a future round's own findings still get their own new tag, not silently
+    # absorbed into either of these two.
+    _KNOWN_DIVERGENCE_WORK_ITEMS = {"WI-0005", "WI-0081"}
+
+    def test_every_known_divergence_is_tagged_a_known_work_item(self):
         untagged = [
             e["name"] for e in CORPUS["entries"]
             if e["known_divergence"] is not None
-            and e["known_divergence"].get("work_item") != "WI-0005"
+            and e["known_divergence"].get("work_item") not in self._KNOWN_DIVERGENCE_WORK_ITEMS
         ]
         self.assertEqual(untagged, [])
 
@@ -104,9 +125,13 @@ class FixtureIntegrityTest(unittest.TestCase):
                 self.assertIn(kd.get("direction"), {"false-positive", "false-negative", "wrong-target"})
                 self.assertTrue(kd.get("reason"), "known_divergence.reason must not be empty")
 
-    def test_known_divergence_presence_matches_the_frozen_oracle_disagreement(self):
-        """The fixture's own internal contract: a `known_divergence` block is
-        present IFF the two frozen oracle fields actually disagree. Catches a
+    def test_known_divergence_or_documented_intent_matches_the_frozen_oracle_disagreement(self):
+        """The fixture's own internal contract: whenever the two frozen oracle
+        fields disagree, the entry must carry an EXPLANATION for that — either
+        `known_divergence` (an open gap in check (n)) or `documented_intent`
+        (WI-0085: a disagreement the PO decided is deliberate, not a bug —
+        check (n)'s own contract is narrower than CommonMark conformance).
+        Exactly one of the two, never both, never neither. Catches a
         hand-edited fixture drifting from what the generator actually
         measured, without re-running either oracle."""
         for entry in CORPUS["entries"]:
@@ -115,11 +140,32 @@ class FixtureIntegrityTest(unittest.TestCase):
                     sorted(entry["expected_check_n_findings"])
                     != sorted(entry["reference_checkable_targets"])
                 )
+                has_kd = entry["known_divergence"] is not None
+                has_intent = entry.get("documented_intent") is not None
+                self.assertFalse(
+                    has_kd and has_intent,
+                    f"{entry['name']!r} carries both known_divergence and "
+                    f"documented_intent — exactly one may explain a disagreement",
+                )
                 self.assertEqual(
-                    entry["known_divergence"] is not None, oracles_disagree,
-                    f"known_divergence presence ({entry['known_divergence'] is not None}) "
+                    has_kd or has_intent, oracles_disagree,
+                    f"known_divergence/documented_intent presence ({has_kd or has_intent}) "
                     f"does not match oracle disagreement ({oracles_disagree}) for "
                     f"{entry['name']!r}",
+                )
+
+    def test_every_documented_intent_has_a_reason_a_po_decision_and_a_work_item(self):
+        for entry in CORPUS["entries"]:
+            intent = entry.get("documented_intent")
+            if intent is None:
+                continue
+            with self.subTest(entry=entry["name"]):
+                self.assertTrue(intent.get("reason"), "documented_intent.reason must not be empty")
+                self.assertTrue(
+                    intent.get("po_decision"), "documented_intent.po_decision must not be empty",
+                )
+                self.assertTrue(
+                    intent.get("work_item"), "documented_intent.work_item must not be empty",
                 )
 
 
@@ -258,17 +304,36 @@ class CommonmarkCorpusDifferentialTest(unittest.TestCase):
             run_memory_lint_on(control["markdown"]), ["dead-refdef-single.md"],
         )
 
-    def test_a_named_entity_in_a_destination_is_checked_undecoded(self):
+    def test_a_named_entity_in_a_destination_is_filed_as_info_not_claimed_dead(self):
         """CommonMark decodes `&num;` to `#` inside a link destination; check
         (n) deliberately leaves NAMED entities undecoded (WI-0081) rather
         than building the full ~2000-entry CommonMark named-entity table for
-        a construct measured at zero occurrences in the field — the raw text
-        is checked as-is, not further garbled.
+        a construct measured at zero occurrences in the field. WI-0081
+        (remainder), fixed 23.08.2026: resolving and reporting the raw,
+        undecoded text as dead used to claim a verdict check (n) cannot
+        back — the decoded target may well exist. Filed as info instead,
+        absent from both Errors and Warnings.
         """
         named = self._entry("entity_reference_named_in_destination")
 
-        self.assertEqual(run_memory_lint_on(named["markdown"]), ["dead&num;3-ent2.md"])
+        self.assertEqual(run_memory_lint_on(named["markdown"]), [])
         self.assertEqual(named["reference_checkable_targets"], ["dead#3-ent2.md"])
+
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp) / "project"
+            (project_dir / "docs" / "memory").mkdir(parents=True)
+            (project_dir / "docs" / "memory" / "MEMORY.md").write_text(
+                "# Memory Index\n\n" + named["markdown"], encoding="utf-8"
+            )
+            fake_home = Path(tmp) / "home"
+            fake_home.mkdir()
+            result = subprocess.run(
+                ["bash", str(SCRIPT_PATH), str(project_dir)],
+                capture_output=True, text=True,
+                env={"HOME": str(fake_home), "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"},
+            )
+        self.assertIn("dead&num;3-ent2.md", result.stdout)
+        self.assertIn("## Info (1)", result.stdout)
 
     def test_numeric_entities_in_a_destination_are_decoded_before_resolving(self):
         """WI-0081, fixed: `&#35;` (decimal) and `&#x23;` (hex) both decode to
@@ -291,57 +356,80 @@ class CommonmarkCorpusDifferentialTest(unittest.TestCase):
     # --- WI-0005 round 2 (22.08.2026-23.08.2026): new construct classes ----
 
     def test_an_indented_code_block_is_not_a_link(self):
-        """New this round: a line indented >=4 spaces (or one tab),
-        surrounded by blank lines, is a CommonMark indented code block --
-        its content is never inline-parsed. check (n)'s block-boundary list
-        has no case for this, so the line falls through to ordinary
-        paragraph content and the bracketed text inside is reported dead.
+        """WI-0084, fixed: a line indented >=4 spaces (or one tab), surrounded
+        by blank lines, is a CommonMark indented code block -- its content is
+        never inline-parsed. check (n) now carries a block-boundary case for
+        this (recomputed per line off pbuf_n == 0, memory-lint.sh), so the
+        bracketed text inside is no longer extracted at all -- the two
+        oracles agree.
         """
         four_space = self._entry("indented_code_block_four_spaces")
         tab = self._entry("indented_code_block_tab_indent")
 
-        self.assertEqual(run_memory_lint_on(four_space["markdown"]), ["dead-ind1.md"])
+        self.assertEqual(run_memory_lint_on(four_space["markdown"]), [])
         self.assertEqual(four_space["reference_checkable_targets"], [])
+        self.assertIsNone(four_space["known_divergence"])
 
-        self.assertEqual(run_memory_lint_on(tab["markdown"]), ["dead-ind2.md"])
+        self.assertEqual(run_memory_lint_on(tab["markdown"]), [])
         self.assertEqual(tab["reference_checkable_targets"], [])
+        self.assertIsNone(tab["known_divergence"])
 
     def test_an_html_block_other_than_a_comment_is_not_checked_as_html(self):
-        """New this round: check (n) only recognises `<!--` as an HTML-block
-        opener (WI-0041). Every other block-level tag (`<div>`, `<pre>`,
-        `<script>`, ...) opens a CommonMark HTML block whose content is raw,
-        unparsed HTML -- but check (n) treats it as ordinary paragraph
-        prose and reports the bracketed text inside as a dead link.
+        """WI-0084, fixed: check (n) used to recognise only `<!--` as an
+        HTML-block opener (WI-0041). It now also tracks HTML block type 1
+        (script/pre/style, closes on a matching closing tag anywhere in a
+        later line) and type 6 (div and the rest of the CommonMark "common
+        block tag" list, closes at the next blank line) -- both copied from
+        the pinned reference implementation itself, not the abstract spec
+        text. The bracketed text inside each is no longer extracted.
         """
         div = self._entry("html_block_div_tag")
         pre = self._entry("html_block_pre_tag")
         script = self._entry("html_block_script_tag")
 
-        self.assertEqual(run_memory_lint_on(div["markdown"]), ["dead-html1.md"])
+        self.assertEqual(run_memory_lint_on(div["markdown"]), [])
         self.assertEqual(div["reference_checkable_targets"], [])
-        self.assertEqual(run_memory_lint_on(pre["markdown"]), ["dead-html2.md"])
+        self.assertIsNone(div["known_divergence"])
+        self.assertEqual(run_memory_lint_on(pre["markdown"]), [])
         self.assertEqual(pre["reference_checkable_targets"], [])
-        self.assertEqual(run_memory_lint_on(script["markdown"]), ["dead-html3.md"])
+        self.assertIsNone(pre["known_divergence"])
+        self.assertEqual(run_memory_lint_on(script["markdown"]), [])
         self.assertEqual(script["reference_checkable_targets"], [])
+        self.assertIsNone(script["known_divergence"])
 
     def test_an_unused_reference_definition_is_checked_anyway(self):
-        """New this round: check (n)'s reference-definition branch checks a
-        `[id]: target` destination straight off the definition line,
-        unconditionally -- it never looks for a matching `[id]` usage
-        anywhere else in the file. A definition with no usage at all
-        renders NOTHING at the reference (a lone definition produces no
-        `<a href>`), but check (n) reports it as a dead target regardless.
-        This is also why the shortcut/collapsed reference-link fixtures
-        below happen to agree with the reference: check (n) never resolves
-        the usage, it only ever reads the definition line.
+        """check (n)'s reference-definition branch checks a `[id]: target`
+        destination straight off the definition line, unconditionally -- it
+        never looks for a matching `[id]` usage anywhere else in the file. A
+        definition with no usage at all renders NOTHING at the reference (a
+        lone definition produces no `<a href>`), but check (n) reports it as
+        a dead target regardless. This is also why the shortcut/collapsed
+        reference-link fixtures below happen to agree with the reference:
+        check (n) never resolves the usage, it only ever reads the
+        definition line.
+
+        WI-0085 (23.08.2026): the PO decided this divergence is INTENDED, not
+        a bug -- an unused definition addressing a deleted file is a dead
+        POINTER that renders as nothing and is invisible on a normal read,
+        exactly the failure mode this check exists to catch even though
+        CommonMark itself renders no link. Both entries carry
+        `documented_intent` instead of `known_divergence` now; this test's
+        own behavioural assertions are unchanged, only the classification is.
         """
         standalone = self._entry("unused_reference_definition_standalone")
         after_prose = self._entry("unused_reference_definition_after_prose")
 
         self.assertEqual(run_memory_lint_on(standalone["markdown"]), ["dead-unused1.md"])
         self.assertEqual(standalone["reference_checkable_targets"], [])
+        self.assertIsNone(standalone["known_divergence"])
+        self.assertIsNotNone(standalone["documented_intent"])
+        self.assertEqual(standalone["documented_intent"]["work_item"], "WI-0085")
+
         self.assertEqual(run_memory_lint_on(after_prose["markdown"]), ["dead-unused2.md"])
         self.assertEqual(after_prose["reference_checkable_targets"], [])
+        self.assertIsNone(after_prose["known_divergence"])
+        self.assertIsNotNone(after_prose["documented_intent"])
+        self.assertEqual(after_prose["documented_intent"]["work_item"], "WI-0085")
 
     def test_a_crlf_blank_line_is_not_a_recognised_block_boundary(self):
         """New this round: check (n)'s blank-line boundary test is
@@ -447,6 +535,201 @@ class MutationProvesTheDifferentialTestCanFail(unittest.TestCase):
         original_md5_after = __import__("hashlib").md5(after.encode("utf-8")).hexdigest()
         self.assertEqual(original_md5_before, original_md5_after)
         self.assertEqual(after, original)
+
+
+class GeneratorDocumentedIntentValidationTest(unittest.TestCase):
+    """WI-0086: `generate_commonmark_corpus.py`'s `main()` now classifies
+    every corpus entry's oracle comparison into one of three outcomes —
+    match, `known_divergence` (an open gap in check (n)), or
+    `documented_intent` (WI-0085: a disagreement the PO decided is
+    deliberate) — and refuses to write a fixture whenever an entry's
+    `known_divergence`/`documented_intent` fields do not match what the two
+    oracles actually measured. This class proves each of the three new
+    refusal branches the `documented_intent` field added:
+
+      1. `documented_intent` claimed but the oracles now AGREE (a stale or
+         unclaimed intent).
+      2. `known_divergence` AND `documented_intent` both present on one
+         entry (a contradiction — exactly one may explain a disagreement).
+      3. Neither block present but the oracles DISAGREE (an undocumented,
+         newly-introduced divergence) — the pre-existing branch, now
+         sharing its message with the new field.
+
+    Each test runs a COPY of the real generator, its `CORPUS` list swapped
+    for a single synthetic entry built for that scenario — the real
+    44-entry corpus is already exercised by CommonmarkCorpusDifferentialTest
+    / FixtureIntegrityTest above; re-running all 44 entries three more times
+    here would triple this module's real `bash`-subprocess cost for no
+    additional coverage. Never the checked-in generator or fixture — proven
+    by md5 before/after, same discipline
+    MutationProvesTheDifferentialTestCanFail above uses for the shell
+    script.
+
+    Each test ALSO proves it can fail: removing the specific validation
+    branch under test from the copy makes the SAME synthetic entry pass
+    silently (exit 0, a fixture gets written) instead of being refused
+    (exit 1) — mutation of the generator's own logic, not a removed
+    assertion.
+    """
+
+    _CORPUS_BLOCK_RE = re.compile(r"^CORPUS = \[.*?^\]\n", re.S | re.M)
+
+    _BOTH_BLOCKS_GUARD = (
+        '        if claims_divergence and claims_intent:\n'
+        '            problems.append(\n'
+        '                f"{entry[\'name\']}: carries BOTH known_divergence and "\n'
+        '                f"documented_intent — pick exactly one (an open gap in "\n'
+        '                f"check (n) vs. a deliberate PO decision) or the fixture "\n'
+        '                f"cannot tell which explanation applies"\n'
+        '            )\n'
+    )
+    _INTENT_AGREES_GUARD = (
+        '        if claims_intent and not actually_diverges:\n'
+        '            problems.append(\n'
+        "                f\"{entry['name']}: documented_intent claimed but the two \"\n"
+        '                f"oracles AGREE (reference={expected_reference_targets!r}, "\n'
+        '                f"check(n)={observed_check_n_findings!r}) — remove the claim, "\n'
+        '                f"there is no longer a disagreement for the PO decision to "\n'
+        '                f"cover"\n'
+        '            )\n'
+    )
+    _NEITHER_BLOCK_GUARD = (
+        '        if not claims_divergence and not claims_intent and actually_diverges:\n'
+        '            problems.append(\n'
+        "                f\"{entry['name']}: no known_divergence or documented_intent \"\n"
+        '                f"recorded but the two oracles DISAGREE "\n'
+        '                f"(reference={expected_reference_targets!r}, "\n'
+        '                f"check(n)={observed_check_n_findings!r}) — this is a NEW, "\n'
+        '                f"previously unrecorded divergence; add a known_divergence "\n'
+        '                f"block (an open gap in check (n)) or a documented_intent "\n'
+        '                f"block (a deliberate PO decision) before regenerating"\n'
+        '            )\n'
+    )
+
+    _ENTRY_INTENT_AGREES = {
+        "name": "synthetic_intent_agrees",
+        "category": "synthetic",
+        "markdown": "[x](dead-agree-test.md)\n",
+        "known_divergence": None,
+        "documented_intent": {
+            "reason": "synthetic fixture for GeneratorDocumentedIntentValidationTest",
+            "po_decision": "23.08.2026",
+            "work_item": "WI-TEST",
+        },
+    }
+    _ENTRY_BOTH_BLOCKS = {
+        "name": "synthetic_both_blocks",
+        "category": "synthetic",
+        # A genuine false-negative (nested brackets break check (n)'s label
+        # regex, see nested_brackets_in_link_text_simple in the real
+        # CORPUS) — actually_diverges is True here, so only the "both
+        # blocks present" guard, not the "claims a divergence that doesn't
+        # exist" guards, can be the one that fires.
+        "markdown": "- [a [b] c](dead-nb1.md) — nested brackets in link text\n",
+        "known_divergence": {
+            "direction": "false-negative",
+            "reason": "synthetic fixture for GeneratorDocumentedIntentValidationTest",
+            "work_item": "WI-0005",
+        },
+        "documented_intent": {
+            "reason": "synthetic fixture for GeneratorDocumentedIntentValidationTest",
+            "po_decision": "23.08.2026",
+            "work_item": "WI-TEST",
+        },
+    }
+    _ENTRY_NEITHER_BLOCK = {
+        "name": "synthetic_neither_block",
+        "category": "synthetic",
+        # Same false-negative construct as above, minus both explanation
+        # blocks — no "documented_intent" key at all, mirroring how most
+        # real CORPUS entries never carry the key (entry.get(), not
+        # entry[...]).
+        "markdown": "[a [b] c](dead-newgap-test.md)\n",
+        "known_divergence": None,
+    }
+
+    def _run_generator_copy(self, generator_source, corpus_entries):
+        """Writes `generator_source` with its CORPUS list swapped for
+        `corpus_entries` into an isolated scratch tree (mirrored one level
+        deep so the copy's own `parents[3]`-based REPO_ROOT/SCRIPT_PATH
+        resolution still lands on a real `memory-lint.sh` + `lib/`), and
+        runs it with the SAME Python interpreter this test suite runs
+        under."""
+        corpus_source = f"CORPUS = {corpus_entries!r}\n"
+        mutated = self._CORPUS_BLOCK_RE.sub(lambda m: corpus_source, generator_source, count=1)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            scratch_root = Path(tmp) / "repo"
+            fixtures_dir = scratch_root / "scripts" / "tests" / "fixtures"
+            fixtures_dir.mkdir(parents=True)
+            shutil.copy(SCRIPT_PATH, scratch_root / "scripts" / "memory-lint.sh")
+            shutil.copytree(SCRIPT_PATH.parent / "lib", scratch_root / "scripts" / "lib")
+            generator_copy = fixtures_dir / "generate_commonmark_corpus.py"
+            generator_copy.write_text(mutated, encoding="utf-8")
+            return subprocess.run(
+                [sys.executable, str(generator_copy)],
+                capture_output=True, text=True,
+            )
+
+    def _assert_generator_disk_copy_untouched(self, original_source, original_md5):
+        after = GENERATOR_PATH.read_text(encoding="utf-8")
+        self.assertEqual(after, original_source)
+        self.assertEqual(
+            hashlib.md5(after.encode("utf-8")).hexdigest(), original_md5,
+            "the checked-in generator was modified by this test run",
+        )
+
+    def _assert_scenario(self, entry, guard, expected_message_fragment):
+        source = GENERATOR_PATH.read_text(encoding="utf-8")
+        original_md5 = hashlib.md5(source.encode("utf-8")).hexdigest()
+
+        clean = self._run_generator_copy(source, [entry])
+        self.assertEqual(
+            clean.returncode, 1,
+            f"expected the generator to refuse this entry, stdout="
+            f"{clean.stdout!r} stderr={clean.stderr!r}",
+        )
+        self.assertIn(expected_message_fragment, clean.stderr)
+
+        # Mutation proof: the guard text must be present verbatim (or this
+        # test would falsely pass with a guard that moved/changed shape),
+        # and removing it must make the SAME entry pass silently.
+        self.assertIn(guard, source, "guard text moved — update this test")
+        mutated_source = source.replace(guard, "", 1)
+        self.assertNotEqual(mutated_source, source)
+
+        mutant = self._run_generator_copy(mutated_source, [entry])
+        self.assertEqual(
+            mutant.returncode, 0,
+            f"removing the guard should make the generator accept this "
+            f"entry silently, but it still refused: {mutant.stderr!r}",
+        )
+
+        self._assert_generator_disk_copy_untouched(source, original_md5)
+
+    def test_documented_intent_claimed_but_oracles_agree_is_refused(self):
+        self._assert_scenario(
+            self._ENTRY_INTENT_AGREES,
+            self._INTENT_AGREES_GUARD,
+            "synthetic_intent_agrees: documented_intent claimed but the two "
+            "oracles AGREE",
+        )
+
+    def test_known_divergence_and_documented_intent_together_is_refused(self):
+        self._assert_scenario(
+            self._ENTRY_BOTH_BLOCKS,
+            self._BOTH_BLOCKS_GUARD,
+            "synthetic_both_blocks: carries BOTH known_divergence and "
+            "documented_intent",
+        )
+
+    def test_neither_block_present_but_oracles_disagree_is_refused(self):
+        self._assert_scenario(
+            self._ENTRY_NEITHER_BLOCK,
+            self._NEITHER_BLOCK_GUARD,
+            "synthetic_neither_block: no known_divergence or "
+            "documented_intent recorded but the two oracles DISAGREE",
+        )
 
 
 if __name__ == "__main__":

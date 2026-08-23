@@ -7,6 +7,39 @@ All notable changes to this project are documented in this file. The format is b
 ## [Unreleased]
 
 ### Fixed
+- **Five of round 2's seven false positives against check (n) closed; the round's one wrong-target
+  row moved to a non-claim instead of a decode (WI-0084, WI-0081 remainder).** check (n)'s awk
+  block-boundary list now tracks an indented code block (four spaces, or one leading tab — CommonMark
+  never inline-parses either) and two non-comment HTML block types, copied from the pinned
+  `commonmark==0.9.2` reference's own tag tables rather than guessed: type 1 (`script`/`pre`/`style`,
+  closes on a matching closing tag anywhere in a LATER line, a blank line inside does not end it) and
+  type 6 (`div` plus roughly sixty more block-level tags, closes at the next blank line — NOT at a
+  matching closing tag, measured directly against the construction trap this distinction turns on: a
+  link right after `</div>` with no blank line yet is still inside the block). Types 3–5 (processing
+  instructions, declarations, CDATA) and type 7 (an arbitrary single tag alone on its own line) are
+  deliberately excluded — zero measured field occurrences and a materially different mechanism,
+  respectively; the boundary is named in the code, not left to "as complete as it happened to get."
+  Separately: a destination containing an unresolved NAMED HTML entity (`&num;`, as opposed to the
+  numeric forms already decoded) used to be resolved as raw text and reported as dead regardless of
+  whether the entity-decoded target actually existed — a false claim in either direction, since check
+  (n) never actually tested the file CommonMark says the link addresses. It is now filed as an `info`
+  finding naming the raw target, absent from both Errors and Warnings, rather than asserting a verdict
+  the check cannot back. Mutation-checked, all four guards individually reverted on an in-memory copy
+  and confirmed to flip their own dedicated fixture, real script untouched (md5-verified). Re-measured
+  against four live memory stores: zero occurrences of any of these constructs in the field today —
+  this closes correctness gaps, not live findings. **No false-positive-direction divergence remains in
+  the CommonMark corpus** after this round; the ten still-open divergences are all false negatives, and
+  the two remaining unused-reference-definition rows are reclassified as intended (WI-0085, below), not
+  left as unfixed bugs.
+- **Two round-2 "false positives" reclassified as intended behaviour, not fixed (WI-0085).** An unused
+  `[id]: dead.md` reference definition (no `[id]`/`[id][]`/`[x][id]` usage anywhere in the file) renders
+  nothing at all per CommonMark — but check (n) checks its destination anyway, unconditionally. PO
+  decision, 23.08.2026: this is deliberate. check (n)'s own contract is narrower than conformance — does
+  the index still point at files that exist? — and a definition addressing a deleted file is a dead
+  pointer, invisible on a normal read because it renders as nothing, which is exactly the failure mode
+  this check exists to catch. No script change; the two corpus entries move from `known_divergence` to a
+  new, mutually-exclusive `documented_intent` field (reason, PO decision date, work item) so a future
+  round's own tooling can tell an open gap apart from one the PO has already closed.
 - **check (n)'s label/destination matcher ignored CommonMark backslash-escapes and inline-resolved
   destinations, closing two of the WI-0079…WI-0083 divergences (WI-0079, WI-0081).** An escaped
   bracket pair (`\[not a link\](x.md)`) is no longer reported as a dead link — either bracket alone

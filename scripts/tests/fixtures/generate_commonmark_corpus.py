@@ -30,14 +30,24 @@ docs/memory/reference_commonmark-conformance.md):
      second oracle: `expected_check_n_findings` is what it ACTUALLY reports
      today, measured, not derived from reading the awk source.
 
-Where the two oracles disagree, the entry must carry a `known_divergence`
-block (direction, reason, work_item) in the CORPUS list below — the
-generator refuses to write a fixture where they disagree silently, and
-refuses to write a `known_divergence` block that the measurement does not
-actually confirm (a claimed divergence must be an observed one). This is the
-"gezaehlt und benannt" contract WI-0005 asks for: the promotion criterion
-("a round producing no new items") becomes measurable only if every
-divergence recorded here was actually seen to diverge.
+Where the two oracles disagree, the entry must carry EXACTLY ONE of two
+explanation blocks in the CORPUS list below — the generator refuses to write
+a fixture where they disagree silently, refuses to write either block when
+the measurement does not actually confirm a disagreement (a claimed
+divergence/intent must be an observed one), and refuses an entry that
+carries both:
+
+  * `known_divergence` (direction, reason, work_item) — an OPEN gap in
+    check (n), tracked for a future fix.
+  * `documented_intent` (reason, po_decision, work_item) — WI-0085: a
+    disagreement the PO explicitly decided is deliberate, not a bug. check
+    (n)'s own contract is narrower than CommonMark conformance ("does the
+    index still point at existing files?"), and this is the field for a
+    case where that narrower contract is the intended behaviour on purpose.
+
+This is the "gezaehlt und benannt" contract WI-0005 asks for: the promotion
+criterion ("a round producing no new items") becomes measurable only if
+every divergence recorded here was actually seen to diverge.
 """
 
 import json
@@ -139,23 +149,29 @@ CORPUS = [
         "category": "entity-references",
         "markdown": "[x](dead&num;3-ent2.md) — named entity in destination\n",
         "known_divergence": {
-            "direction": "wrong-target",
+            "direction": "false-negative",
             "reason": (
-                "CommonMark decodes `&num;` to `#` in the destination "
-                "(reference href: `dead#3-ent2.md`, i.e. file `dead` with "
-                "fragment `3-ent2.md`). check (n) decodes the NUMERIC "
-                "entity forms (`&#35;`, `&#x23;`, WI-0081) but deliberately "
-                "leaves NAMED entities like `&num;` raw and undecoded — the "
-                "full CommonMark named-entity table has roughly 2000 "
-                "entries, and decoding it would be disproportionate for a "
-                "construct measured at zero occurrences across the field's "
-                "memory stores. check (n) resolves the literal raw "
-                "substring `dead&num;3-ent2.md` as one filename instead, a "
-                "different existence question than the one CommonMark "
-                "actually asks — but the raw text is reported as-is, never "
-                "further garbled by that undecoded ampersand."
+                "WI-0081 (remainder), fixed 23.08.2026: check (n) used to "
+                "resolve the raw, undecoded destination text and report it "
+                "as dead -- for a decoded target that happens to exist on "
+                "disk, that is a LIVE link reported as dead, the wrong "
+                "direction ADR-0001's severity promotion actually cares "
+                "about. check (n) does not build the ~2000-entry CommonMark "
+                "named-entity table (see the numeric-entity rows above for "
+                "the bounded set it DOES decode), so it cannot tell a dead "
+                "named-entity destination apart from a live one -- \"cannot "
+                "resolve\" is not license to claim either verdict. The "
+                "destination is now filed as an Info finding naming the raw "
+                "target instead, and is silent in Errors/Warnings, which is "
+                "why the two oracles read as disagreeing here (reference: a "
+                "real link to `dead#3-ent2.md`; check (n): nothing in the "
+                "errors/warnings section this differential test reads). "
+                "Same accepted-exception shape as the empty-destination "
+                "rows below (WI-0060/WI-0061) -- silence for a construct "
+                "this tool cannot resolve is the deliberate design, not a "
+                "conformance gap left open."
             ),
-            "work_item": "WI-0005",
+            "work_item": "WI-0081",
         },
     },
     {
@@ -410,129 +426,75 @@ CORPUS = [
         "name": "indented_code_block_four_spaces",
         "category": "indented-code-blocks",
         "markdown": "before paragraph\n\n    [link](dead-ind1.md)\n\nafter paragraph\n",
-        "known_divergence": {
-            "direction": "false-positive",
-            "reason": (
-                "A line indented >=4 spaces, preceded and followed by a "
-                "blank line, is a CommonMark indented code block — its "
-                "content is literal text, never inline-parsed, so `[link]"
-                "(dead-ind1.md)` renders no `<a href>` at all. check (n)'s "
-                "block-boundary list (blank line / list marker / ATX "
-                "heading / fence / block HTML comment) has no indented-"
-                "code-block case, so this line falls through to the "
-                "ordinary paragraph-content branch and its link is "
-                "extracted and reported as dead."
-            ),
-            "work_item": "WI-0005",
-        },
+        "known_divergence": None,
     },
     {
         "name": "indented_code_block_tab_indent",
         "category": "indented-code-blocks",
         "markdown": "before paragraph\n\n\t[link](dead-ind2.md)\n\nafter paragraph\n",
-        "known_divergence": {
-            "direction": "false-positive",
-            "reason": (
-                "Same defect as indented_code_block_four_spaces, triggered "
-                "by a single leading tab instead of four spaces — "
-                "CommonMark treats a tab as reaching the next 4-space tab "
-                "stop, so this is the same indented-code-block construct, "
-                "wired as a second fixture so the gap is not read as "
-                "'awk doesn't special-case 4 literal spaces' specifically."
-            ),
-            "work_item": "WI-0005",
-        },
+        "known_divergence": None,
     },
     # --- HTML blocks other than comments — only <!--...--> is handled -------
     {
         "name": "html_block_div_tag",
         "category": "html-blocks-non-comment",
         "markdown": "<div>\n[link](dead-html1.md)\n</div>\n",
-        "known_divergence": {
-            "direction": "false-positive",
-            "reason": (
-                "`<div>` opens a CommonMark HTML block (type 6): every "
-                "line up to the next blank line is raw HTML, not "
-                "inline-parsed, so the bracketed text inside stays literal "
-                "and renders no `<a href>`. check (n) only recognises `<!--"
-                "` as an HTML-block opener (WI-0041) — every other block "
-                "tag (`<div>`, `<pre>`, `<script>`, `<table>`, ...) is "
-                "invisible to it, so the content flows through as an "
-                "ordinary paragraph and the link is reported as dead."
-            ),
-            "work_item": "WI-0005",
-        },
+        "known_divergence": None,
     },
     {
         "name": "html_block_pre_tag",
         "category": "html-blocks-non-comment",
         "markdown": "<pre>\n[link](dead-html2.md)\n</pre>\n",
-        "known_divergence": {
-            "direction": "false-positive",
-            "reason": (
-                "Same defect as html_block_div_tag, via `<pre>` — notable "
-                "because check (n) DOES special-case fenced code blocks "
-                "(``` / ~~~) but has no equivalent for the HTML block form "
-                "of a preformatted region."
-            ),
-            "work_item": "WI-0005",
-        },
+        "known_divergence": None,
     },
     {
         "name": "html_block_script_tag",
         "category": "html-blocks-non-comment",
         "markdown": "<script>\nvar x = '[link](dead-html3.md)';\n</script>\n",
-        "known_divergence": {
-            "direction": "false-positive",
-            "reason": (
-                "Same defect as html_block_div_tag, via `<script>` — the "
-                "bracketed text sits inside a JS string literal, not "
-                "prose, underlining that check (n) does not know it is "
-                "inside raw HTML at all."
-            ),
-            "work_item": "WI-0005",
-        },
+        "known_divergence": None,
     },
     # --- reference definitions checked regardless of any usage --------------
     {
         "name": "unused_reference_definition_standalone",
         "category": "unused-reference-definitions",
         "markdown": "[ref9]: dead-unused1.md\n",
-        "known_divergence": {
-            "direction": "false-positive",
+        "known_divergence": None,
+        "documented_intent": {
             "reason": (
-                "A reference definition with no `[ref9]`/`[ref9][]`/"
-                "`[text][ref9]` usage anywhere in the document renders "
-                "NOTHING at the reference — a definition alone produces no "
-                "`<a href>`. check (n)'s reference-definition branch "
-                "(memory-lint.sh, the `^[ ]{0,3}\\[[^][]+\\]:` match) "
-                "checks the destination straight off the definition line "
-                "itself, unconditionally — it never looks for a matching "
-                "usage anywhere else in the file, so a dangling, "
-                "never-referenced definition is checked and reported as "
-                "dead exactly like a used one. This is also the mechanism "
-                "that makes shortcut/collapsed reference links (see the "
-                "reference-link-usage-forms fixtures below) appear to "
-                "work: check (n) never resolves the usage at all, it only "
-                "ever reads the definition line."
+                "PO decision 23.08.2026 (WI-0085): this is INTENDED, not a "
+                "bug, despite CommonMark rendering no <a href> for an "
+                "unused reference definition. check (n)'s own contract is "
+                "narrower than conformance -- does the index still point "
+                "at existing files? -- and a reference definition "
+                "addressing a deleted file is a dead POINTER regardless of "
+                "whether anything currently uses it. It renders as nothing, "
+                "so no reader notices it on a normal read; that "
+                "invisibility is exactly the failure mode this check "
+                "exists to catch. Kept as a corpus entry (not deleted) so "
+                "this decision is not silently forgotten on a future "
+                "adversarial round -- see "
+                "reference_commonmark-conformance.md for the fuller "
+                "rationale."
             ),
-            "work_item": "WI-0005",
+            "po_decision": "23.08.2026",
+            "work_item": "WI-0085",
         },
     },
     {
         "name": "unused_reference_definition_after_prose",
         "category": "unused-reference-definitions",
         "markdown": "Some prose here.\n\n[ref9]: dead-unused2.md\n",
-        "known_divergence": {
-            "direction": "false-positive",
+        "known_divergence": None,
+        "documented_intent": {
             "reason": (
-                "Same defect as unused_reference_definition_standalone, "
-                "wired as a second fixture with an ordinary paragraph "
-                "ahead of the definition (a block-boundary context, not a "
-                "bare single-line document) so the false positive is not "
-                "specific to a definition being the document's only line."
+                "Same PO decision as unused_reference_definition_standalone "
+                "(WI-0085, 23.08.2026), wired as a second fixture with an "
+                "ordinary paragraph ahead of the definition so the intent "
+                "is not read as specific to a definition being the "
+                "document's only line."
             ),
-            "work_item": "WI-0005",
+            "po_decision": "23.08.2026",
+            "work_item": "WI-0085",
         },
     },
     # --- CRLF line endings — the blank-line boundary regex is \n-only -------
@@ -731,7 +693,15 @@ def main():
 
         actually_diverges = observed_check_n_findings != expected_reference_targets
         claims_divergence = entry["known_divergence"] is not None
+        claims_intent = entry.get("documented_intent") is not None
 
+        if claims_divergence and claims_intent:
+            problems.append(
+                f"{entry['name']}: carries BOTH known_divergence and "
+                f"documented_intent — pick exactly one (an open gap in "
+                f"check (n) vs. a deliberate PO decision) or the fixture "
+                f"cannot tell which explanation applies"
+            )
         if claims_divergence and not actually_diverges:
             problems.append(
                 f"{entry['name']}: known_divergence claimed but the two oracles "
@@ -739,13 +709,23 @@ def main():
                 f"check(n)={observed_check_n_findings!r}) — remove the claim "
                 f"or the entry no longer reproduces it"
             )
-        if not claims_divergence and actually_diverges:
+        if claims_intent and not actually_diverges:
             problems.append(
-                f"{entry['name']}: no known_divergence recorded but the two "
-                f"oracles DISAGREE (reference={expected_reference_targets!r}, "
+                f"{entry['name']}: documented_intent claimed but the two "
+                f"oracles AGREE (reference={expected_reference_targets!r}, "
+                f"check(n)={observed_check_n_findings!r}) — remove the claim, "
+                f"there is no longer a disagreement for the PO decision to "
+                f"cover"
+            )
+        if not claims_divergence and not claims_intent and actually_diverges:
+            problems.append(
+                f"{entry['name']}: no known_divergence or documented_intent "
+                f"recorded but the two oracles DISAGREE "
+                f"(reference={expected_reference_targets!r}, "
                 f"check(n)={observed_check_n_findings!r}) — this is a NEW, "
                 f"previously unrecorded divergence; add a known_divergence "
-                f"block before regenerating"
+                f"block (an open gap in check (n)) or a documented_intent "
+                f"block (a deliberate PO decision) before regenerating"
             )
 
         fixture_entries.append({
@@ -757,6 +737,7 @@ def main():
             "expected_check_n_findings": observed_check_n_findings,
             "known_divergence": entry["known_divergence"],
             **({"caveat": entry["caveat"]} if "caveat" in entry else {}),
+            "documented_intent": entry.get("documented_intent"),
         })
 
     if problems:

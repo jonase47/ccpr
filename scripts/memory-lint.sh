@@ -497,6 +497,23 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
         # Restored to a literal "#" only now, after that strip has already run.
         target="${target//$'\x05'/#}"
         [[ -n "$target" ]] || continue
+        # WI-0081 (remainder): a destination containing an UNRESOLVED named HTML
+        # entity (`&num;`, `&amp;`, ...) cannot be turned into a real path here —
+        # decode_numeric_entities() (awk side, above) only resolves the NUMERIC
+        # forms (`&#35;`, `&#x23;`); the full ~2000-entry CommonMark named-entity
+        # table is deliberately not built for a construct measured at zero
+        # occurrences across four live memory stores (see
+        # docs/memory/reference_commonmark-conformance.md). Resolving the raw,
+        # undecoded string and reporting it as dead used to claim a verdict this
+        # check cannot actually back: `dead&num;3.md` decodes to `dead#3.md` at
+        # the reference, and if THAT file exists, the raw-string check reported a
+        # LIVE link as dead — "cannot resolve" is not license to claim "does not
+        # exist" in either direction. Filed as info instead, naming the raw
+        # target, and skipped before the existence check below ever runs.
+        if [[ "$target" =~ \&[a-zA-Z][a-zA-Z0-9]*\; ]]; then
+            info "$index_rel — link target '$target' contains an unresolved named HTML entity reference and could not be checked"
+            continue
+        fi
         # Targets resolve relative to the CURRENT index's own directory, as in check
         # (f) — a persona index's relative links address its own silo, not the Tier-1
         # memory dir (WI-0040). Exception: a leading `/` is repo-root-relative — the
@@ -934,6 +951,26 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
                 }
                 next
             }
+            # HTML block, type 1 (raw-text elements script/pre/style — WI-0084):
+            # every line up to and including the one that finally contains a
+            # matching closing tag is raw, unparsed HTML — a blank line inside
+            # does NOT end it (unlike type 6 below). Gated first, same shape as
+            # in_fence above, so nothing below (fence-opener, comment, type 6,
+            # ...) ever gets offered a line from inside this block.
+            if (in_html_block1) {
+                if (tolower($0) ~ /<\/(script|pre|style)>/) in_html_block1 = 0
+                next
+            }
+            # HTML block, type 6 (the CommonMark "common block tag" list — div,
+            # table, blockquote, and roughly sixty others — WI-0084): ends at the
+            # next BLANK line, not at a matching closing tag (see the type-6
+            # opener comment below for the measured trap this gets wrong if
+            # assumed otherwise). The blank line itself carries no content, so
+            # nothing needs printing — it only ever flips the flag off.
+            if (in_html_block6) {
+                if ($0 ~ /^[ \t]*$/) in_html_block6 = 0
+                next
+            }
             # Gated on !in_html_comment (WI-0045): a line that merely LOOKS like a
             # fence opener while an HTML comment is already open must not set
             # in_fence — otherwise the comments own closing line is caught by the
@@ -996,6 +1033,43 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
                 next
             }
 
+            # HTML block, type 1 opener (WI-0084) — the "raw-text element" set
+            # (script/pre/style). Tag set and both boundary conditions (closing
+            # tag ANYWHERE in a later line, not required to start it; a blank
+            # line inside does NOT end the block; an unclosed block runs to
+            # end-of-document) are copied verbatim from the pinned reference,
+            # `reHtmlBlockOpen[1]`/`reHtmlBlockClose[1]` (commonmark==0.9.2,
+            # measured — docs/memory/reference_commonmark-conformance.md), not
+            # derived from the abstract CommonMark spec text: the current spec
+            # wording additionally lists `textarea`, this pinned reference does
+            # not, and this check matches what is actually installed. Matched
+            # case-insensitively via tolower() (this file has no gawk-only
+            # IGNORECASE available, see hex_to_dec() above for the same
+            # tolower() precedent). Unlike a fence or an HTML comment, an HTML
+            # block CAN interrupt a paragraph (only type 7, not implemented
+            # here, cannot) — so any buffered paragraph is flushed here, not
+            # carried into the block.
+            if (match(tolower($0), /^[ ]{0,3}<(script|pre|style)([ \t>]|$)/)) {
+                flush_paragraph()
+                in_html_block1 = 1
+                next
+            }
+            # HTML block, type 6 opener (WI-0084) — the CommonMark "common
+            # block tag" list (div, table, blockquote, and roughly sixty
+            # others), tag set copied verbatim from the same pinned reference,
+            # `reHtmlBlockOpen[6]`. Ends at the next BLANK line,
+            # NOT at a matching closing tag: `<div>` foo `</div>` immediately
+            # followed by more content, with no blank line anywhere, stays ONE
+            # raw HTML block straight through the `</div>` line — measured
+            # directly against the reference (see the div/pre/script
+            # constructs in reference_commonmark-conformance.md), not assumed.
+            # Interrupts a paragraph, same as type 1 above.
+            if (match(tolower($0), /^[ ]{0,3}<[\/]?(address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h1|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|param|section|source|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul)([ \t]|\/?>|$)/)) {
+                flush_paragraph()
+                in_html_block6 = 1
+                next
+            }
+
             # Reference-style link definition: `[id]: target "optional title"`.
             # The one-line form `[x](target)` this check already handled leaves
             # `[x][id]` + a separate `[id]: target` definition line unseen — same
@@ -1055,6 +1129,23 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
                 append_paragraph($0)
                 next
             }
+            # Indented code block (WI-0084): content indented >=4 spaces or a
+            # leading tab (a tab reaches the next 4-space stop; matched here by
+            # literal-tab presence rather than full tab-stop arithmetic — the
+            # only two shapes measured against the reference, see
+            # reference_commonmark-conformance.md). Never inline-parsed, so a
+            # link inside is not a link. Unlike the HTML blocks above, this
+            # construct CANNOT interrupt a paragraph — recomputed per line
+            # rather than tracked with a persistent flag: as long as no line is
+            # appended to pbuf, pbuf_n stays 0 and every following indented
+            # line keeps qualifying (a multi-line block, with or without blank
+            # separators inside, is skipped in its entirety this way), while a
+            # line that continues an ALREADY-OPEN paragraph (pbuf_n > 0) falls
+            # through unchanged to ordinary content below — exactly the
+            # "cannot interrupt" rule, without needing its own open/close state.
+            if (pbuf_n == 0 && $0 !~ /^[ \t]*$/ && $0 ~ /^(    |\t)/) {
+                next
+            }
             # Ordinary paragraph content — accumulate, do not resolve yet.
             append_paragraph($0)
         }
@@ -1072,6 +1163,18 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
         # buffered when the file simply ends (no trailing blank line) is not lost —
         # it cannot coexist with either open state, both of which already flushed
         # the buffer on the way in and never touch it again while open.
+        #
+        # WI-0084 adds two HTML-block states (in_html_block1, in_html_block6) to
+        # this same mutual-exclusion set — each of the four gates at the top of
+        # the per-record block unconditionally `next`s, so only one flag can ever
+        # be set at a time — but deliberately get NO end-of-input sentinel here.
+        # Both are, per CommonMark itself, correctly allowed to run to
+        # end-of-document with no closing tag at all ("or the end of the
+        # document" is part of the close condition each type defines, not a
+        # failure mode) — unlike an unclosed fence or comment, which is virtually always
+        # an authoring mistake worth flagging. No case has been measured where a
+        # `<div>`/`<pre>`/`<script>` opener left open to EOF was accidental
+        # rather than intentional trailing raw HTML.
         END {
             flush_paragraph()
             if (in_fence) print fence_sentinel fence_open_line

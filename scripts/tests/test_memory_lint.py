@@ -2026,6 +2026,132 @@ class MemoryLintTest(unittest.TestCase):
 
         self.assertEqual(self.link_findings(self.run_lint().stdout), [])
 
+    # --- Indented code blocks and non-comment HTML blocks are not inline-parsed ----
+    # (WI-0084). Measured at the reference (docs/memory/reference_commonmark-
+    # conformance.md, WI-0005 round 2): check (n)'s block-boundary list tracked
+    # fences and `<!--` HTML comments, but not an indented code block (>=4 spaces
+    # or a leading tab) or any other CommonMark HTML block type (`<div>`, `<pre>`,
+    # `<script>`, ...). Both are contexts CommonMark never inline-parses at all —
+    # a bracketed `[text](dest)` inside either is literal text, not a link, and
+    # reporting its destination as dead is a false positive.
+
+    def test_an_indented_code_block_with_four_spaces_is_not_reported(self):
+        """A line indented >=4 spaces, preceded and followed by a blank line, is
+        a CommonMark indented code block — its content is never inline-parsed."""
+        self.write_index(
+            CLEAN_INDEX + "\n" + "    [link](dead_indent_four.md)\n" + "\n" + "after paragraph\n"
+        )
+
+        self.assertEqual(self.link_findings(self.run_lint().stdout), [])
+
+    def test_a_tab_indented_code_block_is_not_reported(self):
+        """Same construct, triggered by a single leading tab instead of four
+        literal spaces — CommonMark treats a tab as reaching the next 4-space
+        stop, so this is the same indented-code-block shape, not a different one."""
+        self.write_index(
+            CLEAN_INDEX + "\n" + "\t[link](dead_indent_tab.md)\n" + "\n" + "after paragraph\n"
+        )
+
+        self.assertEqual(self.link_findings(self.run_lint().stdout), [])
+
+    def test_an_indented_line_continuing_an_open_paragraph_is_still_checked(self):
+        """An indented code block CANNOT interrupt a paragraph (CommonMark) — a
+        4-space-indented line directly continuing an already-open paragraph (no
+        blank line before it) is ordinary paragraph continuation text, not a
+        code block, and its link must still be checked. Regression control for
+        the pbuf_n==0 gate the indented-code skip above relies on."""
+        self.write_index(
+            CLEAN_INDEX
+            + "Paragraph line one\n"
+            + "    continuation indented four [link](dead_lazy_indent.md) spaces\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("dead_lazy_indent.md", findings[0])
+
+    def test_a_div_html_block_around_a_link_is_not_reported(self):
+        """`<div>`...`</div>` opens a CommonMark HTML block (type 6): every line
+        up to the next blank line is raw HTML, not inline-parsed."""
+        self.write_index(
+            CLEAN_INDEX + "\n" + "<div>\n" + "[link](dead_html_div.md)\n" + "</div>\n"
+        )
+
+        self.assertEqual(self.link_findings(self.run_lint().stdout), [])
+
+    def test_a_pre_html_block_around_a_link_is_not_reported(self):
+        """`<pre>`...`</pre>` — HTML block type 1 (raw-text element), a
+        different closing rule than `<div>`'s (see the two tests below)."""
+        self.write_index(
+            CLEAN_INDEX + "\n" + "<pre>\n" + "[link](dead_html_pre.md)\n" + "</pre>\n"
+        )
+
+        self.assertEqual(self.link_findings(self.run_lint().stdout), [])
+
+    def test_a_script_html_block_around_a_link_is_not_reported(self):
+        """`<script>`...`</script>` — same type-1 mechanism as `<pre>`, the
+        bracketed text sits inside a JS string literal rather than prose."""
+        self.write_index(
+            CLEAN_INDEX
+            + "\n"
+            + "<script>\n"
+            + "var x = '[link](dead_html_script.md)';\n"
+            + "</script>\n"
+        )
+
+        self.assertEqual(self.link_findings(self.run_lint().stdout), [])
+
+    def test_a_div_block_closes_at_the_next_blank_line_not_at_the_closing_tag(self):
+        """The construction trap this item was measured against: HTML block type
+        6 ends at the next BLANK LINE, not at a matching `</div>`. A link on the
+        line immediately after `</div>` (no blank line yet) is still inside the
+        block and must not be reported; the same link, once a blank line has
+        actually occurred, is ordinary markdown again and must be reported."""
+        self.write_index(
+            CLEAN_INDEX
+            + "\n"
+            + "<div>\n"
+            + "foo\n"
+            + "</div>\n"
+            + "[link](dead_html_div_no_blank.md)\n"
+        )
+
+        self.assertEqual(self.link_findings(self.run_lint().stdout), [])
+
+        self.write_index(
+            CLEAN_INDEX
+            + "\n"
+            + "<div>\n"
+            + "foo\n"
+            + "</div>\n"
+            + "\n"
+            + "[link](dead_html_div_after_blank.md)\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("dead_html_div_after_blank.md", findings[0])
+
+    def test_a_div_block_interrupted_by_a_blank_line_releases_the_link_inside(self):
+        """The other half of the same trap, non-consecutive this time: `<div>`,
+        blank line, a link, blank line, `</div>` — the blank line right after
+        the opener already ends the type-6 block, so the link in the middle
+        sits in ordinary markdown (not raw HTML) and must be reported."""
+        self.write_index(
+            CLEAN_INDEX
+            + "\n"
+            + "<div>\n"
+            + "\n"
+            + "[link](dead_html_div_interrupted.md)\n"
+            + "\n"
+            + "</div>\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("dead_html_div_interrupted.md", findings[0])
+
     # --- Backslash escapes remove structural meaning (WI-0079/WI-0081) -------------
     # CommonMark backslash-escapes a bracket or a closing paren exactly the way it
     # escapes any other ASCII punctuation: the escaped character loses whatever
@@ -2171,18 +2297,41 @@ class MemoryLintTest(unittest.TestCase):
 
         self.assertEqual(self.link_findings(self.run_lint().stdout), [])
 
-    def test_a_named_entity_in_the_destination_is_still_checked_undecoded(self):
+    def test_a_named_entity_in_the_destination_is_reported_as_info_not_a_dead_link(self):
         """`&num;` is a NAMED entity — deliberately left undecoded (WI-0081):
         decoding the full ~2000-entry CommonMark named-entity table is
         disproportionate for a construct that occurs zero times in the field.
-        The raw text must still be checked as-is, not mangled — it is a
-        documented known_divergence, not silence or a truncated garble."""
+        WI-0081 (remainder): a destination that cannot be resolved must not be
+        CLAIMED dead either — the reference resolves `dead&num;3.md` to
+        `dead#3.md`, a different filename check (n) never actually tested. A
+        named-entity destination is filed as info, naming the raw target and
+        the reason, and is absent from both Errors and Warnings."""
         self.write_index(CLEAN_INDEX + "- [Named](gone_ent_named&num;3.md) — dead\n")
 
-        findings = self.link_findings(self.run_lint().stdout)
+        result = self.run_lint()
 
-        self.assertEqual(len(findings), 1, findings)
-        self.assertIn("gone_ent_named&num;3.md", findings[0])
+        self.assertEqual(self.link_findings(result.stdout), [])
+        infos = self.findings(result.stdout, "Info")
+        self.assertEqual(len(infos), 1, infos)
+        self.assertIn("gone_ent_named&num;3.md", infos[0])
+        self.assertIn("entity", infos[0].lower())
+
+    def test_a_named_entity_whose_decoded_target_actually_exists_is_still_info_not_silence(self):
+        """The other half of the same claim: check (n) cannot tell "cannot
+        resolve" apart from "resolves to a live file" without decoding the
+        entity — so it must not silently treat this as fine either. Same info
+        finding regardless of whether the decoded target exists on disk."""
+        (self.memory_dir / "gone_ent_named_live#3.md").write_text(
+            TIER2_TOPIC_TEXT, encoding="utf-8"
+        )
+        self.write_index(CLEAN_INDEX + "- [Named](gone_ent_named_live&num;3.md) — live once decoded\n")
+
+        result = self.run_lint()
+
+        self.assertEqual(self.link_findings(result.stdout), [])
+        infos = self.findings(result.stdout, "Info")
+        self.assertEqual(len(infos), 1, infos)
+        self.assertIn("gone_ent_named_live&num;3.md", infos[0])
 
     def test_the_index_is_checked_even_when_no_memory_files_are_scanned(self):
         """An index whose entries are all dead scans zero files — and must still fire.
@@ -2621,6 +2770,166 @@ class DestinationEscapeAndEntityMutationTest(unittest.TestCase):
         self.assertIn("gone_mut_paren\\", result.stdout)
         self.assertNotIn("gone_mut_paren).md", result.stdout)
         self.assertNotIn("gone_mut_dec#3.md", result.stdout)
+
+        after = SCRIPT_PATH.read_text(encoding="utf-8")
+        original_md5_after = __import__("hashlib").md5(after.encode("utf-8")).hexdigest()
+        self.assertEqual(original_md5_before, original_md5_after)
+        self.assertEqual(after, original)
+
+
+class IndentedCodeAndHtmlBlockMutationTest(unittest.TestCase):
+    """WI-0084 obligation: each of the three new block-boundary cases (indented
+    code, HTML block type 1, HTML block type 6) must have been seen RED by
+    mutation, not merely written and never falsified. Removes exactly one
+    `if (...) { ... }` guard at a time from an in-memory COPY of the script,
+    same pattern as the mutation tests above — the shipped script on disk is
+    never touched; proven by md5, not assumed.
+    """
+
+    _INDENTED_CODE_GUARD = (
+        "            if (pbuf_n == 0 && $0 !~ /^[ \\t]*$/ && $0 ~ /^(    |\\t)/) {\n"
+        "                next\n"
+        "            }\n"
+    )
+    _HTML_BLOCK1_OPENER = (
+        "            if (match(tolower($0), /^[ ]{0,3}<(script|pre|style)([ \\t>]|$)/)) {\n"
+        "                flush_paragraph()\n"
+        "                in_html_block1 = 1\n"
+        "                next\n"
+        "            }\n"
+    )
+    _HTML_BLOCK6_OPENER = (
+        "            if (match(tolower($0), /^[ ]{0,3}<[\\/]?(address|article|aside|base|"
+        "basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|"
+        "dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h1|head|header|hr|"
+        "html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|"
+        "param|section|source|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul)"
+        "([ \\t]|\\/?>|$)/)) {\n"
+        "                flush_paragraph()\n"
+        "                in_html_block6 = 1\n"
+        "                next\n"
+        "            }\n"
+    )
+
+    def _assert_guard_removal_flips_fixture_red(self, guard, markdown, expected_dead_target):
+        original = SCRIPT_PATH.read_text(encoding="utf-8")
+        original_md5_before = __import__("hashlib").md5(original.encode("utf-8")).hexdigest()
+
+        self.assertIn(
+            guard, original, "fixture line moved — update the mutation target for this test",
+        )
+        mutated = original.replace(guard, "", 1)
+        self.assertNotEqual(mutated, original, "mutation did not change the script")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            script_dir = Path(tmp) / "scriptdir"
+            shutil.copytree(SCRIPT_PATH.parent / "lib", script_dir / "lib")
+            mutant_script = script_dir / "memory-lint.sh"
+            mutant_script.write_text(mutated, encoding="utf-8")
+
+            project_dir = Path(tmp) / "project"
+            (project_dir / "docs" / "memory").mkdir(parents=True)
+            (project_dir / "docs" / "memory" / "MEMORY.md").write_text(
+                "# Memory Index\n\n" + markdown, encoding="utf-8"
+            )
+            fake_home = Path(tmp) / "home"
+            fake_home.mkdir()
+
+            result = subprocess.run(
+                ["bash", str(mutant_script), str(project_dir)],
+                capture_output=True, text=True,
+                env={"HOME": str(fake_home), "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"},
+            )
+
+        self.assertIn(
+            expected_dead_target, result.stdout,
+            "mutation did not flip the fixture — this guard no longer "
+            "discriminates WI-0084's defect",
+        )
+
+        after = SCRIPT_PATH.read_text(encoding="utf-8")
+        original_md5_after = __import__("hashlib").md5(after.encode("utf-8")).hexdigest()
+        self.assertEqual(original_md5_before, original_md5_after)
+        self.assertEqual(after, original)
+
+    def test_removing_the_indented_code_guard_flips_the_indented_fixture_red(self):
+        self._assert_guard_removal_flips_fixture_red(
+            self._INDENTED_CODE_GUARD,
+            "before paragraph\n\n    [link](gone_mut_indent.md)\n\nafter paragraph\n",
+            "gone_mut_indent.md",
+        )
+
+    def test_removing_the_html_block1_opener_flips_the_pre_fixture_red(self):
+        self._assert_guard_removal_flips_fixture_red(
+            self._HTML_BLOCK1_OPENER,
+            "<pre>\n[link](gone_mut_pre.md)\n</pre>\n",
+            "gone_mut_pre.md",
+        )
+
+    def test_removing_the_html_block6_opener_flips_the_div_fixture_red(self):
+        self._assert_guard_removal_flips_fixture_red(
+            self._HTML_BLOCK6_OPENER,
+            "<div>\n[link](gone_mut_div.md)\n</div>\n",
+            "gone_mut_div.md",
+        )
+
+
+class NamedEntityInfoMutationTest(unittest.TestCase):
+    """WI-0081 (remainder) obligation: the info-not-dead-link reclassification
+    must have been seen RED by mutation, not merely written and never
+    falsified. Removes the named-entity guard from an in-memory COPY of the
+    script, same pattern as the mutation tests above — the shipped script on
+    disk is never touched; proven by md5, not assumed.
+    """
+
+    _NAMED_ENTITY_GUARD = (
+        "        if [[ \"$target\" =~ \\&[a-zA-Z][a-zA-Z0-9]*\\; ]]; then\n"
+        "            info \"$index_rel — link target '$target' contains an unresolved named HTML entity reference and could not be checked\"\n"
+        "            continue\n"
+        "        fi\n"
+    )
+
+    def test_removing_the_named_entity_guard_flips_the_fixture_back_to_a_dead_claim(self):
+        original = SCRIPT_PATH.read_text(encoding="utf-8")
+        original_md5_before = __import__("hashlib").md5(original.encode("utf-8")).hexdigest()
+
+        self.assertIn(
+            self._NAMED_ENTITY_GUARD, original,
+            "fixture line moved — update the mutation target for this test",
+        )
+        mutated = original.replace(self._NAMED_ENTITY_GUARD, "", 1)
+        self.assertNotEqual(mutated, original, "mutation did not change the script")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            script_dir = Path(tmp) / "scriptdir"
+            shutil.copytree(SCRIPT_PATH.parent / "lib", script_dir / "lib")
+            mutant_script = script_dir / "memory-lint.sh"
+            mutant_script.write_text(mutated, encoding="utf-8")
+
+            project_dir = Path(tmp) / "project"
+            (project_dir / "docs" / "memory").mkdir(parents=True)
+            (project_dir / "docs" / "memory" / "MEMORY.md").write_text(
+                "# Memory Index\n\n- [Named](gone_mut_named&num;3.md) — dead\n",
+                encoding="utf-8",
+            )
+            fake_home = Path(tmp) / "home"
+            fake_home.mkdir()
+
+            result = subprocess.run(
+                ["bash", str(mutant_script), str(project_dir)],
+                capture_output=True, text=True,
+                env={"HOME": str(fake_home), "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"},
+            )
+
+        self.assertIn(
+            "gone_mut_named&num;3.md", result.stdout,
+            "mutation did not flip the fixture — the named-entity guard no "
+            "longer discriminates WI-0081's (remainder) defect",
+        )
+        self.assertIn(
+            "does not exist", result.stdout,
+            "mutation should restore the pre-fix dead-link CLAIM, not just any finding",
+        )
 
         after = SCRIPT_PATH.read_text(encoding="utf-8")
         original_md5_after = __import__("hashlib").md5(after.encode("utf-8")).hexdigest()
