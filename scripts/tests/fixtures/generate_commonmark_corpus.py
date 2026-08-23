@@ -391,6 +391,286 @@ CORPUS = [
             "agree it renders as one ordinary paragraph with a live link."
         ),
     },
+    # =========================================================================
+    # WI-0005, round 2 (22.08.2026-23.08.2026): a second adversarial pass, new
+    # construct classes only — the ten covered above (nested brackets,
+    # autolinks, entities, escapes, multiline refdefs, setext, thematic
+    # breaks, nested lists, lazy continuation, table-as-boundary) and the six
+    # earlier rounds' ground (image markers, fence state, HTML comments,
+    # comment-vs-code-span precedence, paragraph buffering, three-title-
+    # delimiter refdefs) are NOT retested here. Derived from reading check
+    # (n)'s own awk block-boundary list, not from a generic construct list:
+    # every category below either has NO handling at all in that list
+    # (indented code, non-comment HTML blocks), exploits a mechanism the
+    # extractor uses for an unrelated reason (the reference-definition-line
+    # shortcut, which checks a destination independent of any usage), or
+    # targets the boundary REGEX's character class directly (CRLF).
+    # --- indented code blocks (4 spaces / one tab) — no handling at all ------
+    {
+        "name": "indented_code_block_four_spaces",
+        "category": "indented-code-blocks",
+        "markdown": "before paragraph\n\n    [link](dead-ind1.md)\n\nafter paragraph\n",
+        "known_divergence": {
+            "direction": "false-positive",
+            "reason": (
+                "A line indented >=4 spaces, preceded and followed by a "
+                "blank line, is a CommonMark indented code block — its "
+                "content is literal text, never inline-parsed, so `[link]"
+                "(dead-ind1.md)` renders no `<a href>` at all. check (n)'s "
+                "block-boundary list (blank line / list marker / ATX "
+                "heading / fence / block HTML comment) has no indented-"
+                "code-block case, so this line falls through to the "
+                "ordinary paragraph-content branch and its link is "
+                "extracted and reported as dead."
+            ),
+            "work_item": "WI-0005",
+        },
+    },
+    {
+        "name": "indented_code_block_tab_indent",
+        "category": "indented-code-blocks",
+        "markdown": "before paragraph\n\n\t[link](dead-ind2.md)\n\nafter paragraph\n",
+        "known_divergence": {
+            "direction": "false-positive",
+            "reason": (
+                "Same defect as indented_code_block_four_spaces, triggered "
+                "by a single leading tab instead of four spaces — "
+                "CommonMark treats a tab as reaching the next 4-space tab "
+                "stop, so this is the same indented-code-block construct, "
+                "wired as a second fixture so the gap is not read as "
+                "'awk doesn't special-case 4 literal spaces' specifically."
+            ),
+            "work_item": "WI-0005",
+        },
+    },
+    # --- HTML blocks other than comments — only <!--...--> is handled -------
+    {
+        "name": "html_block_div_tag",
+        "category": "html-blocks-non-comment",
+        "markdown": "<div>\n[link](dead-html1.md)\n</div>\n",
+        "known_divergence": {
+            "direction": "false-positive",
+            "reason": (
+                "`<div>` opens a CommonMark HTML block (type 6): every "
+                "line up to the next blank line is raw HTML, not "
+                "inline-parsed, so the bracketed text inside stays literal "
+                "and renders no `<a href>`. check (n) only recognises `<!--"
+                "` as an HTML-block opener (WI-0041) — every other block "
+                "tag (`<div>`, `<pre>`, `<script>`, `<table>`, ...) is "
+                "invisible to it, so the content flows through as an "
+                "ordinary paragraph and the link is reported as dead."
+            ),
+            "work_item": "WI-0005",
+        },
+    },
+    {
+        "name": "html_block_pre_tag",
+        "category": "html-blocks-non-comment",
+        "markdown": "<pre>\n[link](dead-html2.md)\n</pre>\n",
+        "known_divergence": {
+            "direction": "false-positive",
+            "reason": (
+                "Same defect as html_block_div_tag, via `<pre>` — notable "
+                "because check (n) DOES special-case fenced code blocks "
+                "(``` / ~~~) but has no equivalent for the HTML block form "
+                "of a preformatted region."
+            ),
+            "work_item": "WI-0005",
+        },
+    },
+    {
+        "name": "html_block_script_tag",
+        "category": "html-blocks-non-comment",
+        "markdown": "<script>\nvar x = '[link](dead-html3.md)';\n</script>\n",
+        "known_divergence": {
+            "direction": "false-positive",
+            "reason": (
+                "Same defect as html_block_div_tag, via `<script>` — the "
+                "bracketed text sits inside a JS string literal, not "
+                "prose, underlining that check (n) does not know it is "
+                "inside raw HTML at all."
+            ),
+            "work_item": "WI-0005",
+        },
+    },
+    # --- reference definitions checked regardless of any usage --------------
+    {
+        "name": "unused_reference_definition_standalone",
+        "category": "unused-reference-definitions",
+        "markdown": "[ref9]: dead-unused1.md\n",
+        "known_divergence": {
+            "direction": "false-positive",
+            "reason": (
+                "A reference definition with no `[ref9]`/`[ref9][]`/"
+                "`[text][ref9]` usage anywhere in the document renders "
+                "NOTHING at the reference — a definition alone produces no "
+                "`<a href>`. check (n)'s reference-definition branch "
+                "(memory-lint.sh, the `^[ ]{0,3}\\[[^][]+\\]:` match) "
+                "checks the destination straight off the definition line "
+                "itself, unconditionally — it never looks for a matching "
+                "usage anywhere else in the file, so a dangling, "
+                "never-referenced definition is checked and reported as "
+                "dead exactly like a used one. This is also the mechanism "
+                "that makes shortcut/collapsed reference links (see the "
+                "reference-link-usage-forms fixtures below) appear to "
+                "work: check (n) never resolves the usage at all, it only "
+                "ever reads the definition line."
+            ),
+            "work_item": "WI-0005",
+        },
+    },
+    {
+        "name": "unused_reference_definition_after_prose",
+        "category": "unused-reference-definitions",
+        "markdown": "Some prose here.\n\n[ref9]: dead-unused2.md\n",
+        "known_divergence": {
+            "direction": "false-positive",
+            "reason": (
+                "Same defect as unused_reference_definition_standalone, "
+                "wired as a second fixture with an ordinary paragraph "
+                "ahead of the definition (a block-boundary context, not a "
+                "bare single-line document) so the false positive is not "
+                "specific to a definition being the document's only line."
+            ),
+            "work_item": "WI-0005",
+        },
+    },
+    # --- CRLF line endings — the blank-line boundary regex is \n-only -------
+    {
+        "name": "crlf_blank_line_swallows_link_via_missing_boundary",
+        "category": "crlf-line-endings",
+        "markdown": (
+            "`stray one [a](dead-crlf-c.md)\r\n"
+            "\r\n"
+            "`stray two [b](dead-crlf-d.md)\r\n"
+        ),
+        "known_divergence": {
+            "direction": "false-negative",
+            "reason": (
+                "Reference: two separate paragraphs (blank line between "
+                "them), each with one unpaired backtick that stays "
+                "literal within its own block — both dead-crlf-c.md and "
+                "dead-crlf-d.md are real, separate links. On a CRLF-"
+                "terminated file, awk's line-splitting on `\\n` leaves a "
+                "bare `\\r` as the blank line's `$0` — check (n)'s blank-"
+                "line boundary test (`$0 ~ /^[ \\t]*$/`) does not match "
+                "`\\r` (it is in neither `[ \\t]` nor end-of-string "
+                "immediately), so the paragraph buffer never flushes at "
+                "this blank line. Both paragraphs merge into one buffer, "
+                "the two backticks (one per paragraph, each meant to stay "
+                "unpaired) pair with each other across the merge, and the "
+                "first link is swallowed as a spurious code span — only "
+                "dead-crlf-d.md survives. Same missing-boundary defect "
+                "class as the setext-heading and thematic-break rows from "
+                "round 1, one line-ending convention further; a checkout "
+                "with `core.autocrlf=true`, or any file authored on "
+                "Windows, would carry this shape without anyone writing a "
+                "stray backtick on purpose."
+            ),
+            "work_item": "WI-0005",
+        },
+    },
+    {
+        "name": "crlf_two_paragraphs_no_confounding_span_control",
+        "category": "crlf-line-endings",
+        "markdown": (
+            "para one [a](dead-crlf-a.md)\r\n"
+            "\r\n"
+            "para two [b](dead-crlf-b.md)\r\n"
+        ),
+        "known_divergence": None,
+    },
+    # --- reference-link usage forms — agree, but only via the definition- --
+    # --- line shortcut documented above, not by resolving the USAGE --------
+    {
+        "name": "shortcut_reference_link",
+        "category": "reference-link-usage-forms",
+        "markdown": "[ref5]: dead-short1.md\n\n[ref5]\n",
+        "known_divergence": None,
+    },
+    {
+        "name": "collapsed_reference_link",
+        "category": "reference-link-usage-forms",
+        "markdown": "[ref6]: dead-short2.md\n\n[ref6][]\n",
+        "known_divergence": None,
+    },
+    {
+        "name": "label_normalization_case_insensitive",
+        "category": "reference-link-usage-forms",
+        "markdown": "[Foo]: dead-norm1.md\n\n[foo]\n",
+        "known_divergence": None,
+    },
+    {
+        "name": "label_normalization_whitespace_collapse",
+        "category": "reference-link-usage-forms",
+        "markdown": "[foo  bar]: dead-norm2.md\n\n[foo bar]\n",
+        "known_divergence": None,
+    },
+    # --- blockquotes and ATX headings — no dedicated boundary, agree by ----
+    # --- coincidence (neither is distinguished from ordinary prose) --------
+    {
+        "name": "blockquote_link",
+        "category": "blockquotes-and-headings",
+        "markdown": "> [x](dead-bq1.md)\n",
+        "known_divergence": None,
+    },
+    {
+        "name": "atx_heading_link",
+        "category": "blockquotes-and-headings",
+        "markdown": "# [x](dead-h1.md)\n",
+        "known_divergence": None,
+    },
+    # --- empty / whitespace-only destinations, unbracketed form ------------
+    # Extends the already-settled WI-0060/WI-0061 exception (`[x](<>)`) to
+    # the plain, unbracketed `[x]()` / `[x]( )` forms — not a new gap, the
+    # same "nothing to check" design this tool already commits to for an
+    # empty destination, confirmed here to hold for the syntax most likely
+    # to actually occur in a hand-written index.
+    {
+        "name": "empty_destination_plain_parens",
+        "category": "empty-and-whitespace-destinations",
+        "markdown": "[x]()\n",
+        "known_divergence": {
+            "direction": "false-negative",
+            "reason": (
+                "CommonMark renders `[x]()` as `<a href=\"\">x</a>` — "
+                "technically a link, to an empty destination. check (n)'s "
+                "own `[[ -n \"$target\" ]]` empty-target guard (already "
+                "settled for the angle-bracket form `[x](<>)` under "
+                "WI-0060/WI-0061) skips it: an empty href has no file to "
+                "test existence against, so silence is correct for this "
+                "tool's purpose, not a conformance gap. Recorded as a "
+                "`known_divergence` only because the generator's oracle "
+                "comparison is literal (reference says '', check (n) says "
+                "nothing checked) — this fixture extends the existing "
+                "exception's scope to the unbracketed form, it does not "
+                "add a new one."
+            ),
+            "work_item": "WI-0005",
+        },
+    },
+    {
+        "name": "whitespace_only_destination_plain_parens",
+        "category": "empty-and-whitespace-destinations",
+        "markdown": "[x]( )\n",
+        "known_divergence": {
+            "direction": "false-negative",
+            "reason": (
+                "Same exception as empty_destination_plain_parens — "
+                "CommonMark trims the whitespace-only destination to an "
+                "empty href (`<a href=\"\">`), and check (n) lands on the "
+                "same empty target, silently skipped by the same guard."
+            ),
+            "work_item": "WI-0005",
+        },
+    },
+    # --- emphasis inside link text ------------------------------------------
+    {
+        "name": "emphasis_in_link_text",
+        "category": "emphasis-in-link-text",
+        "markdown": "[*a* b](dead-em1.md)\n",
+        "known_divergence": None,
+    },
 ]
 
 

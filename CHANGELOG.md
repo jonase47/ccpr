@@ -46,6 +46,28 @@ All notable changes to this project are documented in this file. The format is b
   whose destination sits on the next line is not recognised at all, isolated by a single-line control
   that is found. **Not fixed here** — the round's product is the measurement, and the fix order is a
   decision that wants the whole table on the table first.
+- **A second adversarial round against check (n), eight more divergences (WI-0005 round 2).** The
+  first round's ten construct classes were deliberately not repeated; this round read check (n)'s own
+  awk block-boundary list and searched what it has no case for at all. An indented code block (four
+  spaces, or one leading tab) is literal text at the reference — check (n) has a boundary case for a
+  fenced code block but none for the indented form, and reports the bracketed text inside as dead. An
+  HTML block opened by anything other than `<!--` (`<div>`, `<pre>`, `<script>`) is raw, unparsed HTML
+  at the reference for the same reason — check (n) only ever learned the comment form. A reference
+  definition with no matching `[id]`/`[id][]`/`[x][id]` usage anywhere in the file renders nothing at
+  all, but check (n) checks its destination unconditionally, straight off the definition line — the
+  same mechanism that makes shortcut and collapsed reference-link usage, and case-/whitespace-
+  insensitive label matching, merely *look* supported without check (n) ever resolving a usage.
+  **The most consequential this round**: on a CRLF-terminated file, the blank-line boundary test
+  (`$0 ~ /^[ \t]*$/`) does not match the bare `\r` a CRLF blank line leaves behind after `\n`-splitting
+  — two paragraphs merge into one buffer and a stray backtick in each pairs across paragraphs it
+  should never have reached, swallowing a link. Two further entries extend the already-settled
+  WI-0060/WI-0061 empty-destination exception (`[x](<>)`) to the unbracketed forms `[x]()` and
+  `[x]( )` — not new gaps, the same intentional "nothing to check" behaviour, confirmed to hold for
+  the syntax most likely to actually occur. Eight constructs (blockquotes, ATX headings, emphasis in
+  link text, the CRLF case's own non-confounding control) were measured and agree, kept as regression
+  pins. Seven of the eight new divergences are false positives — the direction that blocks promoting
+  this check to `err`; the corpus grew from 26 to 44 entries, all newly verified against both oracles.
+  **Not fixed here**, same as round 1.
 - **`memory-lint.sh` told readers to set a value that did nothing (WI-0074).** Its age warning read
   "consider setting `status='stale'`" — and `stale` was not in the suppression list, so following the
   advice produced the same warning on the very next run. Measured across all five cases: unset warns,
@@ -399,6 +421,20 @@ All notable changes to this project are documented in this file. The format is b
   the index and all theme files.
 
 ### Added
+- **A second round against check (n), on ground the first never touched (WI-0005).** The corpus grew
+  26 → 44. Eight new divergences, and the interesting part is what they group into rather than the
+  count. Five are one cause: the extractor tracks fenced code and HTML *comments*, but neither
+  indented code blocks nor the other HTML block types — both contexts where CommonMark parses no
+  inline content, so a link written there is not one. An index file is exactly the document that
+  explains its own link syntax, which is why fence tracking exists at all; indented and
+  HTML-wrapped examples are the same habit in a different notation. Two more are a **decision, not a
+  defect**: an unused reference definition creates no link under CommonMark, but check (n)'s purpose
+  is narrower than conformance — whether the index still points at files that exist — and a
+  definition naming a vanished file is a dangling pointer nobody sees in the rendered document. The
+  last is a false negative on CRLF blank lines, measured at zero occurrences today but not idle:
+  this framework ships with Windows install guidance. Filed as WI-0084, WI-0085 and WI-0086. Eight
+  further construct classes measured clean and kept as regression pins, including shortcut and
+  collapsed reference links, block quotes, headings and emphasis in link text.
 - **Sprint-review reports get a decided header schema (WI-0072).** `/p5-review-sprint` prescribed
   nothing more than "record the reviewed range in the report header" — measured in the field: five
   different header shapes across two real projects, including a bare `key: value` body with no `---`

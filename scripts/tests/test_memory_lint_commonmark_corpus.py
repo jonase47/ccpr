@@ -288,6 +288,90 @@ class CommonmarkCorpusDifferentialTest(unittest.TestCase):
         self.assertEqual(hexform["reference_checkable_targets"], ["dead#3-ent4.md"])
         self.assertIsNone(hexform["known_divergence"])
 
+    # --- WI-0005 round 2 (22.08.2026-23.08.2026): new construct classes ----
+
+    def test_an_indented_code_block_is_not_a_link(self):
+        """New this round: a line indented >=4 spaces (or one tab),
+        surrounded by blank lines, is a CommonMark indented code block --
+        its content is never inline-parsed. check (n)'s block-boundary list
+        has no case for this, so the line falls through to ordinary
+        paragraph content and the bracketed text inside is reported dead.
+        """
+        four_space = self._entry("indented_code_block_four_spaces")
+        tab = self._entry("indented_code_block_tab_indent")
+
+        self.assertEqual(run_memory_lint_on(four_space["markdown"]), ["dead-ind1.md"])
+        self.assertEqual(four_space["reference_checkable_targets"], [])
+
+        self.assertEqual(run_memory_lint_on(tab["markdown"]), ["dead-ind2.md"])
+        self.assertEqual(tab["reference_checkable_targets"], [])
+
+    def test_an_html_block_other_than_a_comment_is_not_checked_as_html(self):
+        """New this round: check (n) only recognises `<!--` as an HTML-block
+        opener (WI-0041). Every other block-level tag (`<div>`, `<pre>`,
+        `<script>`, ...) opens a CommonMark HTML block whose content is raw,
+        unparsed HTML -- but check (n) treats it as ordinary paragraph
+        prose and reports the bracketed text inside as a dead link.
+        """
+        div = self._entry("html_block_div_tag")
+        pre = self._entry("html_block_pre_tag")
+        script = self._entry("html_block_script_tag")
+
+        self.assertEqual(run_memory_lint_on(div["markdown"]), ["dead-html1.md"])
+        self.assertEqual(div["reference_checkable_targets"], [])
+        self.assertEqual(run_memory_lint_on(pre["markdown"]), ["dead-html2.md"])
+        self.assertEqual(pre["reference_checkable_targets"], [])
+        self.assertEqual(run_memory_lint_on(script["markdown"]), ["dead-html3.md"])
+        self.assertEqual(script["reference_checkable_targets"], [])
+
+    def test_an_unused_reference_definition_is_checked_anyway(self):
+        """New this round: check (n)'s reference-definition branch checks a
+        `[id]: target` destination straight off the definition line,
+        unconditionally -- it never looks for a matching `[id]` usage
+        anywhere else in the file. A definition with no usage at all
+        renders NOTHING at the reference (a lone definition produces no
+        `<a href>`), but check (n) reports it as a dead target regardless.
+        This is also why the shortcut/collapsed reference-link fixtures
+        below happen to agree with the reference: check (n) never resolves
+        the usage, it only ever reads the definition line.
+        """
+        standalone = self._entry("unused_reference_definition_standalone")
+        after_prose = self._entry("unused_reference_definition_after_prose")
+
+        self.assertEqual(run_memory_lint_on(standalone["markdown"]), ["dead-unused1.md"])
+        self.assertEqual(standalone["reference_checkable_targets"], [])
+        self.assertEqual(run_memory_lint_on(after_prose["markdown"]), ["dead-unused2.md"])
+        self.assertEqual(after_prose["reference_checkable_targets"], [])
+
+    def test_a_crlf_blank_line_is_not_a_recognised_block_boundary(self):
+        """New this round: check (n)'s blank-line boundary test is
+        `$0 ~ /^[ \\t]*$/`. On a CRLF-terminated file, awk splits records on
+        `\\n` and leaves a bare `\\r` as a blank line's `$0` -- which this
+        regex does not match. The paragraph buffer never flushes at that
+        blank line, two paragraphs merge into one buffer, and a stray
+        backtick in each (each meant to stay unpaired within its own
+        block) pairs across the merge, swallowing the first paragraph's
+        link as a spurious code span. The control fixture (same CRLF
+        shape, no stray backticks) shows this is specifically a missing-
+        boundary defect, not CRLF handling breaking wholesale.
+        """
+        swallowed = self._entry("crlf_blank_line_swallows_link_via_missing_boundary")
+        control = self._entry("crlf_two_paragraphs_no_confounding_span_control")
+
+        self.assertEqual(run_memory_lint_on(swallowed["markdown"]), ["dead-crlf-d.md"])
+        self.assertEqual(
+            swallowed["reference_checkable_targets"],
+            ["dead-crlf-c.md", "dead-crlf-d.md"],
+        )
+        self.assertEqual(
+            run_memory_lint_on(control["markdown"]),
+            ["dead-crlf-a.md", "dead-crlf-b.md"],
+        )
+        self.assertEqual(
+            control["reference_checkable_targets"],
+            ["dead-crlf-a.md", "dead-crlf-b.md"],
+        )
+
     def test_an_escaped_paren_in_a_destination_resolves_the_full_target(self):
         """WI-0081, fixed: `[x](dead-esc4\\).md)` — the reference decodes the
         escape (href `dead-esc4).md`, one real link). check (n)'s
