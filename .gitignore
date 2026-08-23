@@ -35,11 +35,25 @@ docs/HANDOVER.md
 docs/.handover-archive/
 docs/decisions/
 
-# Project working state, not framework content: 17 work items about CCPR's own
-# defects and ~146 KB of persona review notes, which would arrive in an
+# Project working state, not framework content: 89 work items about CCPR's own
+# defects (560 KB) and 400 KB of persona review notes, which would arrive in an
 # installation looking like the user's own state. Framework docs that explain the
-# design (adr/, CONSTITUTION.md, PROJECT_PHASES.md, the flat Tier-1 memory files)
-# stay tracked.
+# design stay tracked -- and the allowlist named below, not this comment, is what
+# says which ones: adr/, logo/, CONSTITUTION.md, NEXT_STEPS_REFERENCE.md,
+# PROJECT_PHASES.md.
+#
+# This paragraph used to end "..., the flat Tier-1 memory files) stay tracked".
+# That was never true: `git ls-files docs/memory` has always returned nothing,
+# because the rule below ignores docs/memory/ wholesale. Corrected 23.08.2026
+# after measuring it rather than reading it.
+#
+# Tracking those 8 flat files (80 KB) later is NOT a one-line change here. The
+# allowlist below serves BOTH sides of the boundary, so "tracked but not shipped"
+# is not expressible today: artifact-gate.sh fails a tracked docs/ path that is
+# not listed, and install.sh copies exactly what IS listed. Measured 23.08.2026 --
+# all 8 files fail the gate's docs-boundary check. Making them tracked-but-local
+# means either moving them to a framework home that earns an allowlist entry, or
+# splitting the allowlist into two lists, which is an ADR-sized change.
 # Since WI-0018, install.sh no longer copies docs/ wholesale: install_docs()
 # filters each top-level docs/ child against
 # scripts/lib/docs-framework-allowlist.txt and reports what it skipped. This
