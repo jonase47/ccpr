@@ -25,6 +25,7 @@ The split is what makes the tracked promotion of the default from `warn` to
 `err` a single deliberate red test instead of a suite-wide breakage.
 """
 
+import hashlib
 import re
 import shutil
 import subprocess
@@ -2487,6 +2488,263 @@ class MemoryLintTest(unittest.TestCase):
         self.assertEqual(result.returncode, 3, (result.stdout, result.stderr))
 
 
+    # --- block boundaries the paragraph buffer used to miss (WI-0086, WI-0082) ---
+    # All three shapes below share one root cause: check (n) buffers a paragraph
+    # across physical lines so a code span may straddle them, and it flushes that
+    # buffer only at a boundary it recognises. A boundary CommonMark honours but
+    # the buffer does not merges two blocks into one, letting two backticks that
+    # each belong to a block of their own pair across the merge and swallow a real
+    # link. Direction of every defect here: false negative.
+
+    def test_a_cr_terminated_blank_line_ends_the_paragraph(self):
+        """WI-0086: on a CRLF file awk splits records on `\n` and hands the
+        blank line over as a bare `\r`, which `$0 ~ /^[ \t]*$/` does not
+        match. CommonMark counts `\r\n` as a line ending, so both paragraphs
+        are separate blocks and each stray backtick stays unpaired in its own.
+        """
+        self.write_index(
+            "# Memory Index\r\n"
+            "\r\n"
+            "`stray one [a](project_crlf_one.md)\r\n"
+            "\r\n"
+            "`stray two [b](project_crlf_two.md)\r\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertTrue(any("project_crlf_one.md" in f for f in findings), findings)
+        self.assertTrue(any("project_crlf_two.md" in f for f in findings), findings)
+
+    def test_a_cr_terminated_atx_heading_still_ends_the_paragraph(self):
+        """The CR strip is not a special case for the blank-line test: every
+        `$`-anchored boundary regex in the awk block breaks the same way on a
+        CR. The heading here carries NO text on purpose — `## Heading\\r`
+        already matches via the regex's `[ \t]` branch and would prove
+        nothing; an empty ATX heading (`<h2></h2>` at the reference) can only
+        match via the `$` branch, which the carriage return blocks.
+        """
+        self.write_index(
+            "# Memory Index\r\n"
+            "\r\n"
+            "`stray one [a](project_crlf_atx.md)\r\n"
+            "##\r\n"
+            "`stray two [b](project_crlf_atx2.md)\r\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertTrue(any("project_crlf_atx.md" in f for f in findings), findings)
+        self.assertTrue(any("project_crlf_atx2.md" in f for f in findings), findings)
+
+    def test_a_cr_terminated_reference_definition_with_a_title_is_seen(self):
+        """The reference-definition branch reads its own `raw_rest` substring
+        out of `$0`, and `reference_definition_tail()` validates the optional
+        quoted title against end-of-line. With the carriage return still
+        attached the tail never validated, the whole definition fell through as
+        ordinary prose, and its destination was never checked at all — the same
+        CR cause, in the one branch that does not test `$0` directly.
+        """
+        self.write_index(
+            "# Memory Index\r\n"
+            "\r\n"
+            "[ref]: project_crlf_refdef.md \"a title\"\r\n"
+            "\r\n"
+            "see [x][ref]\r\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertTrue(any("project_crlf_refdef.md" in f for f in findings), findings)
+
+    def test_a_cr_terminated_fence_closes_the_fence(self):
+        """A fence close is `$`-anchored too — with the CR still attached the
+        closing line never matches and the fence swallows the rest of the file,
+        which the run reports as an unclosed-fence warning.
+        """
+        self.write_index(
+            "# Memory Index\r\n"
+            "\r\n"
+            "```\r\n"
+            "[inside](project_crlf_fenced.md)\r\n"
+            "```\r\n"
+            "\r\n"
+            "- [Real](project_crlf_after.md) — after the fence\r\n"
+        )
+
+        result = self.run_lint()
+        findings = self.link_findings(result.stdout)
+
+        # The sentinel warning verbatim, and FIRST: it is the root symptom, and
+        # a later assertion firing before it would leave this one unproven.
+        # An earlier draft asserted the absence of the word "unclosed", which
+        # the script emits nowhere — it occurs only in source comments, so that
+        # assertion could not go red for the reason it claimed.
+        self.assertNotIn(
+            "opens a code fence that is never closed", result.stdout
+        )
+        self.assertFalse(any("project_crlf_fenced.md" in f for f in findings), findings)
+        self.assertTrue(any("project_crlf_after.md" in f for f in findings), findings)
+
+
+    # --- thematic break and setext underline as boundaries (WI-0082) ----------
+    # Every expectation below was measured against the pinned reference parser
+    # (commonmark 0.9.2), not derived from the spec text — see
+    # docs/memory/reference_commonmark-conformance.md.
+
+    def test_a_thematic_break_ends_the_paragraph(self):
+        """`***` is its own block (`<hr />`), so it interrupts the paragraph
+        and the two stray backticks never meet."""
+        self.write_index(
+            "# Memory Index\n\n"
+            "`stray one [a](project_tb_a.md)\n"
+            "***\n"
+            "`stray two [b](project_tb_b.md)\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertTrue(any("project_tb_a.md" in f for f in findings), findings)
+        self.assertTrue(any("project_tb_b.md" in f for f in findings), findings)
+
+    def test_a_setext_underline_ends_the_paragraph(self):
+        """`===` under an open paragraph closes it as a setext heading
+        (`<h1>` at the reference), so both links are real and separate."""
+        self.write_index(
+            "# Memory Index\n\n"
+            "`stray one [a](project_setext_a.md)\n"
+            "===\n"
+            "`stray two [b](project_setext_b.md)\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertTrue(any("project_setext_a.md" in f for f in findings), findings)
+        self.assertTrue(any("project_setext_b.md" in f for f in findings), findings)
+
+    def test_a_thematic_break_outranks_the_list_marker_it_also_matches(self):
+        """`- - -` satisfies the list-marker pattern AND the thematic-break
+        pattern; CommonMark gives the break precedence (`<hr />`, measured).
+
+        The discriminating consequence is the line AFTER it: a thematic break
+        leaves the paragraph buffer empty, so a following 4-space-indented line
+        is an indented code block and its link is not a link. Handled as a list
+        marker instead, the `- - -` line itself gets buffered, the indented-code
+        branch's `pbuf_n == 0` gate no longer holds, and the buried link is
+        wrongly reported.
+        """
+        self.write_index(
+            "# Memory Index\n\n"
+            "- - -\n"
+            "    [buried](project_prec_code.md)\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertFalse(any("project_prec_code.md" in f for f in findings), findings)
+
+    def test_a_setext_underline_does_not_close_an_open_list_item(self):
+        """Measured, not assumed: `===` under a list item is NOT an underline —
+        the reference keeps it as lazy continuation inside the `<li>`, so the
+        backticks around it DO pair and only the trailing link is real.
+
+        Without this guard the new setext boundary would flush the list item's
+        buffer and report a link the reference never renders — a false positive
+        traded for the false negative the boundary fixes.
+        """
+        self.write_index(
+            "# Memory Index\n\n"
+            "- `item [a](project_li_a.md)\n"
+            "===\n"
+            "closer` [b](project_li_b.md)\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertFalse(any("project_li_a.md" in f for f in findings), findings)
+        self.assertTrue(any("project_li_b.md" in f for f in findings), findings)
+
+    def test_a_setext_underline_does_not_close_an_open_block_quote(self):
+        """Same shape as the list-item guard, one container further: the
+        reference keeps `===` inside the blockquote paragraph (measured), so
+        only the trailing link is real here too.
+        """
+        self.write_index(
+            "# Memory Index\n\n"
+            "> `q [a](project_bq_a.md)\n"
+            "===\n"
+            "closer` [b](project_bq_b.md)\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertFalse(any("project_bq_a.md" in f for f in findings), findings)
+        self.assertTrue(any("project_bq_b.md" in f for f in findings), findings)
+
+    def test_an_equals_line_with_no_open_paragraph_is_ordinary_content(self):
+        """A setext underline needs a paragraph to underline. With the buffer
+        empty the reference renders `===` as plain paragraph text (measured),
+        so the line must be BUFFERED, not treated as a boundary — otherwise the
+        stray backtick below it loses the content it opens against.
+        """
+        self.write_index(
+            "# Memory Index\n\n"
+            "===\n"
+            "`stray [a](project_noopen_a.md)\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertTrue(any("project_noopen_a.md" in f for f in findings), findings)
+
+    def test_a_setext_underline_does_not_close_a_block_quote_opened_mid_paragraph(self):
+        """The container guard has to survive a block quote that INTERRUPTS an
+        open paragraph instead of opening the buffer itself — a `>` line may do
+        that in CommonMark, so "what opened the buffer" is not what decides.
+
+        Measured at the reference: `foo` / `> \u0060q …` / `===` / `closer\u0060 …`
+        renders `<p>foo</p>` plus a blockquote holding
+        `<code>q [a](…) === closer</code>`, i.e. the underline stays lazy
+        continuation inside the quote exactly as it does when the quote opens
+        the buffer, and only the trailing link is real.
+        """
+        self.write_index(
+            "# Memory Index\n\n"
+            "foo\n"
+            "> `q [a](project_bqmid_a.md)\n"
+            "===\n"
+            "closer` [b](project_bqmid_b.md)\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertFalse(any("project_bqmid_a.md" in f for f in findings), findings)
+        self.assertTrue(any("project_bqmid_b.md" in f for f in findings), findings)
+
+    def test_a_thematic_break_ends_an_open_list_item(self):
+        """The thematic-break branch must stay UNGATED by pbuf_para, and this
+        is the shape that says so: a `---` line is NOT lazy continuation inside
+        a list item the way `===` is.
+
+        Measured at the reference: `- \u0060item …` / `---` / `closer\u0060 …`
+        renders `<ul><li>\u0060item <a …>a</a></li></ul>`, `<hr />` and a separate
+        paragraph — the item's stray backtick never reaches the line below, so
+        BOTH links are real. Gating this branch the way the setext branch is
+        gated would keep the buffer running, pair the two backticks and swallow
+        the first link.
+        """
+        self.write_index(
+            "# Memory Index\n\n"
+            "- `item [a](project_tbli_a.md)\n"
+            "---\n"
+            "closer` [b](project_tbli_b.md)\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertTrue(any("project_tbli_a.md" in f for f in findings), findings)
+        self.assertTrue(any("project_tbli_b.md" in f for f in findings), findings)
+
+
 class ScriptActuallyRanTest(unittest.TestCase):
     """WI-0037: a broken memory-lint.sh must not be able to pass its own tests.
 
@@ -2872,6 +3130,220 @@ class IndentedCodeAndHtmlBlockMutationTest(unittest.TestCase):
             "<div>\n[link](gone_mut_div.md)\n</div>\n",
             "gone_mut_div.md",
         )
+
+
+class ParagraphBoundaryMutationTest(unittest.TestCase):
+    """WI-0086/WI-0082 obligation: each new boundary must have been seen RED,
+    and by a mutation that changes the awk block's STRUCTURE rather than merely
+    deleting an assertion.
+
+    Four of the five mutations here are deliberately NOT deletions: the
+    branch-order mutation MOVES the thematic-break branch behind the list
+    branch (both branches still present, both still reachable), the
+    container-guard mutation WIDENS the setext gate to the naive `pbuf_n > 0`
+    form the reference falsifies, the block-quote mutation RESTORES the guard
+    to its exact pre-fix shape, and the thematic-break mutation ADDS a gate
+    where the reference says there must be none. Only the CR strip is
+    exercised by removal, because it is a single statement with no order or
+    gate to permute.
+
+    Note the two directions. Widening or removing a guard produces a FALSE
+    POSITIVE (a link the reference does not render); narrowing one produces a
+    FALSE NEGATIVE (a dead link that stops being reported). Check (n) is on
+    its way from `warn` to `err` per ADR-0001, which makes the false-positive
+    direction the blocking one — but both are covered here, because a boundary
+    set can drift either way.
+
+    Every run works on an in-memory COPY; the shipped script is never touched,
+    proven by md5 rather than assumed.
+    """
+
+    _CR_STRIP = '            sub(/\\r$/, "")\n'
+    _THEMATIC_BREAK_BRANCH = (
+        "            if ($0 ~ /^[ ]{0,3}((\\*[ \\t]*){3,}|(-[ \\t]*){3,}|(_[ \\t]*){3,})$/) {\n"
+        "                flush_paragraph()\n"
+        "                next\n"
+        "            }\n"
+    )
+    _LIST_MARKER_BRANCH = (
+        "            if ($0 ~ /^[ ]{0,3}([-+*]|[0-9]{1,9}[.)])[ \\t]/) {\n"
+        "                flush_paragraph()\n"
+        "                append_paragraph($0)\n"
+        "                next\n"
+        "            }\n"
+    )
+    _GUARDED_SETEXT = (
+        "            if (pbuf_n > 0 && pbuf_para && $0 ~ /^[ ]{0,3}(=+|-+)[ \\t]*$/) {\n"
+    )
+    _NAIVE_SETEXT = (
+        "            if (pbuf_n > 0 && $0 ~ /^[ ]{0,3}(=+|-+)[ \\t]*$/) {\n"
+    )
+    _CONTAINER_GUARD = (
+        "            if ($0 ~ /^[ ]{0,3}>/) pbuf_para = 0\n"
+        "            else if (pbuf_n == 0) pbuf_para = 1\n"
+    )
+    _CONTAINER_GUARD_PRE_FIX = (
+        "            if (pbuf_n == 0) {\n"
+        "                if ($0 ~ /^[ ]{0,3}>/) pbuf_para = 0\n"
+        "                else pbuf_para = 1\n"
+        "            }\n"
+    )
+    _GATED_THEMATIC_BREAK = (
+        "            if (pbuf_para && $0 ~ /^[ ]{0,3}((\\*[ \\t]*){3,}|(-[ \\t]*){3,}|(_[ \\t]*){3,})$/) {\n"
+    )
+
+    def _run_mutant(self, mutate, markdown):
+        original = SCRIPT_PATH.read_text(encoding="utf-8")
+        md5_before = hashlib.md5(original.encode("utf-8")).hexdigest()
+
+        mutated = mutate(original)
+        self.assertNotEqual(mutated, original, "mutation did not change the script")
+
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                script_dir = Path(tmp) / "scriptdir"
+                shutil.copytree(SCRIPT_PATH.parent / "lib", script_dir / "lib")
+                mutant_script = script_dir / "memory-lint.sh"
+                mutant_script.write_text(mutated, encoding="utf-8")
+
+                project_dir = Path(tmp) / "project"
+                (project_dir / "docs" / "memory").mkdir(parents=True)
+                (project_dir / "docs" / "memory" / "MEMORY.md").write_text(
+                    markdown, encoding="utf-8"
+                )
+                fake_home = Path(tmp) / "home"
+                fake_home.mkdir()
+
+                return subprocess.run(
+                    ["bash", str(mutant_script), str(project_dir)],
+                    capture_output=True, text=True,
+                    env={"HOME": str(fake_home), "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"},
+                )
+        finally:
+            after = SCRIPT_PATH.read_text(encoding="utf-8")
+            self.assertEqual(hashlib.md5(after.encode("utf-8")).hexdigest(), md5_before)
+            self.assertEqual(after, original)
+
+    def test_removing_the_cr_strip_swallows_the_link_before_a_crlf_blank_line(self):
+        def mutate(src):
+            self.assertIn(self._CR_STRIP, src, "CR strip moved — update this mutation")
+            return src.replace(self._CR_STRIP, "", 1)
+
+        result = self._run_mutant(
+            mutate,
+            "# Memory Index\r\n\r\n"
+            "`stray one [a](project_mut_crlf_one.md)\r\n\r\n"
+            "`stray two [b](project_mut_crlf_two.md)\r\n",
+        )
+
+        self.assertNotIn("project_mut_crlf_one.md", result.stdout)
+        self.assertIn("project_mut_crlf_two.md", result.stdout)
+
+    def test_moving_the_thematic_break_behind_the_list_branch_buries_the_code_block(self):
+        """Order mutation, not a deletion: both branches survive, only their
+        sequence changes — and `- - -` is then claimed by the list branch,
+        which buffers its own line and defeats the indented-code gate.
+        """
+        def mutate(src):
+            self.assertIn(self._THEMATIC_BREAK_BRANCH, src)
+            self.assertIn(self._LIST_MARKER_BRANCH, src)
+            moved = src.replace(self._THEMATIC_BREAK_BRANCH, "", 1)
+            return moved.replace(
+                self._LIST_MARKER_BRANCH,
+                self._LIST_MARKER_BRANCH + self._THEMATIC_BREAK_BRANCH,
+                1,
+            )
+
+        result = self._run_mutant(
+            mutate,
+            "# Memory Index\n\n- - -\n    [buried](project_mut_prec.md)\n",
+        )
+
+        self.assertIn(
+            "project_mut_prec.md", result.stdout,
+            "the branch order no longer discriminates — reordering must be visible",
+        )
+
+    def test_widening_the_setext_gate_reports_a_link_inside_a_list_item(self):
+        """Gate mutation: the guard is replaced by the naive `pbuf_n > 0` form,
+        which the reference falsifies (`===` under a list item is lazy
+        continuation, not an underline).
+        """
+        def mutate(src):
+            self.assertIn(self._GUARDED_SETEXT, src)
+            return src.replace(self._GUARDED_SETEXT, self._NAIVE_SETEXT, 1)
+
+        result = self._run_mutant(
+            mutate,
+            "# Memory Index\n\n"
+            "- `item [a](project_mut_li.md)\n===\ncloser` [b](project_mut_li2.md)\n",
+        )
+
+        self.assertIn(
+            "project_mut_li.md", result.stdout,
+            "the container guard no longer discriminates — the naive gate must "
+            "produce the false positive it was added to prevent",
+        )
+
+    def test_restoring_the_pre_fix_container_guard_reports_a_link_inside_a_block_quote(self):
+        """Pre-form restoration, not a deletion: the guard goes back to the
+        exact shape it had before the fix, where the block-quote test was
+        nested inside `pbuf_n == 0` and therefore only ran for a quote that
+        OPENED the buffer. A quote interrupting an open paragraph then kept
+        pbuf_para set, the setext branch fired inside the quote, and the link
+        buried in the code span was reported — a false positive on a shape
+        that was correct before the boundary existed.
+        """
+        def mutate(src):
+            self.assertIn(self._CONTAINER_GUARD, src)
+            return src.replace(
+                self._CONTAINER_GUARD, self._CONTAINER_GUARD_PRE_FIX, 1
+            )
+
+        result = self._run_mutant(
+            mutate,
+            "# Memory Index\n\n"
+            "foo\n> `q [a](project_mut_bqmid.md)\n===\ncloser` [b](project_mut_bqmid2.md)\n",
+        )
+
+        self.assertIn(
+            "project_mut_bqmid.md", result.stdout,
+            "the mid-paragraph block quote no longer discriminates — the "
+            "pre-fix guard must produce the false positive it was fixed for",
+        )
+
+    def test_gating_the_thematic_break_hides_a_link_in_the_list_item_above_it(self):
+        """The opposite direction from the guard mutations above: this one ADDS
+        a gate rather than widening one, and its symptom is a false NEGATIVE.
+
+        Nothing else in the suite pins the thematic-break branch as UNGATED —
+        adding `pbuf_para &&` to it left the whole suite green before this test
+        existed. It must not be gated: unlike `===`, a `---` line is not lazy
+        continuation inside a list item (measured, `<ul><li>…</li></ul><hr />`),
+        so gating it keeps the item paragraph buffered, pairs the two backticks
+        across the break and swallows the first link entirely.
+        """
+        def mutate(src):
+            self.assertIn(self._THEMATIC_BREAK_BRANCH, src)
+            return src.replace(
+                self._THEMATIC_BREAK_BRANCH,
+                self._GATED_THEMATIC_BREAK
+                + self._THEMATIC_BREAK_BRANCH.split("\n", 1)[1],
+                1,
+            )
+
+        result = self._run_mutant(
+            mutate,
+            "# Memory Index\n\n"
+            "- `item [a](project_mut_tbli.md)\n---\ncloser` [b](project_mut_tbli2.md)\n",
+        )
+
+        self.assertNotIn(
+            "project_mut_tbli.md", result.stdout,
+            "the thematic-break branch no longer discriminates — gating it must "
+            "hide the link the ungated branch exposes",
+        )
+        self.assertIn("project_mut_tbli2.md", result.stdout)
 
 
 class NamedEntityInfoMutationTest(unittest.TestCase):

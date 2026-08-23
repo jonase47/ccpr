@@ -257,34 +257,37 @@ class CommonmarkCorpusDifferentialTest(unittest.TestCase):
         self.assertEqual(findings, [])
         self.assertEqual(entry["reference_checkable_targets"], ["dead-nb1.md"])
 
-    def test_setext_heading_underline_is_not_a_recognised_block_boundary(self):
-        """New this round: a setext-heading underline (`===`) is absent from
-        check (n)'s block-boundary list (blank line / list marker / ATX
-        heading / fence / block HTML comment). The heading text and the
-        following paragraph merge into one buffer, and an unpaired backtick
-        in the heading pairs across the merge with one in the next paragraph,
-        swallowing the first link as a spurious code span.
+    def test_a_setext_heading_underline_is_a_recognised_block_boundary(self):
+        """WI-0082, fixed: a setext-heading underline (`===`) used to be absent
+        from check (n)'s block-boundary list, so the heading text and the
+        following paragraph merged into one buffer and an unpaired backtick in
+        each paired across the merge, swallowing the first link as a spurious
+        code span. The underline is now a boundary and both links are reported,
+        matching the reference. The entry name still records the defect it was
+        minted for.
         """
         entry = self._entry("setext_heading_swallows_link_via_missing_boundary")
         findings = run_memory_lint_on(entry["markdown"])
 
-        self.assertEqual(findings, ["dead-setext-f.md"])
+        self.assertEqual(findings, ["dead-setext-e.md", "dead-setext-f.md"])
         self.assertEqual(
             entry["reference_checkable_targets"],
             ["dead-setext-e.md", "dead-setext-f.md"],
         )
+        self.assertIsNone(entry["known_divergence"])
 
-    def test_thematic_break_is_not_a_recognised_block_boundary(self):
+    def test_a_thematic_break_is_a_recognised_block_boundary(self):
         """Same defect class as the setext case, triggered by a thematic
-        break (`***`) instead."""
+        break (`***`) instead — closed by the same WI-0082 change."""
         entry = self._entry("thematic_break_swallows_link_via_missing_boundary")
         findings = run_memory_lint_on(entry["markdown"])
 
-        self.assertEqual(findings, ["dead-tb-b.md"])
+        self.assertEqual(findings, ["dead-tb-a.md", "dead-tb-b.md"])
         self.assertEqual(
             entry["reference_checkable_targets"],
             ["dead-tb-a.md", "dead-tb-b.md"],
         )
+        self.assertIsNone(entry["known_divergence"])
 
     def test_multiline_reference_definition_is_invisible_to_check_n(self):
         """New this round: `[ref]:` followed by its destination on the NEXT
@@ -431,22 +434,29 @@ class CommonmarkCorpusDifferentialTest(unittest.TestCase):
         self.assertIsNotNone(after_prose["documented_intent"])
         self.assertEqual(after_prose["documented_intent"]["work_item"], "WI-0085")
 
-    def test_a_crlf_blank_line_is_not_a_recognised_block_boundary(self):
-        """New this round: check (n)'s blank-line boundary test is
+    def test_a_crlf_blank_line_is_a_recognised_block_boundary(self):
+        """WI-0086, fixed: check (n)'s blank-line boundary test is
         `$0 ~ /^[ \\t]*$/`. On a CRLF-terminated file, awk splits records on
-        `\\n` and leaves a bare `\\r` as a blank line's `$0` -- which this
-        regex does not match. The paragraph buffer never flushes at that
-        blank line, two paragraphs merge into one buffer, and a stray
+        `\\n` and used to leave a bare `\\r` as a blank line's `$0` -- which
+        this regex does not match. The paragraph buffer never flushed at that
+        blank line, two paragraphs merged into one buffer, and a stray
         backtick in each (each meant to stay unpaired within its own
-        block) pairs across the merge, swallowing the first paragraph's
-        link as a spurious code span. The control fixture (same CRLF
-        shape, no stray backticks) shows this is specifically a missing-
-        boundary defect, not CRLF handling breaking wholesale.
+        block) paired across the merge, swallowing the first paragraph's
+        link as a spurious code span. The record now has its trailing
+        carriage return stripped before any boundary test runs, so both
+        links are reported. The control fixture (same CRLF shape, no stray
+        backticks) was green before the fix too, and stays green: this was
+        specifically a missing-boundary defect, not CRLF handling breaking
+        wholesale.
         """
         swallowed = self._entry("crlf_blank_line_swallows_link_via_missing_boundary")
         control = self._entry("crlf_two_paragraphs_no_confounding_span_control")
 
-        self.assertEqual(run_memory_lint_on(swallowed["markdown"]), ["dead-crlf-d.md"])
+        self.assertEqual(
+            run_memory_lint_on(swallowed["markdown"]),
+            ["dead-crlf-c.md", "dead-crlf-d.md"],
+        )
+        self.assertIsNone(swallowed["known_divergence"])
         self.assertEqual(
             swallowed["reference_checkable_targets"],
             ["dead-crlf-c.md", "dead-crlf-d.md"],

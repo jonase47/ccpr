@@ -291,26 +291,7 @@ CORPUS = [
             "===\n"
             "closer` [outer](dead-setext-f.md)\n"
         ),
-        "known_divergence": {
-            "direction": "false-negative",
-            "reason": (
-                "Reference: the setext underline closes the heading block "
-                "(`<h1>`code with a <a href=\"dead-setext-e.md\">link</a> "
-                "inside</h1>`), so the unpaired backtick in the heading text "
-                "stays literal and BOTH links (dead-setext-e.md in the "
-                "heading, dead-setext-f.md in the following paragraph) are "
-                "real. A setext-heading underline is not in check (n)'s "
-                "block-boundary list (blank line / list marker / ATX "
-                "heading / fence / block HTML comment, per the WI-0050 "
-                "comment in memory-lint.sh) — it falls through to ordinary "
-                "paragraph content, so all three lines merge into one "
-                "buffer. The two backticks then pair with each other across "
-                "the merge, swallowing dead-setext-e.md's link (and the "
-                "`===` line) into a spurious code span; only dead-setext-"
-                "f.md survives, after the closing backtick."
-            ),
-            "work_item": "WI-0005",
-        },
+        "known_divergence": None,
     },
     # --- thematic breaks -------------------------------------------------------
     {
@@ -327,21 +308,7 @@ CORPUS = [
             "***\n"
             "closer` [outer](dead-tb-b.md)\n"
         ),
-        "known_divergence": {
-            "direction": "false-negative",
-            "reason": (
-                "Same root cause and shape as the setext case above, with a "
-                "thematic break (`***`) in place of a setext underline: "
-                "the reference treats it as its own block (`<hr />`), "
-                "interrupting the paragraph, so both dead-tb-a.md and "
-                "dead-tb-b.md are real, separate links. `***` is also "
-                "absent from check (n)'s block-boundary list, so the three "
-                "lines merge into one buffer and the two backticks pair "
-                "across the `***` line, swallowing dead-tb-a.md's link; "
-                "only dead-tb-b.md survives."
-            ),
-            "work_item": "WI-0005",
-        },
+        "known_divergence": None,
     },
     # --- nested lists ------------------------------------------------------
     {
@@ -506,31 +473,7 @@ CORPUS = [
             "\r\n"
             "`stray two [b](dead-crlf-d.md)\r\n"
         ),
-        "known_divergence": {
-            "direction": "false-negative",
-            "reason": (
-                "Reference: two separate paragraphs (blank line between "
-                "them), each with one unpaired backtick that stays "
-                "literal within its own block — both dead-crlf-c.md and "
-                "dead-crlf-d.md are real, separate links. On a CRLF-"
-                "terminated file, awk's line-splitting on `\\n` leaves a "
-                "bare `\\r` as the blank line's `$0` — check (n)'s blank-"
-                "line boundary test (`$0 ~ /^[ \\t]*$/`) does not match "
-                "`\\r` (it is in neither `[ \\t]` nor end-of-string "
-                "immediately), so the paragraph buffer never flushes at "
-                "this blank line. Both paragraphs merge into one buffer, "
-                "the two backticks (one per paragraph, each meant to stay "
-                "unpaired) pair with each other across the merge, and the "
-                "first link is swallowed as a spurious code span — only "
-                "dead-crlf-d.md survives. Same missing-boundary defect "
-                "class as the setext-heading and thematic-break rows from "
-                "round 1, one line-ending convention further; a checkout "
-                "with `core.autocrlf=true`, or any file authored on "
-                "Windows, would carry this shape without anyone writing a "
-                "stray backtick on purpose."
-            ),
-            "work_item": "WI-0005",
-        },
+        "known_divergence": None,
     },
     {
         "name": "crlf_two_paragraphs_no_confounding_span_control",
@@ -541,6 +484,50 @@ CORPUS = [
             "para two [b](dead-crlf-b.md)\r\n"
         ),
         "known_divergence": None,
+    },
+    # --- container vs. boundary — the two shapes that decide whether a -----
+    # --- boundary branch may be gated on pbuf_para, added after a review ---
+    # --- caught the first gate in the wrong place (WI-0086/WI-0082) --------
+    {
+        "name": "setext_underline_inside_block_quote_after_paragraph",
+        "category": "container-vs-boundary",
+        "markdown": (
+            "foo\n"
+            "> `q [a](dead-bqmid-a.md)\n"
+            "===\n"
+            "closer` [b](dead-bqmid-b.md)\n"
+        ),
+        "known_divergence": None,
+        "caveat": (
+            "A block quote may INTERRUPT an open paragraph, so the container "
+            "guard on the setext branch cannot key off what OPENED the "
+            "paragraph buffer. It did, briefly, and reported the "
+            "code-span-buried first link — a false positive on a shape that "
+            "was correct before the setext boundary existed. The reference "
+            "keeps the underline inside the quote "
+            "(`<code>q [a](…) === closer</code>`), so only the trailing link "
+            "is a link."
+        ),
+    },
+    {
+        "name": "thematic_break_ends_list_item_ungated",
+        "category": "container-vs-boundary",
+        "markdown": (
+            "- `item [a](dead-tbli-a.md)\n"
+            "---\n"
+            "closer` [b](dead-tbli-b.md)\n"
+        ),
+        "known_divergence": None,
+        "caveat": (
+            "The counterpart of the entry above, and the reason the "
+            "thematic-break branch must NOT carry the same pbuf_para gate as "
+            "the setext branch: unlike a `=`-run, a `---` line is not lazy "
+            "continuation inside a list item. The reference renders "
+            "`<ul><li>…</li></ul>`, `<hr />` and a separate paragraph, so the "
+            "item's stray backtick never reaches the closing one and BOTH "
+            "links are real. Gating the branch would pair them and hide the "
+            "first — a false negative."
+        ),
     },
     # --- reference-link usage forms — agree, but only via the definition- --
     # --- line shortcut documented above, not by resolving the USAGE --------

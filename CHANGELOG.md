@@ -7,6 +7,59 @@ All notable changes to this project are documented in this file. The format is b
 ## [Unreleased]
 
 ### Fixed
+- **check (n)'s paragraph buffer missed three block boundaries CommonMark honours, swallowing real
+  links across the merged blocks (WI-0086, WI-0082).** The buffer accumulates a paragraph across
+  physical lines so a code span may straddle them, and it flushes only at a boundary it recognises. A
+  boundary it did not recognise merged two blocks, letting two backticks that each belonged to a block
+  of their own pair across the merge and hide a real link — a false negative in all three cases.
+  Closed: (1) a CARRIAGE RETURN is now stripped from every record before any boundary test runs.
+  CommonMark counts `\r\n`, `\r` and `\n` all as line endings; awk splits on `\n` only, so on a
+  CRLF file — anything authored on Windows, or any checkout with `core.autocrlf=true` — every
+  `$`-anchored regex in the extractor silently stopped matching, not just the blank-line test — an empty
+  ATX heading, a fence close, and a reference definition carrying a quoted title (`[ref]: x.md "t"`,
+  whose destination was then never checked at all) were each confirmed broken by the same cause, the
+  last of them in the one branch that does not test the record directly. (2) a THEMATIC BREAK
+  (`***`, `---`, `___`, with optional spaces or tabs between the markers) is now a boundary, and
+  deliberately an UNGATED one — a break really does end an open list item, measured
+  (`<ul><li>...</li></ul><hr />`), so gating it would hide links inside the item. (3) a
+  SETEXT-HEADING UNDERLINE is now a boundary, but only where CommonMark actually ends a paragraph
+  with one: with the buffer empty the same line is ordinary paragraph text, and with a list item or a
+  block quote open the reference keeps a `=`-run as lazy continuation inside that container —
+  flushing there would have traded the fixed false negative for a new false positive. That container
+  rule is specific to the `=`-runs and the one- and two-dash runs that actually reach the setext
+  branch; it does NOT generalise to `---`, which the thematic-break branch claims first and which the
+  reference does not treat as lazy continuation either. The guard also has to survive a block quote
+  that INTERRUPTS an open paragraph rather than opening it — a review caught the first version keying
+  off what opened the paragraph buffer, which reported a code-span-buried link on a shape that had
+  been correct before this change; the reference reading (`<code>q [a](...) === closer</code>`) is now
+  pinned by a behaviour test and a pre-form-restoration mutation. All container rules were measured
+  against the pinned `commonmark==0.9.2` reference, not derived from the
+  spec text. The thematic-break branch is deliberately ordered BEFORE the list-marker branch, because
+  `- - -` satisfies both patterns and CommonMark gives the break precedence; that ordering closed a
+  fourth, previously unrecorded divergence found while measuring — a `- - -` line followed by an
+  indented code block used to report the bracketed text inside the code block as a dead link
+  (false positive), because the list branch buffers its own line and thereby defeats the indented-code
+  branch's empty-buffer gate. Mutation-checked, and by structure rather than deletion: the branch order
+  was PERMUTED (both branches still present), the setext gate WIDENED to the naive form the reference
+  falsifies, the block-quote guard RESTORED to its exact pre-fix shape, and a pbuf_para gate ADDED to
+  the thematic-break branch that must not have one — each confirmed to flip its own fixture, real
+  script untouched (md5-verified). The last two came out of the review: nothing had pinned the
+  thematic-break branch as ungated, and adding the gate left the whole suite green.
+  Re-measured against four live memory stores with both script versions on the same day: identical
+  findings in every one, including the 14 persona indexes whose YAML frontmatter CommonMark reads as a
+  thematic break plus a setext underline — inside the extractor both `---` lines are claimed by the
+  thematic-break branch, which runs first, so the effect is the same but the attribution is not;
+  verified by probe links inside and after real frontmatter, found by both versions, not by a bare
+  "no new findings" count. Three corpus entries lose their `known_divergence` and two entries are
+  added for the container-vs-boundary shapes above; the other 41 are byte-identical after
+  regeneration.
+
+  **Upgrade note:** this is a false-negative fix, so a store that has not changed at all can start
+  reporting dead links it never reported before — they were always dead, merely hidden by a paragraph
+  merge. Expect that on CRLF checkouts and on files using `***`/`---`/`===` between link-bearing
+  blocks. Check (n) still defaults to `warn`, so such a finding does not fail a run today; the
+  promotion to `err` tracked under ADR-0001 is what would change that, and is deliberately not part
+  of this entry.
 - **Five of round 2's seven false positives against check (n) closed; the round's one wrong-target
   row moved to a non-claim instead of a decode (WI-0084, WI-0081 remainder).** check (n)'s awk
   block-boundary list now tracks an indented code block (four spaces, or one leading tab — CommonMark

@@ -558,8 +558,9 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
         # nothing is discarded. append_paragraph()/flush_paragraph() below buffer
         # the current paragraph across physical lines and hand the whole thing
         # to resolve_paragraph() in one call, so lookahead is bounded to one
-        # paragraph and never reaches past a block boundary (blank line, list
-        # marker, heading, fence, or a block-level HTML comment).
+        # paragraph and never reaches past a block boundary (blank line,
+        # thematic break, setext underline, list marker, heading, fence, or a
+        # block-level HTML comment).
         #
         # WI-0048: there is no fixed winner between an HTML comment and a code
         # span — whichever construct opens FIRST, reading left to right, claims
@@ -919,6 +920,14 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
         # link whose label happens to still straddle two original lines (never
         # inside a comment or code span) is found too, at no extra cost.
         function flush_paragraph(   resolved) {
+            # Cleared BEFORE the early return, not after the flush, so that
+            # "empty buffer implies pbuf_para == 0" holds locally at every exit
+            # of this function instead of only globally. The early-return path
+            # cannot currently be reached with the flag set — it is only ever
+            # raised immediately before an append that lifts pbuf_n to 1 — so
+            # this is defensive, not a fix: it costs one assignment and keeps a
+            # later conditional append from breaking the setext gate silently.
+            pbuf_para = 0
             if (pbuf_n == 0) return
             resolved = resolve_paragraph(pbuf)
             process_link_line(resolved)
@@ -935,8 +944,32 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
             paren_mark = sprintf("%c", 6)
             pbuf = ""
             pbuf_n = 0
+            pbuf_para = 0
         }
         {
+            # WI-0086: CommonMark counts `\r\n`, `\r` and `\n` all as line
+            # endings; awk splits records on `\n` only, so a CRLF file hands
+            # every record over with a trailing `\r` still attached. That does
+            # not break the blank-line boundary test alone — it breaks EVERY
+            # `$`-anchored regex below it, each one silently, by never
+            # matching. Not an exhaustive list, but the ones with a test:
+            # blank line, empty ATX heading, fence close, thematic break,
+            # setext underline, reference-definition tail. The full set is
+            # larger — it also covers the HTML block type 1 and type 6
+            # openers, the type 6 blank-line close, and the indented-code
+            # branch, whose blank-line test is negated. The claim that matters
+            # here is the reach, not the enumeration. Stripping it once,
+            # here, as the first statement of the record block, is the only
+            # place that reaches all of them: every branch below reads `$0` (or
+            # a substring of it, like the reference-definition `raw_rest`) after
+            # this line has run. No field is ever referenced in this program, so
+            # the record rebuild `sub()` triggers costs nothing.
+            #
+            # A bare `\r` INSIDE a line (a classic pre-OS-X Mac line ending) is
+            # deliberately NOT handled: awk has already split on `\n`, so such a
+            # document arrives as one single record and no per-record strip can
+            # recover the line structure it never had.
+            sub(/\r$/, "")
             # A fenced code block (```…``` or ~~~…~~~, optionally indented up to 3
             # spaces per CommonMark) is skipped wholesale: an index illustrating its
             # own link syntax inside a fenced example is not a set of live entries.
@@ -1097,17 +1130,90 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
 
             # WI-0050 block boundaries: a blank line, a list-item marker or a
             # heading each end the current paragraph the way CommonMark ends
-            # a block. This is deliberately not a full CommonMark block
-            # grammar — a thematic break (`---` with no following list-marker
-            # space) is not recognised as a boundary here, and neither is a
-            # setext-heading underline; both fall through to the ordinary
-            # content branch below and stay inside whatever paragraph is being
-            # buffered, same as they always did (out of scope, see the
-            # senior-developer report for WI-0050).
+            # a block. WI-0082 added the two boundaries WI-0050 left out and
+            # named as out of scope: a thematic break and a setext-heading
+            # underline. This is still deliberately not a full CommonMark block
+            # grammar — a block quote is not modelled as a container (only
+            # recognised well enough not to claim a setext boundary inside
+            # one), and neither are tables or footnote blocks.
             #
             # A blank line closes the paragraph and carries no content of its
             # own.
             if ($0 ~ /^[ \t]*$/) {
+                flush_paragraph()
+                next
+            }
+            # A thematic break (three or more `*`, `-` or `_`, optionally
+            # separated by spaces or tabs) is its own block and carries no
+            # content of its own — it only ends whatever paragraph was open.
+            #
+            # ORDER IS LOAD-BEARING, not cosmetic: `- - -` satisfies BOTH this
+            # pattern and the list-marker pattern further down, and CommonMark
+            # gives the thematic break precedence (measured, `<hr />` — see
+            # reference_commonmark-conformance.md). The same collision applies
+            # to `* * *`, since `*` is a list marker too; only the `_` form is
+            # unambiguous. The consequence is not the break line itself — a
+            # line matching this pattern holds nothing but `*`, `-` or `_` plus
+            # spaces and tabs, so it never carries a link under either reading
+            # — but the line AFTER it: the list branch BUFFERS its own line,
+            # leaving pbuf_n at 1, which defeats the indented-code branch below
+            # (gated on pbuf_n == 0) and made a link inside a following
+            # indented code block visible as a link. This branch buffers
+            # nothing, so that gate keeps holding.
+            #
+            # This branch is deliberately NOT gated on pbuf_para the way the
+            # setext branch below is. A break really does end an open list item
+            # or block quote (measured: `- item` then `---` gives
+            # `<ul><li>item</li></ul><hr />`), so gating it would keep the
+            # container buffered and swallow links inside it — a false
+            # negative. A mutation test adds the gate and pins that.
+            if ($0 ~ /^[ ]{0,3}((\*[ \t]*){3,}|(-[ \t]*){3,}|(_[ \t]*){3,})$/) {
+                flush_paragraph()
+                next
+            }
+            # A setext-heading underline closes the paragraph above it into a
+            # heading. In PRACTICE this branch only ever sees `=`-runs and the
+            # one- and two-character dash runs `-` and `--`: the thematic-break
+            # branch above matches three or more dashes and exits with `next`,
+            # so no `---` or longer ever reaches here. The reference gives the
+            # setext reading precedence over the break for those (measured:
+            # a paragraph line then `---` renders `<h2>`, not `<hr />`), but
+            # since both branches do nothing except flush, the two orders are
+            # indistinguishable in their effect and the order stands.
+            #
+            # It is a boundary ONLY when there is an ordinary paragraph to
+            # underline. With a LIST ITEM or a BLOCK QUOTE open, the reference
+            # keeps a `=`-run as lazy continuation INSIDE that container and
+            # renders no heading at all (both measured). Flushing there would
+            # split a block CommonMark keeps whole and report a link the
+            # reference never renders — trading a false negative for a false
+            # positive. pbuf_para carries that distinction, and the flag rather
+            # than a re-test of the buffered text is what this gate reads: the
+            # line that decided is gone by the time the underline arrives.
+            #
+            # Note the container rule is specific to the runs that reach here.
+            # It does NOT generalise to `---`: measured, a list item followed
+            # by `---` is not lazy continuation but `<ul><li>…</li></ul><hr />`,
+            # and a block quote followed by `---` likewise ends at the break.
+            # That is precisely why the thematic-break branch above must stay
+            # UNGATED by pbuf_para — see the mutation test that pins it.
+            #
+            # `pbuf_n > 0` is belt-and-braces, not load-bearing: pbuf_para can
+            # only be raised immediately before an append, so a set flag always
+            # implies a non-empty buffer, and dropping the pbuf_n test leaves
+            # every behaviour test and the whole conformance corpus green
+            # (measured). It is kept because it makes the empty-buffer case
+            # readable at the gate — with the buffer empty a `=`-run is plain
+            # paragraph text (`<p>===</p>` at the reference) and must be
+            # buffered rather than flushed.
+            #
+            # One conservative gap, measured and accepted: an INDENTED
+            # underline under a list item (`- item` then `  ===`) renders a
+            # heading INSIDE the item at the reference. This branch treats it
+            # as a non-boundary, which keeps the paragraph merged — a false
+            # negative, the safe direction, and the one this whole gate exists
+            # to avoid trading away.
+            if (pbuf_n > 0 && pbuf_para && $0 ~ /^[ ]{0,3}(=+|-+)[ \t]*$/) {
                 flush_paragraph()
                 next
             }
@@ -1147,6 +1253,29 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
                 next
             }
             # Ordinary paragraph content — accumulate, do not resolve yet.
+            # This branch also maintains the flag the setext branch above
+            # reads: whether what is buffered right now is an ordinary
+            # paragraph a setext underline could close.
+            #
+            # The two halves are deliberately NOT symmetrical, and the
+            # asymmetry is the whole point. A block quote may INTERRUPT an
+            # open paragraph in CommonMark, so a `>` line clears the flag
+            # whether it opens the buffer or arrives mid-paragraph. Measured:
+            # a paragraph line, then a quoted line opening a code span around
+            # a link, then `===`, then a line closing that span — the
+            # reference keeps the underline inside the quote and renders only
+            # the trailing link. Gating the clear on pbuf_n == 0 reported the
+            # span-buried link as well, a false positive on a shape that was
+            # correct before this boundary existed. Setting
+            # the flag, by contrast, stays gated on an empty buffer: a
+            # continuation line of an already-open container must not promote
+            # that container to a plain paragraph.
+            #
+            # This extractor models no other part of block quotes, and does
+            # not start to here — it only declines to claim a setext boundary
+            # inside one.
+            if ($0 ~ /^[ ]{0,3}>/) pbuf_para = 0
+            else if (pbuf_n == 0) pbuf_para = 1
             append_paragraph($0)
         }
         # A fence or an HTML comment still open at end-of-input runs to
