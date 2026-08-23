@@ -174,17 +174,30 @@ class CommonmarkCorpusDifferentialTest(unittest.TestCase):
                 return entry
         raise AssertionError(f"no such corpus entry: {name!r}")
 
-    def test_predicted_false_positive_an_escaped_link_is_reported_as_dead(self):
-        """WI-0005 briefing's first prediction, confirmed: `\\[not a
-        link\\](dead.md)` is literal text per CommonMark (the brackets are
-        backslash-escaped), but check (n)'s label/dest regex has no escape
-        awareness and matches from the `[` right after the backslash anyway.
+    def test_an_escaped_link_is_not_reported_as_dead(self):
+        """WI-0079, fixed: `\\[not a link\\](dead.md)` is literal text per
+        CommonMark (the brackets are backslash-escaped) — WI-0005's briefing
+        originally predicted this as a false positive (check (n)'s label/dest
+        regex had no escape awareness and matched from the `[` right after
+        the backslash anyway), and the two oracles now agree.
         """
         entry = self._entry("backslash_escaped_link_is_not_a_link")
         findings = run_memory_lint_on(entry["markdown"])
 
-        self.assertEqual(findings, ["dead-esc1.md"])
+        self.assertEqual(findings, [])
         self.assertEqual(entry["reference_checkable_targets"], [])
+        self.assertIsNone(entry["known_divergence"])
+
+    def test_an_escaped_bracket_pair_does_not_hide_a_real_link_beside_it(self):
+        """Neighbour fixture (WI-0079): the escape-awareness fix must reject
+        exactly the escaped span, not the whole line — a live, unescaped link
+        right next to a backslash-escaped non-link is still found."""
+        entry = self._entry("backslash_escaped_bracket_pair_not_a_link_alongside_a_real_link")
+        findings = run_memory_lint_on(entry["markdown"])
+
+        self.assertEqual(findings, ["dead-esc7.md"])
+        self.assertEqual(entry["reference_checkable_targets"], ["dead-esc7.md"])
+        self.assertIsNone(entry["known_divergence"])
 
     def test_predicted_false_negative_nested_brackets_in_link_text_are_not_matched(self):
         """WI-0005 briefing's second prediction, confirmed: `[a [b] c](dead.md)`
@@ -245,22 +258,48 @@ class CommonmarkCorpusDifferentialTest(unittest.TestCase):
             run_memory_lint_on(control["markdown"]), ["dead-refdef-single.md"],
         )
 
-    def test_entity_reference_in_a_destination_is_checked_undecoded(self):
-        """New this round: CommonMark decodes `&num;`/`&#35;` to `#` inside a
-        link destination; check (n) never decodes entities and resolves the
-        raw text instead. The decimal form additionally contains a literal
-        `#` byte in its own syntax, which the shell-side fragment-stripping
-        (`${target%%#*}`) then truncates on — a different, more severely
-        garbled path than the named-entity sibling.
+    def test_a_named_entity_in_a_destination_is_checked_undecoded(self):
+        """CommonMark decodes `&num;` to `#` inside a link destination; check
+        (n) deliberately leaves NAMED entities undecoded (WI-0081) rather
+        than building the full ~2000-entry CommonMark named-entity table for
+        a construct measured at zero occurrences in the field — the raw text
+        is checked as-is, not further garbled.
         """
         named = self._entry("entity_reference_named_in_destination")
-        decimal = self._entry("entity_reference_decimal_in_destination")
 
         self.assertEqual(run_memory_lint_on(named["markdown"]), ["dead&num;3-ent2.md"])
         self.assertEqual(named["reference_checkable_targets"], ["dead#3-ent2.md"])
 
-        self.assertEqual(run_memory_lint_on(decimal["markdown"]), ["dead&"])
+    def test_numeric_entities_in_a_destination_are_decoded_before_resolving(self):
+        """WI-0081, fixed: `&#35;` (decimal) and `&#x23;` (hex) both decode to
+        `#` at the reference. check (n) used to resolve the raw, undecoded
+        text, and its own shell-side fragment-stripping (`${target%%#*}`)
+        additionally cut at the entity's own literal `#` byte — the two
+        oracles now agree for both spellings.
+        """
+        decimal = self._entry("entity_reference_decimal_in_destination")
+        hexform = self._entry("entity_reference_hex_in_destination")
+
+        self.assertEqual(run_memory_lint_on(decimal["markdown"]), ["dead#3-ent3.md"])
         self.assertEqual(decimal["reference_checkable_targets"], ["dead#3-ent3.md"])
+        self.assertIsNone(decimal["known_divergence"])
+
+        self.assertEqual(run_memory_lint_on(hexform["markdown"]), ["dead#3-ent4.md"])
+        self.assertEqual(hexform["reference_checkable_targets"], ["dead#3-ent4.md"])
+        self.assertIsNone(hexform["known_divergence"])
+
+    def test_an_escaped_paren_in_a_destination_resolves_the_full_target(self):
+        """WI-0081, fixed: `[x](dead-esc4\\).md)` — the reference decodes the
+        escape (href `dead-esc4).md`, one real link). check (n)'s
+        destination capture used to stop at the first literal `)` regardless
+        of a preceding backslash, resolving only the truncated `dead-esc4\\`.
+        """
+        entry = self._entry("backslash_escaped_paren_in_destination")
+        findings = run_memory_lint_on(entry["markdown"])
+
+        self.assertEqual(findings, ["dead-esc4).md"])
+        self.assertEqual(entry["reference_checkable_targets"], ["dead-esc4).md"])
+        self.assertIsNone(entry["known_divergence"])
 
 
 class MutationProvesTheDifferentialTestCanFail(unittest.TestCase):

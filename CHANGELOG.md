@@ -7,6 +7,21 @@ All notable changes to this project are documented in this file. The format is b
 ## [Unreleased]
 
 ### Fixed
+- **check (n)'s label/destination matcher ignored CommonMark backslash-escapes and inline-resolved
+  destinations, closing two of the WI-0079…WI-0083 divergences (WI-0079, WI-0081).** An escaped
+  bracket pair (`\[not a link\](x.md)`) is no longer reported as a dead link — either bracket alone
+  being escaped is enough to remove its structural meaning, checked by backslash-run parity so an
+  escaped backslash (`\\[real](x.md)`) is not mistaken for an escaped bracket. A destination is now
+  resolved the way CommonMark resolves it before it becomes a filename to check: an escaped closing
+  parenthesis (`[x](a\).md)`) no longer truncates the target to `a\`, and a numeric character
+  reference (`&#35;`, `&#x23;`) is decoded to its literal character instead of being checked
+  undecoded — protected from the shell-side `#anchor` fragment-strip by a one-byte sentinel so a
+  decoded `#` is not mistaken for a fragment separator, the mechanism that previously mangled
+  `dead&#35;3-ent3.md` into the unrelated path `dead&`. **Not decoded**: named entities (`&num;`) —
+  the full CommonMark named-entity table has roughly 2000 entries, disproportionate for a construct
+  measured at zero occurrences across four live memory stores; the raw text is still checked, not
+  further garbled. Re-measured against all four stores after the fix: no change — none of the fixed
+  constructs occur in the field today.
 - **`memory-lint.sh` check (f) resolved `related:` against the file's own directory only, the same
   question WI-0071 already answered for `phase-docs-lint.sh` (WI-0078).** Authors write `related:`
   entries project-root-relative (`docs/memory/foo.md`), not document-relative — a document-relative

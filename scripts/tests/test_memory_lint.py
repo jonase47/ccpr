@@ -25,6 +25,7 @@ The split is what makes the tracked promotion of the default from `warn` to
 `err` a single deliberate red test instead of a suite-wide breakage.
 """
 
+import re
 import shutil
 import subprocess
 import tempfile
@@ -2025,6 +2026,164 @@ class MemoryLintTest(unittest.TestCase):
 
         self.assertEqual(self.link_findings(self.run_lint().stdout), [])
 
+    # --- Backslash escapes remove structural meaning (WI-0079/WI-0081) -------------
+    # CommonMark backslash-escapes a bracket or a closing paren exactly the way it
+    # escapes any other ASCII punctuation: the escaped character loses whatever
+    # structural role it would otherwise have, and becomes literal text instead.
+    # Measured at the reference (docs/memory/reference_commonmark-conformance.md,
+    # WI-0005 round): `\[text\](t.md)` renders as literal text, not a link — the
+    # escape does not need to hit BOTH brackets, either one alone is enough.
+
+    def test_a_backslash_escaped_bracket_pair_is_not_reported_as_a_link(self):
+        """`\\[not a link\\](t.md)` — both structural brackets are escaped, so the
+        whole construct is literal text per CommonMark (WI-0079). check (n)'s
+        label/dest regex used to have no escape awareness at all and matched
+        starting at the `[` right after the first backslash, reporting the
+        parenthesised text as a dead link target that was never a link."""
+        self.write_index(CLEAN_INDEX + "- \\[not a link\\](gone_esc1.md) — not a link\n")
+
+        self.assertEqual(self.link_findings(self.run_lint().stdout), [])
+
+    def test_an_escaping_backslash_on_only_the_closing_bracket_also_defeats_the_link(self):
+        """`[text\\](t.md)` — only the CLOSING bracket is escaped. Measured at the
+        reference: also not a link (escaping either one bracket is sufficient,
+        not just the pair together)."""
+        self.write_index(CLEAN_INDEX + "- [not a link\\](gone_esc_close_only.md) — not a link\n")
+
+        self.assertEqual(self.link_findings(self.run_lint().stdout), [])
+
+    def test_an_escaped_bracket_pair_does_not_hide_a_real_link_beside_it(self):
+        """The fix must reject exactly the escaped span, not the whole line: a
+        real, unescaped link right next to an escaped non-link must still be
+        found. Neighbour fixture for the corpus addition this work item asks
+        for — a construct that is NOT a link beside one that is."""
+        self.write_index(
+            CLEAN_INDEX
+            + "- \\[escaped\\](gone_esc_mix1.md) and [real](gone_esc_mix2.md) — mixed\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("gone_esc_mix2.md", findings[0])
+        self.assertNotIn("gone_esc_mix1.md", findings[0])
+
+    def test_a_doubly_escaped_backslash_before_a_bracket_does_not_escape_it(self):
+        """`\\\\[text](t.md)` — an escaped backslash (`\\\\` decodes to one
+        literal `\\`) followed by an UNESCAPED `[`. Backslash-escape parity,
+        not "is the previous byte a backslash": the bracket here structurally
+        opens a real link, per the reference. A naive one-byte lookbehind would
+        wrongly treat this `[` as escaped and stay silent."""
+        self.write_index(CLEAN_INDEX + "- \\\\[real link](gone_esc_dbl.md) — live\n")
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("gone_esc_dbl.md", findings[0])
+
+    # --- A link destination is inline-resolved, not taken literally (WI-0081) ------
+    # `[text](dest)` in link TEXT is opaque to CommonMark's inline grammar, but a
+    # destination is not — a backslash-escape or a numeric character reference
+    # inside it resolves before the destination string exists at all. Measured at
+    # the reference (docs/memory/reference_commonmark-conformance.md, WI-0005
+    # round): `[x](a\).md)` resolves to `a).md`, and `[x](a&#35;b.md)` resolves to
+    # `a#b.md` — the naive stop-at-first-`)`/undecoded-entity scan in
+    # protect_link_destinations() used to garble both.
+
+    def test_an_escaped_closing_paren_in_the_destination_resolves_the_full_target(self):
+        """`[x](gone_esc_paren\\).md)` — check (n)'s destination capture used to
+        stop at the escaped `)`, truncating the target to `gone_esc_paren\\`
+        and losing `.md)` entirely. The reference decodes the escape (one
+        real link, href `gone_esc_paren).md`)."""
+        self.write_index(CLEAN_INDEX + "- [Esc](gone_esc_paren\\).md) — dead\n")
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("gone_esc_paren).md", findings[0])
+        self.assertNotIn("\\", findings[0])
+
+    def test_a_destination_after_an_escaped_paren_is_still_reached_on_the_same_line(self):
+        """Two destinations on one line, the first carrying an escaped `)`: the
+        boundary scan must resume right after the REAL closing paren, not
+        somewhere inside what would have been the truncated old target — or a
+        second link further along the same line would be lost too."""
+        self.write_index(
+            CLEAN_INDEX
+            + "- [First](gone_esc_paren2\\).md) and [Second](gone_esc_paren3.md) — both dead\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 2, findings)
+        joined = " ".join(findings)
+        self.assertIn("gone_esc_paren2).md", joined)
+        self.assertIn("gone_esc_paren3.md", joined)
+
+    def test_a_decimal_numeric_entity_in_the_destination_decodes_before_resolving(self):
+        """`&#35;` is CommonMark's decimal numeric character reference for `#`
+        — the reference resolves `[x](gone_ent_dec&#35;3.md)` to the single
+        target `gone_ent_dec#3.md`. check (n) used to resolve the raw,
+        undecoded text, AND its own shell-side fragment-anchor strip
+        (`${target%%#*}`) then cut at the entity's own literal `#` byte,
+        truncating the report to `gone_ent_dec&` — a decoded `#` is not a
+        fragment separator."""
+        self.write_index(CLEAN_INDEX + "- [Dec](gone_ent_dec&#35;3.md) — dead\n")
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("gone_ent_dec#3.md", findings[0])
+        self.assertNotIn("&", findings[0])
+
+    def test_a_hexadecimal_numeric_entity_in_the_destination_decodes_the_same_way(self):
+        """`&#x23;` is the hexadecimal form of the same numeric character
+        reference (`#`, codepoint 0x23) — same decode path as the decimal
+        case, a second, structurally different fixture so the fix is not
+        pinned to the decimal spelling only."""
+        self.write_index(CLEAN_INDEX + "- [Hex](gone_ent_hex&#x23;3.md) — dead\n")
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("gone_ent_hex#3.md", findings[0])
+        self.assertNotIn("&", findings[0])
+
+    def test_a_numeric_entity_decoding_to_a_plain_character_needs_no_hash_protection(self):
+        """`&#46;` decodes to `.` (codepoint 46) — proves the decode mechanism
+        works generally, not only for the one codepoint (`#`) that needs the
+        fragment-strip sentinel."""
+        self.write_index(CLEAN_INDEX + "- [Dot](gone_ent_dot&#46;md) — dead\n")
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("gone_ent_dot.md", findings[0])
+
+    def test_a_decoded_hash_entity_still_resolves_when_the_file_actually_exists(self):
+        """Live control for the decimal-entity case: `gone_ent_dec#3.md`
+        (the DECODED name) exists on disk. If the fix instead left the
+        fragment-strip cutting the decoded `#`, this would silently pass for
+        the wrong reason — pinning the live case catches that."""
+        live_target = self.memory_dir / "gone_ent_dec#3.md"
+        live_target.write_text(TIER2_TOPIC_TEXT, encoding="utf-8")
+        self.write_index(CLEAN_INDEX + "- [Dec](gone_ent_dec&#35;3.md) — live\n")
+
+        self.assertEqual(self.link_findings(self.run_lint().stdout), [])
+
+    def test_a_named_entity_in_the_destination_is_still_checked_undecoded(self):
+        """`&num;` is a NAMED entity — deliberately left undecoded (WI-0081):
+        decoding the full ~2000-entry CommonMark named-entity table is
+        disproportionate for a construct that occurs zero times in the field.
+        The raw text must still be checked as-is, not mangled — it is a
+        documented known_divergence, not silence or a truncated garble."""
+        self.write_index(CLEAN_INDEX + "- [Named](gone_ent_named&num;3.md) — dead\n")
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("gone_ent_named&num;3.md", findings[0])
+
     def test_the_index_is_checked_even_when_no_memory_files_are_scanned(self):
         """An index whose entries are all dead scans zero files — and must still fire.
 
@@ -2328,6 +2487,145 @@ class ScriptActuallyRanTest(unittest.TestCase):
 
             with self.assertRaises(AssertionError):
                 MemoryLintTest._assert_known_dead_link_is_found(broken_script)
+
+
+class EscapeAwareLinkExtractionMutationTest(unittest.TestCase):
+    """WI-0079 obligation: the new escape-awareness tests must have been seen
+    RED by mutation, not merely written and never falsified. Reverts
+    `process_link_line()`'s escape guard to its exact pre-fix shape on an
+    in-memory COPY of the script (same pattern as
+    MutationProvesTheDifferentialTestCanFail above) — the shipped script on
+    disk is never touched; proven by md5, not assumed.
+    """
+
+    _ESCAPE_GUARD = (
+        "                if (is_escaped(line, open_pos) || is_escaped(line, close_pos)) {\n"
+        "                    line = substr(line, RSTART + 1)\n"
+        "                    continue\n"
+        "                }\n"
+    )
+
+    def test_removing_the_escape_guard_flips_the_escaped_bracket_fixtures_red(self):
+        original = SCRIPT_PATH.read_text(encoding="utf-8")
+        original_md5_before = __import__("hashlib").md5(original.encode("utf-8")).hexdigest()
+
+        self.assertIn(
+            self._ESCAPE_GUARD, original,
+            "fixture line moved — update the mutation target for this test",
+        )
+        mutated = original.replace(self._ESCAPE_GUARD, "", 1)
+        self.assertNotEqual(mutated, original, "mutation did not change the script")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            script_dir = Path(tmp) / "scriptdir"
+            shutil.copytree(SCRIPT_PATH.parent / "lib", script_dir / "lib")
+            mutant_script = script_dir / "memory-lint.sh"
+            mutant_script.write_text(mutated, encoding="utf-8")
+
+            project_dir = Path(tmp) / "project"
+            (project_dir / "docs" / "memory").mkdir(parents=True)
+            (project_dir / "docs" / "memory" / "MEMORY.md").write_text(
+                "# Memory Index\n\n"
+                "- \\[not a link\\](gone_mut_esc1.md) — not a link\n",
+                encoding="utf-8",
+            )
+            fake_home = Path(tmp) / "home"
+            fake_home.mkdir()
+
+            result = subprocess.run(
+                ["bash", str(mutant_script), str(project_dir)],
+                capture_output=True, text=True,
+                env={"HOME": str(fake_home), "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"},
+            )
+
+        self.assertIn(
+            "gone_mut_esc1.md", result.stdout,
+            "mutation did not flip the fixture — the escape guard no longer "
+            "discriminates WI-0079's defect",
+        )
+
+        # The real script on disk was never touched — proven by md5, not assumed.
+        after = SCRIPT_PATH.read_text(encoding="utf-8")
+        original_md5_after = __import__("hashlib").md5(after.encode("utf-8")).hexdigest()
+        self.assertEqual(original_md5_before, original_md5_after)
+        self.assertEqual(after, original)
+
+
+class DestinationEscapeAndEntityMutationTest(unittest.TestCase):
+    """WI-0081 obligation: mutation-proof for the destination-normalisation
+    fix (escaped closing paren + numeric-entity decode) — both live inside
+    `protect_link_destinations()`, reverted here to its exact PRE-FIX shape
+    (not a synthetic no-op) on an in-memory copy, same pattern as the
+    mutation tests above. The shipped script on disk is never touched;
+    proven by md5, not assumed.
+    """
+
+    _PRE_FIX_PROTECT_LINK_DESTINATIONS = (
+        "        function protect_link_destinations(s,    out, dest) {\n"
+        "            out = \"\"\n"
+        "            while (match(s, /\\]\\([^)]*\\)/)) {\n"
+        "                out = out substr(s, 1, RSTART + 1)   # up through and including the ]( pair\n"
+        "                dest = substr(s, RSTART + 2, RLENGTH - 3)\n"
+        "                out = out dest_mark dest dest_mark \")\"\n"
+        "                s = substr(s, RSTART + RLENGTH)\n"
+        "            }\n"
+        "            return out s\n"
+        "        }\n"
+    )
+
+    def test_reverting_protect_link_destinations_flips_the_wi_0081_fixtures_red(self):
+        original = SCRIPT_PATH.read_text(encoding="utf-8")
+        original_md5_before = __import__("hashlib").md5(original.encode("utf-8")).hexdigest()
+
+        current_fn = re.compile(
+            r"        function protect_link_destinations\(.*?\n        \}\n", re.S
+        )
+        match = current_fn.search(original)
+        self.assertIsNotNone(
+            match, "protect_link_destinations() not found — update this test's regex",
+        )
+
+        mutated = (
+            original[: match.start()]
+            + self._PRE_FIX_PROTECT_LINK_DESTINATIONS
+            + original[match.end():]
+        )
+        self.assertNotEqual(mutated, original, "mutation did not change the script")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            script_dir = Path(tmp) / "scriptdir"
+            shutil.copytree(SCRIPT_PATH.parent / "lib", script_dir / "lib")
+            mutant_script = script_dir / "memory-lint.sh"
+            mutant_script.write_text(mutated, encoding="utf-8")
+
+            project_dir = Path(tmp) / "project"
+            (project_dir / "docs" / "memory").mkdir(parents=True)
+            (project_dir / "docs" / "memory" / "MEMORY.md").write_text(
+                "# Memory Index\n\n"
+                "- [Esc](gone_mut_paren\\).md) — escaped paren\n"
+                "- [Dec](gone_mut_dec&#35;3.md) — decimal entity\n",
+                encoding="utf-8",
+            )
+            fake_home = Path(tmp) / "home"
+            fake_home.mkdir()
+
+            result = subprocess.run(
+                ["bash", str(mutant_script), str(project_dir)],
+                capture_output=True, text=True,
+                env={"HOME": str(fake_home), "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"},
+            )
+
+        # The pre-fix shape truncates the escaped-paren destination at the
+        # first literal ")" and leaves the entity destination undecoded, then
+        # separately truncated downstream at its own literal "#" byte.
+        self.assertIn("gone_mut_paren\\", result.stdout)
+        self.assertNotIn("gone_mut_paren).md", result.stdout)
+        self.assertNotIn("gone_mut_dec#3.md", result.stdout)
+
+        after = SCRIPT_PATH.read_text(encoding="utf-8")
+        original_md5_after = __import__("hashlib").md5(after.encode("utf-8")).hexdigest()
+        self.assertEqual(original_md5_before, original_md5_after)
+        self.assertEqual(after, original)
 
 
 if __name__ == "__main__":

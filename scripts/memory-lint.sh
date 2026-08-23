@@ -490,6 +490,12 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
         esac
         # `a.md#section` addresses the file a.md — drop the fragment before resolving.
         target="${target%%#*}"
+        # A "#" decoded from a numeric character reference (WI-0081, e.g.
+        # `&#35;`) is destination TEXT, not a fragment separator — the awk
+        # side swaps it for hash_mark (a control byte no real target can
+        # contain) specifically so the fragment-strip above cannot see it.
+        # Restored to a literal "#" only now, after that strip has already run.
+        target="${target//$'\x05'/#}"
         [[ -n "$target" ]] || continue
         # Targets resolve relative to the CURRENT index's own directory, as in check
         # (f) — a persona index's relative links address its own silo, not the Tier-1
@@ -690,6 +696,63 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
             }
             return out
         }
+        # Converts a HEX digit string (no 0x/0X prefix) to its decimal value —
+        # a small, bounded helper, not a general parser: called only on the
+        # digits already isolated by decode_numeric_entities() below.
+        function hex_to_dec(h,   i, c, v, d) {
+            v = 0
+            for (i = 1; i <= length(h); i++) {
+                c = tolower(substr(h, i, 1))
+                d = index("0123456789abcdef", c) - 1
+                v = v * 16 + d
+            }
+            return v
+        }
+        # Decodes a numeric character reference (`&#35;` decimal, `&#x23;`/
+        # `&#X23;` hex) to its literal character, but only when the codepoint
+        # falls inside printable ASCII (32-126) — the only range a
+        # docs/memory/** relative path can plausibly need (WI-0081). Anything
+        # else — a NAMED entity (`&num;`), or a numeric one outside that
+        # range — is left raw and undecoded rather than guessed at: reporting
+        # the untouched source text is an accepted known_divergence, mangling
+        # it is not. Decoding a full ~2000-entry named-entity table for a
+        # construct measured at zero occurrences in the field would not be
+        # proportionate to the gap it closes.
+        #
+        # A decoded "#" specifically is swapped for hash_mark, a control-byte
+        # sentinel no real target can contain, instead of a literal "#" —
+        # otherwise the shell-side fragment-anchor strip (`${target%%#*}`)
+        # would cut the resolved target right there, exactly the WI-0081
+        # case-3 defect this decode step exists to fix. Restored to a literal
+        # "#" only after that strip runs (see the shell loop below).
+        function decode_numeric_entities(s,   out, i, n, m, num, hexdigits, code, ch) {
+            out = ""
+            n = length(s)
+            i = 1
+            while (i <= n) {
+                m = 0
+                if (substr(s, i, 2) == "&#") {
+                    if (match(substr(s, i), /^&#[0-9]+;/)) {
+                        num = substr(s, i + 2, RLENGTH - 3)
+                        code = num + 0
+                        m = RLENGTH
+                    } else if (match(substr(s, i), /^&#[xX][0-9A-Fa-f]+;/)) {
+                        hexdigits = substr(s, i + 3, RLENGTH - 4)
+                        code = hex_to_dec(hexdigits)
+                        m = RLENGTH
+                    }
+                }
+                if (m > 0 && code >= 32 && code <= 126) {
+                    ch = sprintf("%c", code)
+                    out = out (ch == "#" ? hash_mark : ch)
+                    i += m
+                    continue
+                }
+                out = out substr(s, i, 1)
+                i++
+            }
+            return out
+        }
         # Isolates every inline link destination — the `(...)` immediately
         # after `](` — and wraps its raw text in dest_mark before resolve_
         # paragraph() ever sees it (WI-0042). Riding the raw text along inside
@@ -698,18 +761,56 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
         # `[text](dest)` span it belongs to — including when that whole span
         # later turns out to be inside a code span or an illustrative backtick
         # example and gets discarded as a unit.
-        function protect_link_destinations(s,    out, dest) {
+        #
+        # The closing `)` is found by a manual scan, not `[^)]*` — a
+        # backslash-escaped `)` (WI-0081) is destination TEXT, not the
+        # delimiter, and a plain character-class stop cannot tell the two
+        # apart. Escape parity reuses count_trailing_backslashes(), the same
+        # helper process_link_line() uses for bracket escaping (WI-0079) —
+        # one escaping rule, two call sites.
+        function protect_link_destinations(s,    out, dstart, dend, dest, n, pos) {
             out = ""
-            while (match(s, /\]\([^)]*\)/)) {
+            while (match(s, /\]\(/)) {
                 out = out substr(s, 1, RSTART + 1)   # up through and including the ]( pair
-                dest = substr(s, RSTART + 2, RLENGTH - 3)
+                dstart = RSTART + 2
+                n = length(s)
+                dend = 0
+                pos = dstart
+                while (pos <= n) {
+                    if (substr(s, pos, 1) == ")" && count_trailing_backslashes(s, pos) % 2 == 0) {
+                        dend = pos
+                        break
+                    }
+                    pos++
+                }
+                if (dend == 0) {
+                    # No unescaped closing paren anywhere in the rest of this
+                    # raw line — not a resolvable single-line destination;
+                    # carry the remainder through untouched and stop looking.
+                    return out substr(s, dstart)
+                }
+                dest = substr(s, dstart, dend - dstart)
+                # An escaped ")" is literal destination text, per CommonMark —
+                # but it must not become a literal ")" byte HERE: process_link_
+                # line() below finds a link span with its own naive `[^)]*`
+                # scan, blind to the dest_mark opacity, and would stop right
+                # at it, truncating the destination exactly the way the
+                # unescaped bug did. Swapped for paren_mark instead — the same
+                # late-decode trick hash_mark uses for a decoded "#" against
+                # the shell-side fragment strip — and restored to a literal
+                # ")" only in strip_dest_mark(), once process_link_line() has
+                # already used the now-unbroken dest_mark span to find the
+                # destination extent.
+                gsub(/\\\)/, paren_mark, dest)
+                dest = decode_numeric_entities(dest)
                 out = out dest_mark dest dest_mark ")"
-                s = substr(s, RSTART + RLENGTH)
+                s = substr(s, dend + 1)
             }
             return out s
         }
         function strip_dest_mark(s) {
             gsub(dest_mark, "", s)
+            gsub(paren_mark, ")", s)
             return s
         }
         # A reference-style definition destination is either the bracketed
@@ -729,14 +830,47 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
             if (match(d, /^\([^)]*\)[ \t]*$/)) return 1
             return 0
         }
+        # Counts the run of backslashes immediately BEFORE position pos in s —
+        # not including pos itself. A byte at pos is escaped, per CommonMark,
+        # exactly when that count is odd: an escaped backslash (an even-length
+        # run) does not itself escape whatever follows it (WI-0079/WI-0081).
+        # Checked by trailing-run PARITY, not by a one-byte lookbehind, because
+        # a one-byte check cannot tell an escaped backslash (`\\` + real `[`,
+        # a live link) apart from an escaped bracket (`\` + `[`, not a link).
+        function count_trailing_backslashes(s, pos,   c, p) {
+            c = 0
+            p = pos - 1
+            while (p >= 1 && substr(s, p, 1) == "\\") {
+                c++
+                p--
+            }
+            return c
+        }
+        function is_escaped(s, pos) {
+            return (count_trailing_backslashes(s, pos) % 2 == 1)
+        }
         # Runs the extraction that used to sit directly in the main record
         # block: find every `[text](dest)` span left after decommenting and
         # code-span stripping, and print the destination unless it is an
         # image marker (`![...]`, WI-0029). Factored out unchanged (WI-0050),
         # called once per resolved paragraph by flush_paragraph() below.
-        function process_link_line(line,   prev, link, sep) {
+        function process_link_line(line,   prev, link, sep, open_pos, close_pos) {
             prev = ""
             while (match(line, /\[[^][]*\]\([^)]*\)/)) {
+                sep = index(substr(line, RSTART, RLENGTH), "](")
+                open_pos = RSTART
+                close_pos = RSTART + sep - 1
+                # A backslash-escaped `[` or `]` is literal text, not a link
+                # delimiter at all (WI-0079) — the reference renders neither
+                # `\[text](t.md)` nor `[text\](t.md)` as a link. Advance past
+                # only the disqualified opening bracket, one byte, so a REAL
+                # link starting later on the same line is still found —
+                # unlike the image-marker skip below, this match was never a
+                # link to begin with, so nothing structural is being discarded.
+                if (is_escaped(line, open_pos) || is_escaped(line, close_pos)) {
+                    line = substr(line, RSTART + 1)
+                    continue
+                }
                 if (RSTART > 1) prev = substr(line, RSTART - 1, 1)
                 link = substr(line, RSTART, RLENGTH)
                 sep = index(link, "](")
@@ -780,6 +914,8 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
             fence_sentinel = sprintf("%c", 2)
             dest_mark = sprintf("%c", 3)
             html_comment_sentinel = sprintf("%c", 4)
+            hash_mark = sprintf("%c", 5)
+            paren_mark = sprintf("%c", 6)
             pbuf = ""
             pbuf_n = 0
         }

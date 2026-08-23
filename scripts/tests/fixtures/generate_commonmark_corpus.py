@@ -143,10 +143,17 @@ CORPUS = [
             "reason": (
                 "CommonMark decodes `&num;` to `#` in the destination "
                 "(reference href: `dead#3-ent2.md`, i.e. file `dead` with "
-                "fragment `3-ent2.md`). check (n) never decodes entities in "
-                "destinations — it resolves the literal raw substring "
-                "`dead&num;3-ent2.md` as one filename instead, a different "
-                "existence question than the one CommonMark actually asks."
+                "fragment `3-ent2.md`). check (n) decodes the NUMERIC "
+                "entity forms (`&#35;`, `&#x23;`, WI-0081) but deliberately "
+                "leaves NAMED entities like `&num;` raw and undecoded — the "
+                "full CommonMark named-entity table has roughly 2000 "
+                "entries, and decoding it would be disproportionate for a "
+                "construct measured at zero occurrences across the field's "
+                "memory stores. check (n) resolves the literal raw "
+                "substring `dead&num;3-ent2.md` as one filename instead, a "
+                "different existence question than the one CommonMark "
+                "actually asks — but the raw text is reported as-is, never "
+                "further garbled by that undecoded ampersand."
             ),
             "work_item": "WI-0005",
         },
@@ -155,42 +162,29 @@ CORPUS = [
         "name": "entity_reference_decimal_in_destination",
         "category": "entity-references",
         "markdown": "[x](dead&#35;3-ent3.md) — decimal entity in destination\n",
-        "known_divergence": {
-            "direction": "wrong-target",
-            "reason": (
-                "`&#35;` decodes to `#` at the reference (href "
-                "`dead#3-ent3.md`) same as the named-entity case, but here "
-                "the RAW markdown already contains a literal `#` byte as "
-                "part of the entity's own syntax (`&`, `#`, `3`, `5`, `;`). "
-                "check (n)'s shell-side fragment-stripping "
-                "(`${target%%#*}`) runs on the raw, undecoded text and cuts "
-                "at that byte, truncating the resolved target to `dead&` — "
-                "a different and more severely garbled path than the named-"
-                "entity sibling, same root cause (no entity decoding) "
-                "compounded by the pre-existing naive `#`-split."
-            ),
-            "work_item": "WI-0005",
-        },
+        "known_divergence": None,
+    },
+    {
+        "name": "entity_reference_hex_in_destination",
+        "category": "entity-references",
+        "markdown": "[x](dead&#x23;3-ent4.md) — hex entity in destination\n",
+        "known_divergence": None,
     },
     # --- backslash escapes ---------------------------------------------------
     {
         "name": "backslash_escaped_link_is_not_a_link",
         "category": "backslash-escapes",
         "markdown": "before \\[not a link\\](dead-esc1.md) after\n",
-        "known_divergence": {
-            "direction": "false-positive",
-            "reason": (
-                "`\\[` and `\\]` are CommonMark backslash escapes — the "
-                "whole construct renders as literal text "
-                "(`[not a link](dead-esc1.md)`), not a link. check (n)'s "
-                "label/dest regex has no escape awareness and matches "
-                "starting at the `[` right after the first backslash, "
-                "reporting `dead-esc1.md` as a dead link target that was "
-                "never a link at all. Predicted in the WI-0005 briefing; "
-                "confirmed here by measurement."
-            ),
-            "work_item": "WI-0005",
-        },
+        "known_divergence": None,
+    },
+    {
+        "name": "backslash_escaped_bracket_pair_not_a_link_alongside_a_real_link",
+        "category": "backslash-escapes",
+        "markdown": (
+            "\\[escaped pair\\](dead-esc6.md) and "
+            "[a real link](dead-esc7.md)\n"
+        ),
+        "known_divergence": None,
     },
     {
         "name": "backslash_escaped_bracket_in_link_text",
@@ -214,20 +208,15 @@ CORPUS = [
         "name": "backslash_escaped_paren_in_destination",
         "category": "backslash-escapes",
         "markdown": "[x](dead-esc4\\).md)\n",
-        "known_divergence": {
-            "direction": "wrong-target",
-            "reason": (
-                "The reference decodes the escape (href `dead-esc4).md`, "
-                "one real link). check (n)'s destination capture "
-                "`[^)]*` stops at the first literal `)` regardless of a "
-                "preceding backslash, so it resolves only the truncated, "
-                "garbled `dead-esc4\\` — losing `.md)` entirely. Same root "
-                "cause as the entity-in-destination cases: a naive "
-                "stop-character scan with no escape/entity awareness, "
-                "triggered here via a backslash instead of an entity."
-            ),
-            "work_item": "WI-0005",
-        },
+        "known_divergence": None,
+    },
+    {
+        "name": "backslash_escaped_paren_in_destination_beside_a_plain_one",
+        "category": "backslash-escapes",
+        "markdown": (
+            "[first](dead-esc8\\).md) and [second](dead-esc9.md)\n"
+        ),
+        "known_divergence": None,
     },
     # --- multiline reference-style definitions ------------------------------
     {
