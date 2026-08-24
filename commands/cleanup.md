@@ -144,6 +144,13 @@ Run `bash ~/.claude/scripts/memory-lint.sh [projectdir]`. Show:
 - Exit code (0 clean / 1 warnings / 2 errors / 3 configuration error — no report was produced, treat as a run failure rather than a findings result)
 - Up to the first 10 issue lines from stdout (truncate the rest with a `… N more` note).
 
+**If exit is 2 on `link target '…' does not exist` lines** — that is check (n), dead links in
+`docs/memory/MEMORY.md` and in every `docs/memory/{agent}/MEMORY.md`. It errors by default since
+24.08.2026 (WI-0005); it warned before. Fixing the link is the answer. For a run that has to get past
+it now, `MEMORY_INDEX_LINK_SEVERITY=warn bash ~/.claude/scripts/memory-lint.sh [projectdir]` reports
+the identical findings as warnings (exit 1). The knob takes `err` or `warn` and nothing else — an
+empty value is not an off switch, it exits 3.
+
 Do not auto-fix. Lint-suggested actions (e.g. refreshing `last_updated`, or setting
 `status: archived`/`superseded` on a file that is deliberately no longer maintained) belong to the user.
 

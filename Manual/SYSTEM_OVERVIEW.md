@@ -698,6 +698,7 @@ Indexes are listings — no frontmatter required.
 - `status` is one of `active`/`superseded`/`archived` (WI-0074; any other value errors)
 - `last_updated` older than 90 days → warns, unless `status: archived`/`superseded`
 - Each Tier 1 file referenced in `MEMORY.md`
+- **Dead index links**: a Markdown link in `docs/memory/MEMORY.md` or in any `docs/memory/{agent}/MEMORY.md` whose target file does not exist → **errors** by default since 24.08.2026 (WI-0005); `MEMORY_INDEX_LINK_SEVERITY=warn` downgrades it to a warning. Any other value — the empty string included — exits 3 as a configuration error.
 
 ### Templates
 

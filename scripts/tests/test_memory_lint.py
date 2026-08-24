@@ -2,7 +2,7 @@
 
 Invokes the real entry point as a subprocess (`bash memory-lint.sh <project-dir>`)
 rather than sourcing internals, so these tests also cover the report rendering and
-the documented exit-code contract (0 clean, 1 warnings, 2 errors).
+the documented exit-code contract (0 clean, 1 warnings, 2 errors, 3 configuration error).
 
 HOME is redirected to an empty throwaway directory for every run: memory-lint.sh
 derives all Tier-1-/Tier-2-global paths from $HOME, and the checks over
@@ -21,8 +21,11 @@ purpose:
   `MEMORY_INDEX_LINK_SEVERITY`. Only the tests in the severity section below set
   the variable, and only the default pin asserts the shipped value.
 
-The split is what makes the tracked promotion of the default from `warn` to
-`err` a single deliberate red test instead of a suite-wide breakage.
+The split is what made the promotion of the default from `warn` to `err`
+(24.08.2026, WI-0005) a single deliberate red test instead of a suite-wide
+breakage, and it is what keeps any future move of that default equally cheap to
+see. Measured, not assumed: putting the default back to `warn` turns exactly one
+test in this file red — the pin — and leaves the 42 corpus tests untouched.
 """
 
 import hashlib
@@ -3316,31 +3319,56 @@ class MemoryLintTest(unittest.TestCase):
         self.assertIn("nonexistent_topic.md", findings[0])
 
     # --- The severity knob: the only tests that may notice the default ------------
-    # Everything above asserts extraction and is blind to severity. The four tests
-    # below set the knob deliberately; the pin asserts the shipped value. Changing
-    # the default must turn exactly one of them red.
+    # Everything above asserts extraction and is blind to severity. All five tests
+    # below set the knob deliberately — the pin too, since its second half drives
+    # the escape hatch — but only the pin asserts the SHIPPED value. Changing the
+    # default must therefore turn exactly one of them red, which is measured rather
+    # than assumed: see the module docstring.
 
-    def test_the_shipped_default_severity_is_warn(self):
-        """The default with no override: a dead link is a warning, exit 1.
+    def test_the_shipped_default_severity_is_err_and_warn_remains_reachable(self):
+        """The default with no override: a dead link is an error, exit 2.
 
-        This is the assertion whose absence let a default flip pass silently. It
-        makes any future change to the shipped default a deliberate red test —
-        one failure, here, with the reason written on it — instead of a
-        behaviour change that only shows up as an exit code somewhere in CI.
-        The promotion to `err` (WI-0005, ADR-0001) was reverted (WI-0005 round
-        3, 19.08.2026): see the comment above MEMORY_INDEX_LINK_SEVERITY's
-        assignment in memory-lint.sh for why.
+        This is the assertion whose absence let a default flip pass silently, and
+        it keeps that job across the flip: any future change to the shipped
+        default stays a deliberate red test — one failure, here, with the reason
+        written on it — instead of a behaviour change that only shows up as an
+        exit code somewhere in a report.
+
+        The default is `err` since 24.08.2026 (WI-0005, ADR-0001), promoted under
+        the criterion the PO set on 23.08.2026: no known FALSE-POSITIVE
+        divergence. That criterion replaced "a round that produces no new items",
+        which two rounds against untouched ground had shown to be unreachable.
+        It supersedes the revert of 19.08.2026, which read an incomplete
+        extraction as a reason to stay at `warn`. Only a false positive rejects
+        previously accepted content, so only a false positive meets ADR-0001's
+        threshold; the false negatives that remain reject nothing. The comment
+        above MEMORY_INDEX_LINK_SEVERITY's assignment in memory-lint.sh carries
+        the full criterion including its named caveat (WI-0100).
+
+        The second half of this test is the escape hatch, and it belongs HERE
+        rather than only in its own test: the promotion is defensible because a
+        run it catches off guard can be put back the way it was, and that
+        promise has to be measured next to the default it qualifies, not
+        asserted somewhere else.
         """
         self.assertNotIn(SEVERITY_VAR, self.lint_env(), "the base env must not preset the knob")
         self.write_index(CLEAN_INDEX + "- [Ghost](project_deleted.md) — dead link\n")
 
         result = self.run_lint()
 
-        warnings = self.findings(result.stdout, "Warnings")
-        self.assertEqual(len(warnings), 1, result.stdout)
-        self.assertIn("project_deleted.md", warnings[0])
-        self.assertEqual(self.findings(result.stdout, "Errors"), [], result.stdout)
-        self.assertEqual(result.returncode, 1, result.stdout)
+        errors = self.findings(result.stdout, "Errors")
+        self.assertEqual(len(errors), 1, result.stdout)
+        self.assertIn("project_deleted.md", errors[0])
+        self.assertEqual(self.findings(result.stdout, "Warnings"), [], result.stdout)
+        self.assertEqual(result.returncode, 2, result.stdout)
+
+        opted_out = self.run_lint(**{SEVERITY_VAR: "warn"})
+
+        opted_out_warnings = self.findings(opted_out.stdout, "Warnings")
+        self.assertEqual(len(opted_out_warnings), 1, opted_out.stdout)
+        self.assertIn("project_deleted.md", opted_out_warnings[0])
+        self.assertEqual(self.findings(opted_out.stdout, "Errors"), [], opted_out.stdout)
+        self.assertEqual(opted_out.returncode, 1, opted_out.stdout)
 
     def test_severity_err_reports_a_dead_link_as_an_error(self):
         """Pins the `err` half of the knob so the default value is a one-line change."""
@@ -3381,6 +3409,28 @@ class MemoryLintTest(unittest.TestCase):
         self.assertIn("err", result.stderr)
         self.assertIn("warn", result.stderr)
         self.assertNotIn("command not found", result.stderr)
+
+    def test_an_empty_severity_is_a_configuration_error_not_the_strict_default(self):
+        """`MEMORY_INDEX_LINK_SEVERITY=` must fail loudly, not fall through to `err`.
+
+        Emptying a variable is how a caller reaches for "turn this knob off", and
+        it is the most likely wrong grip on a knob that has no off position. Under
+        `${VAR:-err}` the empty value took the DEFAULT branch, so the attempt to
+        opt out landed on the strict side of the very promotion it was trying to
+        escape — silently, exit 2, indistinguishable from a real findings result.
+        An empty value is not a severity, so it belongs where every other value
+        that is not a severity already goes: the up-front validation, exit 3, with
+        the reason on stderr and no report pretending a run happened.
+        """
+        self.write_index(CLEAN_INDEX + "- [Ghost](project_deleted.md) — dead link\n")
+
+        result = self.run_lint(**{SEVERITY_VAR: ""})
+
+        self.assertEqual(result.returncode, 3, (result.stdout, result.stderr))
+        self.assertIn(SEVERITY_VAR, result.stderr)
+        self.assertIn("err", result.stderr)
+        self.assertIn("warn", result.stderr)
+        self.assertEqual(result.stdout, "", result.stdout)
 
     def test_a_severity_value_is_never_executed_as_a_command(self):
         """The knob is dispatched by value, not expanded into command position."""

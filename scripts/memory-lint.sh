@@ -11,7 +11,8 @@
 # report, so its findings are unknown. It is deliberately distinct from 0/1/2 so a
 # caller cannot mistake a misconfigured script for a clean or a failing lint.
 # Currently raised by exactly one condition: MEMORY_INDEX_LINK_SEVERITY holds a
-# value outside {err,warn}.
+# value outside {err,warn} — the EMPTY string included, see the `-` rather than
+# `:-` on the assignment below.
 
 set -euo pipefail
 
@@ -43,24 +44,61 @@ TIER1_TOPIC_WARN_KB=30
 TIER1_TOPIC_ERR_KB=50
 
 # Severity of check (n) — dead Markdown links in the Tier-1 index.
-# Ships as `warn`. This check's extraction used to have two known gaps —
-# fenced/inline code examples were false positives, and reference-style links
-# were not seen at all — which is why the default started at `warn`: erroring
-# on an incomplete extraction would have been a bet on completeness that was
-# not backed by evidence. Both named gaps were closed (a838a1f), and the
-# default was promoted to `err` on that basis (e241ae3, WI-0005, ADR-0001).
-# The promotion was reverted (WI-0005 round 3, 19.08.2026): closing those two
-# gaps did not converge on completeness — three further extraction gaps
-# surfaced or were found while closing them (WI-0029, WI-0032, WI-0034) plus
-# one false positive found and fixed in the same round (backtick pairing by
-# run length, not position). The evidence for completeness is weaker now than
-# at promotion time, not stronger. Re-promote once WI-0029/WI-0032/WI-0034 are
-# closed and no new gap has surfaced in the round that closes them.
-# Overridable from the environment so both values can be exercised without editing
-# this file, and to let a caller opt into treating a dead index link as a hard
-# failure ahead of the default flip; the assignment below is the single place
-# that decides the default.
-MEMORY_INDEX_LINK_SEVERITY="${MEMORY_INDEX_LINK_SEVERITY:-warn}"
+# Ships as `err` since 24.08.2026 (WI-0005, ADR-0001).
+#
+# It shipped as `warn` for most of its life. Erroring on an extraction with
+# known gaps would have been a bet on completeness that was not backed by
+# evidence; a promotion made on that bet (e241ae3) was reverted the same week
+# (19.08.2026) when closing the two named gaps exposed three more.
+#
+# The criterion that governed the promotion was then "a round that produces no
+# new items". It was replaced on 23.08.2026 by PO decision, because it was
+# shown to be unreachable rather than merely unmet: two rounds against ground
+# no earlier round had touched produced eighteen divergences, and the construct
+# classes were not exhausted. CommonMark is large and an awk extractor will
+# always diverge somewhere, so waiting for a quiet round was waiting for
+# something that may never arrive.
+#
+# The criterion in force is narrower and matches the reason ADR-0001 calls this
+# step SemVer-relevant at all: promotion REJECTS PREVIOUSLY ACCEPTED CONTENT,
+# and only a false positive does that. A false negative rejects nothing and
+# breaks no run. So: no known FALSE-POSITIVE divergence.
+#
+# What satisfied it, measured rather than argued (24.08.2026):
+#   - the conformance corpus in scripts/tests/fixtures/ holds 76 entries with
+#     ZERO false-positive divergences (12 false negatives and 3 documented_intent
+#     remain, and are named there); regenerating it is byte-identical
+#   - the field: 18 real index files, 131 link extractions, 0 targets that the
+#     reference does not render
+#   - the four inventories this framework is run against produce the same
+#     findings and the same exit codes with the flip as without it
+#
+# The caveat, named rather than left to a footnote — WI-0100: a bounded random
+# probe over 3000 lines of bracket soup produces 210 findings the reference
+# never renders (178 of them already before the WI-0080 scanner). The minimal
+# witness is `[](()`, which reports a target named `(`. Cause is WI-0095:
+# protect_link_destinations() spans the text after ANY `](` without checking
+# that a live opener precedes it. That class is REACHABLE but not REACHED — no
+# such construct occurs in any measured index, which is what the field
+# measurement above says and all it says.
+#
+# What this flip is NOT: it makes the check LOUDER, not complete. The false
+# negatives stay, named, in the corpus.
+#
+# The escape hatch is the reason the promotion is defensible for a run it
+# catches off guard: MEMORY_INDEX_LINK_SEVERITY=warn restores the old
+# behaviour exactly, and that is pinned by a test rather than promised here.
+# Overridable from the environment so both values can be exercised without
+# editing this file, and so a caller can opt back out of the promotion; the
+# assignment below is the single place that decides the default.
+#
+# `-`, not `:-`: the default applies to an UNSET variable only. Emptying the
+# variable is how a caller reaches for "turn this off", and this knob has no off
+# position — under `:-` that attempt took the default branch and landed on the
+# STRICT side of the promotion it was trying to escape, silently, exit 2. An
+# empty string is not a severity, so it falls through to the validation below
+# and exits 3 with the reason on stderr.
+MEMORY_INDEX_LINK_SEVERITY="${MEMORY_INDEX_LINK_SEVERITY-err}"
 
 # Validate the knob before doing any work. The value used to be expanded in command
 # position (`"$MEMORY_INDEX_LINK_SEVERITY" "<message>"`), so a typo aborted the run

@@ -251,10 +251,14 @@ All notable changes to this project are documented in this file. The format is b
 
   Otherwise the direction is additive: it ADDS findings on unchanged content — a store nobody has
   touched can start reporting dead links after the upgrade, because those links were always dead and the
-  extractor simply could not see them. What does not change on upgrade is the EXIT CODE: check (n) is
-  filed under `warn` by default (`MEMORY_INDEX_LINK_SEVERITY`), so the new findings land in Warnings and
-  a run that exited 0 still exits 0 unless it already had warnings. The breaking moment is the promotion
-  of check (n) to `err`, not this change. Expect
+  extractor simply could not see them. On its own this change does not move the EXIT CODE: check (n) was
+  filed under `warn` by default (`MEMORY_INDEX_LINK_SEVERITY`), so the new findings landed in Warnings
+  and a run that exited 0 still exited 0 unless it already had warnings. **Corrected after this entry
+  originally shipped (WI-0005):** it went on to say "the breaking moment is the promotion of check (n) to
+  `err`, not this change" — and that promotion is no longer a later release. It is in THIS one, under
+  `Changed`. Read together, the exit code does move: a store nobody has touched can go from **exit 0 to
+  exit 2** on upgrade, because this entry supplies the new findings and the promotion files them as
+  errors. `MEMORY_INDEX_LINK_SEVERITY=warn` restores the severity this entry assumed. Expect
   it wherever an index uses brackets inside link text (`[Release state [measured]](file.md)`) or the badge
   pattern. Measured against four live memory stores with both script versions on the same day: identical
   in all four, because the constructs are almost absent there — a null result that proves nothing, so the
@@ -311,9 +315,12 @@ All notable changes to this project are documented in this file. The format is b
   **Upgrade note:** this is a false-negative fix, so a store that has not changed at all can start
   reporting dead links it never reported before — they were always dead, merely hidden by a paragraph
   merge. Expect that on CRLF checkouts and on files using `***`/`---`/`===` between link-bearing
-  blocks. Check (n) still defaults to `warn`, so such a finding does not fail a run today; the
-  promotion to `err` tracked under ADR-0001 is what would change that, and is deliberately not part
-  of this entry.
+  blocks. **Corrected after this entry originally shipped (WI-0005):** it read "check (n) still defaults
+  to `warn`, so such a finding does not fail a run today", and deferred the promotion to `err` to a
+  later release under ADR-0001. That promotion is in THIS release, under `Changed`. A store that has not
+  changed at all can therefore go from **exit 0 to exit 2** on upgrade — this entry supplies the finding,
+  the promotion supplies the severity. `MEMORY_INDEX_LINK_SEVERITY=warn` restores the severity this
+  entry assumed.
 - **Five of round 2's seven false positives against check (n) closed; the round's one wrong-target
   row moved to a non-claim instead of a decode (WI-0084, WI-0081 remainder).** check (n)'s awk
   block-boundary list now tracks an indented code block (four spaces, or one leading tab — CommonMark
@@ -569,8 +576,8 @@ All notable changes to this project are documented in this file. The format is b
   collapsing to `my`" was right about not truncating, but wrong about what to do with the untruncated
   result — per the reference an unescaped, untitled space in an UNBRACKETED destination means the
   whole `[x](...)` construct is not a link at all, so `[x](my file.md)` was being reported as a dead
-  target for content that was never a link, the direction `MEMORY_INDEX_LINK_SEVERITY`'s `warn`
-  default exists to protect against. Fixed by unwrapping the bracket form before resolving (an
+  target for content that was never a link, the direction `MEMORY_INDEX_LINK_SEVERITY`'s then-`warn`
+  default existed to protect against. Fixed by unwrapping the bracket form before resolving (an
   UNCLOSED opener, `[x](<a.md)`, stays skipped — CommonMark reads it as literal text, not a link) and
   by treating a leftover space in an unbracketed target as "not a link" instead of "a target with a
   space in it". Nine fixtures (one per reference-table row, `docs/memory/reference_commonmark-conformance.md`)
@@ -1157,11 +1164,14 @@ All notable changes to this project are documented in this file. The format is b
   ones; an UNCLOSED opener (`[x](<target.md)`) stays skipped, because the reference reads that as
   literal text, not a link. This is a floor, not a full fix: it catches a target file that no longer
   exists, not a wrong anchor into a file that does — anchor resolution needs heading-to-slug
-  modelling and is a separate, unbuilt item. Ships
-  at **warning** severity by default; `MEMORY_INDEX_LINK_SEVERITY` is the documented escape hatch
-  to `err`, validated up front so a typo reports a configuration error (exit 3) instead of
-  aborting with `command not found` (exit 127), indistinguishable from a findings result.
-  Promotion to error is tracked separately and is the SemVer-relevant step (ADR-0001).
+  modelling and is a separate, unbuilt item. Shipped
+  at **warning** severity by default; `MEMORY_INDEX_LINK_SEVERITY` is the knob, validated up front so a
+  bad value reports a configuration error (exit 3) instead of aborting with `command not found`
+  (exit 127), indistinguishable from a findings result. **Corrected after this entry originally shipped
+  (WI-0005):** both halves read the other way round in the shipped state. The default is `err` since
+  24.08.2026 — the promotion this entry called "tracked separately and the SemVer-relevant step
+  (ADR-0001)" is in THIS release, under `Changed` — and the documented escape hatch now points the other
+  way, to `warn`.
 - **First test coverage for a shell script in this repo.** `scripts/tests/` was Python-only and
   covered the work-item CLI; `scripts/tests/test_memory_lint.py` invokes `memory-lint.sh` as a
   subprocess with `HOME` redirected to a temp directory, so the checks against `~/.claude/**` cannot
@@ -1218,6 +1228,111 @@ All notable changes to this project are documented in this file. The format is b
   self-detection by location cannot distinguish "the same location" from "CCPR's project identity".
 
 ### Changed
+- **check (n) — a dead Markdown link in a memory index is an ERROR by default (WI-0005, ADR-0001).**
+  `MEMORY_INDEX_LINK_SEVERITY` still ships as the single knob that decides it; only its default moves,
+  `warn` -> `err`. **Scope, stated plainly, because it is wider than the Tier-1 index:** since WI-0040
+  check (n) reads the Tier-1 index `docs/memory/MEMORY.md` **and every Tier-2 persona index
+  `docs/memory/{agent}/MEMORY.md`**, and the persona indexes are where the links are. Counted in this
+  repo: 7 link constructs in the Tier-1 index against 66 across the four persona indexes, 52 of them in
+  a single one. A project meets this promotion on the persona indexes first.
+
+  Per ADR-0001 this is the SemVer-relevant step in the whole check (n) series, because it is the one
+  that **rejects content that was previously accepted**: a project whose index points at a file that no
+  longer exists now exits 2 where it exited 1. **The class is MAJOR.** ADR-0001's MAJOR row is
+  "schema-breaking change in memory or phase-docs", illustrated with *"changing `memory-lint.sh` to
+  reject previously-valid frontmatter"* — this is the same shape one field over: the same script
+  rejecting index content it previously accepted. It ships inside a `0.x` MINOR under ADR-0001's own
+  pre-1.0 caveat (semver §4), which permits a MAJOR-class change on a MINOR bump below v1.0. Naming the
+  class here so the release cut does not have to re-derive it.
+
+  **The criterion, and why it changed.** Promotion used to wait for "a round that produces no new
+  items". That criterion was replaced by PO decision on 23.08.2026 because it was shown to be
+  unreachable rather than merely unmet — two probing rounds against ground no earlier round had touched
+  produced eighteen divergences, and the construct classes were not exhausted. CommonMark is large and
+  an awk extractor will always diverge somewhere. The criterion in force is narrower and matches the
+  reason ADR-0001 sets a threshold at all: **no known FALSE-POSITIVE divergence**. Only a false positive
+  rejects previously accepted content; a false negative rejects nothing and breaks no run.
+
+  **What satisfied it, measured:**
+
+  | Measurement | Result |
+  |---|---|
+  | Conformance corpus (`scripts/tests/fixtures/commonmark_corpus.json`) | 76 entries, **0 false-positive** divergences, 12 false-negative, 3 `documented_intent`. **The zero is over a corpus WI-0100 was deliberately kept out of** — see below: adding it unasked would have moved the very number this round was judged by, so that call was left to the PO and the class is named in prose instead of counted here. |
+  | Corpus regeneration against the flipped script | **byte-identical** to the committed file — the flip does not touch the extraction, and the instrument is stable |
+  | Field measurement | 18 real index files, **131 link extractions, 0** targets the reference does not render |
+
+  **Effect on real runs today: none.** Measured on four inventories, old default against new default,
+  same script, same moment, only the knob differing:
+
+  | Inventory | Findings | Exit (old default `warn`) | Exit (new default `err`) |
+  |---|---|---|---|
+  | ccpr-gh | identical | 1 | 1 |
+  | productdata | identical | 2 | 2 |
+  | NutriMatch | identical | 1 | 1 |
+  | erfinderwerkstatt | identical | 1 | 1 |
+
+  check (n) contributes zero findings in all four, so there is nothing for the severity to reclassify.
+
+  **The caveat, named rather than footnoted — WI-0100.** A bounded random probe over 3000 lines of
+  bracket soup produces **210 findings the reference never renders**, 178 of which already reproduce
+  before the WI-0080 bracket scanner. The minimal witness is `[](()`, which check (n) reports with a
+  target named `(`. The cause is WI-0095: `protect_link_destinations()` spans the text after ANY `](`
+  without checking that a live opener precedes it. This class is **reachable but not reached** — that
+  is exactly what the field measurement says, and all it says. A promotion that hid a known
+  false-positive class would be the thing ADR-0001's threshold exists to prevent, so it is stated here
+  and in the source comment above the assignment.
+
+  **What this flip is not.** It makes the check **louder, not complete**. The 12 false-negative
+  divergences stay in the corpus, named, each with its direction and work item, and are fixed on their
+  own merits rather than as a precondition for this line.
+
+  **One consistency the flip repairs in passing.** The source comment over check (n) has read "severity
+  is `MEMORY_INDEX_LINK_SEVERITY`, mirroring check (f)" since the check was written. Check (f) — a
+  `related:` cross-ref pointing at a file that does not exist — reports `err`. Under the `warn` default
+  the comment was simply untrue: the same defect, a reference to a file that is gone, was an error in
+  one check and a warning in the other, decided by nothing but which field it was written in. The two
+  agree for the first time.
+
+  **And its actual reach, stated plainly.** Measured across this framework: the only consumer of this
+  script's exit code is **`/cleanup`** (`commands/cleanup.md` §3), which turns it into a status word —
+  "0 clean / 1 warnings / 2 errors" — and holds 3 apart as a configuration error to be treated as a run
+  failure rather than a findings result. There is no hook, no CI job and no gate that treats exit 2
+  differently from exit 1. Today this change moves one word in one report. It is still the right change
+  — the signal should be true before anyone builds on it — but the entry should not promise more than
+  it delivers.
+
+  **What the null result does NOT cover.** The four inventories above are the ones this framework is
+  run against; they are not a sample of anyone else's. A foreign store meets this promotion through two
+  changes in the same release, not one: the false-negative fixes further up **add findings on content
+  nobody touched**, and this line files them as errors. The combination moves such a store from exit 0
+  to **exit 2** without a single file having been edited. The zero measured here says the four
+  inventories carry no check (n) finding to reclassify — it says nothing about a store that does.
+
+  **Migration, for a run this catches off guard:** `MEMORY_INDEX_LINK_SEVERITY=warn` restores the
+  previous behaviour exactly, and that is measured rather than asserted — on a throwaway project with
+  one dead index link, the shipped default yields 1 error / exit 2 and the override yields the same
+  finding as 1 warning / exit 1. Look for the dead targets in the persona indexes
+  (`docs/memory/{agent}/MEMORY.md`) as well as in `docs/memory/MEMORY.md` — check (n) has covered both
+  since WI-0040, and the persona indexes carry the deep links. The escape hatch is documented where a
+  reader hits the word "error": `commands/cleanup.md` §3 and the Memory Lint checklist in
+  `Manual/system/memory-instincts.md` and `Manual/SYSTEM_OVERVIEW.md`.
+
+  The knob is validated before any work happens, so a bad value still exits 3 (configuration error)
+  instead of being mistaken for a findings result — and **an EMPTY value now reaches that validation**.
+  `MEMORY_INDEX_LINK_SEVERITY=` used to take the default branch (`${VAR:-err}`) and land silently on the
+  strict side of the promotion it was reaching to escape, exit 2, no message. It is `${VAR-err}` now: an
+  empty string is not a severity, so it exits 3 and says so. Emptying a variable is the most likely
+  wrong grip on a knob that has no off position.
+
+  `test_the_shipped_default_severity_is_warn` was **rewritten, not deleted** — it exists so this default
+  cannot move silently, and it did its job: it went red on the flip before anything else was touched. It
+  is now `test_the_shipped_default_severity_is_err_and_warn_remains_reachable` and pins the escape hatch
+  in the same test as the default it qualifies. Both halves were confirmed load-bearing by mutation
+  (restoring the `warn` default, and neutering the `warn` dispatch branch, each turn it red). Restoring
+  the `warn` default turns **exactly one** test in `test_memory_lint.py` red — that one — and leaves the
+  42 corpus tests untouched, which is the design the severity/extraction split exists for.
+  `test_an_empty_severity_is_a_configuration_error_not_the_strict_default` is new alongside it and pins
+  the `${VAR-err}` half.
 - **`phase-docs-lint.sh` scans `docs/reviews/`, with a check profile of its own (WI-0019).** The
   status enum was never the weak part — check (d) already errors and exits 2, and had been doing so
   unnoticed against a real project for months. What let invalid values survive is that the scan only
