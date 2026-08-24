@@ -7,6 +7,52 @@ All notable changes to this project are documented in this file. The format is b
 ## [Unreleased]
 
 ### Fixed
+- **The dependency scan reported "clean" exactly when it found something (WI-0102).** Every external
+  scanner `quality-scan.sh` drives shares one shape: it prints its full JSON report AND exits non-zero
+  when it finds vulnerabilities. The `|| echo '{}'` arm therefore fired on the FINDINGS case, appending a
+  second JSON document to a complete one; `json.load` died on "Extra data", and a bare `except: print(0)`
+  turned the crash into a zero. Measured against a throwaway project pinning `minimist 0.0.8`: npm's own
+  answer was `{critical: 1, total: 1}` with exit 1, the shipped chain's answer was `0`. Measured on
+  `pip-audit 2.10.1` against `jinja2 2.10`: 6 vulnerabilities, exit 1, chain reported `0`. The wrong
+  direction is the dangerous one — a zero reads as a clean bill, not as a failed measurement.
+
+  **The count was wrong even when the chain worked.** `sum(meta.values())` added npm's severity buckets
+  AND its `total` key, which holds their sum, so one critical advisory came out as `2`. On the Python
+  side `len(json.load(...))` counted the report object's two TOP-LEVEL KEYS (`dependencies`, `fixes`), so
+  a project with no vulnerabilities at all was reported as "2 Python vulnerabilities found" — a false
+  alarm to go with the false all-clear. Both are now counted by what they claim to count: severity
+  buckets only, and vulnerabilities summed per dependency (both pip-audit report shapes).
+
+  **No silent fallback is left.** "the tool could not be evaluated" and "the tool found nothing" no longer
+  produce the same number: an unusable report becomes a `scan-error` finding carrying the producer's own
+  last stderr line, and a lockfile or manifest present with no scanner installed becomes a `scan-skipped`
+  finding. Only a tool that ran and genuinely found nothing yields an empty findings list. A non-zero exit
+  status outside the range each tool documents as "ran to completion" is a `scan-error` too, even when the
+  report happens to parse.
+
+- **`semgrep` findings killed the whole SAST scan whenever a rule message contained an apostrophe
+  (WI-0102, found while measuring the above).** The merge step interpolated the semgrep findings JSON
+  straight into Python source. Measured against real semgrep 1.174.0: the first rule it hits on a
+  `subprocess(..., shell=True)` call is worded `Found 'subprocess' function 'call' with 'shell=True'`, the
+  interpolated source failed to parse, `set -e` aborted the run — exit 1, no report written at all. Same
+  apostrophe class as WI-0055, one function further down. No shell value is interpolated into Python
+  source in this script any more: producers write to a file and the reader receives the PATH in `argv`.
+  (semgrep's exit code itself was measured and is the benign one of the three: `--config=auto --json -q`
+  exits 0 with findings. The same run with `--error` prints the same report and exits 1, so the shape was
+  one flag away from breaking there too, and it is now handled either way.)
+
+- **`set -e` never protected any scan function, on the bash this project pins (WI-0102).** Each scan is
+  invoked as `results+=("$(scan_X)")`, and bash 3.2 — macOS `/bin/bash` — does not honour `set -e` inside
+  a `$(...)` command substitution: measured, a failing command there aborts neither the function nor the
+  script, and the outer run still exits 0. So the `# exit-status: exempt set-e-sufficient` justification
+  did not hold inside these functions, and a crashed producer silently contributed nothing. The grep-based
+  pattern pass now goes through the same reader as the external tools (a crash becomes a `scan-error`, not
+  zero patterns), the report reader is called through an explicit `if !` check, and a scan function that
+  produces no record at all now fails the run loudly instead of vanishing from the report.
+
+  Also fixed in passing: a project with both a lockfile and a `requirements.txt` lost its npm findings,
+  because both tools wrote the whole scan record to the same file and pip-audit clobbered npm's.
+
 - **check (n) reported the target of a definition-shaped line that cannot open a definition — the last
   false positive in the corpus (WI-0096).** A link reference definition may not INTERRUPT a paragraph.
   With prose open above it, `foo` then `[ref]: dead.md`, the reference reads the second line as ordinary

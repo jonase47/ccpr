@@ -34,93 +34,341 @@ trap "rm -rf ${TMPDIR}" EXIT
 # unparseable" is scripts/tests/test_shell_script_syntax.py's `bash -n` gate,
 # not this trap.
 
+# -- External-tool report reader (WI-0102) --
+#
+# Every external scanner here shares one shape: it PRINTS its full JSON
+# report and STILL exits non-zero when it finds something. Measured
+# 24.08.2026 against a throwaway project pinning minimist 0.0.8 --
+# `npm audit --json` answered {critical: 1, total: 1} with exit 1, and the
+# `|| echo '{}'` arm this file used to carry appended a SECOND JSON document
+# to a complete one. json.load then died on "Extra data", a bare `except:`
+# printed 0, and the deps scan reported "clean" in precisely the case it
+# exists to catch. pip-audit was measured to behave identically (6
+# vulnerabilities, exit 1, chain reported 0); semgrep exits 0 on findings
+# today, but the same run with `--error` prints the same report and exits 1,
+# so the shape is one flag away from breaking there too.
+#
+# Two rules follow, and both are load-bearing:
+#
+#   1. NO SILENT FALLBACK. "the tool could not be evaluated" and "the tool
+#      found nothing" must never produce the same number. An unusable report
+#      becomes a `scan-error` finding; a tool that is missing where there IS
+#      something to scan becomes a `scan-skipped` finding. Only a tool that
+#      ran and genuinely found nothing yields an empty findings list.
+#   2. NO SHELL VALUE IS EVER INTERPOLATED INTO PYTHON SOURCE. Tool output
+#      reaches Python through a FILE PATH in argv, never through "${var}"
+#      inside a `python3 -c "..."` string. Measured 24.08.2026 against real
+#      semgrep 1.174.0: the first rule it hits on `subprocess(shell=True)`
+#      carries apostrophes in its message, the old merge step interpolated
+#      that text straight into Python source, and the whole sast scan died
+#      with a SyntaxError and wrote no report at all. Same apostrophe class
+#      as WI-0055, one function further down.
+#
+# The body lives in a temp file rather than inline for the WI-0055 reason
+# (a heredoc nested inside a `$(...)` command substitution breaks bash's
+# quote tracking). A quoted heredoc REDIRECTED TO A FILE, as below, is a
+# different construct and parses fine -- `bash -n` covers this file on every
+# run via scripts/tests/test_shell_script_syntax.py.
+TOOL_REPORT_PY="${TMPDIR}/quality_scan_tool_report.py"
+cat > "${TOOL_REPORT_PY}" <<'TOOLREPORTEOF'
+"""Turns one external scanner's JSON report into a findings list.
+
+    quality_scan_tool_report.py <kind> <report-file> <status> [<stderr-file>]
+    quality_scan_tool_report.py --skipped <kind>
+    quality_scan_tool_report.py --merge <scan-name> <parts-file>
+
+The first form prints a JSON array of findings for one producer, the second
+the finding that stands for "this producer is not installed", and the third
+merges the accumulated arrays (one JSON array per line) into the scan record
+the caller writes out. Exit status is 0 in every ordinary case, INCLUDING a
+producer that failed -- that failure is reported as a finding, never
+swallowed and never turned into a zero. A non-zero exit here means the
+reader itself broke, and the caller stops the run.
+"""
+import json
+import sys
+
+SEVERITIES = ("info", "low", "moderate", "high", "critical")
+
+# Statuses each producer documents as "ran to completion". For the three
+# external scanners 0 = nothing found and 1 = something found; the local
+# pattern pass has no "found something" status and any non-zero is a crash.
+# Anything outside this set means the producer did not finish, and a report
+# that happens to parse must not then be read as "0 vulnerabilities".
+COMPLETED = {
+    "npm-audit": ("0", "1"),
+    "pip-audit": ("0", "1"),
+    "semgrep": ("0", "1"),
+    "pattern-scan": ("0",),
+}
+
+
+class ReportError(Exception):
+    """The tool's output parsed as JSON but is not the report we expect."""
+
+
+def findings_npm(doc):
+    meta = doc.get("metadata", {}).get("vulnerabilities")
+    if not isinstance(meta, dict):
+        raise ReportError("no metadata.vulnerabilities object in the report")
+    buckets = [k for k in SEVERITIES if k in meta]
+    if not buckets:
+        raise ReportError("metadata.vulnerabilities names no severity bucket")
+    # Sum the severity buckets ONLY. npm also ships a 'total' key holding
+    # their sum, so the old sum(meta.values()) counted every vulnerability
+    # twice -- one critical advisory came out as 2 (WI-0102).
+    count = sum(int(meta[k]) for k in buckets)
+    if count == 0:
+        return []
+    return [{
+        "type": "npm-audit",
+        "severity": "warning",
+        "message": "%d npm vulnerabilities found" % count,
+        "detail": "Run npm audit --json for details",
+    }]
+
+
+def findings_pip(doc):
+    # pip-audit >= 2.x: {"dependencies": [...], "fixes": [...]}
+    # pip-audit 1.x:    a bare list of dependency objects.
+    if isinstance(doc, dict):
+        deps = doc.get("dependencies")
+        if not isinstance(deps, list):
+            raise ReportError("no dependencies array in the report")
+    elif isinstance(doc, list):
+        deps = doc
+    else:
+        raise ReportError("unexpected top-level JSON %s" % type(doc).__name__)
+    # The old len(json.load(...)) counted DEPENDENCIES on the 1.x shape and
+    # the two TOP-LEVEL KEYS on the 2.x one -- measured: a clean project was
+    # reported as "2 Python vulnerabilities found" (WI-0102).
+    count = 0
+    for dep in deps:
+        if not isinstance(dep, dict):
+            raise ReportError("dependency entry is not an object")
+        vulns = dep.get("vulns", [])
+        if not isinstance(vulns, list):
+            raise ReportError("vulns is not an array")
+        count += len(vulns)
+    if count == 0:
+        return []
+    return [{
+        "type": "pip-audit",
+        "severity": "warning",
+        "message": "%d Python vulnerabilities found" % count,
+        "detail": "Run pip-audit --format=json for details",
+    }]
+
+
+def findings_semgrep(doc):
+    results = doc.get("results")
+    if not isinstance(results, list):
+        raise ReportError("no results array in the report")
+    out = []
+    for r in results[:20]:
+        extra = r.get("extra", {})
+        out.append({
+            "type": "semgrep",
+            "severity": extra.get("severity", "warning"),
+            "message": (extra.get("message") or "")[:200],
+            "file": r.get("path", ""),
+            "line": r.get("start", {}).get("line", 0),
+            "rule": r.get("check_id", ""),
+        })
+    return out
+
+
+def findings_pattern_scan(doc):
+    # The local grep-based pass (lib/quality_scan_sast_patterns.py) already
+    # speaks the findings format. It goes through the same reader as the
+    # external tools on purpose: bash 3.2 does not honour `set -e` inside a
+    # `$(...)` command substitution, so a crash here used to leave nothing
+    # behind and read as "no patterns matched" (WI-0102).
+    if not isinstance(doc, list):
+        raise ReportError("pattern scan did not print a JSON array")
+    for item in doc:
+        if not isinstance(item, dict):
+            raise ReportError("pattern scan entry is not an object")
+    return doc
+
+
+HANDLERS = {
+    "npm-audit": findings_npm,
+    "pip-audit": findings_pip,
+    "semgrep": findings_semgrep,
+    "pattern-scan": findings_pattern_scan,
+}
+
+
+def scan_error(kind, status, reason, detail=""):
+    suffix = (" -- %s" % detail) if detail else ""
+    return [{
+        "type": "scan-error",
+        "severity": "high",
+        "tool": kind,
+        "message": "%s could not be evaluated: %s" % (kind, reason),
+        "detail": "exit status %s -- this is NOT a clean result%s" % (status, suffix),
+    }]
+
+
+def scan_skipped(kind):
+    return [{
+        "type": "scan-skipped",
+        "severity": "info",
+        "tool": kind,
+        "message": "%s is not installed, so these dependencies were not scanned" % kind,
+        "detail": "absence of findings here means absence of measurement",
+    }]
+
+
+def last_stderr_line(path):
+    """The producer's own last word, so a scan-error finding says WHY.
+
+    Kept to one line, and truncated from the FRONT rather than the back:
+    measured 24.08.2026, a Python "can't open file" message spent its first
+    200 characters on the interpreter's own homebrew path and never reached
+    the filename. The specific part of a tool error sits at its end.
+    Missing or empty stderr is normal, not an error of its own."""
+    if not path:
+        return ""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as handle:
+            lines = [l.strip() for l in handle if l.strip()]
+    except OSError:
+        return ""
+    if not lines:
+        return ""
+    line = lines[-1]
+    return line if len(line) <= 200 else "..." + line[-197:]
+
+
+def read_tool(kind, path, status, err_path=""):
+    if kind not in HANDLERS:
+        raise SystemExit("quality_scan_tool_report.py: unknown producer %r" % kind)
+    detail = last_stderr_line(err_path)
+    try:
+        with open(path, encoding="utf-8", errors="replace") as handle:
+            raw = handle.read()
+    except OSError as exc:
+        return scan_error(kind, status, "report file unreadable (%s)" % exc, detail)
+    if status not in COMPLETED[kind]:
+        return scan_error(kind, status, "did not run to completion", detail)
+    try:
+        doc = json.loads(raw)
+    except ValueError as exc:
+        return scan_error(kind, status, "report is not valid JSON (%s)" % exc, detail)
+    try:
+        return HANDLERS[kind](doc)
+    except (ReportError, TypeError, ValueError) as exc:
+        return scan_error(kind, status, str(exc), detail)
+
+
+def merge(scan_name, parts_path):
+    findings = []
+    with open(parts_path, encoding="utf-8") as handle:
+        for line in handle:
+            line = line.strip()
+            if not line:
+                continue
+            findings.extend(json.loads(line))
+    return {"scan": scan_name, "findings": findings}
+
+
+def main(argv):
+    if len(argv) == 4 and argv[1] == "--merge":
+        print(json.dumps(merge(argv[2], argv[3])))
+        return 0
+    if len(argv) == 3 and argv[1] == "--skipped":
+        print(json.dumps(scan_skipped(argv[2])))
+        return 0
+    if len(argv) in (4, 5):
+        print(json.dumps(read_tool(*argv[1:])))
+        return 0
+    raise SystemExit(__doc__)
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
+TOOLREPORTEOF
+
+# Runs the report reader and refuses to continue if IT fails.
+#
+# Not marked `set-e-sufficient` like the rest of this file's python3 calls,
+# because that justification does not hold here: every scan function below
+# is invoked as `results+=("$(scan_X)")`, and bash 3.2 -- the /bin/bash this
+# project pins -- does NOT honour `set -e` inside a `$(...)` command
+# substitution. Measured 24.08.2026: a failing command inside such a
+# substitution aborts neither the function nor the script; execution simply
+# continues and the outer script exits 0. Relying on `set -e` in here would
+# reproduce the very defect WI-0102 is about, one level up.
+run_py() {
+    if ! python3 "$@"; then
+        echo "quality-scan.sh: FAILED -- ${1##*/} exited non-zero" >&2
+        exit 1
+    fi
+}
+
+# Runs one producer and prints its findings array.
+#   run_tool_report <kind> <report-file> <command...>
+# The exit status is captured from the producer's OWN simple command --
+# never read back through `$?` after a pipe or a command substitution, where
+# it would belong to the last process rather than to the producer. Its
+# stderr is kept (not sent to /dev/null) so a scan-error finding can say why.
+run_tool_report() {
+    local kind="$1"
+    local out="$2"
+    shift 2
+    local err="${out}.stderr"
+    local status=0
+    "$@" > "${out}" 2> "${err}" || status=$?
+    run_py "${TOOL_REPORT_PY}" "${kind}" "${out}" "${status}" "${err}"
+}
+
 # -- Scan Functions --
 
 scan_deps() {
-    local results="${TMPDIR}/deps.json"
-    echo '{"scan": "deps", "findings": []}' > "${results}"
+    # One line of JSON findings per tool, merged at the end. The old code
+    # had each tool write the WHOLE scan record to the same file, so a
+    # project with both a lockfile and a requirements.txt lost its npm
+    # findings whenever pip-audit had anything to say (WI-0102).
+    local parts="${TMPDIR}/deps-parts.jsonl"
+    : > "${parts}"
 
     # Node.js
     if [ -f "package-lock.json" ] || [ -f "yarn.lock" ]; then
         if command -v npm &>/dev/null; then
-            local audit_raw
-            audit_raw=$(npm audit --json 2>/dev/null || echo '{}')
-            local vuln_count
-            vuln_count=$(echo "${audit_raw}" | python3 -c "
-import sys, json
-try:
-    d = json.load(sys.stdin)
-    meta = d.get('metadata', {}).get('vulnerabilities', {})
-    total = sum(meta.values()) if isinstance(meta, dict) else 0
-    print(total)
-except:
-    print(0)
-" 2>/dev/null || echo "0")
-
-            python3 -c "
-import json
-findings = []
-if int('${vuln_count}') > 0:
-    findings.append({
-        'type': 'npm-audit',
-        'severity': 'warning',
-        'message': '${vuln_count} npm vulnerabilities found',
-        'detail': 'Run npm audit --json for details',
-    })
-print(json.dumps({'scan': 'deps', 'tool': 'npm-audit', 'findings': findings}))
-" > "${results}"  # exit-status: exempt set-e-sufficient
+            run_tool_report npm-audit "${TMPDIR}/npm-audit.json" npm audit --json >> "${parts}"
+        else
+            # There is something to scan and no scanner. Unlike sast, this
+            # scan has no fallback of its own, so staying silent here would
+            # print the same empty findings list a genuinely clean project
+            # gets -- the very confusion this item is about.
+            run_py "${TOOL_REPORT_PY}" --skipped npm-audit >> "${parts}"
         fi
     fi
 
     # Python
     if [ -f "pyproject.toml" ] || [ -f "requirements.txt" ]; then
         if command -v pip-audit &>/dev/null; then
-            local pip_raw
-            pip_raw=$(pip-audit --format=json 2>/dev/null || echo '[]')
-            local pip_count
-            pip_count=$(echo "${pip_raw}" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "0")
-
-            if [ "${pip_count}" -gt 0 ]; then
-                python3 -c "
-import json
-findings = [{'type': 'pip-audit', 'severity': 'warning', 'message': '${pip_count} Python vulnerabilities found'}]
-print(json.dumps({'scan': 'deps', 'tool': 'pip-audit', 'findings': findings}))
-" > "${results}"  # exit-status: exempt set-e-sufficient
-            fi
+            run_tool_report pip-audit "${TMPDIR}/pip-audit.json" pip-audit --format=json >> "${parts}"
+        else
+            run_py "${TOOL_REPORT_PY}" --skipped pip-audit >> "${parts}"
         fi
     fi
 
-    cat "${results}"
+    run_py "${TOOL_REPORT_PY}" --merge deps "${parts}"
 }
 
 scan_sast() {
-    local results="${TMPDIR}/sast.json"
-    local findings="[]"
+    local parts="${TMPDIR}/sast-parts.jsonl"
+    : > "${parts}"
 
-    # Semgrep if available
+    # Semgrep if available. No scan-skipped finding when it is absent: this
+    # scan keeps its own grep-based pattern pass below, so "semgrep missing"
+    # still leaves a measurement behind -- which is exactly what the deps
+    # scan does not have.
     if command -v semgrep &>/dev/null; then
-        local semgrep_raw
-        semgrep_raw=$(semgrep --config=auto --json -q . 2>/dev/null || echo '{"results":[]}')
-        local semgrep_count
-        semgrep_count=$(echo "${semgrep_raw}" | python3 -c "import sys,json; print(len(json.load(sys.stdin).get('results',[])))" 2>/dev/null || echo "0")
-
-        if [ "${semgrep_count}" -gt 0 ]; then
-            findings=$(echo "${semgrep_raw}" | python3 -c "
-import sys, json
-data = json.load(sys.stdin)
-findings = []
-for r in data.get('results', [])[:20]:
-    findings.append({
-        'type': 'semgrep',
-        'severity': r.get('extra', {}).get('severity', 'warning'),
-        'message': r.get('extra', {}).get('message', '')[:200],
-        'file': r.get('path', ''),
-        'line': r.get('start', {}).get('line', 0),
-        'rule': r.get('check_id', ''),
-    })
-print(json.dumps(findings))
-" 2>/dev/null || echo "[]")
-        fi
+        run_tool_report semgrep "${TMPDIR}/semgrep.json" semgrep --config=auto --json -q . >> "${parts}"
     fi
 
     # Grep-based pattern scan (fallback / always runs). Body lives in a real
@@ -128,17 +376,10 @@ print(json.dumps(findings))
     # -- WI-0055: a heredoc nested inside this command substitution broke
     # bash's quote tracking on an apostrophe in the body's SQL-string
     # pattern and made the whole script unparseable.
-    local grep_findings
-    grep_findings=$(python3 "${SCRIPT_DIR}/lib/quality_scan_sast_patterns.py")  # exit-status: exempt set-e-sufficient
+    run_tool_report pattern-scan "${TMPDIR}/pattern-scan.json" \
+        python3 "${SCRIPT_DIR}/lib/quality_scan_sast_patterns.py" >> "${parts}"
 
-    # Merge findings
-    python3 -c "
-import json
-semgrep = json.loads('${findings}') if '${findings}' != '[]' else []
-grep_f = json.loads('''${grep_findings}''')
-all_f = semgrep + grep_f
-print(json.dumps({'scan': 'sast', 'findings': all_f}))
-"  # exit-status: exempt set-e-sufficient
+    run_py "${TOOL_REPORT_PY}" --merge sast "${parts}"
 }
 
 scan_config() {
@@ -294,6 +535,18 @@ case "${SCOPE}" in
         exit 1
         ;;
 esac
+
+# A scan that produced NOTHING is not a clean scan. Same bash 3.2 fact as
+# above: a crash inside `$(scan_X)` neither aborts the function nor the
+# script, so a broken scan arrives here as an empty string -- and the
+# combiner below skips empty lines, which would silently drop the whole scan
+# from the report while still reporting exit 0 and a plausible summary.
+for entry in "${results[@]}"; do
+    if [ -z "${entry}" ]; then
+        echo "quality-scan.sh: FAILED -- a scan produced no record (scope=${SCOPE})" >&2
+        exit 1
+    fi
+done
 
 # Combine results into single JSON
 python3 -c "

@@ -803,7 +803,17 @@ class ExternalToolExitStatusTest(unittest.TestCase):
         abort the whole `f() { ... }; v="$(f)"` assignment, not just log a
         warning). Net +2 invocations (150 total): `bare-needs-exemption`
         +2, everything else unchanged.
-        150 invocations total across the 17 shipped files, split as below.
+        Updated once more 24.08.2026 when WI-0102 rebuilt quality-scan.sh's
+        scan_deps/scan_sast: the four per-tool `$(... || echo '<empty>')`
+        chains and their inline `python3 -c` consumers are gone, replaced by
+        a single `run_py()` helper that calls the report reader through
+        `if ! python3 "$@"`. That concentrates five separate invocations
+        into one CHECKED one -- deliberately, because the `set-e-sufficient`
+        justification the old sites carried does not hold inside a `$(...)`
+        command substitution on bash 3.2 (measured). Net -7 invocations
+        (143 total): `checked-condition` +1, `checked-chain` -4,
+        `bare-needs-exemption` -4, everything else unchanged.
+        143 invocations total across the 17 shipped files, split as below.
         A change in these numbers means either a script changed shape or
         the scanner's own logic changed -- worth a deliberate look either
         way, not a silent drift."""
@@ -811,14 +821,14 @@ class ExternalToolExitStatusTest(unittest.TestCase):
         by_disposition = {}
         for inv in invocations:
             by_disposition[inv.disposition] = by_disposition.get(inv.disposition, 0) + 1
-        self.assertEqual(150, len(invocations))
+        self.assertEqual(143, len(invocations))
         self.assertEqual(
             {
-                "checked-condition": 22,
+                "checked-condition": 23,
                 "checked-captured": 5,
-                "checked-chain": 17,
+                "checked-chain": 13,
                 "discard-needs-exemption": 40,
-                "bare-needs-exemption": 66,
+                "bare-needs-exemption": 62,
             },
             by_disposition,
         )
