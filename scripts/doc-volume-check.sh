@@ -36,7 +36,15 @@ size_kb() {
 # Number of H2 sections (lines starting with "## " but not "### ")
 h2_count() {
     local file="$1"
-    grep -c '^## [^#]' "$file" 2>/dev/null || echo 0
+    local count
+    # grep -c PRINTS "0" and STILL exits 1 when nothing matched. An
+    # `|| echo 0` arm therefore fires ON TOP of that printed zero and makes
+    # this function emit "0\n0", which breaks every (( )) below (WI-0101).
+    # The arm must REPLACE the value, never add one -- so it is an
+    # assignment, and it only ever takes effect when grep failed for a real
+    # reason (exit 2) and printed nothing at all.
+    count="$(grep -c '^## [^#]' "$file" 2>/dev/null)" || count=0
+    echo "$count"
 }
 
 # Splitting suggestion

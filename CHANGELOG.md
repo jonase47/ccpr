@@ -759,6 +759,28 @@ All notable changes to this project are documented in this file. The format is b
 - **`instinct-check.sh` reported a stale age.** File age came from the index mtime alone, so editing a
   theme file without touching the index left the age unchanged. It now uses the newest mtime across
   the index and all theme files.
+- **`doc-volume-check.sh` printed a broken report line and a stream of shell syntax errors for any file
+  without an H2 heading (WI-0101).** `grep -c` PRINTS `0` and STILL exits 1 when nothing matched, so
+  `h2_count()`'s `|| echo 0` arm fired on top of that printed zero and the function returned `"0\n0"`.
+  Both `(( ))` tests in `split_suggestion()` then aborted with `((: 0\n0: syntax error in expression`,
+  and the report line broke mid-sentence: `... (46 KB) → no obvious splitting point (0` on one line, the
+  rest on the next. Against this repository's own `docs/` that was 8 lines on stderr and 2 truncated
+  bullets. The arm now REPLACES the value instead of adding one
+  (`count="$(grep -c ... )" || count=0`), the same shape `bootstrap.sh` already ships for the identical
+  grep call.
+
+  **What did NOT change is the verdict.** Both arithmetic tests failed, so the branch fell through to
+  the `else` arm — and "no obvious splitting point" is the correct advice for a file with no H2 section
+  to split at. Every file in a before/after run against `docs/` keeps its size band, its KB figure and
+  its suggestion; the exit code stays 2. Only the rendered line and the stderr noise changed, which is
+  why this is a PATCH under ADR-0001 ("bug fix in scripts ... that does not change any rule") even
+  though the script is shipped. It matters because `/cleanup` §5 puts this output in front of a human
+  reader, and a sentence that stops mid-line is a defect that reader sees.
+
+  The script shipped with no test of its own; it now has one (`scripts/tests/test_doc_volume_check.py`),
+  covering both sides of the defect's precondition — a zero-H2 file across all three size bands, an
+  H3-only file (the shape that surfaced it), and H2-carrying positive controls that a fix which simply
+  stopped counting could not pass.
 
 ### Performance
 - **check (n) reads every index TWICE, unconditionally — including indexes with no reference definition
