@@ -34,8 +34,9 @@ import shutil
 import subprocess
 import tempfile
 import unittest
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 SCRIPT_PATH = Path(__file__).resolve().parents[1] / "memory-lint.sh"
 
@@ -5009,6 +5010,328 @@ class NamedEntityInfoMutationTest(unittest.TestCase):
         original_md5_after = __import__("hashlib").md5(after.encode("utf-8")).hexdigest()
         self.assertEqual(original_md5_before, original_md5_after)
         self.assertEqual(after, original)
+
+
+# --------------------------------------------------------------------------- #
+# WI-0087 — the reported age must be a property of the FILE, not of the CLOCK
+# --------------------------------------------------------------------------- #
+
+# The date group is non-greedy rather than \S+: a last_updated may legally carry
+# trailing text ("20.08.2026 (WI-0015)"), and a whitespace-free group silently
+# stops matching those findings — reporting "no warning" for a file that warned.
+AGE_FINDING_RE = re.compile(
+    r"^(?P<rel>\S+) — last_updated=(?P<date>.+?) is (?P<age>\d+) days old"
+)
+
+
+class StaleAgeIsAPropertyOfTheFileTest(unittest.TestCase):
+    """Check (e) must report an age that depends only on `last_updated` (WI-0087).
+
+    Before this, `date_to_epoch()` parsed a DD.MM.YYYY value with a BSD format
+    string carrying no time component, and BSD `date` fills unnamed fields from
+    the RUNNING WALL CLOCK. `TODAY_EPOCH` is captured once at script start, so
+    the two sides of the subtraction carried different times of day and the gap
+    between them was the script's own elapsed runtime. With integer truncation
+    that lands one day low: a genuinely 91-day-old file reported 90 and, at
+    `STALE_DAYS=90`, did not warn at all — a silent false negative at exactly
+    the threshold this check exists to guard.
+
+    Why this fixture is LARGE, and why that is the point. The defect is only
+    visible once the wall clock has ticked past a full second between the
+    capture of "today" and the parse of the file's date. On a three-file store
+    the whole run fits inside that second most of the time, so the buggy code
+    reported the true age and a test built on such a store would have been green
+    against the very defect it was written for — a test that cannot fail. The
+    store below takes roughly two seconds to walk (~30 ms per file, measured),
+    so all but the handful of files reached in the script's first second show
+    the old behaviour. Measured against the unfixed script: 58 of 60 files that
+    were 91 days old did not warn at all.
+
+    That sizing is a mutation-killing property, not a correctness property: with
+    the fix in place every assertion below holds for a one-file store just as
+    well. A machine fast enough to lint the whole fixture inside one second
+    would weaken the red step, not falsify the green one.
+
+    Two cohorts, because silence hides disagreement. Files at STALE_DAYS+1 carry
+    the false-negative question, but a file the old code pushed BELOW the
+    threshold drops out of the report entirely and can no longer be compared
+    with its twins. The second cohort sits far above the threshold, where both
+    the true and the truncated age still warn, so a store disagreeing with
+    itself shows up as two different numbers rather than as absence.
+
+    No test seam. The script's notion of "today" is never overridden — the
+    fixture dates are derived from the same calendar day the script reads from
+    the system clock, so there is nothing here that a field run could reach.
+
+    File order is deliberately not assumed: memory-lint.sh collects files with
+    `find` and does not sort, so which file is reached late is up to the
+    filesystem. Every file in each cohort therefore carries the cohort's date,
+    which makes "some file is parsed late" enough and "a specific file is parsed
+    late" unnecessary.
+    """
+
+    # ~30 ms per file on the reference machine → the fixture takes ~2 s to walk.
+    # See the class docstring.
+    FILES_PER_COHORT = 30
+
+    # Mirrors STALE_DAYS in memory-lint.sh. The interesting ages are derived from
+    # it rather than written out, so the test states the RELATION the check
+    # implements ("older than", exclusive) instead of magic numbers.
+    STALE_DAYS = 90
+
+    # Far enough above the threshold that an age truncated by one day still
+    # warns — see "Two cohorts" in the class docstring.
+    OLD_COHORT_DAYS = 200
+
+    @classmethod
+    def setUpClass(cls):
+        cls.today = date.today()
+        cls.threshold_days = cls.STALE_DAYS + 1
+        cls.threshold_date = (cls.today - timedelta(days=cls.threshold_days)).strftime("%d.%m.%Y")
+        cls.old_date = (cls.today - timedelta(days=cls.OLD_COHORT_DAYS)).strftime("%d.%m.%Y")
+        cls.boundary_date = (cls.today - timedelta(days=cls.STALE_DAYS)).strftime("%d.%m.%Y")
+
+        cls.tmp = tempfile.mkdtemp(prefix="ccpr-memory-lint-age-")
+        project_dir = Path(cls.tmp) / "project"
+        memory_dir = project_dir / "docs" / "memory"
+        memory_dir.mkdir(parents=True)
+
+        for index in range(cls.FILES_PER_COHORT):
+            (memory_dir / f"project_threshold{index:04d}.md").write_text(
+                tier1_text(name=f"threshold probe {index}", last_updated=cls.threshold_date),
+                encoding="utf-8",
+            )
+            (memory_dir / f"project_old{index:04d}.md").write_text(
+                tier1_text(name=f"old probe {index}", last_updated=cls.old_date),
+                encoding="utf-8",
+            )
+        (memory_dir / "project_boundary.md").write_text(
+            tier1_text(name="boundary probe", last_updated=cls.boundary_date),
+            encoding="utf-8",
+        )
+        (memory_dir / "project_annotated.md").write_text(
+            tier1_text(
+                name="annotated probe",
+                last_updated=f"{cls.threshold_date} (WI-0000 a trailing note)",
+            ),
+            encoding="utf-8",
+        )
+        (memory_dir / "MEMORY.md").write_text("# Memory Index\n\nNo entries.\n", encoding="utf-8")
+
+        fake_home = Path(cls.tmp) / "home"
+        fake_home.mkdir()
+        env = {"HOME": str(fake_home), "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"}
+
+        # Two runs, back to back, over an unchanged store: the cross-run half of
+        # the guarantee. Cached here rather than re-run per test method — the
+        # fixture is deliberately expensive and none of the assertions below
+        # need a fresh one.
+        cls.runs = []
+        for _ in range(2):
+            result = subprocess.run(
+                ["bash", str(SCRIPT_PATH), str(project_dir)],
+                capture_output=True, text=True, env=env,
+            )
+            for heading in ("## Errors (", "## Warnings (", "## Info ("):
+                assert heading in result.stdout, (
+                    f"memory-lint.sh produced no report (missing {heading!r}) — "
+                    f"returncode={result.returncode}, stderr={result.stderr!r}"
+                )
+            cls.runs.append(result)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    @classmethod
+    def ages(cls, result, prefix):
+        """{relative path: reported age} over one cohort's check-(e) findings."""
+        found = {}
+        for warning in MemoryLintTest.findings(result.stdout, "Warnings"):
+            match = AGE_FINDING_RE.match(warning)
+            if match and match.group("rel").startswith(f"docs/memory/project_{prefix}"):
+                found[match.group("rel")] = int(match.group("age"))
+        return found
+
+    def test_a_file_one_day_past_the_threshold_warns(self):
+        """The headline false negative: at STALE_DAYS+1 the warning must fire.
+
+        Under the old arithmetic the age truncated down to STALE_DAYS, the `>`
+        comparison was false, and the file the check exists for stayed silent.
+        """
+        ages = self.ages(self.runs[0], "threshold")
+        self.assertEqual(
+            len(ages), self.FILES_PER_COHORT,
+            f"expected all {self.FILES_PER_COHORT} files at {self.threshold_days} "
+            f"days old to warn, got {len(ages)}",
+        )
+
+    def test_the_reported_age_is_the_true_age(self):
+        """A concrete number, not merely a warning — the assertion the suite
+        never carried, and the reason the defect could survive."""
+        for prefix, expected in (
+            ("threshold", self.threshold_days),
+            ("old", self.OLD_COHORT_DAYS),
+        ):
+            with self.subTest(cohort=prefix):
+                ages = self.ages(self.runs[0], prefix)
+                self.assertTrue(ages, f"no age findings for cohort {prefix!r}")
+                self.assertEqual(
+                    sorted(set(ages.values())), [expected],
+                    f"every file in cohort {prefix!r} is exactly {expected} days "
+                    f"before {self.today.strftime('%d.%m.%Y')}; reported "
+                    f"{sorted(set(ages.values()))}",
+                )
+
+    def test_files_sharing_a_date_report_the_same_age_within_one_run(self):
+        """The defect's own signature: the same store disagreeing with itself.
+
+        The old code made the reported age depend on WHEN IN THE RUN the file
+        was reached, so the files parsed in the script's first second read one
+        day older than the rest.
+        """
+        ages = self.ages(self.runs[0], "old")
+        distinct = sorted(set(ages.values()))
+        self.assertEqual(
+            len(distinct), 1,
+            f"files with an identical last_updated reported different ages "
+            f"({distinct}) — the age is tracking the clock, not the file",
+        )
+
+    def test_the_same_store_twice_reports_the_same_ages(self):
+        """The core guarantee: same inventory, two runs, same numbers."""
+        for prefix in ("threshold", "old"):
+            with self.subTest(cohort=prefix):
+                first = self.ages(self.runs[0], prefix)
+                second = self.ages(self.runs[1], prefix)
+                self.assertTrue(first, f"no age findings for cohort {prefix!r}")
+                self.assertEqual(first, second)
+
+    def test_a_date_with_a_trailing_note_still_reads_as_that_date(self):
+        """What the fix must NOT change (WI-0106).
+
+        Both `date` implementations accept text after the value they matched, so
+        `last_updated: 20.08.2026 (WI-0015)` has always been read as 20.08.2026 —
+        and ten files across the live stores are written that way. Anchoring the
+        BSD branch by appending a time to the value would have turned every one
+        of them into a hard parse error and moved this script from exit 1 to
+        exit 2 on its own repository. Measured, which is how it was caught: that
+        variant produced 10 new errors across the four inventories.
+
+        This pins the tolerance as it stands, not as it ought to be — whether
+        the loose form should stay legal is a schema question, filed separately.
+        """
+        ages = self.ages(self.runs[0], "annotated")
+        self.assertEqual(
+            ages,
+            {"docs/memory/project_annotated.md": self.threshold_days},
+            "a last_updated with a trailing note must still be read as its date, "
+            "at the same age as the bare form",
+        )
+
+    def test_a_file_exactly_at_the_threshold_stays_silent(self):
+        """The other side of the boundary: `>` is exclusive, so STALE_DAYS is not
+        yet stale. Pinned alongside the fix because moving both sides of the
+        subtraction to a common anchor moves this edge by a full day — without
+        it, a fix that over-corrected by one would look just as green."""
+        ages = self.ages(self.runs[0], "boundary")
+        self.assertEqual(
+            ages, {},
+            f"a file exactly {self.STALE_DAYS} days old must not warn",
+        )
+
+
+class TodayIsTheLocalCalendarDayTest(unittest.TestCase):
+    """`TODAY_EPOCH` must be the local calendar day, anchored like every other
+    date this script compares against it (WI-0087).
+
+    This is the half of the fix the large fixture above cannot see. Once each
+    file's date is anchored at UTC midnight, leaving `TODAY_EPOCH` as a raw
+    `date +%s` still produces a stable, plausible-looking number: the leftover
+    time-of-day sits on one side only and truncates away — as long as the run
+    happens while the local calendar day and the UTC one agree. Between local
+    midnight and the zone's UTC offset they do not, and the age comes out a day
+    short again. A suite that runs at 20:07 in a UTC+2 zone never sees it, which
+    is exactly how such a defect survives.
+
+    Rather than wait for a run at 01:00, the test moves the disagreement into
+    view: `TZ` is a plain POSIX environment variable, so the run can be placed in
+    a zone whose calendar day differs from UTC's right now. That is not a seam in
+    the script — nothing was added to it to make this testable, and the variable
+    means the same thing here as it does in the field. The zone is picked from
+    the current UTC hour so that one of the two always disagrees, and the
+    disagreement itself is asserted before anything else, so the test cannot
+    quietly stop testing what it claims to.
+
+    Deliberately a small fixture: the question here is which CALENDAR DAY the
+    script calls today, not how far into the run a file is reached.
+    """
+
+    @staticmethod
+    def _shifted_zone():
+        """A zone whose calendar day currently differs from UTC's.
+
+        UTC+14 runs ahead of UTC's date from 10:00 UTC onward, UTC-12 runs behind
+        it until 12:00 UTC — so at every instant at least one of the two differs,
+        and the 12:00 split stays clear of both edges.
+        """
+        utc_now = datetime.now(timezone.utc)
+        return "Etc/GMT-14" if utc_now.hour >= 12 else "Etc/GMT+12"
+
+    def test_the_age_counts_local_calendar_days(self):
+        zone_name = self._shifted_zone()
+        zone = ZoneInfo(zone_name)
+        utc_now = datetime.now(timezone.utc)
+        local_today = utc_now.astimezone(zone).date()
+
+        self.assertNotEqual(
+            local_today, utc_now.date(),
+            f"{zone_name} was chosen because its calendar day differs from UTC's "
+            f"right now; it does not, so this test would prove nothing",
+        )
+
+        stale_days = 90
+        aged = (local_today - timedelta(days=stale_days + 1)).strftime("%d.%m.%Y")
+        fresh = (local_today - timedelta(days=stale_days)).strftime("%d.%m.%Y")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp) / "project"
+            memory_dir = project_dir / "docs" / "memory"
+            memory_dir.mkdir(parents=True)
+            (memory_dir / "project_aged.md").write_text(
+                tier1_text(name="aged probe", last_updated=aged), encoding="utf-8"
+            )
+            (memory_dir / "project_fresh.md").write_text(
+                tier1_text(name="fresh probe", last_updated=fresh), encoding="utf-8"
+            )
+            (memory_dir / "MEMORY.md").write_text(
+                "# Memory Index\n\nNo entries.\n", encoding="utf-8"
+            )
+            fake_home = Path(tmp) / "home"
+            fake_home.mkdir()
+
+            result = subprocess.run(
+                ["bash", str(SCRIPT_PATH), str(project_dir)],
+                capture_output=True, text=True,
+                env={
+                    "HOME": str(fake_home),
+                    "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+                    "TZ": zone_name,
+                },
+            )
+
+        ages = {}
+        for warning in MemoryLintTest.findings(result.stdout, "Warnings"):
+            match = AGE_FINDING_RE.match(warning)
+            if match:
+                ages[match.group("rel")] = int(match.group("age"))
+
+        self.assertEqual(
+            ages, {"docs/memory/project_aged.md": stale_days + 1},
+            f"in {zone_name} today is {local_today}; a file dated {aged} is "
+            f"{stale_days + 1} days old and one dated {fresh} is not yet stale. "
+            f"stdout={result.stdout!r}",
+        )
 
 
 if __name__ == "__main__":

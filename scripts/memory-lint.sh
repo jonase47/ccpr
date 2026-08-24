@@ -117,7 +117,6 @@ esac
 # no topic files in the same directory is treated as a likely skeleton.
 SKELETON_BYTES_WARN=400
 
-TODAY_EPOCH=$(date +%s)
 
 declare -a errors warnings infos
 errors=()
@@ -128,18 +127,64 @@ err()  { errors+=("$1"); }
 warn() { warnings+=("$1"); }
 info() { infos+=("$1"); }
 
-# Date DD.MM.YYYY → epoch (BSD and GNU date compatible).
+# Date DD.MM.YYYY → epoch of that day's UTC midnight (BSD and GNU date compatible).
+#
+# Both the time zone and the time of day are pinned deliberately, and the check
+# below only works because BOTH sides of its subtraction go through this one
+# function (see TODAY_EPOCH below). Two separate defects sit here (WI-0087):
+#
+# 1. Time of day. The BSD branch used to parse with "%d.%m.%Y", a format with no
+#    time component — and BSD date fills unnamed fields from the RUNNING WALL
+#    CLOCK, not from midnight. TODAY_EPOCH was captured once at script start, so
+#    the two sides carried different times of day and their difference was short
+#    by the script's own elapsed runtime. After integer truncation that lands one
+#    day low: a genuinely 91-day-old file reported 90 and, at STALE_DAYS=90, did
+#    not warn at all. The reported age was a property of WHEN IN THE RUN a file
+#    was reached, so on a large store the same date could report two different
+#    ages in one run, and the same store two different ages in two runs. Measured
+#    on the live stores before the fix: six consecutive runs over the same
+#    unchanged inventory reported 93/93/91 four times and 94/94/92 once.
+#
+# 2. Time zone. The GNU branch never had defect 1 — it builds an ISO date, which
+#    date -d anchors on midnight — but anchoring on LOCAL midnight is wrong for a
+#    difference in days: across a spring-forward the two local midnights are only
+#    23 h apart, and the same truncation lands one day low again for every window
+#    spanning that transition. -u puts both ends on UTC midnight, where every day
+#    is exactly 86400 s long and the subtraction is exact by construction.
+#
+# The two branches also disagreed with each other, which is why this never showed
+# on Linux: the same file could warn there and stay silent on macOS. They now
+# return the same number for the same input — verified for both branches, see
+# scripts/tests/test_memory_lint.py.
 date_to_epoch() {
     local d="$1"
-    # BSD date (macOS): date -j -f "%d.%m.%Y" "$d" "+%s"
-    # GNU date: date -d "$(echo $d | awk -F. '{print $3"-"$2"-"$1}')" "+%s"
-    if date -j -f "%d.%m.%Y" "$d" "+%s" 2>/dev/null; then
-        return 0
+    # BSD date (macOS), in two steps rather than one. The obvious single call —
+    # -f "%d.%m.%Y %H:%M:%S" against "$d 00:00:00" — also fixes the anchor, but it
+    # tightens what counts as a DATE at the same time, and that is a different
+    # decision than this one. BSD date accepts trailing text after the value it
+    # matched ("16.05.2026 (Note: ...)" parses, with a warning on stderr) and so
+    # does GNU date on the rewritten form; ten files across the live stores lean
+    # on that, and appending a time turns every one of them into a hard parse
+    # error. So: step one reduces the value to the calendar day BSD date reads
+    # out of it, accepting exactly what it accepted before; step two anchors that
+    # day, and only that day, at UTC midnight. Whether the loose form should stay
+    # legal is a schema question, and it is filed as one (WI-0106).
+    local ymd
+    if ymd="$(date -j -f "%d.%m.%Y" "$d" "+%Y-%m-%d" 2>/dev/null)"; then
+        date -j -u -f "%Y-%m-%d %H:%M:%S" "$ymd 00:00:00" "+%s" 2>/dev/null && return 0
     fi
+    # GNU date: -u -d with the value rewritten to ISO. -d already anchors on
+    # midnight, so only the time zone changes here.
     local iso
     iso="$(printf '%s' "$d" | awk -F. '{print $3"-"$2"-"$1}')"  # exit-status: exempt downstream-checks-result
-    date -d "$iso" "+%s" 2>/dev/null || echo "0"
+    date -u -d "$iso" "+%s" 2>/dev/null || echo "0"
 }
+
+# "Today" as the same kind of value every file's last_updated is turned into:
+# the UTC midnight of the current LOCAL calendar day. Derived through
+# date_to_epoch on purpose — a second, independent way of computing this end of
+# the subtraction is exactly how the two ends drifted apart before.
+TODAY_EPOCH=$(date_to_epoch "$(date +%d.%m.%Y)")
 
 FILES=()
 if [[ -d "$MEMORY_DIR" ]]; then

@@ -7,6 +7,47 @@ All notable changes to this project are documented in this file. The format is b
 ## [Unreleased]
 
 ### Fixed
+- **`memory-lint.sh` reported a file's age as a property of the clock, not of the file (WI-0087,
+  rediscovered independently as WI-0103).** `date_to_epoch()` parsed `DD.MM.YYYY` with a BSD format
+  string carrying no time component, and BSD `date` fills unnamed fields from the RUNNING wall clock.
+  `TODAY_EPOCH` was captured once at script start, so the two sides of the subtraction held different
+  times of day and their difference was short by the script's own elapsed runtime — after integer
+  truncation, one day low. Measured on a live store before the fix: six consecutive runs over the same
+  unchanged inventory reported `93/93/91` four times and `94/94/92` once, with nothing changed between
+  them. On a store large enough to take a second to walk, the SAME run disagreed with itself: of 60
+  files all 91 days old, 58 reported 90 and stayed silent.
+
+  **The consequence was a silent false negative at exactly the threshold check (e) exists for.** A file
+  genuinely `STALE_DAYS + 1` days old was reported as `STALE_DAYS`, the `>` comparison was false, and no
+  warning fired. The check under-reported staleness; it never over-reported it.
+
+  **And the two branches disagreed with each other.** The GNU fallback builds an ISO date, which `date -d`
+  anchors on midnight, so the same file could warn on Linux and stay silent on macOS. Measured with GNU
+  coreutils 9.11 in the script's own GNU path: `94/94/92` on every run, against a BSD path flapping
+  between `93/93/91` and `94/94/91`.
+
+  Both ends are now anchored at **UTC** midnight and derived through the same function, so the difference
+  is an exact multiple of 86400 by construction. UTC rather than local midnight because two local
+  midnights spanning a spring-forward are only 23 h apart, which reintroduces the identical off-by-one
+  for every window crossing that transition — measured on both implementations: 01.01.2026 to 01.04.2026
+  is 90 days and comes out as 89 when anchored locally. The BSD branch normalises in two steps rather
+  than appending a time to the value, so that what counts as a parseable date is unchanged: both
+  implementations accept trailing text after the date, ten files across the live stores are written that
+  way, and the single-call form turns every one of them into a hard error (measured: 10 new errors, and
+  this script moving from exit 1 to exit 2 on its own repository). Whether that tolerance should stay is
+  filed separately as WI-0106.
+
+  **This changes reported numbers, which is the point.** Across the four inventories the fix moves ages up
+  by one where the old code truncated, adds and removes no finding, and leaves every exit code as it was
+  (1/2/1/1). Six consecutive runs per inventory now produce identical reports (bar the report's own
+  `**Run:**` timestamp line), and the BSD and GNU paths agree byte for byte on the same store.
+
+  The suite could not have caught this: no test asserted a concrete age. Two now do, and neither adds a
+  seam to the script. The first sizes its fixture so the defect reproduces rather than coin-flips; the
+  second places the run in a time zone whose calendar day currently differs from UTC's — `TZ` is a plain
+  POSIX variable, not something added to make the script testable — which is what pins "today" to the
+  local calendar day at any hour of the day.
+
 - **The dependency scan reported "clean" exactly when it found something (WI-0102).** Every external
   scanner `quality-scan.sh` drives shares one shape: it prints its full JSON report AND exits non-zero
   when it finds vulnerabilities. The `|| echo '{}'` arm therefore fired on the FINDINGS case, appending a
