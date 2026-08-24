@@ -541,7 +541,26 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
             err)  err  "$link_finding" ;;
             warn) warn "$link_finding" ;;
         esac
-    done < <(awk '
+    # LC_ALL=C is not cosmetic and not a style rule (WI-0099). Two measured
+    # reasons, both about this awk program specifically:
+    #
+    #   1. tolower() case-folds NON-ASCII according to the process locale, so
+    #      normalize_label() below matched `[ÄÖ]:` against `[äö]` under a UTF-8
+    #      locale and not under C. The test harness runs this script with
+    #      env={HOME, PATH} (C); an interactive /cleanup or /postmortem run
+    #      inherits the user's UTF-8 one. Same script, same input, two
+    #      conformance verdicts, decided by who called it.
+    #   2. /usr/bin/awk (20200816) ABORTS with `towc: multibyte conversion
+    #      failure` the moment a record contains a byte that is not valid UTF-8
+    #      — under a UTF-8 locale only. The whole index is then left unscanned
+    #      and every dead link in it disappears from the report, silently.
+    #      Byte-oriented C cannot reach that path.
+    #
+    # The house does the same at scripts/artifact-gate.sh, scripts/memory-sync.sh
+    # and scripts/lib/discipline_gate.sh. Pinning fixes the ANSWER in place; it
+    # does not by itself make the answer right — see the ASCII short-circuit in
+    # reference_link_span() for the other half.
+    done < <(LC_ALL=C awk '
         # Strip HTML-comment spans before extracting links: parking a retired entry
         # in `<!-- ... -->` is ordinary index practice and must not be linted.
         #
@@ -639,7 +658,19 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
             while (i <= n) {
                 if (substr(s, i, 1) == dest_mark) {
                     e = index(substr(s, i + 1), dest_mark)
-                    if (e == 0) {          # malformed guard — should not happen
+                    # An UNPAIRED sentinel — REACHABLE, and measured, not a
+                    # "should not happen" guard (WI-0097). Sentinels are only
+                    # ever emitted in pairs, but a source line may carry a
+                    # literal 0x03 byte of its own: in `a <0x03> stray and
+                    # [x](d.md)` the stray byte pairs with the OPENING sentinel
+                    # of the real destination one skip earlier, and the odd one
+                    # out arrives here. Copying the remainder verbatim is the
+                    # conservative answer — the bytes are handed on untouched,
+                    # so nothing is discarded and no code span or comment is
+                    # resolved across a boundary this function can no longer
+                    # trust. The loss itself is real, sits in the pairing one
+                    # skip earlier, and is recorded as WI-0097 (false negative).
+                    if (e == 0) {
                         out = out substr(s, i)
                         return out
                     }
@@ -683,7 +714,17 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
                 while (j <= n) {
                     if (substr(s, j, 1) == dest_mark) {
                         e = index(substr(s, j + 1), dest_mark)
-                        if (e == 0) break   # malformed guard — should not happen
+                        # Same unpaired sentinel, met while searching for a code
+                        # spans closer, and reachable for the same reason —
+                        # measured on a line whose backtick run opens BEFORE the
+                        # stray byte is reached, e.g. an unclosed code-span
+                        # opener followed by `<0x03> tail and [x](d.md)`.
+                        # `break` leaves the search with found == 0, so the
+                        # opener run is emitted as literal text (see below) and
+                        # the outer loop resumes right after it: the same
+                        # conservative "hand the bytes on" answer as the guard
+                        # at the top of this function.
+                        if (e == 0) break
                         j = j + e + 2
                         continue
                     }
@@ -771,9 +812,24 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
             }
             return out
         }
-        # Isolates every inline link destination — the `(...)` immediately
-        # after `](` — and wraps its raw text in dest_mark before resolve_
-        # paragraph() ever sees it (WI-0042). Riding the raw text along inside
+        # Wraps the raw text after a `](` in dest_mark before resolve_
+        # paragraph() ever sees it (WI-0042).
+        #
+        # Two honest limits, both measured (WI-0095). It matches EVERY `](`
+        # occurrence, whether or not a live link opener precedes it and whether
+        # or not the `]` is backslash-escaped — so `x](y [a](t.md) z)` gets a
+        # span over `y [a](t.md`. And where no unescaped `)` closes the
+        # destination it gives up (`dend == 0` below) and carries the whole
+        # remainder through UNPROTECTED, so "every destination is isolated" is
+        # not a property this function has.
+        #
+        # Neither limit was visible before WI-0080: the extractor scanned INSIDE
+        # a dest_mark span with a regex that did not know the span was there, so
+        # a wrong span was simply re-read as ordinary text. The scanner skips a
+        # span as one unit, which turns every wrong span from harmless into
+        # load-bearing — the general lesson, worth more than the two instances:
+        # once a stage becomes span-opaque, the correctness of the stage that
+        # DRAWS the spans stops being optional. Riding the raw text along inside
         # the normal `line` flow, instead of re-locating it afterward from a
         # parallel scan, keeps it structurally glued to whichever
         # `[text](dest)` span it belongs to — including when that whole span
@@ -808,18 +864,25 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
                     return out substr(s, dstart)
                 }
                 dest = substr(s, dstart, dend - dstart)
-                # An escaped ")" is literal destination text, per CommonMark —
-                # but it must not become a literal ")" byte HERE: process_link_
-                # line() below finds a link span with its own naive `[^)]*`
-                # scan, blind to the dest_mark opacity, and would stop right
-                # at it, truncating the destination exactly the way the
-                # unescaped bug did. Swapped for paren_mark instead — the same
-                # late-decode trick hash_mark uses for a decoded "#" against
-                # the shell-side fragment strip — and restored to a literal
-                # ")" only in strip_dest_mark(), once process_link_line() has
-                # already used the now-unbroken dest_mark span to find the
-                # destination extent.
-                gsub(/\\\)/, paren_mark, dest)
+                # An escaped ")" is literal destination text, per CommonMark,
+                # so the escape is undone here. It used to be undone into a
+                # paren_mark sentinel and restored to ")" only in
+                # strip_dest_mark(), because process_link_line() located a link
+                # span with a `[^)]*` scan of its own, blind to the dest_mark
+                # opacity, and would have stopped at a decoded ")"
+                # mid-destination. Since WI-0080 that scan is gone: the
+                # destination extent is read off the dest_mark span, so a ")"
+                # inside it is inert.
+                #
+                # The detour was kept one round longer on the grounds that no
+                # test could pin its removal either way. That was wrong, and the
+                # line below is why: decode_numeric_entities() runs AFTER the
+                # substitution, so `[x](a&#41;b.md)` has been putting a literal
+                # ")" inside a dest_mark span since WI-0081 and resolving
+                # correctly — the post-removal state was already pinned, by a
+                # fixture that existed before the removal. Both spellings now
+                # have one.
+                gsub(/\\\)/, ")", dest)
                 dest = decode_numeric_entities(dest)
                 out = out dest_mark dest dest_mark ")"
                 s = substr(s, dend + 1)
@@ -828,7 +891,6 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
         }
         function strip_dest_mark(s) {
             gsub(dest_mark, "", s)
-            gsub(paren_mark, ")", s)
             return s
         }
         # A reference-style definition destination is either the bracketed
@@ -867,35 +929,299 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
         function is_escaped(s, pos) {
             return (count_trailing_backslashes(s, pos) % 2 == 1)
         }
-        # Runs the extraction that used to sit directly in the main record
-        # block: find every `[text](dest)` span left after decommenting and
-        # code-span stripping, and print the destination unless it is an
-        # image marker (`![...]`, WI-0029). Factored out unchanged (WI-0050),
-        # called once per resolved paragraph by flush_paragraph() below.
-        function process_link_line(line,   prev, link, sep, open_pos, close_pos) {
-            prev = ""
-            while (match(line, /\[[^][]*\]\([^)]*\)/)) {
-                sep = index(substr(line, RSTART, RLENGTH), "](")
-                open_pos = RSTART
-                close_pos = RSTART + sep - 1
-                # A backslash-escaped `[` or `]` is literal text, not a link
-                # delimiter at all (WI-0079) — the reference renders neither
-                # `\[text](t.md)` nor `[text\](t.md)` as a link. Advance past
-                # only the disqualified opening bracket, one byte, so a REAL
-                # link starting later on the same line is still found —
-                # unlike the image-marker skip below, this match was never a
-                # link to begin with, so nothing structural is being discarded.
-                if (is_escaped(line, open_pos) || is_escaped(line, close_pos)) {
-                    line = substr(line, RSTART + 1)
+        # Normalises a reference LABEL the way CommonMark matches one: collapse
+        # every internal run of whitespace to a single space, trim the ends,
+        # then case-fold. Copied in behaviour from the pinned reference
+        # normalize_reference() (commonmark 0.9.2 — measured, see
+        # docs/memory/reference_commonmark-conformance.md), with one caveat
+        # this comment used to state too flatly (WI-0099). The reference
+        # case-FOLDS across all of Unicode; tolower() here folds whatever the
+        # process LOCALE says it folds. Measured on /usr/bin/awk (version
+        # 20200816), same input, same script: under LANG/LC_ALL=en_US.UTF-8 a
+        # definition written `[ÄÖ]:` and used as `[äö]` MATCHES and agrees with
+        # the reference; with no locale set, or LC_ALL=C, it does not and the
+        # enclosing link is reported. The test harness runs this script with a
+        # bare environment, so the corpus freezes the C-locale answer while an
+        # interactive run gives the UTF-8 one — the divergence is real, but it
+        # is a property of the environment, not of this line. Direction when it
+        # bites: the enclosing link is NOT deactivated, i.e. the pre-WI-0093
+        # behaviour.
+        #
+        # Backslash escapes are deliberately NOT decoded — the reference
+        # normalises the RAW label source on both sides, so `[a\]b]:` defines
+        # exactly the label `[a\]b]` uses, backslash and all.
+        function normalize_label(s) {
+            gsub(/[ \t\r\n]+/, " ", s)
+            sub(/^ /, "", s)
+            sub(/ $/, "", s)
+            return tolower(s)
+        }
+        # Returns the LENGTH of the link label starting at `start` (brackets
+        # included), or 0 if no valid label starts there. The grammar is the
+        # reference regex `reLinkLabel` (`^\[(?:[^\\\[\]]|\\.){0,1000}\]`, plus its
+        # length rejection) restated as a scan: unescaped brackets are not
+        # allowed inside a label, a backslash escapes exactly one following
+        # character and never a line ending, and a label longer than 1001 bytes
+        # including its brackets is no label at all.
+        #
+        # Used from BOTH ends of the reference-link mechanism — the definition
+        # line (`[label]: dest`) and the usage (`[text][label]`) — so the two
+        # cannot drift apart: a label one side accepts is a label the other
+        # accepts. That drift is exactly what WI-0094 found (the definition
+        # line still carried the `[^][]+` class WI-0080 had already removed from
+        # the usage side, so `[a\]b]: dest.md` was silently not a definition).
+        function parse_link_label(s, start,   n, p, c, span) {
+            if (substr(s, start, 1) != "[") return 0
+            n = length(s)
+            p = start + 1
+            while (p <= n) {
+                c = substr(s, p, 1)
+                if (c == "\\") {
+                    if (p >= n || substr(s, p + 1, 1) == "\n") return 0
+                    p += 2
                     continue
                 }
-                if (RSTART > 1) prev = substr(line, RSTART - 1, 1)
-                link = substr(line, RSTART, RLENGTH)
-                sep = index(link, "](")
-                # `![alt](src)` is an image, not an index entry.
-                if (prev != "!") print strip_dest_mark(substr(link, sep + 2, length(link) - sep - 2))
-                line = substr(line, RSTART + RLENGTH)
-                prev = ")"
+                if (c == "]") {
+                    span = p - start + 1
+                    return (span > 1001 ? 0 : span)
+                }
+                if (c == "[") return 0
+                p++
+            }
+            return 0
+        }
+        # Answers one question at a closing `]` that has NO inline destination
+        # after it: does a REFERENCE link resolve here? Returns -1 for "no",
+        # otherwise the number of bytes the construct consumes BEYOND the `]`
+        # (0 for the shortcut form, which consumes nothing beyond it).
+        #
+        # Three forms, all measured against the reference (WI-0093):
+        #   full       `[text][ref]` — the SECOND label names the definition.
+        #   collapsed  `[ref][]`     — the FIRST label does; `[]` is consumed.
+        #   shortcut   `[ref]`       — the FIRST label does; nothing follows.
+        #
+        # A failed FULL reference does not fall back to reading the first label
+        # as a shortcut: `[r][nosuch]` renders no link at all even with `[r]:`
+        # defined (measured — this is the one shape the obvious implementation
+        # gets wrong, and it has its own test).
+        #
+        # The label read here comes out of the RESOLVED paragraph, not out of
+        # the source: resolve_paragraph() has already deleted every code span
+        # and replaced every closed inline comment with `boundary`. An empty
+        # `lbl` therefore does not mean "the author wrote `[]`" — it can also
+        # mean "the author wrote a label that resolved away to nothing", and
+        # that is a label a definition can legitimately carry too. The lookup is
+        # unguarded for exactly that reason; the definition side registers its
+        # labels in this same resolved shape (see the definition branch in the
+        # record block), so `""` is a key only when some definition really did
+        # resolve to it (WI-0098).
+        # True when `s` carries any byte >= 0x80. Byte-wise on purpose — see
+        # the high_bytes comment in BEGIN for why this is not a regex.
+        function has_non_ascii(s,   i, n) {
+            n = length(s)
+            for (i = 1; i <= n; i++) if (index(high_bytes, substr(s, i, 1)) > 0) return 1
+            return 0
+        }
+        function reference_link_span(s, i, o_pos,   n, raw, lbl) {
+            n = parse_link_label(s, i + 1)
+            if (n > 2) raw = substr(s, i + 2, n - 2)
+            else raw = substr(s, o_pos + 1, i - o_pos - 1)
+            # WI-0099, the second half of the locale fix. Pinning LC_ALL=C
+            # makes the answer STABLE; on a non-ASCII label it would also make
+            # it stably WRONG, because C-locale tolower() folds nothing above
+            # 0x7F and `[ÄÖ]:` would stop matching `[äö]` for everyone rather
+            # than only for the harness. So a label carrying a byte >= 0x80 is
+            # answered "resolves" without consulting refmap at all.
+            #
+            # That is the conservative direction, and which direction it is
+            # follows from the shape of the caller, not from a sample of
+            # inputs: "resolves" only ever DEACTIVATES an enclosing opener and
+            # consumes a span, and the sole print() in process_link_line() sits
+            # behind an active opener. So this branch can drop a finding and
+            # cannot invent one -- SO LONG AS protect_link_destinations() draws
+            # correct spans (WI-0095, still open). parse_link_label() is blind
+            # to dest_mark; a `]` sitting inside a wrongly drawn span therefore
+            # terminates a label, and the advance this function returns lands
+            # in the middle of that span, where the invariant the argument
+            # above rests on no longer holds. Measured on bracket-soup input,
+            # check (n) does report targets the reference never renders. That
+            # is the WI-0095 family, not this branch, and this branch inherits
+            # its precondition. The dropped finding is real and is recorded
+            # as a corpus entry (`known_divergence`, direction false-negative):
+            # an UNDEFINED non-ASCII label now silences the link around it. The
+            # trade is the PO decision of 24.08.2026 — a false negative that is
+            # a property of this code, in place of a false positive that was a
+            # property of the environment it was measured in.
+            #
+            # Deliberately NOT narrowed on the definition side: `[ÄÖ]: dead.md`
+            # still reports its target. Whether a label MATCHES is the question
+            # narrowed here; whether a destination EXISTS is check (n)s own
+            # contract and needs no label folding at all.
+            if (has_non_ascii(raw)) return n
+            lbl = normalize_label(raw)
+            return ((lbl in refmap) ? n : -1)
+        }
+        # The effect of rule 3, in one place because it now has two callers (an
+        # inline link and a resolved reference link deactivate identically).
+        function deactivate_enclosing_link_openers(sp, st_img, st_act,   k) {
+            for (k = 1; k <= sp; k++) if (!st_img[k]) st_act[k] = 0
+        }
+        # Finds every inline link left in the resolved paragraph and prints its
+        # destination — images excluded (`![alt](src)` is not an index entry,
+        # WI-0029). Called once per resolved paragraph by flush_paragraph().
+        #
+        # A regex cannot express this (WI-0080). The label class used to be
+        # `\[[^][]*\]`, which excludes BOTH bracket characters — so no label
+        # carrying a bracket could ever match, and `[a [b] c](t.md)`, one
+        # ordinary link at the reference, was silently skipped at every nesting
+        # depth. Widening the class is not a fix either: CommonMark link text is
+        # a BALANCED, arbitrarily deep construct and a regular expression cannot
+        # count. (Measured against commonmark 0.9.2 to depth 100 — the reference
+        # imposes no ceiling, so neither does the stack below.)
+        #
+        # So: a scanner with an explicit opener stack, and four rules, each one
+        # measured at the reference rather than read out of the spec.
+        #
+        #   1. `[` pushes an opener, `]` pops one — balanced brackets in the
+        #      label are ordinary content, at any depth.
+        #   2. A backslash-escaped bracket is literal text and neither opens nor
+        #      closes anything (WI-0079). Decided by is_escaped(), i.e. by
+        #      backslash-run PARITY, never by a one-byte lookbehind: `\\[x](t.md)`
+        #      carries an escaped BACKSLASH and a live `[`. The same parity
+        #      decides the `!` of an image marker — `\![x](t.md)` is a link.
+        #   3. "Links may not contain other links, at any level of nesting" — on
+        #      a successful LINK every opener still on the stack is deactivated,
+        #      so no enclosing bracket can form a link and the INNER link wins.
+        #      Before this rewrite that held by accident (the outer label simply
+        #      could not match); it is now explicit, and pinned by its own test.
+        #   4. An IMAGE in the link text does NOT disqualify the enclosing link:
+        #      `[![alt](i.png)](t.md)`, the badge shape, is a live link whose
+        #      text is an image (WI-0091). This is also why the split point can
+        #      never be "the `](` on the line" — here the LABEL contains one.
+        #   5. Rule 3 fires on any successful LINK, not only on an inline one
+        #      (WI-0093). A `]` with no `(dest)` after it may still close a
+        #      RESOLVING reference link — shortcut `[ref]`, collapsed `[ref][]`
+        #      or full `[text][ref]` — and that deactivates the enclosing
+        #      openers exactly like an inline link does. Deciding it needs the
+        #      documents reference-definition labels, which is why this program
+        #      reads each index twice (see the pass gate in the record block).
+        #      Whether such a construct RESOLVES is the only difference between
+        #      `[a [b] c](t.md)`, one ordinary link, and `[a [ref] c](t.md)`,
+        #      which renders no outer link at all — measured, both of them.
+        #
+        # The destination is not re-parsed here. protect_link_destinations() has
+        # already isolated every `](`-destination into an opaque dest_mark span,
+        # so an inline link is exactly `]` + `(` + dest_mark span + `)`. The same
+        # span is skipped wholesale wherever else it is met, so a bracket inside
+        # a destination can never be read as a delimiter.
+        #
+        # Nothing is ever skipped by a match LENGTH: the scan only ever jumps
+        # over something it has RESOLVED — an opaque destination span, or a link
+        # it just consumed — and advances one byte everywhere else. A
+        # DISQUALIFIED construct therefore consumes exactly its one `]`, and
+        # cannot hide a real link later on the same line. WI-0079 had to arrange
+        # that by hand with a deliberate one-byte advance; here it follows from
+        # the shape of the loop.
+        function process_link_line(line,   n, i, ch, e, r, sp, o_img, o_act, o_pos,
+                                   prev, st_img, st_act, st_pos) {
+            n = length(line)
+            sp = 0
+            i = 1
+            while (i <= n) {
+                ch = substr(line, i, 1)
+                if (ch == dest_mark) {
+                    e = index(substr(line, i + 1), dest_mark)
+                    # An UNPAIRED sentinel. Reachable, though it reads as
+                    # impossible: protect_link_destinations() only ever emits
+                    # them in pairs, but a source file may contain a literal
+                    # 0x03 byte of its own. Measured, and it is NOT this branch
+                    # that then loses anything — the stray byte has already
+                    # PAIRED with the opening sentinel of a real destination one
+                    # skip earlier, swallowing the link in between; by the time
+                    # the odd one out is met, only a `)` and trailing prose are
+                    # left. The loss itself is real and recorded as WI-0097.
+                    #
+                    # `return` here is output-EQUIVALENT to a one-byte skip, and
+                    # that is an argument, not a sample of shapes that happened
+                    # to agree. `e == 0` says no further dest_mark occurs in the
+                    # rest of this line. The only `print` in this function sits
+                    # in the inline-destination branch, which needs TWO more
+                    # dest_marks after the current position to fire at all, so
+                    # from here on nothing can be printed. Nothing else in the
+                    # loop leaves the function: the opener stack is local, and
+                    # deactivating openers changes no output once no output is
+                    # possible. Continuing would therefore print exactly what
+                    # returning prints, which is nothing — so the shorter branch
+                    # is not a degradation choice, it is the same behaviour.
+                    if (e == 0) return
+                    i = i + e + 1
+                    continue
+                }
+                if (ch == "[" && !is_escaped(line, i)) {
+                    prev = (i > 1) ? substr(line, i - 1, 1) : ""
+                    sp++
+                    st_act[sp] = 1
+                    st_img[sp] = ((prev == "!") && !is_escaped(line, i - 1)) ? 1 : 0
+                    # Where this opener sits — rule 5 needs the label TEXT, not
+                    # just the fact that a label was open, to look a shortcut or
+                    # collapsed reference up in refmap.
+                    st_pos[sp] = i
+                    i++
+                    continue
+                }
+                if (ch == "]" && !is_escaped(line, i)) {
+                    if (sp == 0) {   # no opener left — a literal `]`
+                        i++
+                        continue
+                    }
+                    o_img = st_img[sp]
+                    o_act = st_act[sp]
+                    o_pos = st_pos[sp]
+                    sp--
+                    if (!o_act) {
+                        # Deactivated by rule 3 — no link of ANY form may close
+                        # here, so neither branch below is even tried. Tested
+                        # first, in that order, because the reference tests it
+                        # first: an inactive opener returns a literal `]` before
+                        # a destination or a label is ever looked at.
+                        i++
+                        continue
+                    }
+                    e = 0
+                    if (substr(line, i + 1, 2) == ("(" dest_mark)) {
+                        e = index(substr(line, i + 3), dest_mark)
+                        if (e > 0 && substr(line, i + 3 + e, 1) != ")") e = 0
+                    }
+                    if (e > 0) {
+                        if (!o_img) {
+                            print strip_dest_mark(substr(line, i + 3, e - 1))
+                            deactivate_enclosing_link_openers(sp, st_img, st_act)
+                        }
+                        i = i + 4 + e
+                        continue
+                    }
+                    # No inline destination — rule 5: a REFERENCE link may still
+                    # close here. The span it consumes is not always zero
+                    # (`[text][ref]` and `[ref][]` eat their second label), and
+                    # consuming it matters: `[text][ref](x.md)` renders the
+                    # reference link and leaves `(x.md)` as literal text, so a
+                    # scanner that only stepped one byte on would re-read
+                    # `[ref](x.md)` as an inline link and report a target nobody
+                    # linked. The destination of a reference link is NOT printed
+                    # here — its definition line already reports it (WI-0042).
+                    r = reference_link_span(line, i, o_pos)
+                    if (r < 0) {
+                        # No reference resolves either — an ordinary literal `]`.
+                        # The opener is gone but nothing is deactivated, so a
+                        # later link on the same line is unaffected.
+                        i++
+                        continue
+                    }
+                    if (!o_img) deactivate_enclosing_link_openers(sp, st_img, st_act)
+                    i = i + 1 + r
+                    continue
+                }
+                i++
             }
         }
         # Buffers one physical line into the current paragraph. protect_link_
@@ -914,11 +1240,11 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
         # comment, WI-0052 for the code span), and whichever of the two opens
         # first at a given position claims that span (WI-0048). There is no
         # per-line segment left to loop over afterward: process_link_line()
-        # runs exactly once, directly on the fully resolved text — its own
-        # `[^][]*`/`[^)]*` link regex already matches across an embedded
-        # newline the same way it matches across any other character, so a
-        # link whose label happens to still straddle two original lines (never
-        # inside a comment or code span) is found too, at no extra cost.
+        # runs exactly once, directly on the fully resolved text — its scanner
+        # treats an embedded newline as any other label byte (WI-0080; the
+        # `[^][]*` regex it replaced did too), so a link whose label happens to
+        # still straddle two original lines (never inside a comment or code
+        # span) is found too, at no extra cost.
         function flush_paragraph(   resolved) {
             # Cleared BEFORE the early return, not after the flush, so that
             # "empty buffer implies pbuf_para == 0" holds locally at every exit
@@ -930,7 +1256,9 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
             pbuf_para = 0
             if (pbuf_n == 0) return
             resolved = resolve_paragraph(pbuf)
-            process_link_line(resolved)
+            # Pass 1 exists only to fill refmap (see the pass gate in the record
+            # block); extracting there would print every finding twice.
+            if (pass == 2) process_link_line(resolved)
             pbuf = ""
             pbuf_n = 0
         }
@@ -941,12 +1269,59 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
             dest_mark = sprintf("%c", 3)
             html_comment_sentinel = sprintf("%c", 4)
             hash_mark = sprintf("%c", 5)
-            paren_mark = sprintf("%c", 6)
+            # Every byte >= 0x80, as a lookup string for has_non_ascii()
+            # below. Built with sprintf("%c") rather than written as a regex
+            # range for a measured reason: the three regex spellings that also
+            # work (`[\x80-\xFF]`, `[\200-\377]`, and the same range built
+            # dynamically) all ABORT this awk with `towc: multibyte conversion
+            # failure` when the input carries an invalid UTF-8 byte AND the
+            # locale says UTF-8. index() does not — it survived both locales on
+            # every probe. The LC_ALL=C pin at the call site already rules that
+            # combination out, so this is belt AND braces: the one spelling
+            # that stays correct if the pin is ever lost.
+            for (hb = 128; hb <= 255; hb++) high_bytes = high_bytes sprintf("%c", hb)
             pbuf = ""
             pbuf_n = 0
             pbuf_para = 0
+            pass = 0
         }
         {
+            # WI-0093: this program is handed the SAME index file twice, and
+            # runs its whole block machine over it twice. CommonMark collects
+            # reference DEFINITIONS for the entire document before it parses any
+            # inline content, so a definition may legally stand AFTER the link
+            # that uses it (measured) — a single pass cannot answer rule 5 at
+            # the moment it reaches the link. Pass 1 therefore prints nothing
+            # and only fills refmap; pass 2 does the real extraction with the
+            # complete label set.
+            #
+            # Two passes of the SAME program, rather than a cheap pre-scan for
+            # definition-shaped lines: whether a line IS a definition depends on
+            # its block context (inside a fence or an HTML comment it is not
+            # one, and it may not interrupt a paragraph — all measured), and
+            # that context is exactly what this record block computes. A second
+            # implementation of it would be a second thing to keep in step.
+            #
+            # Every scrap of pass-1 state is dropped at the pass boundary;
+            # refmap is the only thing that crosses it. Line numbers below are
+            # therefore FNR, not NR — NR keeps counting across both passes and
+            # would report an unclosed fence at twice its line number.
+            if (NR == FNR) {
+                pass = 1
+            } else if (pass == 1) {
+                pass = 2
+                in_fence = 0
+                fence_char = ""
+                fence_len = 0
+                fence_open_line = 0
+                in_html_comment = 0
+                html_comment_open_line = 0
+                in_html_block1 = 0
+                in_html_block6 = 0
+                pbuf = ""
+                pbuf_n = 0
+                pbuf_para = 0
+            }
             # WI-0086: CommonMark counts `\r\n`, `\r` and `\n` all as line
             # endings; awk splits records on `\n` only, so a CRLF file hands
             # every record over with a trailing `\r` still attached. That does
@@ -1015,9 +1390,13 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
             #
             # A fence opener is itself a block boundary, so it flushes whatever
             # paragraph was being buffered — the opener substring is read out of
-            # $0 via RSTART/RLENGTH BEFORE the flush, because flush_paragraph()
-            # runs process_link_line(), which calls match() itself and would
-            # otherwise clobber them.
+            # $0 via RSTART/RLENGTH BEFORE the flush. That ordering was
+            # load-bearing while process_link_line() drove a match() loop of its
+            # own; since WI-0080 replaced that loop with a scanner, nothing
+            # reachable from flush_paragraph() calls match() any more. Kept
+            # anyway, and only as defence: reading a matched substring before
+            # calling out is the ordering that stays correct if any callee ever
+            # uses match() again.
             if (!in_html_comment && match($0, /^[ ]{0,3}(```+|~~~+)/)) {
                 opener = substr($0, RSTART, RLENGTH)
                 sub(/^[ ]{0,3}/, "", opener)
@@ -1025,7 +1404,7 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
                 fence_char = substr(opener, 1, 1)
                 fence_len = length(opener)
                 in_fence = 1
-                fence_open_line = NR
+                fence_open_line = FNR
                 next
             }
 
@@ -1061,7 +1440,7 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
                 flush_paragraph()
                 if ($0 !~ /-->/) {
                     in_html_comment = 1
-                    html_comment_open_line = NR
+                    html_comment_open_line = FNR
                 }
                 next
             }
@@ -1114,15 +1493,115 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
             # Target normalisation (whitespace, quoted-title stripping) happens
             # uniformly on the shell side below. A genuine reference definition
             # is its own block, so it flushes whatever paragraph was buffered;
-            # raw_rest is read out via RSTART/RLENGTH before that flush, for the
-            # same reason the fence-opener branch above reads its own substring
-            # first.
-            if (match($0, /^[ ]{0,3}\[[^][]+\]:[ \t]*/)) {
-                raw_rest = substr($0, RSTART + RLENGTH)
-                if (reference_definition_tail(raw_rest)) {
-                    flush_paragraph()
-                    print raw_rest
-                    next
+            # raw_rest is read out of the record BEFORE that flush, for the same
+            # reason the fence-opener branch above reads its own substring
+            # first. It is read via lstart/lnum, i.e. off the label
+            # parse_link_label() just measured -- NOT via RSTART/RLENGTH, which
+            # since WI-0094 only locate the opening bracket of that label.
+            #
+            # The label is read with parse_link_label(), the SAME grammar the
+            # usage side uses, rather than with a class of its own (WI-0094).
+            # The class it replaces, `[^][]+`, excluded `]` outright — so
+            # `[a\]b]: dest.md`, one definition at the reference, was not
+            # recognised as a definition at all and its target went unchecked.
+            # That is the WI-0080 defect one function further along: the same
+            # rule expressed twice drifts, expressed once it cannot.
+            #
+            # This is also where the label set that rule 5 consults is built.
+            # Recorded BEFORE the flush, because the pbuf_n gate has to read the
+            # buffer state this line arrived in, not the emptied one: a
+            # definition may not INTERRUPT a paragraph (measured — with prose
+            # open above it the reference reads the line as ordinary text and
+            # defines nothing).
+            #
+            # Reporting the target sits BEHIND THE SAME GATE (WI-0096, PO
+            # decision 24.08.2026). It did not before, and the gap was the last
+            # false positive in the corpus. The line that draws the boundary
+            # between this and WI-0085 is not the syntax, which is identical in
+            # both, but what the READER sees:
+            #
+            #   * `[ref]: dead.md` on its own renders as NOTHING. The author
+            #     declared a destination, it is gone, and no reader will ever
+            #     notice — invisibly dead, so check (n) reports it under its own
+            #     broader contract (WI-0085), even though CommonMark renders no
+            #     link either.
+            #   * `foo` then `[ref]: dead.md` renders as VISIBLE paragraph
+            #     text. The path is prose on the page, not a pointer at all,
+            #     and reporting it was a false positive (WI-0096).
+            #
+            # The `reflbl != ""` half of the gate is a second, independent
+            # answer of the same kind: `[ ]: dead.md` is no definition either
+            # (a label needs one non-whitespace character) and renders as
+            # visible prose. Both halves have their own corpus entry, and
+            # removing either one alone turns the matching entry red.
+            # refmap, meanwhile, answers only the narrower CommonMark question
+            # "does a reference resolve here".
+            #
+            # The label is registered TWICE, and the second one is the point
+            # (WI-0098). This side reads the RAW record; the usage side reads
+            # the paragraph after protect_link_destinations() and
+            # resolve_paragraph() have run, and those two delete a code span
+            # outright and swap a closed inline comment for `boundary`. So
+            # ``[`a`]:`` registered `` `a` `` while ``[`a`]`` looked up the
+            # empty string, nothing matched, and an outer link the reference
+            # does not render was reported — a false positive this round
+            # introduced, measured against 4f2ffa7 and against the reference.
+            # Running the definition label through the SAME two transformations
+            # puts both sides in one key space. It is deliberately an ADDITIONAL
+            # key, never a replacement: adding keys can only make more
+            # references RESOLVE, and a resolving reference only ever
+            # deactivates an enclosing link, so this cannot invent a finding --
+            # so long as protect_link_destinations() draws correct spans
+            # (WI-0095, still open; see the same proviso on reference_link_span
+            # above, which is where a resolving reference also CONSUMES bytes).
+            # Under that precondition the error it can make is dropping one,
+            # and it makes exactly one -- a CLASS, not a shape. The resolution
+            # is not INJECTIVE: distinct raw labels share one resolved key, and
+            # once any definition owns that key, every other label collapsing
+            # to it reads as a resolving reference and silences the link
+            # around it. The mapping has two accumulation points:
+            #
+            #   * the EMPTY key -- a code-span-only label (``[`x`]``), a
+            #     literal `[]`, a whitespace-only `[   ]`. The last two are the
+            #     wider half: the REFERENCE never looks an empty label up at
+            #     all (a label needs one non-whitespace character), while this
+            #     side keys on the resolved shape and finds one.
+            #   * the `boundary` key -- any label that is exactly one closed
+            #     inline comment, so `<!--a-->` and `<!--b-->`, sharing nothing
+            #     but their delimiters, are interchangeable here.
+            #
+            # All four routes are measured, each against a control carrying the
+            # same label with NO colliding definition, where the link is still
+            # reported -- so the loss is pinned on the collision, not on the
+            # label shape. That trade is the PO decision of 24.08.2026 — a
+            # false negative in place of a false positive.
+            #
+            # Which constructs does this cover? Every one either function
+            # rewrites, because the label is put through the functions
+            # themselves rather than through a list of cases: code spans and
+            # closed inline comments from resolve_paragraph(), destination
+            # sentinels, escaped-paren marks and decoded numeric entities from
+            # protect_link_destinations(). Not covered, and out of scope here:
+            # a construct whose resolution depends on text OUTSIDE the label
+            # (an unpaired backtick that finds its partner later in the
+            # paragraph), where the standalone resolution done here and the
+            # in-context resolution done there can still disagree.
+            if (match($0, /^[ ]{0,3}\[/)) {
+                lstart = RSTART + RLENGTH - 1
+                lnum = parse_link_label($0, lstart)
+                if (lnum >= 2 && substr($0, lstart + lnum, 1) == ":") {
+                    raw_rest = substr($0, lstart + lnum + 1)
+                    sub(/^[ \t]+/, "", raw_rest)
+                    rawlbl = substr($0, lstart + 1, lnum - 2)
+                    reflbl = normalize_label(rawlbl)
+                    if (pbuf_n == 0 && reflbl != "" && reference_definition_tail(raw_rest)) {
+                        reslbl = normalize_label(resolve_paragraph(protect_link_destinations(rawlbl)))
+                        refmap[reflbl] = 1
+                        if (reslbl != reflbl) refmap[reslbl] = 1
+                        flush_paragraph()
+                        if (pass == 2) print raw_rest
+                        next
+                    }
                 }
                 # Not a valid reference definition — fall through so a real
                 # `[x](y)` link elsewhere on this line is still found below.
@@ -1309,7 +1788,7 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
             if (in_fence) print fence_sentinel fence_open_line
             if (in_html_comment) print html_comment_sentinel html_comment_open_line
         }
-    ' "$INDEX_FILE")  # exit-status: exempt proc-subst-unobservable
+    ' "$INDEX_FILE" "$INDEX_FILE")  # exit-status: exempt proc-subst-unobservable
 done
 
 # Report

@@ -103,10 +103,24 @@ class FixtureIntegrityTest(unittest.TestCase):
     # Closed set of work items allowed to own a `known_divergence` block. WI-0005
     # is the original adversarial-corpus round; WI-0081 (remainder, 23.08.2026)
     # reclassified the named-entity destination row from a "wrong-target" bug
-    # into a documented, deliberate non-claim (see that entry's own reason text)
-    # -- a future round's own findings still get their own new tag, not silently
-    # absorbed into either of these two.
-    _KNOWN_DIVERGENCE_WORK_ITEMS = {"WI-0005", "WI-0081"}
+    # into a documented, deliberate non-claim (see that entry's own reason text).
+    # WI-0095 and WI-0097 are two of the WI-0093 round's three finds -- a wrong
+    # destination span that the WI-0080 scanner now skips wholesale, and a stray
+    # sentinel byte that pairs with a real one. WI-0098 is the review round's
+    # own: a label the paragraph resolver rewrites is keyed differently on the
+    # two sides of the reference mechanism, and the FIX for that false positive
+    # buys one false negative, which is the divergence class tagged here.
+    #
+    # WI-0096, that round's third find, is NO LONGER on this list (24.08.2026):
+    # the definition-shaped line reported where CommonMark reads none was the
+    # last false positive in the corpus and is fixed, so no entry owns that tag
+    # any more. It is removed rather than kept as a harmless leftover, so that
+    # re-opening it has to be a deliberate act here instead of passing
+    # unnoticed. A future round's own findings still get their own new tag, not
+    # silently absorbed into any of these five.
+    _KNOWN_DIVERGENCE_WORK_ITEMS = {
+        "WI-0005", "WI-0081", "WI-0095", "WI-0097", "WI-0098",
+    }
 
     def test_every_known_divergence_is_tagged_a_known_work_item(self):
         untagged = [
@@ -245,17 +259,323 @@ class CommonmarkCorpusDifferentialTest(unittest.TestCase):
         self.assertEqual(entry["reference_checkable_targets"], ["dead-esc7.md"])
         self.assertIsNone(entry["known_divergence"])
 
-    def test_predicted_false_negative_nested_brackets_in_link_text_are_not_matched(self):
-        """WI-0005 briefing's second prediction, confirmed: `[a [b] c](dead.md)`
-        is one ordinary link per CommonMark, but check (n)'s label regex
-        `[^][]*` forbids ANY literal bracket inside the text, nested or not,
-        so it never matches this span at all.
+    def test_nested_brackets_in_the_link_text_no_longer_hide_the_link(self):
+        """WI-0080, fixed: `[a [b] c](dead.md)` is one ordinary link per
+        CommonMark, but check (n)'s label regex `[^][]*` forbade ANY literal
+        bracket inside the link text, nested or not, so it never matched the
+        span at all. The regex is gone — a bracket-stack scanner now reads the
+        label — and both oracles agree. The entry name still records the defect
+        it was minted for (same convention as the WI-0082 entries below).
         """
         entry = self._entry("nested_brackets_in_link_text_simple")
         findings = run_memory_lint_on(entry["markdown"])
 
-        self.assertEqual(findings, [])
+        self.assertEqual(findings, ["dead-nb1.md"])
         self.assertEqual(entry["reference_checkable_targets"], ["dead-nb1.md"])
+        self.assertIsNone(entry["known_divergence"])
+
+    def test_nested_brackets_in_link_text_are_found_mid_paragraph_too(self):
+        """WI-0080's second fixture: the same construct in running prose rather
+        than a bullet item, so the closure is not pinned to list context."""
+        entry = self._entry("nested_brackets_in_link_text_mid_sentence")
+        findings = run_memory_lint_on(entry["markdown"])
+
+        self.assertEqual(findings, ["dead-esc2.md"])
+        self.assertEqual(entry["reference_checkable_targets"], ["dead-esc2.md"])
+        self.assertIsNone(entry["known_divergence"])
+
+    def test_an_escaped_bracket_inside_the_link_text_no_longer_hides_the_link(self):
+        """WI-0080's other trigger, same root cause: `[a\\]b](dead.md)`. The
+        reference decodes the escape and reads the label as `a]b`; the old label
+        class excluded `]` regardless of the preceding backslash. The scanner
+        treats an escaped bracket as label CONTENT via is_escaped()."""
+        entry = self._entry("backslash_escaped_bracket_in_link_text")
+        findings = run_memory_lint_on(entry["markdown"])
+
+        self.assertEqual(findings, ["dead-esc5.md"])
+        self.assertEqual(entry["reference_checkable_targets"], ["dead-esc5.md"])
+        self.assertIsNone(entry["known_divergence"])
+
+    def test_three_levels_of_nested_brackets_are_one_link(self):
+        """WI-0080 depth pin. A repair that tolerated exactly one bracket pair
+        would still pass the two entries above; this one discriminates a real
+        stack from a special case."""
+        entry = self._entry("nested_brackets_three_levels_in_link_text")
+        findings = run_memory_lint_on(entry["markdown"])
+
+        self.assertEqual(findings, ["dead-nb3.md"])
+        self.assertEqual(entry["reference_checkable_targets"], ["dead-nb3.md"])
+
+    def test_an_unbalanced_closing_bracket_stays_silent(self):
+        """WI-0080 negative pin: `[a] b](dead.md)` renders NO link at the
+        reference — `[a]` closes on its own and the second `]` has no opener
+        left. The obvious wrong repairs (widen the label class; split at the
+        last `](`) all report the target here. This entry's value is that it
+        stays EMPTY on both sides."""
+        entry = self._entry("unbalanced_closing_bracket_is_not_a_link")
+        findings = run_memory_lint_on(entry["markdown"])
+
+        self.assertEqual(findings, [])
+        self.assertEqual(entry["reference_checkable_targets"], [])
+
+    def test_a_link_in_the_link_text_leaves_only_the_inner_link_and_later_ones(self):
+        """CommonMark: "Links may not contain other links, at any level of
+        nesting". The inner link wins, the outer opener is deactivated — and the
+        deactivation must not swallow an independent link further along the same
+        line (WI-0080)."""
+        entry = self._entry("link_in_link_text_inner_wins_beside_a_later_link")
+        findings = run_memory_lint_on(entry["markdown"])
+
+        self.assertEqual(findings, ["dead-nb5-inner.md", "dead-nb5-later.md"])
+        self.assertEqual(
+            entry["reference_checkable_targets"],
+            ["dead-nb5-inner.md", "dead-nb5-later.md"],
+        )
+
+    def test_an_image_in_the_link_text_leaves_the_outer_link_live(self):
+        """WI-0091, the badge shape `[![alt](badge.png)](target.md)`. Only a
+        LINK in the link text disqualifies the enclosing link; an IMAGE does
+        not. The image source is never a check (n) finding, so the reference
+        column is the link target alone."""
+        entry = self._entry("image_in_link_text_badge_pattern")
+        findings = run_memory_lint_on(entry["markdown"])
+
+        self.assertEqual(findings, ["dead-img1.md"])
+        self.assertEqual(entry["reference_checkable_targets"], ["dead-img1.md"])
+
+    def test_two_nested_images_in_the_link_text_still_leave_one_link(self):
+        """WI-0091 at depth: one link, two images, no image reported."""
+        entry = self._entry("image_nested_two_deep_in_link_text")
+        findings = run_memory_lint_on(entry["markdown"])
+
+        self.assertEqual(findings, ["dead-img2.md"])
+        self.assertEqual(entry["reference_checkable_targets"], ["dead-img2.md"])
+
+    def test_an_image_with_a_bracketed_alt_text_is_still_not_a_link(self):
+        """WI-0091 negative pin: `![[a]](i.png)` is an image. The old code
+        decided that on the byte before `[`; the scanner decides it on the
+        opener it pushed, and must reach the same answer for an alt text the
+        old label class could never have matched."""
+        entry = self._entry("image_with_bracketed_alt_text_is_not_a_link")
+        findings = run_memory_lint_on(entry["markdown"])
+
+        self.assertEqual(findings, [])
+        self.assertEqual(entry["reference_checkable_targets"], [])
+
+    def test_a_resolving_reference_link_in_the_link_text_disqualifies_the_outer_link(self):
+        """WI-0093. CommonMark's "no links in links" rule fires on any
+        successful LINK, not only an inline one — `[outer [ref5] text](out.md)`
+        with `[ref5]:` defined renders ONE link, to the definition's target, and
+        the outer `](out.md)` is literal. The WI-0080 scanner deactivated
+        enclosing openers only in its inline-destination branch and reported
+        `out.md` too: a false positive the regex it replaced never produced."""
+        entry = self._entry("shortcut_reference_in_link_text_disqualifies_outer")
+        findings = run_memory_lint_on(entry["markdown"])
+
+        self.assertEqual(findings, ["dead-refdis1.md"])
+        self.assertEqual(entry["reference_checkable_targets"], ["dead-refdis1.md"])
+        self.assertIsNone(entry["known_divergence"])
+
+    def test_a_reference_definition_after_its_use_still_disqualifies_the_outer_link(self):
+        """WI-0093's architectural entry, and the reason check (n) reads each
+        index TWICE: CommonMark collects reference definitions for the whole
+        document before it parses any inline content, so a definition may stand
+        after the link that uses it. A single pass cannot answer the rule at the
+        moment it reaches the link."""
+        entry = self._entry("reference_definition_after_its_use_still_disqualifies")
+        findings = run_memory_lint_on(entry["markdown"])
+
+        self.assertEqual(findings, ["dead-refdis2.md"])
+        self.assertEqual(entry["reference_checkable_targets"], ["dead-refdis2.md"])
+        self.assertIsNone(entry["known_divergence"])
+
+    def test_an_undefined_label_in_the_link_text_leaves_the_outer_link_alive(self):
+        """The counter-entry that forbids the cheap repair for WI-0093.
+        "Deactivate whenever no inline destination follows" would also kill
+        `[a [b] c](t.md)`, WI-0080's central fixture. The only difference
+        between the two is whether the inner label RESOLVES — here it does not,
+        and this entry's value is that the outer link stays reported."""
+        entry = self._entry("undefined_label_in_link_text_keeps_the_outer_link")
+        findings = run_memory_lint_on(entry["markdown"])
+
+        self.assertEqual(findings, ["dead-refout3.md"])
+        self.assertEqual(entry["reference_checkable_targets"], ["dead-refout3.md"])
+
+    def test_a_failed_full_reference_leaves_the_outer_link_alive(self):
+        """Measured, and NOT derivable from the spec text: in `[ref8][nosuch]`
+        the FIRST label is defined, but the reference does not fall back to the
+        shortcut reading — the failed full reference renders no link at all, so
+        nothing is deactivated. The single shape an obvious WI-0093 repair gets
+        wrong."""
+        entry = self._entry("failed_full_reference_keeps_the_outer_link")
+        findings = run_memory_lint_on(entry["markdown"])
+
+        self.assertEqual(findings, ["dead-refout5.md"])
+        self.assertEqual(entry["reference_checkable_targets"], ["dead-refout5.md"])
+
+    def test_a_reference_definition_inside_a_fence_defines_nothing(self):
+        """A reference definition is a BLOCK construct: inside a fence it is
+        code. Pins that WI-0093's label collection runs the same block machine
+        as the extraction, rather than grepping the file for definition-shaped
+        lines — a pre-scan would define `ref11` and wrongly silence the outer
+        link."""
+        entry = self._entry("reference_definition_inside_a_fence_defines_nothing")
+        findings = run_memory_lint_on(entry["markdown"])
+
+        self.assertEqual(findings, ["dead-refout7.md"])
+        self.assertEqual(entry["reference_checkable_targets"], ["dead-refout7.md"])
+
+    def test_an_escaped_bracket_in_a_definition_label_is_still_a_definition(self):
+        """WI-0094: the DEFINITION side of the label grammar WI-0080 fixed on
+        the usage side. `[a\\]b]: dead-escdefn.md` is one definition at the
+        reference; check (n) recognised definitions with `\\[[^][]+\\]:`, which
+        excludes `]` regardless of a preceding backslash, so the line was not a
+        definition at all and its target went unchecked."""
+        entry = self._entry("backslash_escaped_bracket_in_reference_definition_label")
+        findings = run_memory_lint_on(entry["markdown"])
+
+        self.assertEqual(findings, ["dead-escdefn.md"])
+        self.assertEqual(entry["reference_checkable_targets"], ["dead-escdefn.md"])
+        self.assertIsNone(entry["known_divergence"])
+
+    def test_a_wrong_destination_span_now_hides_the_real_link_inside_it(self):
+        """WI-0095, an OPEN divergence this round introduced and did not close.
+        protect_link_destinations() spans the text after ANY `](`, live opener
+        or not; the WI-0080 scanner skips such a span WHOLESALE, so the real
+        link inside a wrong span vanishes. 4f2ffa7 found it, because its regex
+        was blind to the span it scanned through. Direction: false negative —
+        it hides findings, it never invents one."""
+        stray = self._entry("stray_close_bracket_paren_span_hides_a_later_link")
+        escaped = self._entry("escaped_close_bracket_paren_span_hides_a_later_link")
+
+        self.assertEqual(run_memory_lint_on(stray["markdown"]), [])
+        self.assertEqual(run_memory_lint_on(escaped["markdown"]), [])
+        self.assertEqual(stray["reference_checkable_targets"], ["dead-span1.md"])
+        self.assertEqual(escaped["reference_checkable_targets"], ["dead-span2.md"])
+        for entry in (stray, escaped):
+            self.assertEqual(entry["known_divergence"]["direction"], "false-negative")
+            self.assertEqual(entry["known_divergence"]["work_item"], "WI-0095")
+
+    def test_a_stray_sentinel_byte_swallows_the_link_that_follows_it(self):
+        """WI-0097, an OPEN divergence of the same family as WI-0095: a span
+        that should not exist, skipped as a unit. A literal 0x03 byte in the
+        source is read as the OPENING sentinel of a protected destination and
+        pairs with the one opening the next real destination, so the link
+        between them disappears. Pathological input, false-negative direction,
+        left open rather than fixed in the round that measured it."""
+        entry = self._entry("stray_sentinel_byte_swallows_the_following_link")
+
+        self.assertEqual(run_memory_lint_on(entry["markdown"]), [])
+        self.assertEqual(entry["reference_checkable_targets"], ["dead-stray1.md"])
+        self.assertEqual(entry["known_divergence"]["direction"], "false-negative")
+        self.assertEqual(entry["known_divergence"]["work_item"], "WI-0097")
+
+    def test_a_definition_line_that_cannot_interrupt_a_paragraph_is_not_reported(self):
+        """WI-0096, fixed (PO decision 24.08.2026). A link reference definition
+        may not interrupt a paragraph, so with prose open above it the
+        reference reads the line as ordinary text and renders no link for it.
+        check (n) used to report its target anyway — the last false positive in
+        the corpus. It now asks the paragraph buffer the same question and
+        stays silent; only the OUTER link, which the refmap never treated as
+        defined either, is reported. The entry name still records the defect it
+        was minted for.
+
+        This is NOT the WI-0085 decision one shape further along, which is why
+        the two verdicts differ on the same bytes: the deciding question is
+        what the reader sees. WI-0085's lone definition renders as
+        nothing, so its dead pointer is invisible and worth reporting; here the
+        very same bytes render as visible paragraph prose."""
+        entry = self._entry("reference_definition_cannot_interrupt_a_paragraph")
+        findings = run_memory_lint_on(entry["markdown"])
+
+        self.assertEqual(findings, ["dead-refout8.md"])
+        self.assertEqual(entry["reference_checkable_targets"], ["dead-refout8.md"])
+        self.assertIsNone(
+            entry["known_divergence"],
+            "the entry must no longer carry a known_divergence — a fixed "
+            "divergence that keeps its block would leave the corpus claiming "
+            "a false positive this round removed",
+        )
+        self.assertIsNone(entry.get("documented_intent"))
+
+    def test_a_label_without_a_non_whitespace_character_is_no_definition(self):
+        """The sibling of WI-0096, measured 24.08.2026 and answered by the same
+        rule through a DIFFERENT gate. A link label needs at least one
+        non-whitespace character, so neither `[ ]:` nor `[]:` opens a reference
+        definition and the reference renders both lines as visible paragraph
+        text — the WI-0096 verdict (prose on the page, not a pointer), not the
+        WI-0085 one (a declared destination that renders as nothing).
+
+        check (n) already agreed before this round, but silently and untested;
+        it does so through `reflbl != ""` in the definition branch and not
+        through the paragraph-buffer gate WI-0096 added. Measured both ways:
+        with the paragraph gate removed these two stay silent, with
+        `reflbl != ""` removed they report their targets. Pinning it here is
+        what turns an incidental agreement into a claim."""
+        ws = self._entry("whitespace_only_label_is_not_a_reference_definition")
+        empty = self._entry("empty_label_is_not_a_reference_definition")
+
+        for entry in (ws, empty):
+            with self.subTest(entry=entry["name"]):
+                self.assertEqual(run_memory_lint_on(entry["markdown"]), [])
+                self.assertEqual(entry["reference_checkable_targets"], [])
+                self.assertIsNone(entry["known_divergence"])
+                self.assertIsNone(entry.get("documented_intent"))
+
+    def test_the_label_collision_class_has_two_accumulation_points(self):
+        """WI-0098, the whole class rather than the one shape it was minted on
+        (measured 24.08.2026). check (n) keys reference labels by their
+        RESOLVED shape, and that mapping is not injective: distinct raw labels
+        share a key, and once a definition owns that key every other label
+        collapsing to it reads as a resolving reference and silences the link
+        around it.
+
+        Two accumulation points, three routes measured here:
+
+          * the EMPTY key, reached by a literal `[]` and by a whitespace-only
+            `[   ]`. Wider than the code-span shape the class was found on,
+            because the REFERENCE never looks an empty label up at all.
+          * the `boundary` key, reached by any label that is exactly one closed
+            inline comment — `<!--a-->` and `<!--b-->` share nothing else and
+            are still interchangeable. No empty label is involved, which is why
+            the class is stated as non-injectivity and not as "the empty
+            label".
+
+        Each divergent entry is paired with a control carrying the SAME label
+        and NO colliding definition, where the outer link IS reported. Without
+        those the entries would be equally consistent with "such a label
+        silences the link", which is not what happens."""
+        collisions = (
+            ("literal_empty_label_in_link_text_collides_with_a_definition",
+             ["dead-empty-defn.md"]),
+            ("whitespace_only_label_in_link_text_collides_with_a_definition",
+             ["dead-wslabel-defn.md"]),
+            ("boundary_labels_from_two_different_comments_collide",
+             ["dead-boundary-defn.md"]),
+        )
+        for name, expected in collisions:
+            entry = self._entry(name)
+            with self.subTest(entry=name):
+                self.assertEqual(run_memory_lint_on(entry["markdown"]), expected)
+                self.assertEqual(entry["known_divergence"]["direction"], "false-negative")
+                self.assertEqual(entry["known_divergence"]["work_item"], "WI-0098")
+                # The reference renders the outer link the scanner drops.
+                self.assertEqual(len(entry["reference_checkable_targets"]), 2)
+
+        controls = (
+            ("literal_empty_label_in_link_text_without_a_definition_control",
+             ["dead-empty-ctl.md"]),
+            ("whitespace_only_label_in_link_text_without_a_definition_control",
+             ["dead-wslabel-ctl.md"]),
+            ("comment_label_in_link_text_without_a_definition_control",
+             ["dead-boundary-ctl.md"]),
+        )
+        for name, expected in controls:
+            entry = self._entry(name)
+            with self.subTest(control=name):
+                self.assertEqual(run_memory_lint_on(entry["markdown"]), expected)
+                self.assertEqual(entry["reference_checkable_targets"], expected)
+                self.assertIsNone(entry["known_divergence"])
 
     def test_a_setext_heading_underline_is_a_recognised_block_boundary(self):
         """WI-0082, fixed: a setext-heading underline (`===`) used to be absent
@@ -566,11 +886,12 @@ class GeneratorDocumentedIntentValidationTest(unittest.TestCase):
          sharing its message with the new field.
 
     Each test runs a COPY of the real generator, its `CORPUS` list swapped
-    for a single synthetic entry built for that scenario — the real
-    44-entry corpus is already exercised by CommonmarkCorpusDifferentialTest
-    / FixtureIntegrityTest above; re-running all 44 entries three more times
-    here would triple this module's real `bash`-subprocess cost for no
-    additional coverage. Never the checked-in generator or fixture — proven
+    for a single synthetic entry built for that scenario — the real corpus
+    (65 entries as of WI-0093) is already exercised by
+    CommonmarkCorpusDifferentialTest / FixtureIntegrityTest above; re-running
+    every entry three more times here would triple this module's real
+    `bash`-subprocess cost for no additional coverage. The count is prose, not
+    an assertion — FixtureIntegrityTest owns the real one. Never the checked-in generator or fixture — proven
     by md5 before/after, same discipline
     MutationProvesTheDifferentialTestCanFail above uses for the shell
     script.
@@ -630,16 +951,25 @@ class GeneratorDocumentedIntentValidationTest(unittest.TestCase):
     _ENTRY_BOTH_BLOCKS = {
         "name": "synthetic_both_blocks",
         "category": "synthetic",
-        # A genuine false-negative (nested brackets break check (n)'s label
-        # regex, see nested_brackets_in_link_text_simple in the real
-        # CORPUS) — actually_diverges is True here, so only the "both
-        # blocks present" guard, not the "claims a divergence that doesn't
-        # exist" guards, can be the one that fires.
-        "markdown": "- [a [b] c](dead-nb1.md) — nested brackets in link text\n",
+        # A genuine divergence is needed here: actually_diverges must be True
+        # so that only the "both blocks present" guard, and not the "claims a
+        # divergence that doesn't exist" guards, can be the one that fires.
+        # A NAMED entity in the destination is the construct used for it (see
+        # entity_reference_named_in_destination in the real CORPUS, which
+        # carries the same known_divergence/WI-0081 classification; the extra
+        # documented_intent block below is what makes this fixture synthetic,
+        # and is the whole scenario under test) — check (n)
+        # deliberately does not decode the ~2000-entry named-entity table and
+        # files such a target as Info instead, so the reference sees a link and
+        # the differential's errors/warnings view sees nothing. It replaced the
+        # nested-bracket construct this fixture used until 23.08.2026, which
+        # WI-0080 closed: the two oracles agree on it now, and a synthetic
+        # fixture that no longer reproduces a divergence tests nothing.
+        "markdown": "[x](dead-both&num;3.md) — named entity in destination\n",
         "known_divergence": {
             "direction": "false-negative",
             "reason": "synthetic fixture for GeneratorDocumentedIntentValidationTest",
-            "work_item": "WI-0005",
+            "work_item": "WI-0081",
         },
         "documented_intent": {
             "reason": "synthetic fixture for GeneratorDocumentedIntentValidationTest",
@@ -650,11 +980,11 @@ class GeneratorDocumentedIntentValidationTest(unittest.TestCase):
     _ENTRY_NEITHER_BLOCK = {
         "name": "synthetic_neither_block",
         "category": "synthetic",
-        # Same false-negative construct as above, minus both explanation
-        # blocks — no "documented_intent" key at all, mirroring how most
-        # real CORPUS entries never carry the key (entry.get(), not
-        # entry[...]).
-        "markdown": "[a [b] c](dead-newgap-test.md)\n",
+        # Same divergent construct as above (named entity in the destination),
+        # minus both explanation blocks — no "documented_intent" key at all,
+        # mirroring how most real CORPUS entries never carry the key
+        # (entry.get(), not entry[...]).
+        "markdown": "[x](dead-newgap&num;3.md)\n",
         "known_divergence": None,
     }
 

@@ -982,7 +982,13 @@ class MemoryLintTest(unittest.TestCase):
         """Same defect, the reference-definition path (`[id]: target`) instead of
         the inline `[x](target)` form (WI-0042) — the two paths extract the
         target independently, so the fix has to cover both."""
-        self.write_index(CLEAN_INDEX + "[r]: refdead<!--c-->.md\n")
+        # The blank line between CLEAN_INDEX and the definition is load-bearing,
+        # not layout (WI-0096, measured at the reference). CLEAN_INDEX ends in a
+        # list item; without the blank line the definition-shaped line is a LAZY
+        # CONTINUATION of that item's paragraph, which renders it as visible
+        # prose and defines nothing. This fixture is about the definition form,
+        # so it has to actually be one.
+        self.write_index(CLEAN_INDEX + "\n[r]: refdead<!--c-->.md\n")
 
         output = self.run_lint().stdout
         findings = self.link_findings(output)
@@ -1578,7 +1584,13 @@ class MemoryLintTest(unittest.TestCase):
         self.assertNotIn("this is prose", findings[0])
 
     def test_reference_style_definition_with_a_title_and_a_dead_target_is_reported(self):
-        self.write_index(CLEAN_INDEX + '[ref-titled-dead]: dead_titled.md "A Title"\n')
+        # The blank line between CLEAN_INDEX and the definition is load-bearing,
+        # not layout (WI-0096, measured at the reference). CLEAN_INDEX ends in a
+        # list item; without the blank line the definition-shaped line is a LAZY
+        # CONTINUATION of that item's paragraph, which renders it as visible
+        # prose and defines nothing. This fixture is about the definition form,
+        # so it has to actually be one.
+        self.write_index(CLEAN_INDEX + '\n[ref-titled-dead]: dead_titled.md "A Title"\n')
 
         findings = self.link_findings(self.run_lint().stdout)
 
@@ -1594,7 +1606,13 @@ class MemoryLintTest(unittest.TestCase):
         """`[id]: target (Title)` — CommonMark's third title delimiter, alongside
         `"..."` and `'...'` (WI-0034). A reference definition written this way
         used to be missed entirely, so its dead target was never checked."""
-        self.write_index(CLEAN_INDEX + "[ref-paren-dead]: dead_paren.md (A Title)\n")
+        # The blank line between CLEAN_INDEX and the definition is load-bearing,
+        # not layout (WI-0096, measured at the reference). CLEAN_INDEX ends in a
+        # list item; without the blank line the definition-shaped line is a LAZY
+        # CONTINUATION of that item's paragraph, which renders it as visible
+        # prose and defines nothing. This fixture is about the definition form,
+        # so it has to actually be one.
+        self.write_index(CLEAN_INDEX + "\n[ref-paren-dead]: dead_paren.md (A Title)\n")
 
         findings = self.link_findings(self.run_lint().stdout)
 
@@ -1623,7 +1641,13 @@ class MemoryLintTest(unittest.TestCase):
         `[id]: <target>` shares the same shell-side unwrap/resolve logic as the
         inline `[x](<target>)` form, so a dead target in this form must be
         caught too, not just the inline one."""
-        self.write_index(CLEAN_INDEX + "[ref-angle-dead]: <gone_reference_angle.md>\n")
+        # The blank line between CLEAN_INDEX and the definition is load-bearing,
+        # not layout (WI-0096, measured at the reference). CLEAN_INDEX ends in a
+        # list item; without the blank line the definition-shaped line is a LAZY
+        # CONTINUATION of that item's paragraph, which renders it as visible
+        # prose and defines nothing. This fixture is about the definition form,
+        # so it has to actually be one.
+        self.write_index(CLEAN_INDEX + "\n[ref-angle-dead]: <gone_reference_angle.md>\n")
 
         findings = self.link_findings(self.run_lint().stdout)
 
@@ -2263,6 +2287,39 @@ class MemoryLintTest(unittest.TestCase):
         self.assertIn("gone_ent_dec#3.md", findings[0])
         self.assertNotIn("&", findings[0])
 
+    def test_a_numeric_entity_closing_paren_reaches_the_report_as_a_literal_paren(self):
+        """`&#41;` decodes to `)` — a closing paren that appears INSIDE the
+        destination after decoding, which is the state the whole `paren_mark`
+        detour used to exist to avoid. It cannot be avoided here: the decode
+        runs after the escape substitution, so this destination has carried a
+        literal `)` through every later stage since WI-0081, and the reference
+        agrees on the target (`gone_ent_paren)b.md`). That is what makes the
+        detour removable rather than merely unpinnable — this fixture already
+        pins the post-removal state, and it did so before the removal."""
+        self.write_index(CLEAN_INDEX + "- [Ent](gone_ent_paren&#41;b.md) — dead\n")
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("gone_ent_paren)b.md", findings[0])
+        self.assertNotIn("&", findings[0])
+
+    def test_a_destination_after_an_entity_encoded_paren_is_still_reached_on_the_same_line(self):
+        """The escaped-paren line's twin, one encoding over: a decoded `)`
+        inside the first destination must not be read as that destination's
+        delimiter either, or the second link on the line is lost."""
+        self.write_index(
+            CLEAN_INDEX
+            + "- [First](gone_ent_paren2&#41;b.md) and [Second](gone_ent_paren3.md) — both dead\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+        joined = " ".join(findings)
+
+        self.assertEqual(len(findings), 2, findings)
+        self.assertIn("gone_ent_paren2)b.md", joined)
+        self.assertIn("gone_ent_paren3.md", joined)
+
     def test_a_hexadecimal_numeric_entity_in_the_destination_decodes_the_same_way(self):
         """`&#x23;` is the hexadecimal form of the same numeric character
         reference (`#`, codepoint 0x23) — same decode path as the decimal
@@ -2297,6 +2354,854 @@ class MemoryLintTest(unittest.TestCase):
         self.write_index(CLEAN_INDEX + "- [Dec](gone_ent_dec&#35;3.md) — live\n")
 
         self.assertEqual(self.link_findings(self.run_lint().stdout), [])
+
+    # --- Link labels are scanned, not regex-matched (WI-0080/WI-0091) -------------
+    # CommonMark's link text may contain balanced brackets at any depth, plus
+    # backslash-escaped brackets anywhere. check (n)'s label class used to be
+    # `[^][]*`, which excludes BOTH bracket characters — so no label carrying a
+    # bracket could ever match, at any depth. Every expectation below was measured
+    # against the reference (commonmark 0.9.2), see
+    # docs/memory/reference_commonmark-conformance.md.
+
+    def test_balanced_brackets_in_the_link_text_do_not_hide_the_link(self):
+        """`[a [b] c](t.md)` — the reference renders one ordinary link
+        (`<a href="t.md">a [b] c</a>`). The old `[^][]*` label class could not
+        match a label with a bracket in it at all, so check (n) stayed silent
+        on every such entry (WI-0080)."""
+        self.write_index(CLEAN_INDEX + "- [a [b] c](gone_nb1.md) — nested label\n")
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("gone_nb1.md", findings[0])
+
+    def test_three_levels_of_balanced_brackets_in_the_link_text_are_still_one_link(self):
+        """`[a [b [c] d] e](t.md)` — reference-measured as a single link to
+        `t.md`. A fix that only tolerated ONE bracket pair would leave this
+        one silent, so the depth is pinned separately from the shallow case."""
+        self.write_index(CLEAN_INDEX + "- [a [b [c] d] e](gone_nb3.md) — three levels\n")
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("gone_nb3.md", findings[0])
+
+    def test_five_levels_of_balanced_brackets_in_the_link_text_are_still_one_link(self):
+        """`[l4 [l3 [l2 [l1 [l0 x r0] r1] r2] r3] r4](t.md)` — the reference
+        imposes no nesting limit (measured to depth 100 during the WI-0080
+        round; five is the fixture depth kept in the suite). Pins that the
+        scanner's bracket stack has no fixed ceiling either."""
+        self.write_index(
+            CLEAN_INDEX
+            + "- [l4 [l3 [l2 [l1 [l0 x r0] r1] r2] r3] r4](gone_nb5.md) — five levels\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("gone_nb5.md", findings[0])
+
+    def test_a_backslash_escaped_closing_bracket_inside_the_label_keeps_the_link(self):
+        """`[a\\]b](t.md)` — the escaped `]` is literal label text, so the label
+        is `a]b` and the link is live (reference-measured). The old label class
+        excluded `]` outright and never matched (WI-0080); the scanner must
+        skip an escaped bracket as content instead of ending the label there."""
+        self.write_index(CLEAN_INDEX + "- [a\\]b](gone_nb_esc.md) — escaped bracket in label\n")
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("gone_nb_esc.md", findings[0])
+
+    def test_a_link_inside_the_link_text_disqualifies_the_outer_link(self):
+        """CommonMark: "Links may not contain other links, at any level of
+        nesting" — the INNER link wins and the outer brackets are literal text.
+        Reference-measured: `[a [b](in.md) c](out.md)` yields exactly one
+        `<a>`, to `in.md`. Before the scanner this happened by accident (the
+        outer label simply could not match); now it is an explicit rule and
+        needs its own pin."""
+        self.write_index(
+            CLEAN_INDEX
+            + "- [a [b](gone_inner.md) c](gone_outer.md) — link in link text\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("gone_inner.md", findings[0])
+        self.assertNotIn("gone_outer.md", " ".join(findings))
+
+    def test_a_disqualified_outer_link_does_not_swallow_a_later_link_on_the_same_line(self):
+        """The outer opener is deactivated, not the rest of the line: a further,
+        independent link after the nested construct is still found. Reference-
+        measured: `[a [b](in.md) c](out.md) and [d](e.md)` yields `in.md` and
+        `e.md`, never `out.md`."""
+        self.write_index(
+            CLEAN_INDEX
+            + "- [a [b](gone_in2.md) c](gone_out2.md) and [d](gone_e2.md) — mixed\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+        joined = " ".join(findings)
+
+        self.assertEqual(len(findings), 2, findings)
+        self.assertIn("gone_in2.md", joined)
+        self.assertIn("gone_e2.md", joined)
+        self.assertNotIn("gone_out2.md", joined)
+
+    def test_an_image_inside_the_link_text_does_not_disqualify_the_outer_link(self):
+        """`[![alt](img.png)](t.md)` — the badge pattern. An IMAGE in the link
+        text is allowed (only a LINK disqualifies), so the reference renders a
+        live link to `t.md` whose content is an `<img>`. The hardest shape for
+        any `](`-splitting approach, because the label itself contains `](`
+        (WI-0091)."""
+        self.write_index(
+            CLEAN_INDEX + "- [![alt](gone_badge.png)](gone_ci.md) — badge\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("gone_ci.md", findings[0])
+        self.assertNotIn("gone_badge.png", " ".join(findings))
+
+    def test_an_image_nested_two_deep_inside_the_link_text_still_leaves_one_link(self):
+        """`[![![deep](d1.png)](d2.png)](t.md)` — reference-measured: one link
+        (`t.md`), two images (`d2.png`, `d1.png`), no image ever reported.
+        Pins that image openers are neither reported nor deactivated at depth."""
+        self.write_index(
+            CLEAN_INDEX
+            + "- [![![deep](gone_d1.png)](gone_d2.png)](gone_d3.md) — nested images\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+        joined = " ".join(findings)
+
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("gone_d3.md", joined)
+        self.assertNotIn("gone_d1.png", joined)
+        self.assertNotIn("gone_d2.png", joined)
+
+    def test_an_image_whose_alt_text_carries_brackets_is_still_not_a_link(self):
+        """Negative pin for the image rule under the new scanner: `![[a]](i.png)`
+        is an image, reference-measured (no `<a>` at all). The old code decided
+        this on the single byte before `[`; the scanner decides it on the
+        bracket opener it pushed, and must reach the same answer with a
+        bracketed alt text that the old label class could never have matched."""
+        self.write_index(CLEAN_INDEX + "- ![[a]](gone_img_nb.png) — image\n")
+
+        self.assertEqual(self.link_findings(self.run_lint().stdout), [])
+
+    def test_an_escaped_bang_before_the_bracket_leaves_a_real_link(self):
+        """`\\![a](t.md)` — the `!` is backslash-escaped, so it is literal text
+        and the bracket opens a LINK, not an image (reference-measured: one
+        `<a href="t.md">`). The image test must use escape parity, not a bare
+        "previous byte is a bang"."""
+        self.write_index(CLEAN_INDEX + "- \\![a](gone_escbang.md) — escaped bang\n")
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("gone_escbang.md", findings[0])
+
+    def test_an_unbalanced_closing_bracket_before_the_destination_is_not_a_link(self):
+        """Negative pin, the one shape a bracket-counting fix is most likely to
+        break: `[a] b](t.md)`. The reference renders NO link — the `[a]` closes
+        on its own and the second `]` has no opener left. A scanner that merely
+        looked for the last `](` on the line would wrongly report `t.md`."""
+        self.write_index(CLEAN_INDEX + "- [a] b](gone_unbalanced.md) — not a link\n")
+
+        self.assertEqual(self.link_findings(self.run_lint().stdout), [])
+
+    def test_a_nested_bracket_link_beside_an_escaped_non_link_is_still_found(self):
+        """WI-0079's one-byte-advance guarantee, restated for the scanner: an
+        escaped, disqualified construct earlier on the line must not hide a real
+        (here: nested-bracket) link later on it. The scanner never skips ahead by
+        a match length, so this holds structurally — pinned so a future rewrite
+        that reintroduces a skip is caught."""
+        self.write_index(
+            CLEAN_INDEX
+            + "- \\[escaped\\](gone_nb_skip1.md) and [a [b] c](gone_nb_skip2.md) — mixed\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("gone_nb_skip2.md", findings[0])
+        self.assertNotIn("gone_nb_skip1.md", " ".join(findings))
+
+    def test_a_nested_bracket_label_combines_with_an_escaped_paren_destination(self):
+        """`[a [b] c](t\\).md)` — WI-0080's label scan and WI-0081's destination
+        scan on the same construct. Reference-measured: one link, href
+        `t).md`. Pins that the scanner reads the destination through the
+        `dest_mark` span protect_link_destinations() already built, rather than
+        re-finding the closing paren itself."""
+        self.write_index(CLEAN_INDEX + "- [a [b] c](gone_nb_paren\\).md) — dead\n")
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("gone_nb_paren).md", findings[0])
+
+    def test_a_nested_bracket_link_whose_target_exists_stays_silent(self):
+        """Live control for the whole WI-0080 group: the same nested-bracket
+        shape, but the target is on disk. Without this, every assertion above
+        would also pass for a scanner that reports EVERY bracket construct as
+        dead."""
+        live_target = self.memory_dir / "live_nb.md"
+        live_target.write_text(TIER2_TOPIC_TEXT, encoding="utf-8")
+        self.write_index(CLEAN_INDEX + "- [a [b] c](live_nb.md) — live\n")
+
+        self.assertEqual(self.link_findings(self.run_lint().stdout), [])
+
+    def test_a_badge_style_link_whose_target_exists_stays_silent(self):
+        """Live control for the image-in-link-text rule (WI-0091): the badge
+        shape resolving to a real file must produce no finding — otherwise the
+        rule could be "report the outer destination unconditionally"."""
+        live_target = self.memory_dir / "live_ci.md"
+        live_target.write_text(TIER2_TOPIC_TEXT, encoding="utf-8")
+        (self.memory_dir / "live_badge.png").write_text("x", encoding="utf-8")
+        self.write_index(CLEAN_INDEX + "- [![alt](live_badge.png)](live_ci.md) — live\n")
+
+        self.assertEqual(self.link_findings(self.run_lint().stdout), [])
+
+    # --- A reference link in the link text disqualifies the outer link too (WI-0093) ---
+    # CommonMark's "no links in links" rule fires on any successful LINK, not only
+    # on an inline one: a shortcut (`[ref]`), collapsed (`[ref][]`) or full
+    # (`[text][ref]`) reference that RESOLVES against a definition deactivates
+    # every enclosing link opener exactly like `[b](in.md)` does. Deciding it
+    # needs the document's reference-definition labels, which CommonMark collects
+    # for the WHOLE document before any inline parsing — so a definition may sit
+    # AFTER its use. Every expectation below was measured against the reference
+    # (commonmark 0.9.2), see docs/memory/reference_commonmark-conformance.md.
+
+    def test_a_resolving_shortcut_reference_in_the_link_text_disqualifies_the_outer_link(self):
+        """`[outer [r5] text](out.md)` with `[r5]:` defined — the reference
+        renders ONE link, to the definition's target, and leaves the outer
+        `](out.md)` as literal text. WI-0080's scanner deactivated enclosing
+        openers only in the inline-destination branch, so it reported `out.md`
+        as well: a false positive the regex it replaced never produced."""
+        self.write_index(
+            CLEAN_INDEX
+            + "\n[r5]: gone_ref_defn.md\n"
+            + "\n- [outer [r5] text](gone_ref_outer.md) — reference link inside\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("gone_ref_defn.md", findings[0])
+        self.assertNotIn("gone_ref_outer.md", " ".join(findings))
+
+    def test_a_reference_definition_placed_after_its_use_still_disqualifies_the_outer_link(self):
+        """The architectural claim, measured: CommonMark collects reference
+        DEFINITIONS for the whole document before it parses any inline content,
+        so the definition may follow its use. A single-pass extractor cannot
+        answer this at the moment it reaches the link — check (n) therefore
+        reads each index twice, and this is the fixture that says so."""
+        self.write_index(
+            CLEAN_INDEX
+            + "\n- [outer [r6] text](gone_fwd_outer.md) — used before defined\n"
+            + "\n[r6]: gone_fwd_defn.md\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("gone_fwd_defn.md", findings[0])
+        self.assertNotIn("gone_fwd_outer.md", " ".join(findings))
+
+    def test_an_undefined_label_in_the_link_text_leaves_the_outer_link_intact(self):
+        """The counter-fixture that forbids the cheap repair. "Deactivate
+        whenever no inline destination follows" would also kill
+        `[a [b] c](t.md)`, WI-0080's central case. The ONLY difference between
+        the two is whether the inner label resolves against a definition — here
+        it does not, and the reference renders the outer link."""
+        self.write_index(
+            CLEAN_INDEX + "- [outer [nosuchlabel] text](gone_undef_outer.md) — no definition\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("gone_undef_outer.md", findings[0])
+
+    def test_a_resolving_full_reference_in_the_link_text_disqualifies_the_outer_link(self):
+        """The full form `[text][r]` resolves the same way as the shortcut and
+        deactivates the same openers (reference-measured)."""
+        self.write_index(
+            CLEAN_INDEX
+            + "\n[r7]: gone_full_defn.md\n"
+            + "\n- [outer [txt][r7] text](gone_full_outer.md) — full reference inside\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("gone_full_defn.md", findings[0])
+        self.assertNotIn("gone_full_outer.md", " ".join(findings))
+
+    def test_a_resolving_collapsed_reference_in_the_link_text_disqualifies_the_outer_link(self):
+        """The collapsed form `[r][]` takes its label from the FIRST bracket
+        pair, not the empty second one — a separate code path from the full
+        form, so it gets its own pin."""
+        self.write_index(
+            CLEAN_INDEX
+            + "\n[r8]: gone_coll_defn.md\n"
+            + "\n- [outer [r8][] text](gone_coll_outer.md) — collapsed reference inside\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("gone_coll_defn.md", findings[0])
+        self.assertNotIn("gone_coll_outer.md", " ".join(findings))
+
+    def test_a_full_reference_whose_second_label_is_undefined_leaves_the_outer_link_intact(self):
+        """Measured, and NOT obvious: in `[r9][nosuch]` the first label IS
+        defined, but the reference does not fall back to the shortcut reading —
+        the failed full reference renders no link at all, so nothing is
+        deactivated and the outer link stands."""
+        self.write_index(
+            CLEAN_INDEX
+            + "\n[r9]: gone_fallback_defn.md\n"
+            + "\n- [outer [r9][nosuchlabel] text](gone_fallback_outer.md) — failed full reference\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+        joined = " ".join(findings)
+
+        self.assertEqual(len(findings), 2, findings)
+        self.assertIn("gone_fallback_defn.md", joined)
+        self.assertIn("gone_fallback_outer.md", joined)
+
+    def test_an_image_reference_in_the_link_text_leaves_the_outer_link_intact(self):
+        """WI-0091's rule, restated for the reference form: `![r]` is an IMAGE
+        even when it resolves, and an image in the link text does not
+        disqualify the enclosing link (reference-measured)."""
+        self.write_index(
+            CLEAN_INDEX
+            + "\n[r10]: gone_imgref_defn.png\n"
+            + "\n- [outer ![r10] text](gone_imgref_outer.md) — image reference inside\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+        joined = " ".join(findings)
+
+        self.assertEqual(len(findings), 2, findings)
+        self.assertIn("gone_imgref_defn.png", joined)
+        self.assertIn("gone_imgref_outer.md", joined)
+
+    def test_reference_labels_match_case_insensitively(self):
+        """CommonMark normalises a label by case-folding it, so `[R11]:` defines
+        `[r11]`. Pinned on the deactivation path specifically — the corpus
+        already covers normalisation on the definition-reporting path."""
+        self.write_index(
+            CLEAN_INDEX
+            + "\n[R11]: gone_case_defn.md\n"
+            + "\n- [outer [r11] text](gone_case_outer.md) — case-folded label\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("gone_case_defn.md", findings[0])
+
+    def test_reference_labels_match_with_internal_whitespace_collapsed(self):
+        """Second half of label normalisation: internal whitespace runs collapse
+        to one space and the ends are trimmed, so `[r 12]:` defines `[ r  12 ]`."""
+        self.write_index(
+            CLEAN_INDEX
+            + "\n[r 12]: gone_ws_defn.md\n"
+            + "\n- [outer [ r  12 ] text](gone_ws_outer.md) — whitespace-folded label\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("gone_ws_defn.md", findings[0])
+
+    def test_a_definition_inside_a_fenced_code_block_defines_nothing(self):
+        """A reference definition is a BLOCK construct: inside a fence it is
+        code, not a definition, and the reference renders the outer link. Pins
+        that the label collection runs the same block machine as the extraction
+        rather than grepping the file for definition-shaped lines."""
+        self.write_index(
+            CLEAN_INDEX
+            + "\n```\n[r13]: gone_fenced_defn.md\n```\n"
+            + "\n- [outer [r13] text](gone_fenced_outer.md) — definition is code\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("gone_fenced_outer.md", findings[0])
+        self.assertNotIn("gone_fenced_defn.md", " ".join(findings))
+
+    def test_a_definition_line_that_cannot_interrupt_a_paragraph_defines_nothing(self):
+        """A reference definition may not interrupt a paragraph — with an open
+        paragraph above it, `[r14]: x.md` is ordinary paragraph text and defines
+        nothing, so the outer link stands (reference-measured).
+
+        WI-0096, PO decision 24.08.2026: that line's target is no longer
+        reported either. Measured at the reference, `foo\\n[ref]: dead.md`
+        renders `<p>foo\\n[ref]: dead.md</p>` — VISIBLE paragraph text, so the
+        path is on the page and a reader can see it is dead. That is what
+        separates it from WI-0085's standalone definition, which renders as
+        NOTHING: there the invisibility is the defect worth reporting, here
+        there is no invisibility to report. The rule stayed "report what is
+        invisibly dead"; only this shape stopped meeting it."""
+        self.write_index(
+            CLEAN_INDEX
+            + "\nsome prose\n[r14]: gone_interrupt_defn.md\n"
+            + "\n- [outer [r14] text](gone_interrupt_outer.md) — not a definition\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("gone_interrupt_outer.md", findings[0])
+
+    def test_a_standalone_unused_definition_is_still_reported(self):
+        """The control WI-0096 must not disturb (WI-0085, PO decision
+        23.08.2026, re-affirmed 24.08.2026). `[ref]: dead.md` on its own renders
+        as the empty string at the reference — the reader never sees the path,
+        so a dead one stays invisible, and that invisibility is exactly what
+        check (n) exists to report. Same file, same check, opposite verdict to
+        the test above: the discriminator is whether the reader can see the
+        path, not whether CommonMark renders a link."""
+        self.write_index(CLEAN_INDEX + "\n[r24]: gone_unused_defn.md\n")
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("gone_unused_defn.md", findings[0])
+
+    def test_a_definition_shaped_line_inside_a_paragraph_still_yields_its_own_links(self):
+        """The paragraph gate must not swallow the LINE. A definition-shaped
+        line that cannot interrupt a paragraph is ordinary paragraph text, and
+        ordinary paragraph text is scanned for links — so this line falls
+        through into the paragraph buffer instead of being consumed and
+        skipped. Reference-measured: `dead-i2.md` is the one link rendered."""
+        self.write_index(
+            CLEAN_INDEX
+            + "\nsome prose\n[r25]: gone_fall_defn.md and [x](gone_fall_link.md)\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("gone_fall_link.md", findings[0])
+
+    def test_a_whitespace_only_label_is_not_a_definition(self):
+        """Sibling of WI-0096 found in the same review, measured the same way.
+        `[   ]: dead.md` renders as `<p>[   ]: dead.md</p>` — the reference
+        refuses a label that normalises to nothing (its own parseReference
+        rejects an empty normalised label), so the line is VISIBLE prose and
+        the path is on the page. Same verdict as WI-0096, and it falls out of
+        the same guard: a label that normalises to the empty string is no
+        label, so the line is no definition."""
+        self.write_index(
+            CLEAN_INDEX
+            + "\n[   ]: gone_wsdefn.md\n"
+            + "\n- [outer [   ] text](gone_wsouter.md) — whitespace-only label\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("gone_wsouter.md", findings[0])
+
+    def test_an_empty_label_is_not_a_definition(self):
+        """The degenerate end of the same rule, pinned so the two shapes are
+        governed by ONE guard rather than by two accidents. `[]:` was already
+        rejected — by a length test, not by the label rule — and this test is
+        what keeps it rejected after the length test was folded into the
+        normalised-label guard."""
+        self.write_index(
+            CLEAN_INDEX
+            + "\n[]: gone_emptydefn.md\n"
+            + "\n- [outer [] text](gone_emptyouter.md) — empty label\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("gone_emptyouter.md", findings[0])
+
+    # --- WI-0099: the same answer whoever measures ---------------------------
+    # awk's tolower() case-folds NON-ASCII only under a UTF-8 locale. The test
+    # harness starts the script with env={HOME, PATH}, i.e. in the C locale;
+    # an interactive `/cleanup` run inherits the user's UTF-8 one. Same script,
+    # same input, two answers — so a conformance question about a non-ASCII
+    # label used to be decided by WHO ran it (measured, WI-0099).
+    #
+    # The fix has two halves and both are pinned below: the awk call is pinned
+    # to LC_ALL=C so the folding no longer varies, and a label carrying a byte
+    # >= 0x80 short-circuits to "resolves", which is the conservative answer —
+    # it can only silence a link, never invent one.
+    #
+    # The second locale is looked up rather than hard-coded: a machine with no
+    # UTF-8 locale installed cannot exhibit the divergence at all, and on such
+    # a machine both runs are simply the C run. That does not make these tests
+    # vacuous — each one also asserts the ABSOLUTE answer the reference gives,
+    # and it is the C run that used to get that wrong.
+    @staticmethod
+    def _a_utf8_locale():
+        """A UTF-8 locale name this machine actually has, or None."""
+        out = subprocess.run(
+            ["locale", "-a"], capture_output=True, text=True,
+        ).stdout.splitlines()
+        for preferred in ("en_US.UTF-8", "C.UTF-8"):
+            if preferred in out:
+                return preferred
+        for name in out:
+            if name.lower().endswith(("utf-8", "utf8")):
+                return name
+        return None
+
+    def test_a_resolving_non_ascii_label_answers_the_same_in_every_locale(self):
+        """`[ÄÖ]:` defined, `[äö]` used inside a link text. The reference
+        renders the inner reference link and therefore NO outer link, so the
+        outer target must not be reported. Before the fix the C-locale run
+        reported it (tolower left `ÄÖ` alone, the lookup missed) while a UTF-8
+        run did not — the divergence WI-0099 records. Both halves of the fix
+        are needed here: the LC_ALL=C pin alone would have frozen the false
+        positive, the ASCII short-circuit is what removes it."""
+        body = (
+            CLEAN_INDEX
+            + "\n[ÄÖ]: https://example.com/ao\n"
+            + "\n- [outer [äö] text](gone_locale_outer.md) — non-ASCII label\n"
+        )
+        self.write_index(body)
+
+        c_findings = self.link_findings(self.run_lint(LC_ALL="C").stdout)
+        utf8 = self._a_utf8_locale()
+        utf8_findings = self.link_findings(
+            self.run_lint(**({"LC_ALL": utf8} if utf8 else {})).stdout
+        )
+
+        self.assertEqual(
+            c_findings, utf8_findings,
+            f"same script, same input, two answers (LC_ALL=C vs {utf8!r}) — "
+            f"the conformance verdict still depends on who measures",
+        )
+        self.assertEqual(c_findings, [], c_findings)
+
+    def test_an_undefined_non_ascii_label_silences_the_enclosing_link(self):
+        """The false negative the ASCII short-circuit knowingly buys, pinned so
+        it is a counted cost and not a surprise (WI-0099, PO decision
+        24.08.2026). `[äö]` with no definition anywhere: the reference renders
+        the OUTER link, check (n) reports nothing. Direction: false NEGATIVE,
+        and — this is the point of the trade — it is now a property of the
+        CODE (the label carries a byte >= 0x80, so the link is not reported)
+        rather than of the locale the caller happened to have."""
+        self.write_index(
+            CLEAN_INDEX
+            + "\n- [outer [äö] text](gone_locale_fn.md) — undefined non-ASCII label\n"
+            + "- [outer [nosuch] text](gone_locale_ctl.md) — undefined ASCII label\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn(
+            "gone_locale_ctl.md", findings[0],
+            "the ASCII control vanished too — this fixture would then also "
+            "pass for a scanner that reported nothing at all",
+        )
+
+    def test_a_non_ascii_definition_still_reports_its_own_target(self):
+        """The control the short-circuit must not touch. Narrowing the USAGE
+        side to ASCII says nothing about the DEFINITION side: `[ÄÖ]: dead.md`
+        still points at a file, and check (n)'s contract is to check that the
+        file exists. Reference-measured: it renders a link here, so both
+        oracles agree."""
+        self.write_index(
+            CLEAN_INDEX + "\n[ÄÖ]: gone_locale_defn.md\n" + "\n- [äö]\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("gone_locale_defn.md", findings[0])
+
+    def test_an_invalid_utf8_byte_does_not_stop_the_scan_under_a_utf8_locale(self):
+        """The second, larger thing the LC_ALL=C pin buys — found while
+        measuring WI-0099, not asked for. /usr/bin/awk (20200816) ABORTS with
+        `towc: multibyte conversion failure` on a byte that is not valid UTF-8
+        when the locale says UTF-8. The whole index then goes unscanned and the
+        run still exits 0-or-1: every dead link in that file silently
+        disappears. Under LC_ALL=C awk is byte-oriented and cannot hit it."""
+        raw = (
+            CLEAN_INDEX
+            + "\nstray \udcff byte and [x](gone_badbyte.md) — invalid UTF-8 above\n"
+        ).encode("utf-8", "surrogateescape")
+        (self.memory_dir / "MEMORY.md").write_bytes(raw)
+
+        utf8 = self._a_utf8_locale()
+        # Run it here rather than through run_lint(): the awk abort message
+        # echoes the offending byte to stderr, and decoding that as strict
+        # UTF-8 raises inside subprocess before any assertion is reached — an
+        # ERROR that hides the finding this test is about.
+        result = subprocess.run(
+            ["bash", str(SCRIPT_PATH), str(self.project_dir)],
+            capture_output=True, text=True, errors="replace",
+            env=self.lint_env(**({"LC_ALL": utf8} if utf8 else {})),
+        )
+        self._assert_script_actually_ran(result)
+        findings = self.link_findings(result.stdout)
+
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("gone_badbyte.md", findings[0])
+
+    def test_a_backslash_escaped_bracket_in_a_definition_label_is_still_a_definition(self):
+        """Sibling of WI-0080's label fix, two functions further along: the
+        definition line's own label grammar excluded `]` outright, so
+        `[a\\]b]: t.md` was not recognised as a definition at all — its target
+        went unchecked and the label went undefined. Reference-measured: it is
+        one definition with label `a]b`, and using it deactivates an enclosing
+        link."""
+        self.write_index(
+            CLEAN_INDEX
+            + "\n[a\\]b]: gone_escdefn.md\n"
+            + "\n- [outer [a\\]b] text](gone_escdefn_outer.md) — escaped bracket label\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("gone_escdefn.md", findings[0])
+        self.assertNotIn("gone_escdefn_outer.md", " ".join(findings))
+
+    def test_a_resolved_reference_link_consumes_a_parenthesis_that_follows_it(self):
+        """`[txt][r15](paren.md)` — the reference consumes `[txt][r15]` as the
+        link and leaves `(paren.md)` as literal text. A scanner that only
+        deactivates, without consuming the span, re-reads `[r15](paren.md)` as
+        an inline link and reports a target nobody linked."""
+        self.write_index(
+            CLEAN_INDEX
+            + "\n[r15]: gone_consume_defn.md\n"
+            + "\n- [txt][r15](gone_consume_paren.md) — the paren is literal text\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("gone_consume_defn.md", findings[0])
+        self.assertNotIn("gone_consume_paren.md", " ".join(findings))
+
+    def test_a_reference_disqualified_outer_link_does_not_swallow_a_later_link(self):
+        """The deactivation ends with the outer opener, not with the line — an
+        independent link after the construct is still found (reference-measured,
+        same guarantee WI-0080 pinned for the inline-in-inline case)."""
+        self.write_index(
+            CLEAN_INDEX
+            + "\n[r16]: gone_later_defn.md\n"
+            + "\n- [outer [r16] text](gone_later_outer.md) and [d](gone_later_e.md)\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+        joined = " ".join(findings)
+
+        self.assertEqual(len(findings), 2, findings)
+        self.assertIn("gone_later_defn.md", joined)
+        self.assertIn("gone_later_e.md", joined)
+        self.assertNotIn("gone_later_outer.md", joined)
+
+    def test_a_reference_disqualified_outer_link_whose_targets_exist_stays_silent(self):
+        """Live control for the whole reference-deactivation group: the same
+        shapes with targets on disk must report nothing. Without it every
+        assertion above would also hold for a scanner that reports every
+        bracket construct as dead."""
+        (self.memory_dir / "live_ref_defn.md").write_text(TIER2_TOPIC_TEXT, encoding="utf-8")
+        (self.memory_dir / "live_ref_outer.md").write_text(TIER2_TOPIC_TEXT, encoding="utf-8")
+        self.write_index(
+            CLEAN_INDEX
+            + "\n[r17]: live_ref_defn.md\n"
+            + "\n- [outer [r17] text](live_ref_outer.md) — live\n"
+        )
+
+        self.assertEqual(self.link_findings(self.run_lint().stdout), [])
+
+    # --- A label the paragraph resolver REWRITES still has to match (WI-0098) ---
+    # The two sides of the reference-link mechanism read their label from
+    # different text: the definition line reads the RAW record, the usage side
+    # reads the paragraph after protect_link_destinations() and
+    # resolve_paragraph() have run. resolve_paragraph() DISCARDS a code span
+    # and replaces a closed inline comment with the boundary sentinel, so the
+    # two keyed refmap on different strings and the deactivation never fired.
+    # Both shapes below were measured against the reference (commonmark 0.9.2,
+    # HTML oracle) and against 4f2ffa7, the commit before the scanner rewrite:
+    # both say the outer link is NOT a link. This was a regression, not a
+    # pre-existing gap -- 4f2ffa7 was accidentally right, because its
+    # `[^][]*` label class could not match a label carrying brackets at all.
+
+    def test_a_code_span_in_a_resolving_shortcut_label_still_disqualifies_the_outer_link(self):
+        """`[`a`]` with ``[`a`]:`` defined renders one link, to the definition's
+        target; the outer `](out.md)` is literal text. The code span is stripped
+        out of the paragraph before the scanner sees the label, so the label the
+        scanner reads is empty while the label the definition registered is not
+        -- and nothing matched."""
+        self.write_index(
+            CLEAN_INDEX
+            + "\n[`r20`]: gone_cspan_defn.md\n"
+            + "\n- [outer [`r20`] text](gone_cspan_outer.md) — code-span label\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("gone_cspan_defn.md", findings[0])
+        self.assertNotIn("gone_cspan_outer.md", " ".join(findings))
+
+    def test_an_inline_comment_in_a_resolving_shortcut_label_still_disqualifies_the_outer_link(self):
+        """The same defect through the other rewriting construct, measured
+        rather than assumed to be the same mechanism: a CLOSED inline comment is
+        replaced by the boundary sentinel, so the label the scanner reads is one
+        control byte and the label the definition registered is `<!--x-->`."""
+        self.write_index(
+            CLEAN_INDEX
+            + "\n[<!--x-->]: gone_cmt_defn.md\n"
+            + "\n- [outer [<!--x-->] text](gone_cmt_outer.md) — inline-comment label\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("gone_cmt_defn.md", findings[0])
+        self.assertNotIn("gone_cmt_outer.md", " ".join(findings))
+
+    def test_a_code_span_label_with_no_definition_leaves_the_outer_link_intact(self):
+        """The counter-fixture that forbids the blunt repair. "A label the
+        resolver rewrote deactivates the enclosing openers" would also kill
+        this, and the reference renders the outer link here -- the difference is
+        only whether a definition exists, exactly as for a plain label. Green
+        before the fix and after it; it is the fixture that must NOT move."""
+        self.write_index(
+            CLEAN_INDEX + "- [outer [`nosuch`] text](gone_cspan_undef.md) — no definition\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("gone_cspan_undef.md", findings[0])
+
+    def test_a_code_span_labelled_reference_whose_targets_exist_stays_silent(self):
+        """Live control for the pair above: the same shapes pointing at real
+        files report nothing, so neither assertion is satisfied by a scanner
+        that has started reporting every bracket construct."""
+        (self.memory_dir / "live_cspan_defn.md").write_text(TIER2_TOPIC_TEXT, encoding="utf-8")
+        (self.memory_dir / "live_cspan_outer.md").write_text(TIER2_TOPIC_TEXT, encoding="utf-8")
+        self.write_index(
+            CLEAN_INDEX
+            + "\n[`r21`]: live_cspan_defn.md\n"
+            + "\n- [outer [`r21`] text](live_cspan_outer.md) — live\n"
+        )
+
+        self.assertEqual(self.link_findings(self.run_lint().stdout), [])
+
+    def test_a_label_emptied_by_the_resolver_matches_any_other_emptied_label(self):
+        """The false negative WI-0098's fix knowingly buys, pinned so it is a
+        counted cost and not a surprise. The definition label is registered in
+        the shape the scanner will see it in, and two DIFFERENT raw labels can
+        resolve to the same shape -- here both to the empty one. The reference
+        renders the outer link (``[`r22`]`` and ``[`other`]`` are different
+        labels); check (n) treats the inner as resolving and drops it.
+        Direction: false NEGATIVE, the one the PO decision of 24.08.2026 accepts
+        in trade for the false positive above."""
+        self.write_index(
+            CLEAN_INDEX
+            + "\n[`r22`]: gone_collide_defn.md\n"
+            + "\n- [outer [`other`] text](gone_collide_outer.md) — different label, same resolved shape\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("gone_collide_defn.md", findings[0])
+        self.assertNotIn("gone_collide_outer.md", " ".join(findings))
+
+    # --- Nothing but refmap crosses the pass boundary (WI-0093, S-3) ---------
+    # Reading the index twice means pass 2 must start from BEGIN state. Each
+    # test below leaves ONE block construct open at end of pass 1 and puts a
+    # dead link BEFORE it: if that construct's flag leaks, pass 2 opens inside
+    # it and scans nothing at all — and an assertion that only demanded "no
+    # finding from inside the construct" would be satisfied by exactly that.
+    # The dead link in front is what makes the assertion able to fail. Same
+    # shape as the block-comment sentinel test above, which is the one
+    # construct of the five that already had it.
+    #
+    # The indexes below are minimal on purpose, and the missing blank line
+    # between the heading and the paragraph is load-bearing — measured, not
+    # stylistic. A leaked `in_fence` arrives in pass 2 with `fence_char` and
+    # `fence_len` already reset to "" and 0, and the closer test built from
+    # those degenerates into a blank-line match, so the leaked fence closes
+    # itself at the FIRST blank line of the second pass. A leaked
+    # `in_html_block6` closes at the first blank line by its own rule. Anything
+    # after that blank line is scanned normally and proves nothing; only a link
+    # before it can tell the two states apart.
+    _PASS_LEAK_INDEX = "# Memory Index\nA paragraph pointing at [Dead]({dead}).\n\n{opener}\n- [Example]({inner})\n"
+
+    def test_an_unclosed_fence_does_not_leak_into_the_second_pass(self):
+        """`in_fence` at the pass boundary. The fence opens in pass 1 and never
+        closes, so it is still open when the file is handed over a second
+        time."""
+        self.write_index(self._PASS_LEAK_INDEX.format(
+            dead="dead_pass_fence_before.md", opener="```", inner="dead_pass_fence_after.md",
+        ))
+
+        result = self.run_lint()
+
+        findings = self.link_findings(result.stdout)
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("dead_pass_fence_before.md", findings[0])
+        warnings = self.findings(result.stdout, "Warnings")
+        self.assertTrue(any("never closed" in w for w in warnings), warnings)
+
+    def test_an_unclosed_html_block_type_1_does_not_leak_into_the_second_pass(self):
+        """`in_html_block1`. A raw-text element (`<script>`) closes only on its
+        own closing tag, so an unclosed one runs to end of document — and,
+        without the reset, past it."""
+        self.write_index(self._PASS_LEAK_INDEX.format(
+            dead="dead_pass_b1_before.md", opener="<script>", inner="dead_pass_b1_after.md",
+        ))
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("dead_pass_b1_before.md", findings[0])
+
+    def test_an_unclosed_html_block_type_6_does_not_leak_into_the_second_pass(self):
+        """`in_html_block6`. A type-6 block ends at the next BLANK line, so a
+        file that ends without one leaves the flag set at the pass boundary."""
+        self.write_index(self._PASS_LEAK_INDEX.format(
+            dead="dead_pass_b6_before.md", opener="<div>", inner="dead_pass_b6_after.md",
+        ))
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("dead_pass_b6_before.md", findings[0])
+
+    def test_a_closed_construct_before_the_pass_boundary_scans_both_sides(self):
+        """The control the three tests above need: with the construct CLOSED,
+        the link in front of it is still the only finding and the run is
+        otherwise identical — so "exactly one finding" above is a statement
+        about the leak, not about this index shape being unscannable."""
+        self.write_index(
+            "# Memory Index\nA paragraph pointing at [Dead](dead_pass_closed_before.md).\n"
+            "\n```\n- [Example](dead_pass_closed_inner.md)\n```\n"
+            "\nAnd [After](dead_pass_closed_after.md).\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+        joined = " ".join(findings)
+
+        self.assertEqual(len(findings), 2, findings)
+        self.assertIn("dead_pass_closed_before.md", joined)
+        self.assertIn("dead_pass_closed_after.md", joined)
+        self.assertNotIn("dead_pass_closed_inner.md", joined)
 
     def test_a_named_entity_in_the_destination_is_reported_as_info_not_a_dead_link(self):
         """`&num;` is a NAMED entity — deliberately left undecoded (WI-0081):
@@ -2896,33 +3801,77 @@ class ScriptActuallyRanTest(unittest.TestCase):
                 MemoryLintTest._assert_known_dead_link_is_found(broken_script)
 
 
-class EscapeAwareLinkExtractionMutationTest(unittest.TestCase):
-    """WI-0079 obligation: the new escape-awareness tests must have been seen
-    RED by mutation, not merely written and never falsified. Reverts
-    `process_link_line()`'s escape guard to its exact pre-fix shape on an
-    in-memory COPY of the script (same pattern as
-    MutationProvesTheDifferentialTestCanFail above) — the shipped script on
-    disk is never touched; proven by md5, not assumed.
+class LinkScannerMutationTest(unittest.TestCase):
+    """WI-0079/WI-0080/WI-0091/WI-0093/WI-0094 obligation: every rule of
+    `process_link_line()`'s bracket-stack scanner, and every part of the
+    reference-label machinery feeding it, must have been seen RED by a
+    STRUCTURAL mutation of the rule itself — never by deletion, with one named
+    exception. A deleted branch usually turns the whole suite red and proves
+    only that something was removed; a rule replaced by a plausible-but-wrong
+    variant proves which fixture discriminates it.
+
+    The named exception is the pass-boundary reset (S-3): three of the nineteen
+    mutations below DO remove a line, one `in_*` reset each. Removal is the
+    plausible-but-wrong variant there, not a switch-off — the claim is that no
+    state survives the boundary, and "survives a little" cannot be written as a
+    substitution. What replaces the substitution as the guard against a merely
+    broken mutant is a SECOND fixture: each of the three runs the same mutant
+    on an open construct (must break) and on a closed one (must still report),
+    so a mutant that simply killed the script fails the test. The full argument
+    is at the block comment above those three tests. Whenever this discipline
+    is relaxed again, name the mutation here and say why substitution could
+    not express it.
+
+    Each test mutates an in-memory COPY of the script. The shipped script on
+    disk is never touched — proven by md5 before/after, same discipline as
+    DestinationEscapeAndEntityMutationTest below.
+
+    Nineteen mutations. Six from the WI-0080/WI-0091 round:
+
+      * escape parity -> one-byte lookbehind (rule 2, WI-0079)
+      * escape probed one byte past the OPENING bracket (rule 2)
+      * escape probed one byte past the CLOSING bracket (rule 2)
+      * image openers also deactivate their enclosing link (rule 4, WI-0091)
+      * "deactivate enclosing LINK openers" predicate inverted (rule 3)
+      * the opener stack capped at one entry (rule 1, WI-0080's depth claim)
+
+    Eight added for the reference-link rule (rule 5, WI-0093/WI-0094):
+
+      * the refmap lookup forced to "yes" — every inner label resolves
+      * the refmap lookup forced to "no" — the WI-0093 false positive returns
+      * the full and shortcut label SOURCES swapped
+      * label collection restricted to pass 2 — a forward definition breaks
+      * the "may not interrupt a paragraph" gate dropped
+      * a resolved reference span no longer consumed
+      * an image reference deactivates its enclosing opener
+      * the label grammar skips one byte per escape instead of two (WI-0094)
+
+    Two added for WI-0098, one per side of the label-key space:
+
+      * the definition label registered without resolve_paragraph() — the
+        false positive on a code-span label returns
+      * the `lbl != ""` guard put back on the usage-side lookup — likewise
+
+    Three added for the pass-boundary reset (S-3), one reset line removed each:
+
+      * `in_fence = 0` — an unclosed fence swallows the second pass
+      * `in_html_block1 = 0` — an unclosed `<script>` block does
+      * `in_html_block6 = 0` — an unclosed `<div>` block does
+
+    Every one of the nineteen was itself falsified once, by neutralising the
+    mutation (`_mutate` returning the script unchanged) and confirming all
+    nineteen go red — a mutation test that cannot fail proves nothing.
     """
 
-    _ESCAPE_GUARD = (
-        "                if (is_escaped(line, open_pos) || is_escaped(line, close_pos)) {\n"
-        "                    line = substr(line, RSTART + 1)\n"
-        "                    continue\n"
-        "                }\n"
-    )
+    def _run_mutant(self, mutated, index_body, raw=False):
+        """Runs `mutated` against a scratch project whose index body is
+        `index_body`, and returns the memory-lint stdout.
 
-    def test_removing_the_escape_guard_flips_the_escaped_bracket_fixtures_red(self):
-        original = SCRIPT_PATH.read_text(encoding="utf-8")
-        original_md5_before = __import__("hashlib").md5(original.encode("utf-8")).hexdigest()
-
-        self.assertIn(
-            self._ESCAPE_GUARD, original,
-            "fixture line moved — update the mutation target for this test",
-        )
-        mutated = original.replace(self._ESCAPE_GUARD, "", 1)
-        self.assertNotEqual(mutated, original, "mutation did not change the script")
-
+        `raw=True` writes `index_body` verbatim instead of prefixing the usual
+        `# Memory Index` heading and blank line. Needed by the pass-boundary
+        tests below, where that blank line is not neutral: it closes a leaked
+        fence or type-6 block before the fixture's own link is reached, and the
+        mutation then looks harmless."""
         with tempfile.TemporaryDirectory() as tmp:
             script_dir = Path(tmp) / "scriptdir"
             shutil.copytree(SCRIPT_PATH.parent / "lib", script_dir / "lib")
@@ -2932,30 +3881,633 @@ class EscapeAwareLinkExtractionMutationTest(unittest.TestCase):
             project_dir = Path(tmp) / "project"
             (project_dir / "docs" / "memory").mkdir(parents=True)
             (project_dir / "docs" / "memory" / "MEMORY.md").write_text(
-                "# Memory Index\n\n"
-                "- \\[not a link\\](gone_mut_esc1.md) — not a link\n",
+                index_body if raw else "# Memory Index\n\n" + index_body,
                 encoding="utf-8",
             )
             fake_home = Path(tmp) / "home"
             fake_home.mkdir()
 
-            result = subprocess.run(
+            return subprocess.run(
                 ["bash", str(mutant_script), str(project_dir)],
                 capture_output=True, text=True,
                 env={"HOME": str(fake_home), "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"},
-            )
+            ).stdout
 
-        self.assertIn(
-            "gone_mut_esc1.md", result.stdout,
-            "mutation did not flip the fixture — the escape guard no longer "
-            "discriminates WI-0079's defect",
+    def _mutate(self, old, new):
+        """Returns the script source with `old` replaced by `new`, asserting the
+        target is present exactly once (so a drifted fixture fails loudly here
+        instead of silently mutating nothing)."""
+        original = SCRIPT_PATH.read_text(encoding="utf-8")
+        self.assertEqual(
+            original.count(old), 1,
+            "mutation target moved — update this test's fixture",
+        )
+        mutated = original.replace(old, new, 1)
+        self.assertNotEqual(mutated, original, "mutation did not change the script")
+        return original, mutated
+
+    def _assert_script_untouched(self, original):
+        after = SCRIPT_PATH.read_text(encoding="utf-8")
+        md5 = __import__("hashlib").md5
+        self.assertEqual(
+            md5(original.encode("utf-8")).hexdigest(),
+            md5(after.encode("utf-8")).hexdigest(),
+        )
+        self.assertEqual(after, original)
+
+    def test_escape_parity_replaced_by_a_one_byte_lookbehind_flips_a_live_link_silent(self):
+        """Rule 2 (WI-0079). The scanner asks is_escaped(), i.e. backslash-run
+        PARITY. Replaced here by the naive "is the previous byte a backslash",
+        which is wrong for `\\\\[x](t.md)`: that is an escaped BACKSLASH followed
+        by a LIVE bracket, and the reference renders a real link. The mutant
+        reads the bracket as escaped and stays silent — so the doubly-escaped
+        fixture is what discriminates the parity rule, not the single-escape
+        one (which both variants get right)."""
+        original, mutated = self._mutate(
+            '                if (ch == "[" && !is_escaped(line, i)) {',
+            '                if (ch == "[" && substr(line, i - 1, 1) != "\\\\") {',
         )
 
-        # The real script on disk was never touched — proven by md5, not assumed.
-        after = SCRIPT_PATH.read_text(encoding="utf-8")
-        original_md5_after = __import__("hashlib").md5(after.encode("utf-8")).hexdigest()
-        self.assertEqual(original_md5_before, original_md5_after)
-        self.assertEqual(after, original)
+        out = self._run_mutant(
+            mutated,
+            "- \\\\[real link](gone_mut_dbl.md) — live\n"
+            "- [control](gone_mut_ctl1.md) — plain dead link\n",
+        )
+
+        self.assertIn(
+            "gone_mut_ctl1.md", out,
+            "the mutant produced no findings at all — this assertion cannot "
+            "discriminate anything (the control link must still be reported)",
+        )
+        self.assertNotIn(
+            "gone_mut_dbl.md", out,
+            "mutation did not flip the fixture — the doubly-escaped-backslash "
+            "case no longer discriminates parity from a one-byte lookbehind",
+        )
+        self._assert_script_untouched(original)
+
+    def test_probing_the_escape_one_byte_past_the_opening_bracket_revives_a_non_link(self):
+        r"""Rule 2, the OPENING bracket. `\[text](t.md)` is not a link at the
+        reference — escaping either bracket alone is enough. The mutation keeps
+        the escape test but asks it about the wrong POSITION (`i + 1`, the byte
+        after the bracket), which is never preceded by a backslash. The mutant
+        pushes an opener that should not exist and reports a target nobody
+        linked — a false POSITIVE, the direction that matters most."""
+        original, mutated = self._mutate(
+            '                if (ch == "[" && !is_escaped(line, i)) {',
+            '                if (ch == "[" && !is_escaped(line, i + 1)) {',
+        )
+
+        out = self._run_mutant(mutated, "- \\[text](gone_mut_openesc.md) — not a link\n")
+
+        self.assertIn(
+            "gone_mut_openesc.md", out,
+            "mutation did not flip the fixture — nothing pins that an escaped "
+            "OPENING bracket opens nothing",
+        )
+        self._assert_script_untouched(original)
+
+    def test_probing_the_escape_one_byte_past_the_closing_bracket_revives_a_non_link(self):
+        r"""Rule 2, the CLOSING bracket. `[text\](t.md)` is not a link either.
+        Same off-by-one mutation on the `]` branch: the escape test still runs,
+        one byte too far along, and the mutant closes a link the reference does
+        not render."""
+        original, mutated = self._mutate(
+            '                if (ch == "]" && !is_escaped(line, i)) {',
+            '                if (ch == "]" && !is_escaped(line, i + 1)) {',
+        )
+
+        out = self._run_mutant(mutated, "- [text\\](gone_mut_closeesc.md) — not a link\n")
+
+        self.assertIn(
+            "gone_mut_closeesc.md", out,
+            "mutation did not flip the fixture — nothing pins that an escaped "
+            "CLOSING bracket closes nothing",
+        )
+        self._assert_script_untouched(original)
+
+    def test_letting_an_image_deactivate_its_enclosing_opener_flips_the_badge_silent(self):
+        """Rule 4 (WI-0091). Only a LINK in the link text disqualifies the
+        enclosing link; an IMAGE does not. The mutation moves the deactivation
+        loop OUT of the `!o_img` branch, so an image deactivates too — both
+        branches still present, one line differently placed. The badge shape
+        `[![alt](b.png)](t.md)` then reports nothing."""
+        original, mutated = self._mutate(
+            "                        if (!o_img) {\n"
+            "                            print strip_dest_mark(substr(line, i + 3, e - 1))\n"
+            "                            deactivate_enclosing_link_openers(sp, st_img, st_act)\n"
+            "                        }\n",
+            "                        if (!o_img) {\n"
+            "                            print strip_dest_mark(substr(line, i + 3, e - 1))\n"
+            "                        }\n"
+            "                        deactivate_enclosing_link_openers(sp, st_img, st_act)\n",
+        )
+
+        out = self._run_mutant(
+            mutated,
+            "- [![alt](gone_mut_badge.png)](gone_mut_ci.md) — badge\n"
+            "- [control](gone_mut_ctl2.md) — plain dead link\n",
+        )
+
+        self.assertIn(
+            "gone_mut_ctl2.md", out,
+            "the mutant produced no findings at all — this assertion cannot "
+            "discriminate anything (the control link must still be reported)",
+        )
+        self.assertNotIn(
+            "gone_mut_ci.md", out,
+            "mutation did not flip the fixture — the badge shape no longer "
+            "discriminates 'an image does not disqualify the outer link'",
+        )
+        self._assert_script_untouched(original)
+
+    def test_inverting_the_deactivation_predicate_reports_the_outer_link_too(self):
+        """Rule 3. "Links may not contain other links, at any level of nesting"
+        — the inner link wins. The mutation inverts the predicate that decides
+        WHICH openers get deactivated (`!st_img[k]` -> `st_img[k]`), so the
+        enclosing LINK opener survives and the outer target is reported
+        alongside the inner one. Not a removal: the loop still runs, still
+        assigns, just to the complementary set."""
+        original, mutated = self._mutate(
+            "for (k = 1; k <= sp; k++) if (!st_img[k]) st_act[k] = 0",
+            "for (k = 1; k <= sp; k++) if (st_img[k]) st_act[k] = 0",
+        )
+
+        out = self._run_mutant(
+            mutated,
+            "- [a [b](gone_mut_in.md) c](gone_mut_out.md) — link in link text\n",
+        )
+
+        self.assertIn(
+            "gone_mut_out.md", out,
+            "mutation did not flip the fixture — nothing pins that a link "
+            "inside the link text disqualifies the enclosing one",
+        )
+        self._assert_script_untouched(original)
+
+    def test_capping_the_opener_stack_at_one_entry_flips_the_nested_label_silent(self):
+        """Rule 1 (WI-0080's central claim: the label is a BALANCED construct,
+        so the scanner needs a real stack). The mutation caps the stack at a
+        single entry — a nested `[` then overwrites the outer opener instead of
+        pushing beside it, which is exactly what a "remember the last opener"
+        implementation would do. A FLAT link is unaffected (asserted here, so
+        the mutation is not simply breaking everything); the nested label goes
+        silent."""
+        original, mutated = self._mutate(
+            "                    sp++\n",
+            "                    if (sp < 1) sp++\n",
+        )
+
+        out = self._run_mutant(
+            mutated,
+            "- [a [b] c](gone_mut_nested.md) — nested\n"
+            "- [flat](gone_mut_flat.md) — flat control\n",
+        )
+
+        self.assertNotIn(
+            "gone_mut_nested.md", out,
+            "mutation did not flip the fixture — the nested label no longer "
+            "discriminates a real opener stack from a single remembered opener",
+        )
+        self.assertIn(
+            "gone_mut_flat.md", out,
+            "the mutation broke the flat case too — it is not discriminating "
+            "the depth rule specifically",
+        )
+        self._assert_script_untouched(original)
+
+
+    _REFMAP_LOOKUP = "            return ((lbl in refmap) ? n : -1)"
+
+    def test_a_refmap_that_answers_yes_to_everything_silences_a_live_nested_link(self):
+        """Rule 5 (WI-0093), the direction that matters most. The refmap lookup
+        is what separates `[a [ref] c](t.md)`, which renders no outer link, from
+        `[a [b] c](t.md)`, WI-0080's central fixture, which renders one. Forced
+        to "yes" here — every inner label resolves — the nested-bracket link goes
+        silent while a plain link is untouched."""
+        original, mutated = self._mutate(
+            self._REFMAP_LOOKUP,
+            '            return ((lbl != "") ? n : -1)',
+        )
+
+        out = self._run_mutant(
+            mutated,
+            "- [a [b] c](gone_mut_nb_live.md) — nested, no definition anywhere\n"
+            "- [control](gone_mut_ctl3.md) — plain dead link\n",
+        )
+
+        self.assertIn(
+            "gone_mut_ctl3.md", out,
+            "the mutant produced no findings at all — this assertion cannot "
+            "discriminate anything (the control link must still be reported)",
+        )
+        self.assertNotIn(
+            "gone_mut_nb_live.md", out,
+            "mutation did not flip the fixture — nothing pins that an inner "
+            "label must RESOLVE before it disqualifies the enclosing link",
+        )
+        self._assert_script_untouched(original)
+
+    def test_a_refmap_that_answers_no_to_everything_revives_the_false_positive(self):
+        """Rule 5, the other direction: neutralising the lookup restores exactly
+        the WI-0093 defect — the outer destination of
+        `[outer [r] text](out.md)` is reported again although the reference
+        renders no link there."""
+        original, mutated = self._mutate(
+            self._REFMAP_LOOKUP,
+            "            return (n < 0 ? n : -1)",
+        )
+
+        out = self._run_mutant(
+            mutated,
+            "[mutref]: gone_mut_refdefn.md\n"
+            "\n"
+            "- [outer [mutref] text](gone_mut_refouter.md) — reference inside\n",
+        )
+
+        self.assertIn(
+            "gone_mut_refouter.md", out,
+            "mutation did not flip the fixture — nothing pins that a RESOLVING "
+            "reference link in the link text disqualifies the enclosing one",
+        )
+        self._assert_script_untouched(original)
+
+    def test_swapping_the_two_label_sources_breaks_the_full_reference_form(self):
+        """Rule 5, the form distinction. A FULL reference `[text][ref]` names
+        its definition in the SECOND label; the collapsed and shortcut forms
+        name it in the FIRST. The mutation swaps the two `raw` assignments —
+        both branches still present, still assigning — so the full form takes
+        its label from the link TEXT and looks up `txt`, which is undefined,
+        and the outer link is reported again."""
+        original, mutated = self._mutate(
+            "            if (n > 2) raw = substr(s, i + 2, n - 2)\n"
+            "            else raw = substr(s, o_pos + 1, i - o_pos - 1)\n",
+            "            if (n > 2) raw = substr(s, o_pos + 1, i - o_pos - 1)\n"
+            "            else raw = substr(s, i + 2, n - 2)\n",
+        )
+
+        out = self._run_mutant(
+            mutated,
+            "[mutfull]: gone_mut_fulldefn.md\n"
+            "\n"
+            "- [outer [txt][mutfull] text](gone_mut_fullouter.md) — full reference\n",
+        )
+
+        self.assertIn(
+            "gone_mut_fullouter.md", out,
+            "mutation did not flip the fixture — nothing pins WHICH of the two "
+            "labels a full reference resolves against",
+        )
+        self._assert_script_untouched(original)
+
+    def test_collecting_labels_in_the_second_pass_only_breaks_a_forward_definition(self):
+        """The two-pass architecture (WI-0093). CommonMark collects reference
+        definitions for the whole document before parsing any inline content, so
+        a definition may stand AFTER its use. The mutation restricts recording
+        to pass 2, i.e. reduces the program to a single effective pass. A
+        BACKWARD definition still works — asserted here, so the mutation is not
+        simply switching the feature off — and only the forward one breaks."""
+        original, mutated = self._mutate(
+            "                        refmap[reflbl] = 1\n",
+            "                        if (pass == 2) refmap[reflbl] = 1\n",
+        )
+
+        out = self._run_mutant(
+            mutated,
+            "- [outer [mutfwd] text](gone_mut_fwdouter.md) — used before defined\n"
+            "\n"
+            "[mutfwd]: gone_mut_fwddefn.md\n"
+            "\n"
+            "[mutback]: gone_mut_backdefn.md\n"
+            "\n"
+            "- [outer [mutback] text](gone_mut_backouter.md) — used after defined\n",
+        )
+
+        self.assertIn(
+            "gone_mut_fwdouter.md", out,
+            "mutation did not flip the fixture — nothing pins that a definition "
+            "AFTER its use is still collected, i.e. that two passes are needed",
+        )
+        self.assertNotIn(
+            "gone_mut_backouter.md", out,
+            "the mutant broke the backward direction too — it is not "
+            "discriminating the forward-reference claim specifically",
+        )
+        self._assert_script_untouched(original)
+
+    def test_dropping_the_paragraph_gate_lets_a_non_definition_define_a_label(self):
+        """A link reference definition may not INTERRUPT a paragraph — with
+        prose open above it the line is ordinary text and defines nothing
+        (measured). The mutation drops that gate, so the line becomes a
+        definition again: it defines `mutint`, wrongly silencing an outer link
+        the reference renders, and it reports its own target, which is the
+        WI-0096 false positive. One gate, both effects — that is why the
+        mutant's two assertions below are the exact inverse of the shipped
+        script's behaviour on the same fixture."""
+        original, mutated = self._mutate(
+            '                    if (pbuf_n == 0 && reflbl != "" && reference_definition_tail(raw_rest)) {\n',
+            '                    if (pbuf_n >= 0 && reflbl != "" && reference_definition_tail(raw_rest)) {\n',
+        )
+
+        out = self._run_mutant(
+            mutated,
+            "some prose\n"
+            "[mutint]: gone_mut_intdefn.md\n"
+            "\n"
+            "- [outer [mutint] text](gone_mut_intouter.md) — not a definition above\n",
+        )
+
+        self.assertIn(
+            "gone_mut_intdefn.md", out,
+            "the mutant produced no findings at all — this assertion cannot "
+            "discriminate anything (the definition line target must still be "
+            "reported, it is the outer link that must vanish)",
+        )
+        self.assertNotIn(
+            "gone_mut_intouter.md", out,
+            "mutation did not flip the fixture — nothing pins that a "
+            "definition-shaped line inside a paragraph defines nothing",
+        )
+        self._assert_script_untouched(original)
+
+    def test_dropping_the_empty_label_gate_makes_a_whitespace_only_line_a_definition(self):
+        """The second half of the same guard (WI-0096 sibling). CommonMark's
+        own parseReference rejects a label that normalises to nothing, so
+        `[   ]: dead.md` is visible prose, not a definition — measured. The
+        mutation neutralises the `reflbl != ""` test WITHOUT removing it (the
+        comparison is made trivially true), so the line defines the empty label
+        and reports its target: the false positive returns AND the outer link
+        the reference renders goes silent. Two effects, one guard, both
+        asserted — a mutant that merely broke the script would fail the first
+        assertion."""
+        original, mutated = self._mutate(
+            '                    if (pbuf_n == 0 && reflbl != "" && reference_definition_tail(raw_rest)) {\n',
+            '                    if (pbuf_n == 0 && reflbl == reflbl && reference_definition_tail(raw_rest)) {\n',
+        )
+
+        out = self._run_mutant(
+            mutated,
+            "[   ]: gone_mut_wsdefn.md\n"
+            "\n"
+            "- [outer [   ] text](gone_mut_wsouter.md) — whitespace-only label\n",
+        )
+
+        self.assertIn(
+            "gone_mut_wsdefn.md", out,
+            "the mutant produced no definition finding at all — this assertion "
+            "cannot discriminate anything",
+        )
+        self.assertNotIn(
+            "gone_mut_wsouter.md", out,
+            "mutation did not flip the fixture — nothing pins that a label "
+            "which normalises to nothing is no label",
+        )
+        self._assert_script_untouched(original)
+
+    _WI0098_RESOLVED_KEY = (
+        "                        reslbl = normalize_label("
+        "resolve_paragraph(protect_link_destinations(rawlbl)))\n"
+    )
+
+    def test_registering_only_the_raw_definition_label_revives_the_code_span_false_positive(self):
+        """WI-0098, the definition half. The usage side reads its label out of
+        the RESOLVED paragraph, so the definition side has to register the
+        resolved shape as well. The mutation drops one stage of that pipeline —
+        resolve_paragraph(), the stage that deletes a code span — so
+        ``[`r`]:`` registers only `` `r` `` again while the scanner looks up the
+        empty string, and the outer link the reference does not render comes
+        back as a finding."""
+        original, mutated = self._mutate(
+            self._WI0098_RESOLVED_KEY,
+            "                        reslbl = normalize_label("
+            "protect_link_destinations(rawlbl))\n",
+        )
+
+        out = self._run_mutant(
+            mutated,
+            "[`mutcs`]: gone_mut_csdefn.md\n"
+            "\n"
+            "- [outer [`mutcs`] text](gone_mut_csouter.md) — code-span label\n",
+        )
+
+        self.assertIn(
+            "gone_mut_csdefn.md", out,
+            "the mutant produced no definition finding at all — this assertion "
+            "cannot discriminate anything",
+        )
+        self.assertIn(
+            "gone_mut_csouter.md", out,
+            "mutation did not flip the fixture — nothing pins that the "
+            "definition label is registered in the shape the scanner reads",
+        )
+        self._assert_script_untouched(original)
+
+    def test_re_guarding_the_empty_label_lookup_revives_the_code_span_false_positive(self):
+        """WI-0098, the usage half. A label that resolved away to nothing is
+        still a label a definition can carry, so the lookup must not refuse the
+        empty string. The mutation puts the `lbl != ""` guard back — the shape
+        this code had before the fix — and the same false positive returns."""
+        original, mutated = self._mutate(
+            self._REFMAP_LOOKUP,
+            '            return ((lbl != "" && (lbl in refmap)) ? n : -1)',
+        )
+
+        out = self._run_mutant(
+            mutated,
+            "[`mutcs2`]: gone_mut_cs2defn.md\n"
+            "\n"
+            "- [outer [`mutcs2`] text](gone_mut_cs2outer.md) — code-span label\n"
+            "- [plain [mutplain] text](gone_mut_cs2plain.md) — undefined label, control\n",
+        )
+
+        self.assertIn(
+            "gone_mut_cs2plain.md", out,
+            "the mutant produced no findings at all — this assertion cannot "
+            "discriminate anything (the control link must still be reported)",
+        )
+        self.assertIn(
+            "gone_mut_cs2outer.md", out,
+            "mutation did not flip the fixture — nothing pins that an emptied "
+            "label is still looked up",
+        )
+        self._assert_script_untouched(original)
+
+    # --- The pass-boundary reset, one removed line at a time (S-3) -----------
+    # REMOVAL mutations, which normally prove little — a removal tends to make
+    # everything red. Here it is the right shape: the block exists solely so
+    # that pass 2 starts from BEGIN state, and the only way to say "this one
+    # line is load-bearing" is to take it out. Each test therefore runs the
+    # SAME mutant twice — once on a fixture that leaves the construct open at
+    # the pass boundary (must break) and once on a fixture that closes it (must
+    # still work) — so a mutant that merely broke the script cannot pass.
+    #
+    # Each target carries the line ABOVE it as an anchor. `in_fence = 0` on its
+    # own is a substring of the fence-closing branch's own `in_fence = 0` one
+    # indent deeper, and _mutate() would have refused it.
+    #
+    # Three of the twelve reset lines have NO such test, and that is a measured
+    # statement, not an omission: removing `fence_char = ""`, `fence_len = 0` or
+    # `fence_open_line = 0` alone changes NOTHING observable, on any of the ten
+    # fixtures tried. All three are read only under `if (in_fence)`, and every
+    # path that sets `in_fence = 1` assigns fence_char and fence_len in the same
+    # breath, so with `in_fence` reset they are unreachable. They are reset so
+    # that "pass 2 starts from BEGIN state" is a property of the block rather
+    # than a chain of reasoning about which flag guards which — the same
+    # discipline the awk-local declarations elsewhere in this script follow.
+
+    def _assert_reset_line_is_load_bearing(self, anchored_target, anchor_only,
+                                           open_body, closed_body, target):
+        original, mutated = self._mutate(anchored_target, anchor_only)
+
+        leaked = self._run_mutant(mutated, open_body, raw=True)
+        intact = self._run_mutant(mutated, closed_body, raw=True)
+
+        self.assertIn(
+            target, intact,
+            "the mutant reports nothing even with the construct CLOSED — it "
+            "broke the script outright and discriminates nothing",
+        )
+        self.assertNotIn(
+            target, leaked,
+            "mutation did not flip the fixture — nothing pins that this reset "
+            "line stops the flag from crossing the pass boundary",
+        )
+        self._assert_script_untouched(original)
+
+    # These fixtures need the dead link BEFORE the first blank line of the
+    # index, for the reason spelt out at the behaviour tests above — so they are
+    # written raw, without _run_mutant()'s usual "# Memory Index\n\n" prefix
+    # whose blank line would close the leaked construct first and make every
+    # mutation below look harmless. It did, before this was measured.
+    _MUT_LEAK_HEAD = "# Memory Index\nA paragraph with [Dead]({dead}).\n\n"
+
+    def test_dropping_the_in_fence_reset_lets_an_unclosed_fence_swallow_the_second_pass(self):
+        """`in_fence = 0` at the pass boundary."""
+        head = self._MUT_LEAK_HEAD.format(dead="gone_mut_passfence.md")
+        self._assert_reset_line_is_load_bearing(
+            "                pass = 2\n                in_fence = 0\n",
+            "                pass = 2\n",
+            head + "```\n- [x](gone_mut_infence.md)\n",
+            head + "```\n- [x](gone_mut_infence.md)\n```\n",
+            "gone_mut_passfence.md",
+        )
+
+    def test_dropping_the_in_html_block1_reset_lets_an_unclosed_script_swallow_the_second_pass(self):
+        """`in_html_block1 = 0` at the pass boundary."""
+        head = self._MUT_LEAK_HEAD.format(dead="gone_mut_passb1.md")
+        self._assert_reset_line_is_load_bearing(
+            "                html_comment_open_line = 0\n                in_html_block1 = 0\n",
+            "                html_comment_open_line = 0\n",
+            head + "<script>\n- [x](gone_mut_inb1.md)\n",
+            head + "<script>\n- [x](gone_mut_inb1.md)\n</script>\n",
+            "gone_mut_passb1.md",
+        )
+
+    def test_dropping_the_in_html_block6_reset_lets_an_unclosed_div_swallow_the_second_pass(self):
+        """`in_html_block6 = 0` at the pass boundary."""
+        head = self._MUT_LEAK_HEAD.format(dead="gone_mut_passb6.md")
+        self._assert_reset_line_is_load_bearing(
+            "                in_html_block1 = 0\n                in_html_block6 = 0\n",
+            "                in_html_block1 = 0\n",
+            head + "<div>\n- [x](gone_mut_inb6.md)\n",
+            head + "<div>\n- [x](gone_mut_inb6.md)\n\n",
+            "gone_mut_passb6.md",
+        )
+
+    def test_not_consuming_a_resolved_reference_span_reports_a_stray_parenthesis(self):
+        """Rule 5 consumes the span it matched. `[txt][ref](x.md)` renders the
+        reference link and leaves `(x.md)` as literal text; a scanner that only
+        deactivated and stepped one byte on re-reads `[ref](x.md)` as an inline
+        link. The mutation replaces the consuming advance with the one-byte one
+        — a false POSITIVE, a target nobody linked."""
+        original, mutated = self._mutate(
+            "                    i = i + 1 + r\n",
+            "                    i++\n",
+        )
+
+        out = self._run_mutant(
+            mutated,
+            "[mutcons]: gone_mut_consdefn.md\n"
+            "\n"
+            "- [txt][mutcons](gone_mut_consparen.md) — the paren is literal text\n",
+        )
+
+        self.assertIn(
+            "gone_mut_consparen.md", out,
+            "mutation did not flip the fixture — nothing pins that a resolved "
+            "reference link CONSUMES its second label",
+        )
+        self._assert_script_untouched(original)
+
+    def test_letting_an_image_reference_deactivate_its_enclosing_opener_flips_it_silent(self):
+        """Rule 4 meets rule 5: `![ref]` is an IMAGE even when it resolves, and
+        an image in the link text does not disqualify the enclosing link. The
+        mutation drops the image guard from the reference branch only — the
+        inline branch keeps its own — so the badge-shaped reference form
+        silences a link the reference renders."""
+        original, mutated = self._mutate(
+            "                    if (!o_img) deactivate_enclosing_link_openers(sp, st_img, st_act)\n",
+            "                    deactivate_enclosing_link_openers(sp, st_img, st_act)\n",
+        )
+
+        out = self._run_mutant(
+            mutated,
+            "[mutimg]: gone_mut_imgdefn.png\n"
+            "\n"
+            "- [outer ![mutimg] text](gone_mut_imgouter.md) — image reference inside\n",
+        )
+
+        self.assertIn(
+            "gone_mut_imgdefn.png", out,
+            "the mutant produced no findings at all — this assertion cannot "
+            "discriminate anything (the definition line target must still be "
+            "reported)",
+        )
+        self.assertNotIn(
+            "gone_mut_imgouter.md", out,
+            "mutation did not flip the fixture — nothing pins that an IMAGE "
+            "reference leaves the enclosing link alone",
+        )
+        self._assert_script_untouched(original)
+
+    def test_a_one_byte_escape_skip_in_the_label_grammar_unmakes_a_definition(self):
+        """WI-0094, the DEFINITION side of the label grammar. A backslash
+        escapes exactly ONE following character, so `[a\\]b]` is a five-character
+        label ending at the second `]`. The mutation consumes the backslash but
+        not what it escapes — the label then ends at the escaped `]`, the line
+        stops being a definition, and its target goes unchecked. A plain
+        definition on the same file is unaffected (asserted), so the mutation
+        discriminates the escape rule and not definitions in general."""
+        original, mutated = self._mutate(
+            "                if (c == \"\\\\\") {\n"
+            "                    if (p >= n || substr(s, p + 1, 1) == \"\\n\") return 0\n"
+            "                    p += 2\n"
+            "                    continue\n"
+            "                }\n",
+            "                if (c == \"\\\\\") {\n"
+            "                    p++\n"
+            "                    continue\n"
+            "                }\n",
+        )
+
+        out = self._run_mutant(
+            mutated,
+            "[a\\]b]: gone_mut_escdefn.md\n"
+            "\n"
+            "[plain]: gone_mut_plaindefn.md\n",
+        )
+
+        self.assertIn(
+            "gone_mut_plaindefn.md", out,
+            "the mutant stopped recognising definitions altogether — it is not "
+            "discriminating the escape rule specifically",
+        )
+        self.assertNotIn(
+            "gone_mut_escdefn.md", out,
+            "mutation did not flip the fixture — nothing pins that a "
+            "backslash-escaped bracket is CONTENT of a definition label",
+        )
+        self._assert_script_untouched(original)
 
 
 class DestinationEscapeAndEntityMutationTest(unittest.TestCase):

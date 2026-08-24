@@ -7,6 +7,260 @@ All notable changes to this project are documented in this file. The format is b
 ## [Unreleased]
 
 ### Fixed
+- **check (n) reported the target of a definition-shaped line that cannot open a definition — the last
+  false positive in the corpus (WI-0096).** A link reference definition may not INTERRUPT a paragraph.
+  With prose open above it, `foo` then `[ref]: dead.md`, the reference reads the second line as ordinary
+  text, defines nothing and renders `<p>foo
+[ref]: dead.md</p>`. check (n) reported `dead.md` anyway:
+  `refmap` already declined to treat the line as a definition (WI-0093), but the REPORTING path was
+  gated on nothing. Both now sit behind the same `pbuf_n == 0` gate. Pre-existing — `4f2ffa7` behaves
+  identically — and pinned by a mutation that drops the gate and asserts the exact inverse behaviour on
+  the same fixture.
+
+  **Why WI-0085 stays** — the two are the same bytes and the opposite verdict, and the line between them
+  is what the READER sees, not the syntax. `[ref]: dead.md` standing alone renders as NOTHING: the author
+  declared a destination, the file is gone, and no reader will ever notice it. That is invisibly dead, and
+  catching it is what check (n) is for, even where CommonMark renders no link at all (PO decision
+  23.08.2026). The same line under an open paragraph renders as VISIBLE paragraph text: the path is prose
+  on the page, not a pointer, and reporting it said something untrue about a line the reader can read.
+  Both verdicts have their own corpus entry, and dropping either gate turns exactly one of them red.
+
+  The `reflbl != ""` half of the same gate answers a third shape by the same rule, and it was measured
+  rather than assumed: `[ ]: dead.md` (a label of nothing but whitespace) and `[]: dead.md` are no
+  definitions either — a label needs one non-whitespace character — and both render as visible prose.
+  `4f2ffa7` reported the whitespace one; the working tree already did not, through `reflbl != ""` and not
+  through the paragraph gate. Measured both ways (removing one gate leaves the other shape silent) and
+  now pinned by two corpus entries, where before it was an untested accident.
+
+- **`tolower()` on a reference label answered differently depending on the process locale, and the
+  harness measured the narrow answer (WI-0099).** Label matching follows the reference normalisation,
+  which case-folds — and what `tolower()` does above 0x7F is a property of the LOCALE, not of this
+  script. Under a UTF-8 locale `[ÄÖ]:` matched `[äö]` and agreed with the reference; under C/POSIX it did
+  not and the enclosing link was reported. The test harness runs the script with a bare environment
+  (`HOME` and `PATH` only), i.e. in the C locale, so the suite froze one answer while an interactive run
+  gave the other.
+
+  Fixed in two parts, because pinning the locale alone would only have made the wrong answer STABLE.
+  (1) `LC_ALL=C` at the awk call site, in line with `artifact-gate.sh`, `memory-sync.sh` and
+  `lib/discipline_gate.sh` — the byte-oriented answer is now the same everywhere. (2) A label carrying
+  any byte >= 0x80 short-circuits to "resolves" without consulting `refmap` at all, so a non-ASCII label
+  is never DECIDED by a folding that cannot fold it. The direction of that short-circuit follows from the
+  shape of the caller and not from a sample of inputs: "resolves" only ever deactivates an enclosing
+  opener, and the only `print` sits behind an active opener, so the branch can drop a finding and not
+  invent one. The detection is byte-wise via `index()` and deliberately not a regex — all three regex
+  spellings abort this awk with `towc: multibyte conversion failure`.
+
+  **The trade, named:** an UNDEFINED non-ASCII label now silences the link around it — a false negative
+  that is a property of this code, in place of a false positive that was a property of the environment it
+  was measured in (PO decision 24.08.2026), with its own corpus entry. Deliberately NOT narrowed on the
+  definition side: `[ÄÖ]: dead.md` still reports its target. Whether a label MATCHES is the question
+  narrowed here; whether a destination EXISTS is check (n)'s own contract and needs no folding at all.
+
+- **The corpus now carries no `false-positive` divergence at all.** 68 -> 76 entries. Of the 68
+  pre-existing rows exactly two move: the WI-0096 row (its `known_divergence` becomes null and
+  `dead-interrupt.md` leaves its findings) and the WI-0098 row (its `reason` now states the class rather
+  than the one shape). Eight rows are added — two for the whitespace/empty definition labels above, and
+  six for the WI-0098 collision class: three divergences, each paired with a control carrying the same
+  label and NO colliding definition, where the link IS still reported. Twelve `false-negative`
+  divergences remain and three `documented_intent` rows. WI-0096 is also removed from the closed set of
+  work items allowed to own a `known_divergence`, so re-opening it has to be a deliberate act.
+
+- **check (n) reported an outer link whose text contains a reference whose label the paragraph
+  resolver rewrites — a false positive the two-pass round below introduced (WI-0098).** The two ends of
+  the reference mechanism read their label from different text. The definition line reads the RAW
+  record; the usage side reads the paragraph after `protect_link_destinations()` and
+  `resolve_paragraph()` have run, and those DELETE a code span outright and replace a closed inline
+  comment with a boundary sentinel. So ``[`a`]: def.md`` registered the label `` `a` `` while
+  ``[outer [`a`] text](out.md)`` looked up the empty string, nothing matched, no deactivation happened
+  and `out.md` was reported. Measured three ways: the reference (`commonmark==0.9.2`, HTML and AST) and
+  `4f2ffa7` both report only `def.md`; the working tree reported both. `4f2ffa7` was right by accident —
+  its `[^][]*` label class could not match a bracketed label at all. The inline-comment spelling
+  (`[<!--x-->]`) was measured separately rather than assumed to be the same mechanism; it is.
+
+  Fixed on the definition side, by registering each definition label a SECOND time in the shape the
+  scanner will read it in — the raw label put through the same two functions — so that both ends key one
+  space. It is an additional key, never a replacement, and that is what bounds the risk: adding keys can
+  only make more references RESOLVE, a resolving reference only ever DEACTIVATES an enclosing link, so
+  this cannot invent a finding — so long as `protect_link_destinations()` draws correct spans, which is
+  WI-0095 and still open. `parse_link_label()` is blind to the destination sentinel, so a `]` inside a
+  wrongly drawn span terminates a label and the consuming advance lands inside that span, where the
+  argument no longer holds; on bracket-soup input check (n) has been measured reporting targets the
+  reference never renders. That precondition is now written into the source next to the argument.
+
+  Under it, the error the fix can make is dropping one, and it makes exactly one — a CLASS, not a shape.
+  Label resolution is not INJECTIVE, and it has two accumulation points: the EMPTY key (a code-span-only
+  label ``[`x`]``, a literal `[]`, a whitespace-only `[   ]` — the last two wider than the shape this was
+  found on, because the reference never looks an empty label up at all) and the `boundary` key (any label
+  that is exactly one closed inline comment, so `<!--a-->` and `<!--b-->` are interchangeable with no
+  empty label involved). Once any definition owns such a key, every other label collapsing to it reads as
+  a resolving reference and silences the link around it. All routes are measured, each against a control
+  carrying the same label and NO colliding definition where the link IS reported, so the loss is pinned
+  on the collision and not on the label shape. Traded deliberately (PO decision
+  24.08.2026 — a false negative may replace a false positive, not the other way round) and counted as
+  its own corpus entry. The counter-fixture that forbids the blunt repair has its own test: a code-span
+  label with NO definition must keep reporting the outer link, because the reference renders it.
+
+  The fix covers every construct either function rewrites, because the label is put through the
+  functions rather than through a list of cases. It does not cover a construct whose resolution depends
+  on text OUTSIDE the label (an unpaired backtick finding its partner later in the paragraph), where
+  standalone and in-context resolution can still disagree; named in the source, not fixed here.
+
+- **`paren_mark`, the sentinel a link destination's escaped `)` was detoured through, is removed.** Its
+  stated reason had already expired: `process_link_line()` used to find a link span with a `[^)]*` scan
+  blind to the `dest_mark` opacity, and WI-0080 replaced that scan with one that reads the extent off
+  the span. The retention argument — "no test can pin the removal in either direction" — was false, and
+  the line below the substitution is why: `decode_numeric_entities()` runs AFTER it, so
+  `[x](a&#41;b.md)` has been putting a literal `)` inside a protected destination since WI-0081 and
+  resolving correctly. The post-removal state was already pinned by a fixture that predates the removal;
+  both spellings now have an explicit one, plus a two-links-on-one-line pin per spelling.
+
+- **The pass-boundary reset now has tests, and three of its lines turn out to be the load-bearing
+  ones.** Reading each index twice means pass 2 must start from BEGIN state; five of the reset lines
+  were pinned by nothing. The three that can be observed — `in_fence`, `in_html_block1`,
+  `in_html_block6` — get one behaviour test each (an unclosed construct at the pass boundary, with a
+  dead link in FRONT of it, so an assertion of "one finding" cannot be satisfied by a pass that scanned
+  nothing) and one mutation test each that removes exactly that reset line. Two measured details shape
+  the fixtures: the dead link has to sit before the first BLANK line of the document, because a leaked
+  fence arrives with `fence_char`/`fence_len` already reset and its closer test degenerates into a
+  blank-line match, and a leaked type-6 block closes at a blank line by its own rule. The remaining two,
+  `fence_char` and `fence_len`, are deliberately left untested and the reason is measured, not assumed:
+  removing either changes nothing observable on any of ten fixtures, because both are read only under
+  `if (in_fence)` and every path that sets that flag assigns them in the same breath. Nineteen structural
+  mutations in that class now, each falsified once by neutralising the mutation.
+
+- **Three corpus entries added: one for a reach that was described rather than pinned, one for a PO
+  decision, one for a divergence traded in.** The WI-0097 stray-sentinel entry claimed a reach it could
+  not discriminate — a second, independent
+  link AFTER the construct shows the loss is the whole remainder of the paragraph, not just the link
+  between the two sentinels (`stray_sentinel_byte_swallows_the_rest_of_the_paragraph`). WI-0092 (a link
+  inside IMAGE ALT TEXT, `![a [b](in.md) c](out.png)`, which
+  the reference renders as plain text and check (n) reports) is filed as `documented_intent` on the
+  WI-0085 argument, PO decision 23.08.2026; it is pre-existing and `4f2ffa7` behaves identically. The
+  third is `two_labels_with_the_same_resolved_shape_are_interchangeable`, the false negative the WI-0098
+  fix above buys — it was counted in the 65 -> 68 total but not named here. The
+  generator's docstring now carries the guard that class needs: `documented_intent` may only be assigned
+  when the justification would hold even if no criterion depended on it — otherwise a round ends clean
+  because a divergence changed its name. Corpus 65 -> 68 entries; all 65 previous entries are
+  byte-identical after regeneration.
+
+- **check (n) reported the outer target of a link whose text contains a RESOLVING reference link
+  (WI-0093), and did not recognise a reference definition whose label carries an escaped bracket
+  (WI-0094).** CommonMark's "links may not contain other links, at any level of nesting" fires on any
+  successful LINK, not only an inline one. The WI-0080 scanner (see the entry below) implemented that
+  rule in its inline-destination branch only, so `[outer [ref] text](out.md)` with `[ref]:` defined
+  reported `out.md` — a FALSE POSITIVE, and one the regex the scanner replaced did not produce. It is
+  the shape that blocked the promotion of check (n) to `err`. Fixed by extending the rule to the three
+  reference forms, each measured against the pinned `commonmark==0.9.2` reference and not read out of
+  the spec: shortcut `[ref]`, collapsed `[ref][]` and full `[text][ref]` all deactivate the enclosing
+  openers when they RESOLVE, and consume the span they matched — `[text][ref](x.md)` renders the
+  reference link and leaves `(x.md)` as literal text, so a scanner that only deactivated would re-read
+  `[ref](x.md)` as an inline link. Three measured details decide the shape of the fix and none of them
+  is obvious: (1) a FAILED full reference does not fall back to the shortcut reading, so
+  `[ref][nosuch]` renders no link at all even with `[ref]:` defined and the enclosing link survives;
+  (2) an IMAGE reference (`![ref]`) resolves but is an image, so it leaves the enclosing link alone,
+  exactly as WI-0091 established for the inline form; (3) whether the inner label RESOLVES is the ONLY
+  thing separating this from `[a [b] c](t.md)`, WI-0080's central fixture, which must stay one ordinary
+  link — so "deactivate whenever no inline destination follows" is not a repair, it is a regression.
+
+  Deciding any of it needs the document's reference-definition labels, and CommonMark collects those
+  for the WHOLE document before it parses any inline content — a definition may legally stand AFTER the
+  link that uses it (measured). A single pass cannot answer the question at the moment it reaches the
+  link, so the extractor now reads each index TWICE: pass 1 prints nothing and only collects labels,
+  pass 2 does the extraction with the complete set. Two passes of the SAME program, not a cheap
+  pre-scan for definition-shaped lines: whether a line IS a definition depends on its block context —
+  inside a fence or an HTML comment it is not one, and it may not interrupt a paragraph, all measured —
+  and that context is precisely what the record block already computes. Label matching follows the
+  reference's normalisation (internal whitespace collapsed, ends trimmed, case-folded). Case-folding is
+  `tolower()`, and what that does to NON-ASCII depends on the process LOCALE, not on this script: under
+  a UTF-8 locale `[ÄÖ]:` and `[äö]` match and agree with the reference, under C/POSIX they do not and
+  the enclosing link is reported. The test harness runs the script with a bare environment, i.e. in the
+  C locale, so the corpus freezes the narrower answer while an interactive run gives the wider one.
+  Measured both ways and filed as WI-0099; not fixed in this wave.
+
+  WI-0094 is the sibling defect the same round exposed one function further along: reference
+  definitions were recognised with `\[[^][]+\]:`, the very label class WI-0080 had already removed
+  from the usage side. A definition whose label carries a backslash-escaped bracket
+  (`[a\]b]: dest.md`, one definition at the reference) was therefore not a definition at all — its
+  target went unchecked and its label stayed undefined for the rule above. Both sides now share one
+  `parse_link_label()` implementing the reference's own label grammar, so the two cannot drift apart
+  again. Eight further structural mutations were added on top of WI-0080's six, one per new rule — the
+  refmap lookup forced to "yes" and to "no", the two label sources swapped, label collection restricted
+  to pass 2 (a BACKWARD definition asserted still working, so the mutation discriminates the
+  forward-reference claim and not the feature), the paragraph gate dropped, the consuming advance
+  replaced by a one-byte one, an image reference made to deactivate, and the label grammar made to skip
+  one byte per escape instead of two. Each was itself falsified once, by neutralising the mutation and
+  confirming it goes red — a mutation test that cannot fail proves nothing.
+
+  **Three divergences this round measured and did NOT close**, recorded in the corpus rather than left
+  unnamed, all in the false-negative direction: `protect_link_destinations()` spans the text after ANY
+  `](` occurrence, live opener or not and escaped or not, and since WI-0080 the scanner skips such a
+  span WHOLESALE — so a wrong span now hides the real link inside it, where the previous regex simply
+  re-read through it (WI-0095, two entries); a literal 0x03 byte in a source file pairs with the
+  opening sentinel of the next real destination and eats the link between them (WI-0097, pathological
+  input, one entry); and a definition-shaped line that cannot interrupt a paragraph still has its
+  target reported, which may be the WI-0085 decision one shape further along or a defect, and is filed
+  as an open question for the PO rather than assumed (WI-0096, one entry). Corpus 52 -> 65 entries; all
+  52 previous entries are byte-identical after regeneration.
+
+- **check (n) could not see any link whose label contained a bracket, at any nesting depth, and could
+  not see the badge pattern at all (WI-0080, WI-0091).** The extractor matched links with the regex
+  `\[[^][]*\]\([^)]*\)`. That label class excludes BOTH bracket characters, so `[a [b] c](target.md)`
+  — one ordinary link per CommonMark — never matched, and neither did `[a\]b](target.md)`, where the
+  inner `]` is backslash-escaped rather than balanced. Both were silent false negatives. Widening the
+  class would not have fixed it: CommonMark link text is a BALANCED construct of arbitrary depth, and a
+  regular expression cannot count — the reference renders one link at nesting depth 1, 2, 3, 5, 10, 20,
+  50 and 100, with no ceiling (measured, not assumed). The regex is therefore replaced by a scanner with
+  an explicit opener stack, implementing four rules, each one measured against the pinned
+  `commonmark==0.9.2` reference rather than read out of the spec: (1) `[` pushes, `]` pops, so balanced
+  brackets in the label are ordinary content at any depth; (2) a backslash-escaped bracket neither opens
+  nor closes, decided by backslash-run PARITY (`\\[x](t.md)` carries an escaped BACKSLASH and a live
+  bracket) — the same parity now also decides the image marker, so `\![x](t.md)` is a LINK, not an image;
+  (3) "links may not contain other links, at any level of nesting" — on a successful link every enclosing
+  opener is deactivated, so the INNER link wins and the outer target is never reported; (4) an IMAGE in
+  the link text does NOT disqualify the enclosing link. Rule 3 used to hold by accident, because the
+  outer label could not match either — the corpus recorded an agreement no rule was responsible for; it
+  is now explicit and pinned. Rule 4 is WI-0091, filed as its own item because its cause is separate:
+  `[![build](badge.svg)](ci-url)`, the badge pattern, is a live link whose text is an image, and check
+  (n) reported neither the link target nor anything else. It is also the shape that rules out every
+  repair short of a real scanner — the LABEL itself contains a `](`, so any "split at the `](`" choice is
+  wrong. Nothing is skipped by a match LENGTH any more — the scan only jumps over something it has
+  RESOLVED (an opaque destination span, or a link it just consumed) and advances one byte everywhere
+  else — so WI-0079's guarantee that a DISQUALIFIED construct cannot hide a real link later on the same
+  line is now structural rather than hand-arranged. Mutation-checked by structure, never by deletion: escape parity
+  replaced by a one-byte lookbehind, the escape probe moved one byte past each bracket in turn, the
+  deactivation predicate INVERTED, the deactivation moved OUT of the image branch so an image disqualifies
+  too, and the opener stack CAPPED at one entry (with the flat case asserted still green, so the mutation
+  discriminates depth specifically) — six mutations, each confirmed to flip its own fixture, the real
+  script untouched and md5-verified. Corpus 46 -> 52 entries; three lose their `known_divergence`
+  (`nested_brackets_in_link_text_simple`, `nested_brackets_in_link_text_mid_sentence`,
+  `backslash_escaped_bracket_in_link_text`), the other 43 are byte-identical after regeneration, and the
+  six additions cover three-level nesting, an unbalanced-bracket negative pin, inner-wins-beside-a-later-link,
+  the badge pattern, two nested images, and an image with a bracketed alt text.
+
+  **Upgrade note:** against the last RELEASE (`v0.2.1-beta`) this wave removes no finding — measured,
+  with both scripts, on every shape this wave discusses, including the three it regresses on internally
+  (below): `v0.2.1-beta` reported none of them either. Against the INTERMEDIATE state `4f2ffa7`, i.e.
+  for anyone tracking `main` rather than releases, the claim does not hold and the difference is not
+  cosmetic — the WI-0080 scanner skips a `dest_mark` span wholesale where the regex it replaced re-read
+  through it, and that costs three shapes, all measured: `x](y [a](t.md) z)` and its escaped twin
+  `x\](y [a](t.md) z)` (WI-0095, two corpus entries, `4f2ffa7` reported the inner link, this version
+  does not), and a literal 0x03 byte in the source, which now swallows the rest of its paragraph
+  (WI-0097, two corpus entries, one defect — `4f2ffa7` reported both links, this version reports
+  neither). All three stay open. WI-0098's traded false negative is NOT in this list: `4f2ffa7` did not
+  report that shape either, so it is a divergence from CommonMark, not a loss on upgrade.
+
+  Otherwise the direction is additive: it ADDS findings on unchanged content — a store nobody has
+  touched can start reporting dead links after the upgrade, because those links were always dead and the
+  extractor simply could not see them. What does not change on upgrade is the EXIT CODE: check (n) is
+  filed under `warn` by default (`MEMORY_INDEX_LINK_SEVERITY`), so the new findings land in Warnings and
+  a run that exited 0 still exits 0 unless it already had warnings. The breaking moment is the promotion
+  of check (n) to `err`, not this change. Expect
+  it wherever an index uses brackets inside link text (`[Release state [measured]](file.md)`) or the badge
+  pattern. Measured against four live memory stores with both script versions on the same day: identical
+  in all four, because the constructs are almost absent there — a null result that proves nothing, so the
+  evidence is a discriminating probe on a COPY of a real memory tree instead, where the old script
+  reported 2 warnings and the new one 4, the two additions being exactly the dead nested-label and dead
+  badge targets, with the live ones and both image sources correctly silent.
 - **check (n)'s paragraph buffer missed three block boundaries CommonMark honours, swallowing real
   links across the merged blocks (WI-0086, WI-0082).** The buffer accumulates a paragraph across
   physical lines so a code span may straddle them, and it flushes only at a boundary it recognises. A
@@ -505,6 +759,22 @@ All notable changes to this project are documented in this file. The format is b
 - **`instinct-check.sh` reported a stale age.** File age came from the index mtime alone, so editing a
   theme file without touching the index left the age unchanged. It now uses the newest mtime across
   the index and all theme files.
+
+### Performance
+- **check (n) reads every index TWICE, unconditionally — including indexes with no reference definition
+  in them at all.** This is the cost of the two-pass extractor (WI-0093): the awk program is invoked as
+  `awk '...' "$INDEX_FILE" "$INDEX_FILE"`, so both the file I/O and the whole block machine — fences,
+  HTML blocks, comments, the paragraph buffer, `protect_link_destinations()`, `resolve_paragraph()` —
+  run a second time on every index, whether or not pass 1 found a single label. Measured on this repo
+  (macOS 26, BSD awk 20200816, `LC_ALL=C`, median of 25 runs): a 46 KB persona index goes from 24.7 ms
+  to 50.7 ms (factor 2.05, +26 ms); a 1.8 KB index from 3.5 ms to 4.5 ms, where process startup
+  dominates. Across all five indexes in this repo, 54.6 ms -> 103.0 ms per lint run (+48 ms, factor
+  1.88) — and **none of those five contains a single reference definition**, so the entire second pass
+  is dead weight here today. It is accepted rather than optimised: a "skip pass 2 if refmap is empty"
+  shortcut would need pass 1 to be trustworthy about a document it has not finished classifying, and a
+  cheap pre-scan for definition-shaped lines is exactly the second block implementation the two-pass
+  design exists to avoid. Recorded so the trade is visible if an index ever grows to a size where it
+  matters.
 
 ### Added
 - **A second round against check (n), on ground the first never touched (WI-0005).** The corpus grew

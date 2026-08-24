@@ -1,7 +1,7 @@
 {
   "commonmark_version": "0.9.2",
   "generated_by": "scripts/tests/fixtures/generate_commonmark_corpus.py",
-  "entry_count": 46,
+  "entry_count": 76,
   "entries": [
     {
       "name": "nested_brackets_in_link_text_simple",
@@ -13,12 +13,10 @@
       "reference_checkable_targets": [
         "dead-nb1.md"
       ],
-      "expected_check_n_findings": [],
-      "known_divergence": {
-        "direction": "false-negative",
-        "reason": "check (n)'s label regex is `\\[[^][]*\\]` \u2014 ANY literal `]` or `[` inside the link text breaks the match, nested or not. The reference renders this as one ordinary link (`<a href=\"dead-nb1.md\">a [b] c</a>`); check (n) never matches it at all and stays silent.",
-        "work_item": "WI-0005"
-      },
+      "expected_check_n_findings": [
+        "dead-nb1.md"
+      ],
+      "known_divergence": null,
       "documented_intent": null
     },
     {
@@ -31,12 +29,10 @@
       "reference_checkable_targets": [
         "dead-esc2.md"
       ],
-      "expected_check_n_findings": [],
-      "known_divergence": {
-        "direction": "false-negative",
-        "reason": "Same defect as nested_brackets_in_link_text_simple, wired as a second, structurally different fixture (mid-paragraph prose instead of a list item) so the finding is not specific to bullet-list context.",
-        "work_item": "WI-0005"
-      },
+      "expected_check_n_findings": [
+        "dead-esc2.md"
+      ],
+      "known_divergence": null,
       "documented_intent": null
     },
     {
@@ -51,6 +47,483 @@
       ],
       "expected_check_n_findings": [
         "dead-nb2-inner.md"
+      ],
+      "known_divergence": null,
+      "documented_intent": null
+    },
+    {
+      "name": "nested_brackets_three_levels_in_link_text",
+      "category": "nested-brackets-in-link-text",
+      "markdown": "[a [b [c] d] e](dead-nb3.md) \u2014 three levels\n",
+      "reference_hrefs": [
+        "dead-nb3.md"
+      ],
+      "reference_checkable_targets": [
+        "dead-nb3.md"
+      ],
+      "expected_check_n_findings": [
+        "dead-nb3.md"
+      ],
+      "known_divergence": null,
+      "documented_intent": null
+    },
+    {
+      "name": "unbalanced_closing_bracket_is_not_a_link",
+      "category": "nested-brackets-in-link-text",
+      "markdown": "[a] b](dead-nb4.md) \u2014 not a link\n",
+      "reference_hrefs": [],
+      "reference_checkable_targets": [],
+      "expected_check_n_findings": [],
+      "known_divergence": null,
+      "documented_intent": null
+    },
+    {
+      "name": "link_in_link_text_inner_wins_beside_a_later_link",
+      "category": "nested-brackets-in-link-text",
+      "markdown": "[a [b](dead-nb5-inner.md) c](dead-nb5-outer.md) and [d](dead-nb5-later.md)\n",
+      "reference_hrefs": [
+        "dead-nb5-inner.md",
+        "dead-nb5-later.md"
+      ],
+      "reference_checkable_targets": [
+        "dead-nb5-inner.md",
+        "dead-nb5-later.md"
+      ],
+      "expected_check_n_findings": [
+        "dead-nb5-inner.md",
+        "dead-nb5-later.md"
+      ],
+      "known_divergence": null,
+      "documented_intent": null
+    },
+    {
+      "name": "image_in_link_text_badge_pattern",
+      "category": "images-in-link-text",
+      "markdown": "[![alt](dead-badge1.png)](dead-img1.md) \u2014 badge\n",
+      "reference_hrefs": [
+        "dead-img1.md"
+      ],
+      "reference_checkable_targets": [
+        "dead-img1.md"
+      ],
+      "expected_check_n_findings": [
+        "dead-img1.md"
+      ],
+      "known_divergence": null,
+      "documented_intent": null
+    },
+    {
+      "name": "image_nested_two_deep_in_link_text",
+      "category": "images-in-link-text",
+      "markdown": "[![![deep](dead-badge2.png)](dead-badge3.png)](dead-img2.md)\n",
+      "reference_hrefs": [
+        "dead-img2.md"
+      ],
+      "reference_checkable_targets": [
+        "dead-img2.md"
+      ],
+      "expected_check_n_findings": [
+        "dead-img2.md"
+      ],
+      "known_divergence": null,
+      "documented_intent": null
+    },
+    {
+      "name": "image_with_bracketed_alt_text_is_not_a_link",
+      "category": "images-in-link-text",
+      "markdown": "![[a]](dead-img3.png) \u2014 image\n",
+      "reference_hrefs": [],
+      "reference_checkable_targets": [],
+      "expected_check_n_findings": [],
+      "known_divergence": null,
+      "documented_intent": null
+    },
+    {
+      "name": "shortcut_reference_in_link_text_disqualifies_outer",
+      "category": "reference-links-in-link-text",
+      "markdown": "[ref5]: dead-refdis1.md\n\n[outer [ref5] text](dead-refout1.md)\n",
+      "reference_hrefs": [
+        "dead-refdis1.md"
+      ],
+      "reference_checkable_targets": [
+        "dead-refdis1.md"
+      ],
+      "expected_check_n_findings": [
+        "dead-refdis1.md"
+      ],
+      "known_divergence": null,
+      "documented_intent": null
+    },
+    {
+      "name": "reference_definition_after_its_use_still_disqualifies",
+      "category": "reference-links-in-link-text",
+      "markdown": "[outer [ref6] text](dead-refout2.md)\n\n[ref6]: dead-refdis2.md\n",
+      "reference_hrefs": [
+        "dead-refdis2.md"
+      ],
+      "reference_checkable_targets": [
+        "dead-refdis2.md"
+      ],
+      "expected_check_n_findings": [
+        "dead-refdis2.md"
+      ],
+      "known_divergence": null,
+      "documented_intent": null
+    },
+    {
+      "name": "undefined_label_in_link_text_keeps_the_outer_link",
+      "category": "reference-links-in-link-text",
+      "markdown": "[outer [nosuchlabel] text](dead-refout3.md)\n",
+      "reference_hrefs": [
+        "dead-refout3.md"
+      ],
+      "reference_checkable_targets": [
+        "dead-refout3.md"
+      ],
+      "expected_check_n_findings": [
+        "dead-refout3.md"
+      ],
+      "known_divergence": null,
+      "documented_intent": null
+    },
+    {
+      "name": "full_reference_in_link_text_disqualifies_outer",
+      "category": "reference-links-in-link-text",
+      "markdown": "[ref7]: dead-refdis3.md\n\n[outer [txt][ref7] text](dead-refout4.md)\n",
+      "reference_hrefs": [
+        "dead-refdis3.md"
+      ],
+      "reference_checkable_targets": [
+        "dead-refdis3.md"
+      ],
+      "expected_check_n_findings": [
+        "dead-refdis3.md"
+      ],
+      "known_divergence": null,
+      "documented_intent": null
+    },
+    {
+      "name": "failed_full_reference_keeps_the_outer_link",
+      "category": "reference-links-in-link-text",
+      "markdown": "[ref8]: https://example.com/ref8\n\n[outer [ref8][nosuchlabel] text](dead-refout5.md)\n",
+      "reference_hrefs": [
+        "dead-refout5.md"
+      ],
+      "reference_checkable_targets": [
+        "dead-refout5.md"
+      ],
+      "expected_check_n_findings": [
+        "dead-refout5.md"
+      ],
+      "known_divergence": null,
+      "documented_intent": null
+    },
+    {
+      "name": "image_reference_in_link_text_keeps_the_outer_link",
+      "category": "reference-links-in-link-text",
+      "markdown": "[ref9]: https://example.com/ref9.png\n\n[outer ![ref9] text](dead-refout6.md)\n",
+      "reference_hrefs": [
+        "dead-refout6.md"
+      ],
+      "reference_checkable_targets": [
+        "dead-refout6.md"
+      ],
+      "expected_check_n_findings": [
+        "dead-refout6.md"
+      ],
+      "known_divergence": null,
+      "documented_intent": null
+    },
+    {
+      "name": "resolved_reference_link_consumes_a_following_parenthesis",
+      "category": "reference-links-in-link-text",
+      "markdown": "[ref10]: dead-refdis4.md\n\n[txt][ref10](dead-refparen.md)\n",
+      "reference_hrefs": [
+        "dead-refdis4.md"
+      ],
+      "reference_checkable_targets": [
+        "dead-refdis4.md"
+      ],
+      "expected_check_n_findings": [
+        "dead-refdis4.md"
+      ],
+      "known_divergence": null,
+      "documented_intent": null
+    },
+    {
+      "name": "reference_definition_inside_a_fence_defines_nothing",
+      "category": "reference-links-in-link-text",
+      "markdown": "```\n[ref11]: dead-fenced.md\n```\n\n[outer [ref11] text](dead-refout7.md)\n",
+      "reference_hrefs": [
+        "dead-refout7.md"
+      ],
+      "reference_checkable_targets": [
+        "dead-refout7.md"
+      ],
+      "expected_check_n_findings": [
+        "dead-refout7.md"
+      ],
+      "known_divergence": null,
+      "documented_intent": null
+    },
+    {
+      "name": "reference_definition_cannot_interrupt_a_paragraph",
+      "category": "reference-links-in-link-text",
+      "markdown": "some prose\n[ref12]: dead-interrupt.md\n\n[outer [ref12] text](dead-refout8.md)\n",
+      "reference_hrefs": [
+        "dead-refout8.md"
+      ],
+      "reference_checkable_targets": [
+        "dead-refout8.md"
+      ],
+      "expected_check_n_findings": [
+        "dead-refout8.md"
+      ],
+      "known_divergence": null,
+      "documented_intent": null
+    },
+    {
+      "name": "whitespace_only_label_is_not_a_reference_definition",
+      "category": "reference-links-in-link-text",
+      "markdown": "[ ]: dead-wsdefn.md\n",
+      "reference_hrefs": [],
+      "reference_checkable_targets": [],
+      "expected_check_n_findings": [],
+      "known_divergence": null,
+      "documented_intent": null
+    },
+    {
+      "name": "empty_label_is_not_a_reference_definition",
+      "category": "reference-links-in-link-text",
+      "markdown": "[]: dead-emptydefn.md\n",
+      "reference_hrefs": [],
+      "reference_checkable_targets": [],
+      "expected_check_n_findings": [],
+      "known_divergence": null,
+      "documented_intent": null
+    },
+    {
+      "name": "stray_close_bracket_paren_span_hides_a_later_link",
+      "category": "destination-span-overreach",
+      "markdown": "x](y [a](dead-span1.md) z)\n",
+      "reference_hrefs": [
+        "dead-span1.md"
+      ],
+      "reference_checkable_targets": [
+        "dead-span1.md"
+      ],
+      "expected_check_n_findings": [],
+      "known_divergence": {
+        "direction": "false-negative",
+        "reason": "The reference renders `x](y ` as literal text and `[a](dead-span1.md)` as an ordinary link. protect_link_destinations() treats the stray `](` as a link destination opener, spans `y [a](dead-span1.md` as one opaque unit, and the WI-0080 scanner skips that unit whole -- so the real link inside it is never seen. 4f2ffa7 found it, because its regex was blind to the span it was scanning through.",
+        "work_item": "WI-0095"
+      },
+      "documented_intent": null
+    },
+    {
+      "name": "escaped_close_bracket_paren_span_hides_a_later_link",
+      "category": "destination-span-overreach",
+      "markdown": "x\\](y [a](dead-span2.md) z)\n",
+      "reference_hrefs": [
+        "dead-span2.md"
+      ],
+      "reference_checkable_targets": [
+        "dead-span2.md"
+      ],
+      "expected_check_n_findings": [],
+      "known_divergence": {
+        "direction": "false-negative",
+        "reason": "Same mechanism as stray_close_bracket_paren_span_hides_a_later_link, reached via an escaped `]`: `\\]` is literal text at the reference and opens no destination, but protect_link_destinations() matches `](` without any escape-parity test.",
+        "work_item": "WI-0095"
+      },
+      "documented_intent": null
+    },
+    {
+      "name": "stray_sentinel_byte_swallows_the_following_link",
+      "category": "destination-span-overreach",
+      "markdown": "a \u0003 stray sentinel byte and [x](dead-stray1.md)\n",
+      "reference_hrefs": [
+        "dead-stray1.md"
+      ],
+      "reference_checkable_targets": [
+        "dead-stray1.md"
+      ],
+      "expected_check_n_findings": [],
+      "known_divergence": {
+        "direction": "false-negative",
+        "reason": "The reference renders the 0x03 byte as ordinary text and `[x](dead-stray1.md)` as a link. check (n) reads the stray byte as the OPENING sentinel of a protected destination, skips everything up to the next sentinel -- which is the one opening the real destination -- and the link vanishes. The loss does not stop there: the sentinel CLOSING that destination is then unpaired, the scanner returns, and the whole remainder of the paragraph goes unscanned. See stray_sentinel_byte_swallows_the_rest_of_the_paragraph for the fixture that pins that reach. 4f2ffa7 reported it, because its extractor re-scanned inside a sentinel span instead of skipping it.",
+        "work_item": "WI-0097"
+      },
+      "documented_intent": null
+    },
+    {
+      "name": "stray_sentinel_byte_swallows_the_rest_of_the_paragraph",
+      "category": "destination-span-overreach",
+      "markdown": "a \u0003 stray sentinel byte and [x](dead-stray2.md) and [y](dead-stray3.md)\n",
+      "reference_hrefs": [
+        "dead-stray2.md",
+        "dead-stray3.md"
+      ],
+      "reference_checkable_targets": [
+        "dead-stray2.md",
+        "dead-stray3.md"
+      ],
+      "expected_check_n_findings": [],
+      "known_divergence": {
+        "direction": "false-negative",
+        "reason": "The reference renders BOTH links. check (n) reports neither: the stray byte pairs with the first destination's opening sentinel, that destination's CLOSING sentinel then finds no partner, and the scanner leaves the paragraph -- so the reach is the rest of the paragraph, not just the link between the two sentinels. This is the control line the single-link entry above lacks: without it, an assertion of no findings is also satisfied by a scanner that never ran.",
+        "work_item": "WI-0097"
+      },
+      "documented_intent": null
+    },
+    {
+      "name": "link_inside_image_alt_text_is_reported",
+      "category": "images",
+      "markdown": "![a [b](dead-alt-in.md) c](dead-alt-out.png)\n",
+      "reference_hrefs": [],
+      "reference_checkable_targets": [],
+      "expected_check_n_findings": [
+        "dead-alt-in.md"
+      ],
+      "known_divergence": null,
+      "documented_intent": {
+        "reason": "PO decision 23.08.2026 (WI-0092): INTENDED, on exactly the WI-0085 grounds. check (n)'s contract is narrower than conformance -- does this index still point at existing files? -- and `dead-alt-in.md` is a path an author wrote and can delete. The reference renders it as NOTHING (it collapses into the alt attribute), so no reader notices it on a normal read, and that invisibility is the failure mode check (n) was built against. The reasoning stands independently of any promotion criterion: it is the same argument WI-0085 settled before a criterion was in play, applied to the same shape one construct over. Pre-existing and unchanged by WI-0080/WI-0093 -- 4f2ffa7 behaves identically, measured.",
+        "po_decision": "23.08.2026",
+        "work_item": "WI-0092"
+      }
+    },
+    {
+      "name": "two_labels_with_the_same_resolved_shape_are_interchangeable",
+      "category": "reference-links-in-link-text",
+      "markdown": "[`r22`]: dead-collide-defn.md\n\nUses it here: [`r22`] and then [outer [`other`] text](dead-collide-outer.md)\n",
+      "reference_hrefs": [
+        "dead-collide-defn.md",
+        "dead-collide-outer.md"
+      ],
+      "reference_checkable_targets": [
+        "dead-collide-defn.md",
+        "dead-collide-outer.md"
+      ],
+      "expected_check_n_findings": [
+        "dead-collide-defn.md"
+      ],
+      "known_divergence": {
+        "direction": "false-negative",
+        "reason": "The reference renders two links: the shortcut reference ``[`r22`]`` to dead-collide-defn.md, and the outer link to dead-collide-outer.md, because ``[`other`]`` is a DIFFERENT label and resolves to nothing. check (n) compares the two in their resolved shape, where both are the empty label, so ``[`other`]`` looks like a resolving reference and deactivates the link enclosing it. This is the whole class, not this shape: label resolution is not injective, and its two accumulation points are the EMPTY key (a code-span-only label, a literal `[]`, a whitespace-only `[   ]`) and the `boundary` key (any label that is exactly one closed inline comment). The `[]` and `[   ]` halves are wider than this entry: the reference does not look up an empty label at all, while the scanner keys on one -- see the four entries after this one, each paired with a no-definition control. PO decision 24.08.2026: accepted in trade for the false POSITIVE this replaces -- a rewritten label matched no definition at all before, and an outer link the reference does not render was reported. A false negative may be traded in for a false positive; not the other way round.",
+        "work_item": "WI-0098"
+      },
+      "documented_intent": null
+    },
+    {
+      "name": "literal_empty_label_in_link_text_collides_with_a_definition",
+      "category": "reference-links-in-link-text",
+      "markdown": "[`r30`]: dead-empty-defn.md\n\nUses it: [`r30`] and then [outer [] text](dead-empty-outer.md)\n",
+      "reference_hrefs": [
+        "dead-empty-defn.md",
+        "dead-empty-outer.md"
+      ],
+      "reference_checkable_targets": [
+        "dead-empty-defn.md",
+        "dead-empty-outer.md"
+      ],
+      "expected_check_n_findings": [
+        "dead-empty-defn.md"
+      ],
+      "known_divergence": {
+        "direction": "false-negative",
+        "reason": "WI-0098 class, empty-key half. The reference renders BOTH links -- the shortcut ``[`r30`]`` and the outer one -- because a literal `[]` is not a link label at all there. check (n) resolves the definition label to the empty key and then reads `[]` in the link text as a reference resolving against it, which deactivates the enclosing opener and silences dead-empty-outer.md. Same trade as the entry above.",
+        "work_item": "WI-0098"
+      },
+      "documented_intent": null
+    },
+    {
+      "name": "literal_empty_label_in_link_text_without_a_definition_control",
+      "category": "reference-links-in-link-text",
+      "markdown": "[outer [] text](dead-empty-ctl.md)\n",
+      "reference_hrefs": [
+        "dead-empty-ctl.md"
+      ],
+      "reference_checkable_targets": [
+        "dead-empty-ctl.md"
+      ],
+      "expected_check_n_findings": [
+        "dead-empty-ctl.md"
+      ],
+      "known_divergence": null,
+      "documented_intent": null
+    },
+    {
+      "name": "whitespace_only_label_in_link_text_collides_with_a_definition",
+      "category": "reference-links-in-link-text",
+      "markdown": "[`r31`]: dead-wslabel-defn.md\n\nUses it: [`r31`] and then [outer [   ] text](dead-wslabel-outer.md)\n",
+      "reference_hrefs": [
+        "dead-wslabel-defn.md",
+        "dead-wslabel-outer.md"
+      ],
+      "reference_checkable_targets": [
+        "dead-wslabel-defn.md",
+        "dead-wslabel-outer.md"
+      ],
+      "expected_check_n_findings": [
+        "dead-wslabel-defn.md"
+      ],
+      "known_divergence": {
+        "direction": "false-negative",
+        "reason": "WI-0098 class, empty-key half, whitespace route. A label of nothing but spaces carries no non-whitespace character, so the reference is not looking at a link label and renders the outer link. normalize_label() folds it to the empty key, which the definition ``[`r31`]`` already owns, so check (n) reads it as resolving and drops dead-wslabel-outer.md.",
+        "work_item": "WI-0098"
+      },
+      "documented_intent": null
+    },
+    {
+      "name": "whitespace_only_label_in_link_text_without_a_definition_control",
+      "category": "reference-links-in-link-text",
+      "markdown": "[outer [   ] text](dead-wslabel-ctl.md)\n",
+      "reference_hrefs": [
+        "dead-wslabel-ctl.md"
+      ],
+      "reference_checkable_targets": [
+        "dead-wslabel-ctl.md"
+      ],
+      "expected_check_n_findings": [
+        "dead-wslabel-ctl.md"
+      ],
+      "known_divergence": null,
+      "documented_intent": null
+    },
+    {
+      "name": "boundary_labels_from_two_different_comments_collide",
+      "category": "reference-links-in-link-text",
+      "markdown": "[<!--a-->]: dead-boundary-defn.md\n\nUses it: [<!--a-->] and then [outer [<!--b-->] text](dead-boundary-outer.md)\n",
+      "reference_hrefs": [
+        "dead-boundary-defn.md",
+        "dead-boundary-outer.md"
+      ],
+      "reference_checkable_targets": [
+        "dead-boundary-defn.md",
+        "dead-boundary-outer.md"
+      ],
+      "expected_check_n_findings": [
+        "dead-boundary-defn.md"
+      ],
+      "known_divergence": {
+        "direction": "false-negative",
+        "reason": "WI-0098 class, `boundary`-key half. The reference renders both links: `[<!--a-->]` resolves against its definition and `[<!--b-->]` is simply an undefined label, leaving the outer link alive. check (n) resolves every closed inline comment to the same single `boundary` byte, so the two labels are one key and `[<!--b-->]` deactivates the opener around it. This is why the class is stated as non-injectivity rather than as the empty label: no empty label is involved here at all.",
+        "work_item": "WI-0098"
+      },
+      "documented_intent": null
+    },
+    {
+      "name": "comment_label_in_link_text_without_a_definition_control",
+      "category": "reference-links-in-link-text",
+      "markdown": "[outer [<!--b-->] text](dead-boundary-ctl.md)\n",
+      "reference_hrefs": [
+        "dead-boundary-ctl.md"
+      ],
+      "reference_checkable_targets": [
+        "dead-boundary-ctl.md"
+      ],
+      "expected_check_n_findings": [
+        "dead-boundary-ctl.md"
       ],
       "known_divergence": null,
       "documented_intent": null
@@ -191,12 +664,26 @@
       "reference_checkable_targets": [
         "dead-esc5.md"
       ],
-      "expected_check_n_findings": [],
-      "known_divergence": {
-        "direction": "false-negative",
-        "reason": "The reference decodes the escape and renders one ordinary link (text `a]b`, href `dead-esc5.md`). check (n)'s label regex `[^][]*` disallows a literal `]` regardless of a preceding backslash, so it never matches this span at all \u2014 the same root cause as the nested-brackets false negatives above, triggered via escaping instead of nesting.",
-        "work_item": "WI-0005"
-      },
+      "expected_check_n_findings": [
+        "dead-esc5.md"
+      ],
+      "known_divergence": null,
+      "documented_intent": null
+    },
+    {
+      "name": "backslash_escaped_bracket_in_reference_definition_label",
+      "category": "backslash-escapes",
+      "markdown": "[a\\]b]: dead-escdefn.md\n\ntext [a\\]b] more\n",
+      "reference_hrefs": [
+        "dead-escdefn.md"
+      ],
+      "reference_checkable_targets": [
+        "dead-escdefn.md"
+      ],
+      "expected_check_n_findings": [
+        "dead-escdefn.md"
+      ],
+      "known_divergence": null,
       "documented_intent": null
     },
     {

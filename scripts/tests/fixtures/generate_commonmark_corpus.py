@@ -45,6 +45,39 @@ carries both:
     index still point at existing files?"), and this is the field for a
     case where that narrower contract is the intended behaviour on purpose.
 
+    GUARD ON THIS CLASS (PO decision 24.08.2026). `documented_intent` may
+    only be assigned when the justification would still hold if NO criterion
+    depended on it. Ask it in that order, and in those words: would this
+    still be the right behaviour if reclassifying it changed nothing about
+    whether the round counts as clean? If the answer needs the criterion to
+    be interesting, the entry is a `known_divergence` and the criterion is
+    supposed to notice.
+
+    WI-0085 is the precedent because its reasoning was settled BEFORE any
+    promotion criterion was in play: an unused reference definition pointing
+    at a deleted file is a dead pointer whether or not anything renders it,
+    and the fact that it renders as nothing is what makes it worth reporting
+    rather than what excuses it. WI-0092 (a link inside image alt text) was
+    admitted on exactly that argument, not on the fact that admitting it
+    emptied the ledger.
+
+    The guard exists because the incentive runs the other way: a false
+    positive is cheapest to remove by relabelling it, and this field is the
+    label. A round that ends clean because a divergence changed its name has
+    measured nothing.
+
+    THIS GUARD IS NOT MACHINE-ENFORCEABLE, and saying so is part of it. What
+    the code below does check is that the two blocks are mutually exclusive,
+    that whichever one is present matches a disagreement the generator
+    actually measured, that its required fields are non-empty, and (in
+    FixtureIntegrityTest) that its work item is on a closed allowlist. None of
+    that can tell a well-reasoned `documented_intent` from a relabelled false
+    positive: both carry a reason, a po_decision and a work item, and both
+    reproduce. The question above is a question for a READER. Its checkpoint
+    is the review of the round that adds or reclassifies an entry, and a
+    reclassification is therefore something to raise there explicitly rather
+    than to let a green suite carry.
+
 This is the "gezaehlt und benannt" contract WI-0005 asks for: the promotion
 criterion ("a round producing no new items") becomes measurable only if
 every divergence recorded here was actually seen to diverge.
@@ -85,37 +118,516 @@ CORPUS = [
         "name": "nested_brackets_in_link_text_simple",
         "category": "nested-brackets-in-link-text",
         "markdown": "- [a [b] c](dead-nb1.md) — nested brackets in link text\n",
-        "known_divergence": {
-            "direction": "false-negative",
-            "reason": (
-                "check (n)'s label regex is `\\[[^][]*\\]` — ANY literal `]` "
-                "or `[` inside the link text breaks the match, nested or not. "
-                "The reference renders this as one ordinary link "
-                "(`<a href=\"dead-nb1.md\">a [b] c</a>`); check (n) never "
-                "matches it at all and stays silent."
-            ),
-            "work_item": "WI-0005",
-        },
+        # Divergence closed by WI-0080 (23.08.2026): the `[^][]*` label regex was
+        # replaced by a bracket-stack scanner, so a balanced pair in the link text
+        # is ordinary content and this entry now agrees with the reference.
+        "known_divergence": None,
     },
     {
         "name": "nested_brackets_in_link_text_mid_sentence",
         "category": "nested-brackets-in-link-text",
         "markdown": "before [a [b] c](dead-esc2.md) after\n",
-        "known_divergence": {
-            "direction": "false-negative",
-            "reason": (
-                "Same defect as nested_brackets_in_link_text_simple, wired as "
-                "a second, structurally different fixture (mid-paragraph "
-                "prose instead of a list item) so the finding is not "
-                "specific to bullet-list context."
-            ),
-            "work_item": "WI-0005",
-        },
+        # Divergence closed by WI-0080 (23.08.2026), same fix as the entry above.
+        # Kept as the mid-paragraph-prose variant so the closure is not pinned to
+        # bullet-list context alone.
+        "known_divergence": None,
     },
     {
         "name": "nested_brackets_outer_literal_inner_real_link",
         "category": "nested-brackets-in-link-text",
         "markdown": "[a [b](dead-nb2-inner.md) c](dead-nb2-outer.md)\n",
+        "known_divergence": None,
+    },
+    {
+        # WI-0080: three nesting levels, not one. The regex this round replaced
+        # failed at depth 1 already, so a fix that only tolerated a single pair
+        # would have looked green on the two entries above — this one discriminates
+        # a real stack from a special case. (The reference imposes no depth limit;
+        # measured to 100 during the WI-0080 round.)
+        "name": "nested_brackets_three_levels_in_link_text",
+        "category": "nested-brackets-in-link-text",
+        "markdown": "[a [b [c] d] e](dead-nb3.md) — three levels\n",
+        "known_divergence": None,
+    },
+    {
+        # WI-0080 negative pin. `[a]` closes on its own, so the second `]` has no
+        # opener left and the reference renders NO link. The entry exists because
+        # the obvious wrong repair — "widen the label class" or "split at the last
+        # `](`" — reports `dead-nb4.md` here. Its value is in staying EMPTY.
+        "name": "unbalanced_closing_bracket_is_not_a_link",
+        "category": "nested-brackets-in-link-text",
+        "markdown": "[a] b](dead-nb4.md) — not a link\n",
+        "known_divergence": None,
+    },
+    {
+        # WI-0080: the inner link wins AND the disqualified outer opener must not
+        # swallow the rest of the line. Sibling of the entry above with a third,
+        # independent link after the nested construct.
+        "name": "link_in_link_text_inner_wins_beside_a_later_link",
+        "category": "nested-brackets-in-link-text",
+        "markdown": (
+            "[a [b](dead-nb5-inner.md) c](dead-nb5-outer.md) and "
+            "[d](dead-nb5-later.md)\n"
+        ),
+        "known_divergence": None,
+    },
+    # --- images inside link text (WI-0091) -----------------------------------
+    {
+        # WI-0091, the badge pattern. An IMAGE in the link text does not
+        # disqualify the enclosing link (only a LINK does), so the reference
+        # renders a live `<a href="dead-img1.md">` around an `<img>`. Hardest
+        # shape for any non-scanner repair: the LABEL itself contains a `](`.
+        "name": "image_in_link_text_badge_pattern",
+        "category": "images-in-link-text",
+        "markdown": "[![alt](dead-badge1.png)](dead-img1.md) — badge\n",
+        "known_divergence": None,
+    },
+    {
+        # WI-0091 at depth: one link, two images, no image ever reported.
+        "name": "image_nested_two_deep_in_link_text",
+        "category": "images-in-link-text",
+        "markdown": "[![![deep](dead-badge2.png)](dead-badge3.png)](dead-img2.md)\n",
+        "known_divergence": None,
+    },
+    {
+        # WI-0091 negative pin: a plain image with a BRACKETED alt text. The old
+        # code decided "image" on the single byte before `[`; the scanner decides
+        # it on the opener it pushed, and must still stay silent on a label the
+        # old regex could never have matched.
+        "name": "image_with_bracketed_alt_text_is_not_a_link",
+        "category": "images-in-link-text",
+        "markdown": "![[a]](dead-img3.png) — image\n",
+        "known_divergence": None,
+    },
+    # --- reference links in the link text (WI-0093) --------------------------
+    # CommonMark's "no links in links" rule fires on any successful LINK, not
+    # only an inline one — a RESOLVING shortcut/collapsed/full reference in the
+    # link text deactivates the enclosing openers exactly like `[b](in.md)`
+    # does. Whether it resolves is the only thing separating these entries from
+    # `nested_brackets_in_link_text_simple` above, which must stay a live link.
+    {
+        "name": "shortcut_reference_in_link_text_disqualifies_outer",
+        "category": "reference-links-in-link-text",
+        "markdown": "[ref5]: dead-refdis1.md\n\n[outer [ref5] text](dead-refout1.md)\n",
+        "known_divergence": None,
+    },
+    {
+        # The architectural entry: CommonMark collects reference DEFINITIONS for
+        # the whole document before parsing any inline content, so a definition
+        # may stand AFTER its use. A single-pass extractor cannot answer this at
+        # the moment it reaches the link — check (n) reads each index twice.
+        "name": "reference_definition_after_its_use_still_disqualifies",
+        "category": "reference-links-in-link-text",
+        "markdown": "[outer [ref6] text](dead-refout2.md)\n\n[ref6]: dead-refdis2.md\n",
+        "known_divergence": None,
+    },
+    {
+        # The counter-entry that forbids the cheap repair ("deactivate whenever
+        # no inline destination follows"): an UNDEFINED label in the link text
+        # changes nothing and the outer link stays live.
+        "name": "undefined_label_in_link_text_keeps_the_outer_link",
+        "category": "reference-links-in-link-text",
+        "markdown": "[outer [nosuchlabel] text](dead-refout3.md)\n",
+        "known_divergence": None,
+    },
+    {
+        "name": "full_reference_in_link_text_disqualifies_outer",
+        "category": "reference-links-in-link-text",
+        "markdown": "[ref7]: dead-refdis3.md\n\n[outer [txt][ref7] text](dead-refout4.md)\n",
+        "known_divergence": None,
+    },
+    {
+        # Measured and NOT obvious: the first label IS defined, but a FAILED
+        # full reference does not fall back to the shortcut reading — no link
+        # forms inside, so nothing is deactivated. The definition target is an
+        # external URL here so that the definition line, which stays unused,
+        # does not drag the WI-0085 unused-definition divergence into an entry
+        # about something else; both oracles skip an external scheme.
+        "name": "failed_full_reference_keeps_the_outer_link",
+        "category": "reference-links-in-link-text",
+        "markdown": (
+            "[ref8]: https://example.com/ref8\n\n"
+            "[outer [ref8][nosuchlabel] text](dead-refout5.md)\n"
+        ),
+        "known_divergence": None,
+    },
+    {
+        # WI-0091's rule restated for the reference form: `![ref]` is an IMAGE
+        # even when it resolves, and an image in the link text does not
+        # disqualify the enclosing link. External definition target for the same
+        # reason as the entry above — an image reference renders `<img>`, never
+        # `<a>`, so a checkable one would show up as a WI-0085-shaped divergence.
+        "name": "image_reference_in_link_text_keeps_the_outer_link",
+        "category": "reference-links-in-link-text",
+        "markdown": (
+            "[ref9]: https://example.com/ref9.png\n\n"
+            "[outer ![ref9] text](dead-refout6.md)\n"
+        ),
+        "known_divergence": None,
+    },
+    {
+        # A resolved reference link CONSUMES its second label: the reference
+        # reads `[txt][ref10]` as the link and leaves `(dead-refparen.md)` as
+        # literal text. An extractor that only deactivated, without consuming,
+        # would re-read `[ref10](dead-refparen.md)` as an inline link.
+        "name": "resolved_reference_link_consumes_a_following_parenthesis",
+        "category": "reference-links-in-link-text",
+        "markdown": "[ref10]: dead-refdis4.md\n\n[txt][ref10](dead-refparen.md)\n",
+        "known_divergence": None,
+    },
+    {
+        # A reference definition is a BLOCK construct: inside a fence it is
+        # code and defines nothing, so the outer link stays live. Pins that the
+        # label collection runs the same block machine as the extraction rather
+        # than grepping the file for definition-shaped lines.
+        "name": "reference_definition_inside_a_fence_defines_nothing",
+        "category": "reference-links-in-link-text",
+        "markdown": (
+            "```\n[ref11]: dead-fenced.md\n```\n\n"
+            "[outer [ref11] text](dead-refout7.md)\n"
+        ),
+        "known_divergence": None,
+    },
+    {
+        # A reference definition may not INTERRUPT a paragraph — with prose open
+        # above it the reference reads the line as ordinary text, defines
+        # nothing and renders the outer link. Divergence closed by WI-0096
+        # (24.08.2026): check (n) now asks the paragraph buffer whether a
+        # definition-shaped line could open a block at all, and stays silent
+        # when it could not. It is NOT the WI-0085 decision one shape further
+        # along — the two are separated by what the reader sees. WI-0085's
+        # lone `[ref]: dead.md` renders as NOTHING, so its dead pointer is
+        # invisible and worth reporting; here the very same bytes render as
+        # visible paragraph prose, which makes the path ordinary text rather
+        # than a pointer. The refmap deliberately does not treat the line as a
+        # definition either, which is why the OUTER link is still reported.
+        "name": "reference_definition_cannot_interrupt_a_paragraph",
+        "category": "reference-links-in-link-text",
+        "markdown": (
+            "some prose\n[ref12]: dead-interrupt.md\n\n"
+            "[outer [ref12] text](dead-refout8.md)\n"
+        ),
+        "known_divergence": None,
+    },
+    {
+        # The sibling of the entry above, decided by the same rule and answered
+        # by a DIFFERENT gate (measured 24.08.2026). A link label needs at
+        # least one non-whitespace character, so `[ ]:` opens no definition and
+        # the reference renders the line as visible paragraph text -- the
+        # WI-0096 verdict, not the WI-0085 one: nothing here is invisibly dead.
+        # check (n) agrees today, and it does so through `reflbl != ""` in the
+        # definition branch, not through the paragraph-buffer gate WI-0096
+        # added: with the gate removed the line still stays silent, with
+        # `reflbl != ""` removed it reports `dead-wsdefn.md`. Untested until
+        # now, which is what this entry changes.
+        "name": "whitespace_only_label_is_not_a_reference_definition",
+        "category": "reference-links-in-link-text",
+        "markdown": "[ ]: dead-wsdefn.md\n",
+        "known_divergence": None,
+    },
+    {
+        # Same gate, shortest input: an explicitly EMPTY label. Kept beside the
+        # whitespace one because the two reach `reflbl == ""` by different
+        # routes (nothing to fold vs. folded away) and a repair could easily
+        # keep one and lose the other.
+        "name": "empty_label_is_not_a_reference_definition",
+        "category": "reference-links-in-link-text",
+        "markdown": "[]: dead-emptydefn.md\n",
+        "known_divergence": None,
+    },
+    # --- a wrong destination span now swallows a real link (WI-0095) ---------
+    # protect_link_destinations() wraps the text after ANY `](` in an opaque
+    # dest_mark span, without checking that a live link opener precedes it. That
+    # was harmless while the extractor re-scanned inside such a span with its
+    # own regex; since WI-0080 the scanner skips a dest_mark span WHOLESALE, so
+    # a wrong span hides the real link inside it. Direction: false negative.
+    {
+        "name": "stray_close_bracket_paren_span_hides_a_later_link",
+        "category": "destination-span-overreach",
+        "markdown": "x](y [a](dead-span1.md) z)\n",
+        "known_divergence": {
+            "direction": "false-negative",
+            "reason": (
+                "The reference renders `x](y ` as literal text and "
+                "`[a](dead-span1.md)` as an ordinary link. "
+                "protect_link_destinations() treats the stray `](` as a link "
+                "destination opener, spans `y [a](dead-span1.md` as one opaque "
+                "unit, and the WI-0080 scanner skips that unit whole -- so the "
+                "real link inside it is never seen. 4f2ffa7 found it, because "
+                "its regex was blind to the span it was scanning through."
+            ),
+            "work_item": "WI-0095",
+        },
+    },
+    {
+        # The same defect reached through an ESCAPED `]`, which the prestage
+        # also does not test for. Kept as a second fixture because the escape
+        # blindness and the missing opener check are two separate omissions in
+        # the same function and a repair might close only one.
+        "name": "escaped_close_bracket_paren_span_hides_a_later_link",
+        "category": "destination-span-overreach",
+        "markdown": "x\\](y [a](dead-span2.md) z)\n",
+        "known_divergence": {
+            "direction": "false-negative",
+            "reason": (
+                "Same mechanism as "
+                "stray_close_bracket_paren_span_hides_a_later_link, reached via "
+                "an escaped `]`: `\\]` is literal text at the reference and "
+                "opens no destination, but protect_link_destinations() matches "
+                "`](` without any escape-parity test."
+            ),
+            "work_item": "WI-0095",
+        },
+    },
+    # --- a stray sentinel byte in the source (WI-0097) -----------------------
+    {
+        # protect_link_destinations() fences every inline destination between
+        # two 0x03 sentinel bytes and the WI-0080 scanner skips such a span
+        # wholesale — so a literal 0x03 byte in the SOURCE pairs with the
+        # opening sentinel of the next real destination and eats the link
+        # between them. Same family as the destination-span entries above: a
+        # span that should not exist, skipped as a unit. Direction: false
+        # negative. Pathological input (a control byte in a Markdown index),
+        # left open rather than fixed in the round that found it.
+        "name": "stray_sentinel_byte_swallows_the_following_link",
+        "category": "destination-span-overreach",
+        "markdown": "a \x03 stray sentinel byte and [x](dead-stray1.md)\n",
+        "known_divergence": {
+            "direction": "false-negative",
+            "reason": (
+                "The reference renders the 0x03 byte as ordinary text and "
+                "`[x](dead-stray1.md)` as a link. check (n) reads the stray "
+                "byte as the OPENING sentinel of a protected destination, "
+                "skips everything up to the next sentinel -- which is the one "
+                "opening the real destination -- and the link vanishes. The "
+                "loss does not stop there: the sentinel CLOSING that "
+                "destination is then unpaired, the scanner returns, and the "
+                "whole remainder of the paragraph goes unscanned. See "
+                "stray_sentinel_byte_swallows_the_rest_of_the_paragraph for "
+                "the fixture that pins that reach. "
+                "4f2ffa7 reported it, because its extractor re-scanned inside "
+                "a sentinel span instead of skipping it."
+            ),
+            "work_item": "WI-0097",
+        },
+    },
+    {
+        # The reach of the same defect, pinned rather than described. The entry
+        # above ends at the swallowed link, so it cannot tell "the link between
+        # the two sentinels is lost" apart from "everything from the stray byte
+        # on is lost". A second, INDEPENDENT link after the construct settles
+        # it: it is also gone, because the unpaired closing sentinel makes the
+        # scanner return from the whole paragraph.
+        "name": "stray_sentinel_byte_swallows_the_rest_of_the_paragraph",
+        "category": "destination-span-overreach",
+        "markdown": (
+            "a \x03 stray sentinel byte and [x](dead-stray2.md) "
+            "and [y](dead-stray3.md)\n"
+        ),
+        "known_divergence": {
+            "direction": "false-negative",
+            "reason": (
+                "The reference renders BOTH links. check (n) reports neither: "
+                "the stray byte pairs with the first destination's opening "
+                "sentinel, that destination's CLOSING sentinel then finds no "
+                "partner, and the scanner leaves the paragraph -- so the reach "
+                "is the rest of the paragraph, not just the link between the "
+                "two sentinels. This is the control line the single-link entry "
+                "above lacks: without it, an assertion of no findings is also "
+                "satisfied by a scanner that never ran."
+            ),
+            "work_item": "WI-0097",
+        },
+    },
+    # --- a link inside IMAGE ALT TEXT (WI-0092) ------------------------------
+    {
+        # `![a [b](in.md) c](out.png)` -- the outer construct is an image, and
+        # CommonMark renders its alt text as PLAIN TEXT: the inner `[b](in.md)`
+        # produces no <a href> at all. check (n) reports `in.md` anyway,
+        # because its scanner excludes the IMAGE from being reported but still
+        # walks its label and reports an inline link found there.
+        "name": "link_inside_image_alt_text_is_reported",
+        "category": "images",
+        "markdown": "![a [b](dead-alt-in.md) c](dead-alt-out.png)\n",
+        "known_divergence": None,
+        "documented_intent": {
+            "reason": (
+                "PO decision 23.08.2026 (WI-0092): INTENDED, on exactly the "
+                "WI-0085 grounds. check (n)'s contract is narrower than "
+                "conformance -- does this index still point at existing "
+                "files? -- and `dead-alt-in.md` is a path an author wrote and "
+                "can delete. The reference renders it as NOTHING (it "
+                "collapses into the alt attribute), so no reader notices it "
+                "on a normal read, and that invisibility is the failure mode "
+                "check (n) was built against. The reasoning stands "
+                "independently of any promotion criterion: it is the same "
+                "argument WI-0085 settled before a criterion was in play, "
+                "applied to the same shape one construct over. Pre-existing "
+                "and unchanged by WI-0080/WI-0093 -- 4f2ffa7 behaves "
+                "identically, measured."
+            ),
+            "po_decision": "23.08.2026",
+            "work_item": "WI-0092",
+        },
+    },
+    # --- the false negative WI-0098's fix buys (WI-0098) ---------------------
+    # THE CLASS, not one shape. The definition side registers its label in the
+    # shape the scanner reads (code spans deleted, closed inline comments
+    # replaced by `boundary`), so that a rewritten label can match at all. That
+    # mapping is NOT INJECTIVE: several distinct raw labels share one resolved
+    # key. Once ANY definition owns such a key, every OTHER label collapsing to
+    # it looks like a resolving reference and silences the link enclosing it,
+    # even though the reference resolves none of them.
+    #
+    # The mapping has two accumulation points, and both are measured below:
+    #
+    #   * the EMPTY key -- reached by a code-span-only label (``[`x`]``), by a
+    #     literal `[]`, and by a whitespace-only `[   ]`. The last two are the
+    #     wider half of the class: the REFERENCE never looks up an empty label
+    #     at all (a link label needs one non-whitespace character), while the
+    #     scanner keys on the resolved shape and finds one.
+    #   * the `boundary` key -- reached by ANY label that is exactly one closed
+    #     inline comment, so `[<!--a-->]` and `[<!--b-->]`, two labels with
+    #     nothing in common, are interchangeable here.
+    #
+    # Each divergent entry is paired with a control carrying the SAME label but
+    # no colliding definition, where the outer link IS reported: that pins the
+    # false negative on the COLLISION and not on the label shape alone.
+    # Deliberately traded for the false POSITIVE it replaces.
+    {
+        "name": "two_labels_with_the_same_resolved_shape_are_interchangeable",
+        "category": "reference-links-in-link-text",
+        "markdown": (
+            "[`r22`]: dead-collide-defn.md\n"
+            "\n"
+            "Uses it here: [`r22`] and then "
+            "[outer [`other`] text](dead-collide-outer.md)\n"
+        ),
+        "known_divergence": {
+            "direction": "false-negative",
+            "reason": (
+                "The reference renders two links: the shortcut reference "
+                "``[`r22`]`` to dead-collide-defn.md, and the outer link to "
+                "dead-collide-outer.md, because ``[`other`]`` is a DIFFERENT "
+                "label and resolves to nothing. check (n) compares the two in "
+                "their resolved shape, where both are the empty label, so "
+                "``[`other`]`` looks like a resolving reference and "
+                "deactivates the link enclosing it. This is the whole class, "
+                "not this shape: label resolution is not injective, and its "
+                "two accumulation points are the EMPTY key (a code-span-only "
+                "label, a literal `[]`, a whitespace-only `[   ]`) and the "
+                "`boundary` key (any label that is exactly one closed inline "
+                "comment). The `[]` and `[   ]` halves are wider than this "
+                "entry: the reference does not look up an empty label at all, "
+                "while the scanner keys on one -- see the four entries after "
+                "this one, each paired with a no-definition control. PO "
+                "decision 24.08.2026: accepted in trade for the false "
+                "POSITIVE this replaces -- a rewritten label matched no "
+                "definition at all before, and an outer link the reference "
+                "does not render was reported. A false negative may be traded "
+                "in for a false positive; not the other way round."
+            ),
+            "work_item": "WI-0098",
+        },
+    },
+    {
+        # Empty key, reached by a LITERAL `[]` in the link text. The reference
+        # never looks an empty label up (a link label needs one non-whitespace
+        # character), so it renders the outer link; the scanner resolves
+        # ``[`r30`]`` to the same empty key and reads `[]` as resolving.
+        "name": "literal_empty_label_in_link_text_collides_with_a_definition",
+        "category": "reference-links-in-link-text",
+        "markdown": (
+            "[`r30`]: dead-empty-defn.md\n"
+            "\n"
+            "Uses it: [`r30`] and then [outer [] text](dead-empty-outer.md)\n"
+        ),
+        "known_divergence": {
+            "direction": "false-negative",
+            "reason": (
+                "WI-0098 class, empty-key half. The reference renders BOTH "
+                "links -- the shortcut ``[`r30`]`` and the outer one -- "
+                "because a literal `[]` is not a link label at all there. "
+                "check (n) resolves the definition label to the empty key and "
+                "then reads `[]` in the link text as a reference resolving "
+                "against it, which deactivates the enclosing opener and "
+                "silences dead-empty-outer.md. Same trade as the entry above."
+            ),
+            "work_item": "WI-0098",
+        },
+    },
+    {
+        # The control that pins the collision. Same `[]` in the same position,
+        # no definition resolving to the empty key -- and the outer link IS
+        # reported. Without it the entry above would be consistent with "any
+        # `[]` in link text silences the link", which is not what happens.
+        "name": "literal_empty_label_in_link_text_without_a_definition_control",
+        "category": "reference-links-in-link-text",
+        "markdown": "[outer [] text](dead-empty-ctl.md)\n",
+        "known_divergence": None,
+    },
+    {
+        # Empty key, reached by a WHITESPACE-ONLY label. Same half of the class
+        # as the entry above, different route to the key.
+        "name": "whitespace_only_label_in_link_text_collides_with_a_definition",
+        "category": "reference-links-in-link-text",
+        "markdown": (
+            "[`r31`]: dead-wslabel-defn.md\n"
+            "\n"
+            "Uses it: [`r31`] and then "
+            "[outer [   ] text](dead-wslabel-outer.md)\n"
+        ),
+        "known_divergence": {
+            "direction": "false-negative",
+            "reason": (
+                "WI-0098 class, empty-key half, whitespace route. A label of "
+                "nothing but spaces carries no non-whitespace character, so "
+                "the reference is not looking at a link label and renders the "
+                "outer link. normalize_label() folds it to the empty key, "
+                "which the definition ``[`r31`]`` already owns, so check (n) "
+                "reads it as resolving and drops dead-wslabel-outer.md."
+            ),
+            "work_item": "WI-0098",
+        },
+    },
+    {
+        "name": "whitespace_only_label_in_link_text_without_a_definition_control",
+        "category": "reference-links-in-link-text",
+        "markdown": "[outer [   ] text](dead-wslabel-ctl.md)\n",
+        "known_divergence": None,
+    },
+    {
+        # The OTHER accumulation point. `<!--a-->` and `<!--b-->` share no
+        # bytes beyond the comment delimiters, but resolve_paragraph() replaces
+        # each closed comment with the single `boundary` byte, so both labels
+        # arrive as the same key.
+        "name": "boundary_labels_from_two_different_comments_collide",
+        "category": "reference-links-in-link-text",
+        "markdown": (
+            "[<!--a-->]: dead-boundary-defn.md\n"
+            "\n"
+            "Uses it: [<!--a-->] and then "
+            "[outer [<!--b-->] text](dead-boundary-outer.md)\n"
+        ),
+        "known_divergence": {
+            "direction": "false-negative",
+            "reason": (
+                "WI-0098 class, `boundary`-key half. The reference renders "
+                "both links: `[<!--a-->]` resolves against its definition and "
+                "`[<!--b-->]` is simply an undefined label, leaving the outer "
+                "link alive. check (n) resolves every closed inline comment to "
+                "the same single `boundary` byte, so the two labels are one "
+                "key and `[<!--b-->]` deactivates the opener around it. This "
+                "is why the class is stated as non-injectivity rather than as "
+                "the empty label: no empty label is involved here at all."
+            ),
+            "work_item": "WI-0098",
+        },
+    },
+    {
+        "name": "comment_label_in_link_text_without_a_definition_control",
+        "category": "reference-links-in-link-text",
+        "markdown": "[outer [<!--b-->] text](dead-boundary-ctl.md)\n",
         "known_divergence": None,
     },
     # --- autolinks — structurally out of check (n)'s syntax family ---------
@@ -206,19 +718,22 @@ CORPUS = [
         "name": "backslash_escaped_bracket_in_link_text",
         "category": "backslash-escapes",
         "markdown": "[a\\]b](dead-esc5.md)\n",
-        "known_divergence": {
-            "direction": "false-negative",
-            "reason": (
-                "The reference decodes the escape and renders one ordinary "
-                "link (text `a]b`, href `dead-esc5.md`). check (n)'s label "
-                "regex `[^][]*` disallows a literal `]` regardless of a "
-                "preceding backslash, so it never matches this span at all "
-                "— the same root cause as the nested-brackets false "
-                "negatives above, triggered via escaping instead of "
-                "nesting."
-            ),
-            "work_item": "WI-0005",
-        },
+        # Divergence closed by WI-0080 (23.08.2026): the scanner treats an escaped
+        # bracket as label CONTENT (is_escaped(), backslash-run parity) instead of
+        # excluding the byte from the label class outright.
+        "known_divergence": None,
+    },
+    {
+        # WI-0094: the DEFINITION side of the same label grammar WI-0080 fixed
+        # on the usage side. `[a\]b]: dest.md` is one definition at the
+        # reference (label `a]b`), but check (n) recognised a definition with
+        # `\[[^][]+\]:`, which excludes `]` regardless of a preceding
+        # backslash -- so the line was not a definition at all, its target went
+        # unchecked, and its label stayed undefined for the WI-0093 rule.
+        "name": "backslash_escaped_bracket_in_reference_definition_label",
+        "category": "backslash-escapes",
+        "markdown": "[a\\]b]: dead-escdefn.md\n\ntext [a\\]b] more\n",
+        "known_divergence": None,
     },
     {
         "name": "backslash_escaped_paren_in_destination",
