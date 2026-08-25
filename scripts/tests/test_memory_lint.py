@@ -191,7 +191,20 @@ def related_text(name="related probe", related_entries=()):
     )
 
 
-class MemoryLintTest(unittest.TestCase):
+class MemoryLintFixture:
+    """Shared fixtures for memory-lint.sh end-to-end tests (WI-0111).
+
+    Deliberately NOT a `unittest.TestCase` subclass: `MemoryLintTest` below combines
+    this mixin with `unittest.TestCase` and carries ~200 test methods. A second
+    class that needs the same fixtures without inheriting those 200 tests
+    (`DecayHintGracePeriodTest`) combines this mixin with `unittest.TestCase` on its
+    own instead of subclassing `MemoryLintTest` directly — subclassing a concrete
+    `TestCase` that itself carries tests makes unittest's discovery run every
+    inherited test a second time under the new class name. See
+    `scripts/tests/workitems/contract.py` for the same pattern applied to the
+    work-items backend contract suite.
+    """
+
     def setUp(self):
         self.project_dir = Path(tempfile.mkdtemp(prefix="ccpr-memory-lint-"))
         self.addCleanup(shutil.rmtree, self.project_dir, ignore_errors=True)
@@ -340,6 +353,8 @@ class MemoryLintTest(unittest.TestCase):
             if LINK_FINDING_MARKER in finding
         ]
 
+
+class MemoryLintTest(MemoryLintFixture, unittest.TestCase):
     # --- Tier-aware type enum (WI-0008): Tier-1 and Tier-2 do not share a vocabulary ---
     # Check (c) used to apply the Tier-1 content-type enum to every file under
     # docs/memory/, including Tier-2 persona topic files, which the schema never gave
