@@ -28,6 +28,15 @@ TIER1_GLOBAL_ARCHIVE="$HOME/.claude/instincts-archive/HISTORY.md"
 TIER2_GLOBAL_DIR="$HOME/.claude/memory"
 STALE_DAYS=90
 
+# Grace period quoted by check (k)'s low-confidence decay hint below — the
+# instincts.md "Decay policy" itself ("30 days without re-confirmation"), not
+# STALE_DAYS above (which belongs to check (e), the unrelated memory-FILE
+# staleness warning). Kept as its own name on purpose: the two thresholds are
+# independent policies that happen to both be day-counts, and sharing a name
+# is exactly what let `${STALE_DAYS:-30}`'s dead fallback go unnoticed
+# (WI-0111) — the `:-30` never fired because STALE_DAYS is always assigned.
+DECAY_DAYS=30
+
 # Tier-1-global size thresholds (soft cap → warn, hard cap → err).
 # 50 KB target keeps the file load-able as session-start context without dominating the budget.
 # 100 KB hard cap signals enforced cleanup or persona-silo migration.
@@ -475,9 +484,9 @@ if (( ${#tier1_low_conf_files[@]} > 0 )); then
     low_conf=${low_conf:-0}
     if (( low_conf > 0 )); then
         if [[ -d "$TIER1_GLOBAL_TOPIC_DIR" ]]; then
-            info "Tier-1-global — ${low_conf} entries at Confidence ≤ 0.4 across ~/.claude/instincts.md + ~/.claude/instincts/*.md (review candidates if older than ${STALE_DAYS:-30}d without confirmation; full decay check belongs in /postmortem)."
+            info "Tier-1-global — ${low_conf} entries at Confidence ≤ 0.4 across ~/.claude/instincts.md + ~/.claude/instincts/*.md (review candidates if older than ${DECAY_DAYS}d without confirmation; full decay check belongs in /postmortem)."
         else
-            info "~/.claude/instincts.md — ${low_conf} entries at Confidence ≤ 0.4 (review candidates if older than ${STALE_DAYS:-30}d without confirmation; full decay check belongs in /postmortem)."
+            info "~/.claude/instincts.md — ${low_conf} entries at Confidence ≤ 0.4 (review candidates if older than ${DECAY_DAYS}d without confirmation; full decay check belongs in /postmortem)."
         fi
     fi
 fi

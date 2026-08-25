@@ -5492,5 +5492,74 @@ class LastUpdatedFormTest(unittest.TestCase):
         )
 
 
+# --------------------------------------------------------------------------- #
+# WI-0111 — the decay-hint's grace-period NUMBER, not just its presence
+# --------------------------------------------------------------------------- #
+
+
+class DecayHintGracePeriodTest(MemoryLintFixture, unittest.TestCase):
+    """Check (k)'s low-confidence hint must quote the DECAY policy's 30 days, not
+    check (e)'s unrelated STALE_DAYS=90 (WI-0111).
+
+    Both hint sites resolve `${STALE_DAYS:-30}` — a fallback that never fires
+    because `STALE_DAYS` is assigned unconditionally at the top of the script
+    for a different check (the memory-FILE staleness warning, check (e)). The
+    hint therefore reads "90d" where the decay policy documented in
+    instincts.md says "30 days without re-confirmation". A test that only
+    checks the hint fires (as the previous, absent coverage would have) passes
+    against the unfixed script — it has to pin the NUMBER to mean anything.
+
+    Two sites, two layouts, deliberately both covered: line 478 fires when
+    ~/.claude/instincts/*.md exists (split layout), line 480 when only
+    ~/.claude/instincts.md exists (flat layout) — they sit in different
+    branches of the same `if` and neither is a fallback for the other.
+    """
+
+    LOW_CONFIDENCE_ENTRY = "**Confidence: 0.4**\n"
+
+    def test_flat_layout_hint_quotes_the_30_day_decay_policy(self):
+        """Only ~/.claude/instincts.md exists — no instincts/ topic dir (else
+        branch, line 480)."""
+        claude_dir = self.fake_home / ".claude"
+        claude_dir.mkdir(parents=True)
+        (claude_dir / "instincts.md").write_text(self.LOW_CONFIDENCE_ENTRY, encoding="utf-8")
+
+        result = self.run_lint()
+
+        infos = self.findings(result.stdout, "Info")
+        matches = [i for i in infos if "review candidates if older than" in i]
+        self.assertTrue(
+            matches, f"expected a decay-hint Info line, got: {infos!r}"
+        )
+        self.assertTrue(
+            any("older than 30d" in i for i in matches),
+            f"decay hint must quote the 30-day decay policy (instincts.md "
+            f"'Decay policy': '30 days without re-confirmation'), not "
+            f"check (e)'s unrelated STALE_DAYS — got: {matches!r}",
+        )
+
+    def test_split_layout_hint_quotes_the_30_day_decay_policy(self):
+        """~/.claude/instincts.md AND ~/.claude/instincts/*.md both exist (if
+        branch, line 478)."""
+        claude_dir = self.fake_home / ".claude"
+        topic_dir = claude_dir / "instincts"
+        topic_dir.mkdir(parents=True)
+        (claude_dir / "instincts.md").write_text("# index\n", encoding="utf-8")
+        (topic_dir / "agents.md").write_text(self.LOW_CONFIDENCE_ENTRY, encoding="utf-8")
+
+        result = self.run_lint()
+
+        infos = self.findings(result.stdout, "Info")
+        matches = [i for i in infos if "review candidates if older than" in i]
+        self.assertTrue(
+            matches, f"expected a decay-hint Info line, got: {infos!r}"
+        )
+        self.assertTrue(
+            any("older than 30d" in i for i in matches),
+            f"decay hint must quote the 30-day decay policy, not check (e)'s "
+            f"unrelated STALE_DAYS — got: {matches!r}",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
