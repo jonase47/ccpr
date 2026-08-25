@@ -104,22 +104,28 @@ class FixtureIntegrityTest(unittest.TestCase):
     # is the original adversarial-corpus round; WI-0081 (remainder, 23.08.2026)
     # reclassified the named-entity destination row from a "wrong-target" bug
     # into a documented, deliberate non-claim (see that entry's own reason text).
-    # WI-0095 and WI-0097 are two of the WI-0093 round's three finds -- a wrong
-    # destination span that the WI-0080 scanner now skips wholesale, and a stray
-    # sentinel byte that pairs with a real one. WI-0098 is the review round's
-    # own: a label the paragraph resolver rewrites is keyed differently on the
-    # two sides of the reference mechanism, and the FIX for that false positive
-    # buys one false negative, which is the divergence class tagged here.
+    # WI-0097 is one of the WI-0093 round's three finds -- a stray sentinel byte
+    # that pairs with a real one. WI-0098 is the review round's own: a label the
+    # paragraph resolver rewrites is keyed differently on the two sides of the
+    # reference mechanism, and the FIX for that false positive buys one false
+    # negative, which is the divergence class tagged here.
     #
     # WI-0096, that round's third find, is NO LONGER on this list (24.08.2026):
     # the definition-shaped line reported where CommonMark reads none was the
     # last false positive in the corpus and is fixed, so no entry owns that tag
-    # any more. It is removed rather than kept as a harmless leftover, so that
-    # re-opening it has to be a deliberate act here instead of passing
-    # unnoticed. A future round's own findings still get their own new tag, not
-    # silently absorbed into any of these five.
+    # any more.
+    #
+    # WI-0095, the other of the WI-0093 round's three finds, is NO LONGER on
+    # this list either (25.08.2026): protect_link_destinations() now checks
+    # both a live opener AND escape parity before treating a `](` as a
+    # destination, so the wrong span that used to hide a real link inside it no
+    # longer forms and both fixtures agree with the reference on both oracles.
+    # Both removals are deliberate acts here rather than harmless leftovers, so
+    # that re-opening either has to be noticed instead of passing silently. A
+    # future round's own findings still get their own new tag, not silently
+    # absorbed into any of these three.
     _KNOWN_DIVERGENCE_WORK_ITEMS = {
-        "WI-0005", "WI-0081", "WI-0095", "WI-0097", "WI-0098",
+        "WI-0005", "WI-0081", "WI-0097", "WI-0098",
     }
 
     def test_every_known_divergence_is_tagged_a_known_work_item(self):
@@ -438,31 +444,35 @@ class CommonmarkCorpusDifferentialTest(unittest.TestCase):
         self.assertEqual(entry["reference_checkable_targets"], ["dead-escdefn.md"])
         self.assertIsNone(entry["known_divergence"])
 
-    def test_a_wrong_destination_span_now_hides_the_real_link_inside_it(self):
-        """WI-0095, an OPEN divergence this round introduced and did not close.
-        protect_link_destinations() spans the text after ANY `](`, live opener
-        or not; the WI-0080 scanner skips such a span WHOLESALE, so the real
-        link inside a wrong span vanishes. 4f2ffa7 found it, because its regex
-        was blind to the span it scanned through. Direction: false negative —
-        it hides findings, it never invents one."""
+    def test_a_wrong_destination_span_no_longer_hides_the_real_link_inside_it(self):
+        """WI-0095, CLOSED. protect_link_destinations() used to span the text
+        after ANY `](`, live opener or not, and without an escape-parity test
+        on the `]`; the WI-0080 scanner skips such a span WHOLESALE, so the
+        real link inside a wrong span used to vanish. 4f2ffa7 found it,
+        because its regex was blind to the span it scanned through. The fix
+        gives protect_link_destinations() the same opener-stack + escape-parity
+        scan process_link_line() already runs, so both fixtures now report the
+        real link and agree with the reference on both oracles."""
         stray = self._entry("stray_close_bracket_paren_span_hides_a_later_link")
         escaped = self._entry("escaped_close_bracket_paren_span_hides_a_later_link")
 
-        self.assertEqual(run_memory_lint_on(stray["markdown"]), [])
-        self.assertEqual(run_memory_lint_on(escaped["markdown"]), [])
+        self.assertEqual(run_memory_lint_on(stray["markdown"]), ["dead-span1.md"])
+        self.assertEqual(run_memory_lint_on(escaped["markdown"]), ["dead-span2.md"])
         self.assertEqual(stray["reference_checkable_targets"], ["dead-span1.md"])
         self.assertEqual(escaped["reference_checkable_targets"], ["dead-span2.md"])
         for entry in (stray, escaped):
-            self.assertEqual(entry["known_divergence"]["direction"], "false-negative")
-            self.assertEqual(entry["known_divergence"]["work_item"], "WI-0095")
+            self.assertIsNone(entry["known_divergence"])
 
     def test_a_stray_sentinel_byte_swallows_the_link_that_follows_it(self):
-        """WI-0097, an OPEN divergence of the same family as WI-0095: a span
-        that should not exist, skipped as a unit. A literal 0x03 byte in the
-        source is read as the OPENING sentinel of a protected destination and
-        pairs with the one opening the next real destination, so the link
-        between them disappears. Pathological input, false-negative direction,
-        left open rather than fixed in the round that measured it."""
+        """WI-0097, an OPEN divergence in the same family the now-closed
+        WI-0095 belonged to: a span that should not exist, skipped as a unit.
+        A literal 0x03 byte in the source is read as the OPENING sentinel of a
+        protected destination and pairs with the one opening the next real
+        destination, so the link between them disappears. Pathological input,
+        false-negative direction, left open rather than fixed in the round
+        that measured it — the WI-0095 fix closed the opener/escape gap in
+        which SPAN this scan draws, not the WI-0097 gap in which BYTE it
+        treats as the span delimiter."""
         entry = self._entry("stray_sentinel_byte_swallows_the_following_link")
 
         self.assertEqual(run_memory_lint_on(entry["markdown"]), [])

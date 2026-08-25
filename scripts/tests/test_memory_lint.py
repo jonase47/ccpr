@@ -3972,6 +3972,31 @@ class LinkScannerMutationTest(unittest.TestCase):
         self.assertNotEqual(mutated, original, "mutation did not change the script")
         return original, mutated
 
+    def _mutate_both(self, pairs):
+        """Like _mutate(), but applies MULTIPLE independent (old, new) pairs to
+        the same original text, each checked for a unique target the same way
+        _mutate() does one.
+
+        Needed since WI-0095 (closed): process_link_line()'s bracket-escape
+        rule 2 and protect_link_destinations()'s own opener/escape check (the
+        WI-0095 fix) now cooperate on the SAME question -- is this `[`/`]`
+        live or escaped -- for the inline-destination shape. Either one alone
+        being correct is enough to keep a non-link silent, so a single-line
+        mutation of process_link_line() no longer flips those fixtures (the
+        untouched protect_link_destinations() check masks it). Breaking both
+        checks the same way is what the two escape-position tests below need;
+        see their docstrings."""
+        original = SCRIPT_PATH.read_text(encoding="utf-8")
+        mutated = original
+        for old, new in pairs:
+            self.assertEqual(
+                original.count(old), 1,
+                "mutation target moved — update this test's fixture",
+            )
+            mutated = mutated.replace(old, new, 1)
+        self.assertNotEqual(mutated, original, "mutation did not change the script")
+        return original, mutated
+
     def _assert_script_untouched(self, original):
         after = SCRIPT_PATH.read_text(encoding="utf-8")
         md5 = __import__("hashlib").md5
@@ -4018,11 +4043,19 @@ class LinkScannerMutationTest(unittest.TestCase):
         the escape test but asks it about the wrong POSITION (`i + 1`, the byte
         after the bracket), which is never preceded by a backslash. The mutant
         pushes an opener that should not exist and reports a target nobody
-        linked — a false POSITIVE, the direction that matters most."""
-        original, mutated = self._mutate(
-            '                if (ch == "[" && !is_escaped(line, i)) {',
-            '                if (ch == "[" && !is_escaped(line, i + 1)) {',
-        )
+        linked — a false POSITIVE, the direction that matters most.
+
+        Mutates BOTH process_link_line()'s check and protect_link_
+        destinations()'s own opener/escape check (see _mutate_both()) — since
+        WI-0095 closed, the latter refuses to even draw a dest_mark span for
+        an escaped opener, so mutating process_link_line() alone leaves this
+        inline-destination fixture silent regardless (measured: it does)."""
+        original, mutated = self._mutate_both([
+            ('                if (ch == "[" && !is_escaped(s, i)) {',
+             '                if (ch == "[" && !is_escaped(s, i + 1)) {'),
+            ('                if (ch == "[" && !is_escaped(line, i)) {',
+             '                if (ch == "[" && !is_escaped(line, i + 1)) {'),
+        ])
 
         out = self._run_mutant(mutated, "- \\[text](gone_mut_openesc.md) — not a link\n")
 
@@ -4037,11 +4070,18 @@ class LinkScannerMutationTest(unittest.TestCase):
         r"""Rule 2, the CLOSING bracket. `[text\](t.md)` is not a link either.
         Same off-by-one mutation on the `]` branch: the escape test still runs,
         one byte too far along, and the mutant closes a link the reference does
-        not render."""
-        original, mutated = self._mutate(
-            '                if (ch == "]" && !is_escaped(line, i)) {',
-            '                if (ch == "]" && !is_escaped(line, i + 1)) {',
-        )
+        not render.
+
+        Same reason as the OPENING-bracket test above for mutating BOTH
+        functions' checks together (see _mutate_both()) — WI-0095 gave
+        protect_link_destinations() the same escape-parity test on `]`, and
+        mutating process_link_line() alone no longer flips this fixture."""
+        original, mutated = self._mutate_both([
+            ('                if (ch == "]" && !is_escaped(s, i)) {',
+             '                if (ch == "]" && !is_escaped(s, i + 1)) {'),
+            ('                if (ch == "]" && !is_escaped(line, i)) {',
+             '                if (ch == "]" && !is_escaped(line, i + 1)) {'),
+        ])
 
         out = self._run_mutant(mutated, "- [text\\](gone_mut_closeesc.md) — not a link\n")
 
@@ -4118,10 +4158,17 @@ class LinkScannerMutationTest(unittest.TestCase):
         pushing beside it, which is exactly what a "remember the last opener"
         implementation would do. A FLAT link is unaffected (asserted here, so
         the mutation is not simply breaking everything); the nested label goes
-        silent."""
+        silent.
+
+        The target string includes the following `st_act[sp] = 1` line —
+        protect_link_destinations() gained its own, differently-scoped `sp++`
+        for the opener check WI-0095 closed, so the bare line alone no longer
+        identifies process_link_line()'s copy uniquely."""
         original, mutated = self._mutate(
-            "                    sp++\n",
-            "                    if (sp < 1) sp++\n",
+            "                    sp++\n"
+            "                    st_act[sp] = 1\n",
+            "                    if (sp < 1) sp++\n"
+            "                    st_act[sp] = 1\n",
         )
 
         out = self._run_mutant(

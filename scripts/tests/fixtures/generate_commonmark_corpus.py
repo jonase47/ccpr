@@ -335,49 +335,34 @@ CORPUS = [
         "markdown": "[]: dead-emptydefn.md\n",
         "known_divergence": None,
     },
-    # --- a wrong destination span now swallows a real link (WI-0095) ---------
-    # protect_link_destinations() wraps the text after ANY `](` in an opaque
-    # dest_mark span, without checking that a live link opener precedes it. That
-    # was harmless while the extractor re-scanned inside such a span with its
-    # own regex; since WI-0080 the scanner skips a dest_mark span WHOLESALE, so
-    # a wrong span hides the real link inside it. Direction: false negative.
+    # --- a wrong destination span no longer swallows a real link (WI-0095,
+    # closed) ------------------------------------------------------------
+    # protect_link_destinations() used to wrap the text after ANY `](` in an
+    # opaque dest_mark span, without checking that a live link opener
+    # preceded it and without an escape-parity test on the `]` itself. Since
+    # WI-0080 the scanner skips a dest_mark span WHOLESALE, so a wrong span
+    # used to hide the real link inside it. The repair reuses the same
+    # left-to-right opener-stack scan process_link_line() already runs: a
+    # `]` only opens a destination when it just closed a live, unescaped `[`
+    # AND is immediately followed by `(`. Both fixtures below now agree with
+    # the reference on both oracles, so neither carries a known_divergence
+    # block any more.
     {
         "name": "stray_close_bracket_paren_span_hides_a_later_link",
         "category": "destination-span-overreach",
         "markdown": "x](y [a](dead-span1.md) z)\n",
-        "known_divergence": {
-            "direction": "false-negative",
-            "reason": (
-                "The reference renders `x](y ` as literal text and "
-                "`[a](dead-span1.md)` as an ordinary link. "
-                "protect_link_destinations() treats the stray `](` as a link "
-                "destination opener, spans `y [a](dead-span1.md` as one opaque "
-                "unit, and the WI-0080 scanner skips that unit whole -- so the "
-                "real link inside it is never seen. 4f2ffa7 found it, because "
-                "its regex was blind to the span it was scanning through."
-            ),
-            "work_item": "WI-0095",
-        },
+        "known_divergence": None,
     },
     {
-        # The same defect reached through an ESCAPED `]`, which the prestage
-        # also does not test for. Kept as a second fixture because the escape
-        # blindness and the missing opener check are two separate omissions in
-        # the same function and a repair might close only one.
+        # The same construct reached through an ESCAPED `]` — the escape
+        # parity half of the same fix. Kept as its own fixture because the
+        # escape blindness and the missing opener check were two separate
+        # omissions in the same function, and a repair could have closed
+        # only one.
         "name": "escaped_close_bracket_paren_span_hides_a_later_link",
         "category": "destination-span-overreach",
         "markdown": "x\\](y [a](dead-span2.md) z)\n",
-        "known_divergence": {
-            "direction": "false-negative",
-            "reason": (
-                "Same mechanism as "
-                "stray_close_bracket_paren_span_hides_a_later_link, reached via "
-                "an escaped `]`: `\\]` is literal text at the reference and "
-                "opens no destination, but protect_link_destinations() matches "
-                "`](` without any escape-parity test."
-            ),
-            "work_item": "WI-0095",
-        },
+        "known_divergence": None,
     },
     # --- a stray sentinel byte in the source (WI-0097) -----------------------
     {

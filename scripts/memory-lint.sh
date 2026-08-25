@@ -85,9 +85,15 @@ TIER1_TOPIC_ERR_KB=50
 # The caveat, named rather than left to a footnote — WI-0100: a bounded random
 # probe over 3000 lines of bracket soup produces 210 findings the reference
 # never renders (178 of them already before the WI-0080 scanner). The minimal
-# witness is `[](()`, which reports a target named `(`. Cause is WI-0095:
-# protect_link_destinations() spans the text after ANY `](` without checking
-# that a live opener precedes it. That class is REACHABLE but not REACHED — no
+# witness is `[](()`, which reports a target named `(`. WI-0095's merge
+# comment named this a duplicate of the missing-opener-check gap ("whoever
+# fixes this fixes all three"); measured after that gap was closed
+# (25.08.2026), it is not — `[]` IS a live, unescaped opener/closer pair, so
+# the opener check does not reject it, and `[](()` still reports `(`
+# unchanged. The actual cause is separate: the destination-closing scan takes
+# the first unescaped `)` as the delimiter without requiring the parens inside
+# a destination to balance, which CommonMark's link-destination grammar does
+# require for the non-`<>` form. That gap is REACHABLE but not REACHED — no
 # such construct occurs in any measured index, which is what the field
 # measurement above says and all it says.
 #
@@ -957,79 +963,127 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
         # Wraps the raw text after a `](` in dest_mark before resolve_
         # paragraph() ever sees it (WI-0042).
         #
-        # Two honest limits, both measured (WI-0095). It matches EVERY `](`
-        # occurrence, whether or not a live link opener precedes it and whether
-        # or not the `]` is backslash-escaped — so `x](y [a](t.md) z)` gets a
-        # span over `y [a](t.md`. And where no unescaped `)` closes the
-        # destination it gives up (`dend == 0` below) and carries the whole
-        # remainder through UNPROTECTED, so "every destination is isolated" is
-        # not a property this function has.
+        # A `](` only opens a destination when a live opener precedes the `]`
+        # AND that `]` is not itself backslash-escaped (WI-0095, closed). Both
+        # conditions are checked by the same left-to-right scan process_
+        # link_line() already uses for its own opener stack: `[` pushes an
+        # unescaped opener, `]` pops one if any is open. A `]` only starts a
+        # destination when it just popped a real opener (`had_opener` below)
+        # AND the very next byte is `(` — every other `]`, escaped or with no
+        # opener left, is ordinary text and leaves `sp` exactly where a correct
+        # bracket count would. That parity matters: an unescaped `]` with no
+        # following `(` (`[a] b](t.md)`, no link at the reference) still has to
+        # POP its opener here, or a later, unrelated `]` inherits its credit
+        # and wrongly opens a span — measured against exactly that fixture
+        # during the repair.
         #
-        # Neither limit was visible before WI-0080: the extractor scanned INSIDE
-        # a dest_mark span with a regex that did not know the span was there, so
-        # a wrong span was simply re-read as ordinary text. The scanner skips a
-        # span as one unit, which turns every wrong span from harmless into
-        # load-bearing — the general lesson, worth more than the two instances:
-        # once a stage becomes span-opaque, the correctness of the stage that
-        # DRAWS the spans stops being optional. Riding the raw text along inside
-        # the normal `line` flow, instead of re-locating it afterward from a
-        # parallel scan, keeps it structurally glued to whichever
-        # `[text](dest)` span it belongs to — including when that whole span
-        # later turns out to be inside a code span or an illustrative backtick
-        # example and gets discarded as a unit.
+        # This scan does NOT reproduce the rule 3 that process_link_line() applies (a
+        # successful link deactivates every enclosing opener) — it only asks
+        # "is there an unclosed `[` at all", not "is this specific opener still
+        # live for a REAL link". An over-eager span drawn on a since-deactivated
+        # outer opener (`[a [b](i.md) c](o.md)`) is harmless downstream:
+        # process_link_line() finds that outer opener inactive and takes its
+        # literal-`]` branch before it ever looks at what follows, so the
+        # dest_mark span it walks past is never printed. That is the SAME
+        # imprecision the pre-fix regex already had on this exact shape (it
+        # matched every `](` unconditionally too), so it is not a new
+        # divergence — just not one this repair needed to remove.
+        #
+        # A second, independent limit remains and is NOT what WI-0095 closed:
+        # the PARENS inside a destination are not required to balance
+        # (`[](()` reports a target named `(` — WI-0100, a PO decision to
+        # leave open, not the opener/escape gap this function closes).
+        #
+        # Where no unescaped `)` closes the destination this still gives up
+        # (`dend == 0` below) and carries the whole remainder through
+        # UNPROTECTED, so "every destination is isolated" is not a property
+        # this function has.
+        #
+        # The scanner skips a dest_mark span as one unit (WI-0080), which is
+        # why the correctness of the stage that DRAWS the spans is not
+        # optional — a wrong span here is load-bearing downstream, not
+        # harmless. Riding the raw text along inside the normal `line` flow,
+        # instead of re-locating it afterward from a parallel scan, keeps it
+        # structurally glued to whichever `[text](dest)` span it belongs to —
+        # including when that whole span later turns out to be inside a code
+        # span or an illustrative backtick example and gets discarded as a
+        # unit.
         #
         # The closing `)` is found by a manual scan, not `[^)]*` — a
         # backslash-escaped `)` (WI-0081) is destination TEXT, not the
         # delimiter, and a plain character-class stop cannot tell the two
         # apart. Escape parity reuses count_trailing_backslashes(), the same
         # helper process_link_line() uses for bracket escaping (WI-0079) —
-        # one escaping rule, two call sites.
-        function protect_link_destinations(s,    out, dstart, dend, dest, n, pos) {
+        # one escaping rule, now three call sites (the opener, the destination
+        # closer, and the `]` in this function).
+        function protect_link_destinations(s,    out, dstart, dend, dest, n, pos,
+                                           i, ch, sp, had_opener) {
             out = ""
-            while (match(s, /\]\(/)) {
-                out = out substr(s, 1, RSTART + 1)   # up through and including the ]( pair
-                dstart = RSTART + 2
-                n = length(s)
-                dend = 0
-                pos = dstart
-                while (pos <= n) {
-                    if (substr(s, pos, 1) == ")" && count_trailing_backslashes(s, pos) % 2 == 0) {
-                        dend = pos
-                        break
+            n = length(s)
+            sp = 0
+            i = 1
+            while (i <= n) {
+                ch = substr(s, i, 1)
+                if (ch == "[" && !is_escaped(s, i)) {
+                    sp++
+                    out = out ch
+                    i++
+                    continue
+                }
+                if (ch == "]" && !is_escaped(s, i)) {
+                    had_opener = (sp > 0)
+                    if (had_opener) sp--
+                    if (had_opener && substr(s, i + 1, 1) == "(") {
+                        dstart = i + 2
+                        dend = 0
+                        pos = dstart
+                        while (pos <= n) {
+                            if (substr(s, pos, 1) == ")" && count_trailing_backslashes(s, pos) % 2 == 0) {
+                                dend = pos
+                                break
+                            }
+                            pos++
+                        }
+                        if (dend == 0) {
+                            # No unescaped closing paren anywhere in the rest
+                            # of this raw line — not a resolvable single-line
+                            # destination; carry the remainder through
+                            # untouched and stop looking.
+                            return out "](" substr(s, dstart)
+                        }
+                        dest = substr(s, dstart, dend - dstart)
+                        # An escaped ")" is literal destination text, per CommonMark,
+                        # so the escape is undone here. It used to be undone into a
+                        # paren_mark sentinel and restored to ")" only in
+                        # strip_dest_mark(), because process_link_line() located a link
+                        # span with a `[^)]*` scan of its own, blind to the dest_mark
+                        # opacity, and would have stopped at a decoded ")"
+                        # mid-destination. Since WI-0080 that scan is gone: the
+                        # destination extent is read off the dest_mark span, so a ")"
+                        # inside it is inert.
+                        #
+                        # The detour was kept one round longer on the grounds that no
+                        # test could pin its removal either way. That was wrong, and the
+                        # line below is why: decode_numeric_entities() runs AFTER the
+                        # substitution, so `[x](a&#41;b.md)` has been putting a literal
+                        # ")" inside a dest_mark span since WI-0081 and resolving
+                        # correctly — the post-removal state was already pinned, by a
+                        # fixture that existed before the removal. Both spellings now
+                        # have one.
+                        gsub(/\\\)/, ")", dest)
+                        dest = decode_numeric_entities(dest)
+                        out = out "](" dest_mark dest dest_mark ")"
+                        i = dend + 1
+                        continue
                     }
-                    pos++
+                    out = out ch
+                    i++
+                    continue
                 }
-                if (dend == 0) {
-                    # No unescaped closing paren anywhere in the rest of this
-                    # raw line — not a resolvable single-line destination;
-                    # carry the remainder through untouched and stop looking.
-                    return out substr(s, dstart)
-                }
-                dest = substr(s, dstart, dend - dstart)
-                # An escaped ")" is literal destination text, per CommonMark,
-                # so the escape is undone here. It used to be undone into a
-                # paren_mark sentinel and restored to ")" only in
-                # strip_dest_mark(), because process_link_line() located a link
-                # span with a `[^)]*` scan of its own, blind to the dest_mark
-                # opacity, and would have stopped at a decoded ")"
-                # mid-destination. Since WI-0080 that scan is gone: the
-                # destination extent is read off the dest_mark span, so a ")"
-                # inside it is inert.
-                #
-                # The detour was kept one round longer on the grounds that no
-                # test could pin its removal either way. That was wrong, and the
-                # line below is why: decode_numeric_entities() runs AFTER the
-                # substitution, so `[x](a&#41;b.md)` has been putting a literal
-                # ")" inside a dest_mark span since WI-0081 and resolving
-                # correctly — the post-removal state was already pinned, by a
-                # fixture that existed before the removal. Both spellings now
-                # have one.
-                gsub(/\\\)/, ")", dest)
-                dest = decode_numeric_entities(dest)
-                out = out dest_mark dest dest_mark ")"
-                s = substr(s, dend + 1)
+                out = out ch
+                i++
             }
-            return out s
+            return out
         }
         function strip_dest_mark(s) {
             gsub(dest_mark, "", s)
@@ -1181,14 +1235,21 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
             # consumes a span, and the sole print() in process_link_line() sits
             # behind an active opener. So this branch can drop a finding and
             # cannot invent one -- SO LONG AS protect_link_destinations() draws
-            # correct spans (WI-0095, still open). parse_link_label() is blind
-            # to dest_mark; a `]` sitting inside a wrongly drawn span therefore
-            # terminates a label, and the advance this function returns lands
-            # in the middle of that span, where the invariant the argument
-            # above rests on no longer holds. Measured on bracket-soup input,
-            # check (n) does report targets the reference never renders. That
-            # is the WI-0095 family, not this branch, and this branch inherits
-            # its precondition. The dropped finding is real and is recorded
+            # correct spans, i.e. only opens one after a live, unescaped
+            # opener (WI-0095, closed). parse_link_label() is blind to
+            # dest_mark; a `]` sitting inside a WRONGLY-SCOPED span used to
+            # terminate a label early, landing the advance this function
+            # returns in the middle of that span, where the invariant the
+            # argument above rests on no longer held -- exactly the class
+            # WI-0095 closed. One imprecision remains in the same function
+            # (WI-0100 duplicate, still open): the destination-closing scan
+            # does not require the parens inside a destination to balance,
+            # which can pick the wrong `)` as the delimiter and mis-target an
+            # otherwise correctly SCOPED span. That is a wrong TARGET, not a
+            # wrongly swallowed `]`, so it does not reopen the precondition of
+            # this branch -- it bears on the contract of check (n) itself
+            # (WI-0100), not this branch, and this branch inherits neither.
+            # The dropped finding is real and is recorded
             # as a corpus entry (`known_divergence`, direction false-negative):
             # an UNDEFINED non-ASCII label now silences the link around it. The
             # trade is the PO decision of 24.08.2026 — a false negative that is
@@ -1693,9 +1754,14 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
             # key, never a replacement: adding keys can only make more
             # references RESOLVE, and a resolving reference only ever
             # deactivates an enclosing link, so this cannot invent a finding --
-            # so long as protect_link_destinations() draws correct spans
-            # (WI-0095, still open; see the same proviso on reference_link_span
-            # above, which is where a resolving reference also CONSUMES bytes).
+            # so long as protect_link_destinations() draws correctly SCOPED
+            # spans (WI-0095, closed; see the same proviso on
+            # reference_link_span above, which is where a resolving reference
+            # also CONSUMES bytes). The one imprecision left in that function
+            # (WI-0100 duplicate, still open — unbalanced parens inside a
+            # destination can pick the wrong `)`) mis-targets an already
+            # correctly scoped span rather than mis-scoping one, so it does
+            # not reopen this precondition either.
             # Under that precondition the error it can make is dropping one,
             # and it makes exactly one -- a CLASS, not a shape. The resolution
             # is not INJECTIVE: distinct raw labels share one resolved key, and

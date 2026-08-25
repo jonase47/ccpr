@@ -312,12 +312,10 @@
       "reference_checkable_targets": [
         "dead-span1.md"
       ],
-      "expected_check_n_findings": [],
-      "known_divergence": {
-        "direction": "false-negative",
-        "reason": "The reference renders `x](y ` as literal text and `[a](dead-span1.md)` as an ordinary link. protect_link_destinations() treats the stray `](` as a link destination opener, spans `y [a](dead-span1.md` as one opaque unit, and the WI-0080 scanner skips that unit whole -- so the real link inside it is never seen. 4f2ffa7 found it, because its regex was blind to the span it was scanning through.",
-        "work_item": "WI-0095"
-      },
+      "expected_check_n_findings": [
+        "dead-span1.md"
+      ],
+      "known_divergence": null,
       "documented_intent": null
     },
     {
@@ -330,12 +328,10 @@
       "reference_checkable_targets": [
         "dead-span2.md"
       ],
-      "expected_check_n_findings": [],
-      "known_divergence": {
-        "direction": "false-negative",
-        "reason": "Same mechanism as stray_close_bracket_paren_span_hides_a_later_link, reached via an escaped `]`: `\\]` is literal text at the reference and opens no destination, but protect_link_destinations() matches `](` without any escape-parity test.",
-        "work_item": "WI-0095"
-      },
+      "expected_check_n_findings": [
+        "dead-span2.md"
+      ],
+      "known_divergence": null,
       "documented_intent": null
     },
     {
