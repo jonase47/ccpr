@@ -196,7 +196,7 @@ done
 # are identified by position -- printing the name would put it in the CI log,
 # which is precisely what the deny-list exists to prevent.
 if [ -n "$GATE_DENY_UNUSABLE" ]; then
-  die "deny-list entry $GATE_DENY_UNUSABLE is unusable (blank, or containing a line break) — fix gate.denyNames in $(gate_config_path). Refusing to run with a shorter list than configured."
+  die "deny-list entry $GATE_DENY_UNUSABLE is unusable (blank, or containing a line break) -- fix gate.denyNames in $(gate_config_path). Refusing to run with a shorter list than configured."
 fi
 
 # --- collect the scan set -----------------------------------------------------
@@ -220,7 +220,7 @@ is_text() {
   case "$rc" in
     0) return 0 ;;
     1) [ ! -s "$1" ] ;;
-    *) die "text/binary classification did not run — grep exited $rc: $1" ;;
+    *) die "text/binary classification did not run -- grep exited $rc: $1" ;;
   esac
 }
 
@@ -245,7 +245,7 @@ if [ -n "$FILES" ]; then
     files_rc=$?
   fi
   if [ "$files_rc" -ge 2 ]; then
-    die "file-list filter did not run — grep exited $files_rc"
+    die "file-list filter did not run -- grep exited $files_rc"
   fi
   while IFS= read -r f; do
     [ -n "$f" ] || continue
@@ -253,7 +253,7 @@ if [ -n "$FILES" ]; then
   done < "$TMP"
 else
   if [ -z "$REPO" ]; then
-    REPO="$(git rev-parse --show-toplevel 2>/dev/null)" || die "not a git repository — pass --repo <dir> or file arguments"
+    REPO="$(git rev-parse --show-toplevel 2>/dev/null)" || die "not a git repository -- pass --repo <dir> or file arguments"
   fi
   [ -d "$REPO" ] || die "not a directory: $REPO"
   git -C "$REPO" rev-parse --show-toplevel >/dev/null 2>&1 || die "not a git repository: $REPO"
@@ -343,7 +343,7 @@ while IFS= read -r f; do
     path_rc=$?
   fi
   if [ "$path_rc" -ge 2 ]; then
-    die "PATH deny-list check did not run — grep exited $path_rc: $rel"
+    die "PATH deny-list check did not run -- grep exited $path_rc: $rel"
   fi
   if [ -n "$path_idx" ]; then rel="$(gate_redact_path "$rel")"; fi
 
@@ -501,7 +501,7 @@ case "$GATE_DENY_SOURCE" in
     # `artifact-gate.sh --repo . >/dev/null` printed nothing at all and exited
     # 0 -- byte-identical to a fully configured clean run redirected the same
     # way.
-    warn '%s: deny-list NOT CONFIGURED — no tenant/project names were checked. Set gate.denyNames in %s, or pass CCPR_GATE_DENY_NAMES.' \
+    warn '%s: deny-list NOT CONFIGURED -- no tenant/project names were checked. Set gate.denyNames in %s, or pass CCPR_GATE_DENY_NAMES.' \
       "$PROG" "$(gate_config_path)"
     ;;
   *)
@@ -534,7 +534,7 @@ say '%s: scanned %s files, %s findings in %s files; %s' \
 # checks by design, but their names were still checked, and saying so is what
 # keeps the summary from contradicting a name-only finding above it.
 if [ "$skipped_binary" -gt 0 ]; then
-  say '%s: %s binary file(s) skipped — content not scanned, names still checked' \
+  say '%s: %s binary file(s) skipped -- content not scanned, names still checked' \
     "$PROG" "$skipped_binary"
 fi
 
@@ -543,7 +543,7 @@ fi
 # as "N files is all there was" for a tracked link too -- the exact defect
 # this line exists to avoid repeating for binaries.
 if [ "$skipped_symlink" -gt 0 ]; then
-  say '%s: %s symlink(s) skipped — target not scanned, names still checked' \
+  say '%s: %s symlink(s) skipped -- target not scanned, names still checked' \
     "$PROG" "$skipped_symlink"
 fi
 
@@ -560,7 +560,7 @@ if [ "$findings" -gt 0 ]; then
 fi
 
 if [ "$scanned" -eq 0 ]; then
-  warn '%s: no files were scanned — nothing was verified. Check the --repo path or the file arguments; a scope of only binary files or symlinks ends up empty too.' "$PROG"
+  warn '%s: no files were scanned -- nothing was verified. Check the --repo path or the file arguments; a scope of only binary files or symlinks ends up empty too.' "$PROG"
   exit 2
 fi
 if [ "$REQUIRE_DENYLIST" -eq 1 ] && [ "$denylist_missing" -eq 1 ]; then

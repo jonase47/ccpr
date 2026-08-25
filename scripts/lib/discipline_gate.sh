@@ -388,7 +388,7 @@ _gate_needs_unicode() {
   # substitution, whose subshell resets it, so the warning repeats. Repeating a
   # warning about an incomplete check is the harmless direction.
   if [ "$_GATE_UNICODE_WARNED" -eq 0 ]; then
-    printf 'gate: python3 not found — non-ASCII names are folded as ASCII only\n' >&2
+    printf 'gate: python3 not found -- non-ASCII names are folded as ASCII only\n' >&2
     _GATE_UNICODE_WARNED=1
   fi
   return 1
@@ -468,7 +468,7 @@ gate_path_deny_index() {
       # code -- WI-0049) means the comparison did not happen. Say so and let
       # the ASCII matcher below answer what it can, rather than reporting a
       # clean path because a helper crashed.
-      *) printf 'gate: unicode matcher failed (status %s) — falling back to ASCII folding\n' "$rc" >&2 ;;
+      *) printf 'gate: unicode matcher failed (status %s) -- falling back to ASCII folding\n' "$rc" >&2 ;;
     esac
   fi
   while IFS= read -r name; do
@@ -493,7 +493,7 @@ gate_path_deny_index() {
       0) printf '%s' "$idx"; return 0 ;;
       1) : ;;
       *)
-        printf 'gate: PATH deny-list check did not run — grep exited %s\n' "$grc" >&2
+        printf 'gate: PATH deny-list check did not run -- grep exited %s\n' "$grc" >&2
         return "$grc"
         ;;
     esac
@@ -520,7 +520,7 @@ gate_redact_path() {
     local masked rc=0
     masked="$(_gate_unicode_py redact "$1")" || rc=$?
     if [ "$rc" -eq 0 ]; then printf '%s' "$masked"; return 0; fi
-    printf 'gate: unicode masker failed (status %s) — falling back to ASCII folding\n' "$rc" >&2
+    printf 'gate: unicode masker failed (status %s) -- falling back to ASCII folding\n' "$rc" >&2
   fi
   GATE_RP_PATH="$1" GATE_RP_NAMES="$GATE_DENY_NAMES" LC_ALL=C awk '
     BEGIN {
@@ -659,7 +659,7 @@ _gate_checked() {
   local out rc=0
   out="$(_gate_hits "$content" "$@")" || rc=$?
   if [ "$rc" -ge 2 ]; then
-    _gate_emit 0 _error "$label check did not run — grep exited $rc"
+    _gate_emit 0 _error "$label check did not run -- grep exited $rc"
     return "$rc"
   fi
   printf '%s\n' "$out"
@@ -714,7 +714,7 @@ EOF
   fi
   while IFS= read -r line; do
     [ -n "$line" ] || continue
-    _gate_emit "${line%%:*}" secret "bearer token header — verify it is not a real credential"
+    _gate_emit "${line%%:*}" secret "bearer token header -- verify it is not a real credential"
     found=1
   done <<EOF
 $hits
@@ -730,7 +730,7 @@ EOF
 $blob_hits"
   while IFS= read -r line; do
     [ -n "$line" ] || continue
-    _gate_emit "${line%%:*}" secret "long token-like string — verify it is a name/path, not a value"
+    _gate_emit "${line%%:*}" secret "long token-like string -- verify it is a name/path, not a value"
     found=1
   done <<EOF
 $hits
@@ -779,7 +779,7 @@ EOF
   fi
   while IFS= read -r line; do
     [ -n "$line" ] || continue
-    _gate_emit "${line%%:*}" personal "email address — remove or generalize"
+    _gate_emit "${line%%:*}" personal "email address -- remove or generalize"
     found=1
   done <<EOF
 $hits
@@ -791,7 +791,7 @@ EOF
     [ "$rc" -lt 2 ] || { printf '%s\n' "$hits"; return "$rc"; }
     while IFS= read -r line; do
       [ -n "$line" ] || continue
-      _gate_emit "${line%%:*}" context "personal-context marker (colour vision / accessibility) — de-personalize before sharing"
+      _gate_emit "${line%%:*}" context "personal-context marker (colour vision / accessibility) -- de-personalize before sharing"
       found=1
     done <<EOF
 $hits
@@ -825,7 +825,7 @@ EOF
     if [ -n "$GATE_IP_ALLOWLIST" ] && printf '%s\n' "$ip" | grep -qE -e "$GATE_IP_ALLOWLIST"; then
       continue
     fi
-    _gate_emit "${line%%:*}" network "IPv4 literal not in the configured allowlist — verify it is not a third-party/public address"
+    _gate_emit "${line%%:*}" network "IPv4 literal not in the configured allowlist -- verify it is not a third-party/public address"
     found=1
   done <<EOF
 $hits
@@ -838,7 +838,7 @@ EOF
     [ "$rc" -lt 2 ] || { printf '%s\n' "$hits"; return "$rc"; }
     while IFS= read -r line; do
       [ -n "$line" ] || continue
-      _gate_emit "${line%%:*}" content "work-item marker (TODO:/FIXME:/checkbox/open-status/next-steps heading) — track in the ticket system, not in shared memory"   # gate-pattern-source
+      _gate_emit "${line%%:*}" content "work-item marker (TODO:/FIXME:/checkbox/open-status/next-steps heading) -- track in the ticket system, not in shared memory"   # gate-pattern-source
       found=1
     done <<EOF
 $hits
@@ -889,7 +889,7 @@ EOF
           # what it can, rather than reporting a clean file because the
           # helper crashed.
           *)
-            printf 'gate: unicode content matcher failed (status %s) — falling back to ASCII folding\n' "$rc" >&2
+            printf 'gate: unicode content matcher failed (status %s) -- falling back to ASCII folding\n' "$rc" >&2
             rc=0
             hits="$(_gate_checked "denylist/name #$idx (unicode-fallback)" "$content" -nFi -- "$name")" || rc=$?
             [ "$rc" -lt 2 ] || { printf '%s\n' "$hits"; return "$rc"; }
@@ -907,7 +907,7 @@ EOF
         # flag _gate_needs_unicode already uses for the identical condition
         # on the path side.
         if [ "$_GATE_UNICODE_WARNED" -eq 0 ]; then
-          printf 'gate: python3 not found — non-ASCII names are folded as ASCII only\n' >&2
+          printf 'gate: python3 not found -- non-ASCII names are folded as ASCII only\n' >&2
           _GATE_UNICODE_WARNED=1
         fi
         rc=0

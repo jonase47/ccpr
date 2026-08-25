@@ -2802,5 +2802,87 @@ class CrashMarkersAreUniqueToOnePatternTest(unittest.TestCase):
                                   f"marker {marker!r} for {owner} also occurs in {collisions}")
 
 
+class EveryEmittedStringIsAsciiTest(unittest.TestCase):
+    """A decorative non-ASCII character in an emitted message forces the
+    deny-list mask (`gate_redact_path`, which `say()`/`warn()`/`die()` call on
+    their own rendered text whenever a deny list is configured) to escalate to
+    python3 for that line -- WI-0114. The character carries no information the
+    mask cares about; the escalation is pure cost.
+
+    Extraction is mechanical, derived from the source rather than a hardcoded
+    line list, so a newly introduced non-ASCII character is caught the same
+    way a fixed one stays fixed. It reliably separates comments (a line whose
+    stripped text starts with '#') from code, and within code it looks only at
+    the quoted-literal arguments of five call sites: `say`, `warn`, `die`,
+    `printf`, and `_gate_emit` -- the last because its third argument becomes
+    a finding's message text, which `gate_scan_file`'s caller later prints
+    through `say()` (see `scripts/artifact-gate.sh`'s main loop), so a
+    non-ASCII character placed there reaches `gate_redact_path` exactly like
+    one placed directly in a `say()` call, just one hop later.
+
+    What this does NOT cover: a message assembled by concatenating variables
+    at runtime (only literal, in-source text is checked), a call reached
+    through some other function name, or a literal split across more than one
+    backslash-continued statement boundary in a shape this scanner does not
+    join. None of the sites this gate currently ships are shaped that way --
+    a future one might be, and this test would not catch it.
+    """
+
+    EMIT_FUNCS = ("say", "warn", "die", "printf", "_gate_emit")
+    _CALL_RE = re.compile(r"\b(?:" + "|".join(EMIT_FUNCS) + r")\b")
+    _SQ_RE = re.compile(r"'([^']*)'")
+    _DQ_RE = re.compile(r'"((?:[^"\\]|\\.)*)"')
+
+    @classmethod
+    def _logical_statements(cls, source):
+        """Yield (1-based start line, joined text) per logical statement.
+
+        Comment-only lines (stripped text starts with '#') are dropped
+        entirely. A line ending in a literal backslash is joined with the
+        next physical line, so a call whose arguments continue onto a second
+        line (e.g. `warn '...' \\` then `"$PROG"`) is seen as one statement.
+        """
+        lines = source.splitlines()
+        i, n = 0, len(lines)
+        out = []
+        while i < n:
+            raw = lines[i]
+            if raw.strip().startswith("#"):
+                i += 1
+                continue
+            start_no = i + 1
+            buf = raw
+            while buf.endswith("\\"):
+                i += 1
+                if i >= n:
+                    break
+                buf = buf[:-1] + " " + lines[i]
+            out.append((start_no, buf))
+            i += 1
+        return out
+
+    @classmethod
+    def _nonascii_emitted_sites(cls, path):
+        source = Path(path).read_text(encoding="utf-8")
+        sites = []
+        for start_no, stmt in cls._logical_statements(source):
+            for m in cls._CALL_RE.finditer(stmt):
+                tail = stmt[m.end():]
+                literals = cls._SQ_RE.findall(tail) + cls._DQ_RE.findall(tail)
+                for lit in literals:
+                    bad = [c for c in lit if ord(c) > 127]
+                    if bad:
+                        sites.append((start_no, tuple(bad)))
+        return sites
+
+    def test_artifact_gate_emits_only_ascii(self):
+        sites = self._nonascii_emitted_sites(GATE)
+        self.assertEqual(sites, [], f"non-ASCII in emitted string(s): {sites}")
+
+    def test_discipline_gate_emits_only_ascii(self):
+        sites = self._nonascii_emitted_sites(LIB)
+        self.assertEqual(sites, [], f"non-ASCII in emitted string(s): {sites}")
+
+
 if __name__ == "__main__":
     unittest.main()
