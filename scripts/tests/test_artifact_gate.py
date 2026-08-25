@@ -796,6 +796,140 @@ class DenyListTest(GateTestBase):
         self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
 
 
+
+# ---------------------------------------------------------------------------
+# 3a. WI-0090 — the run whose headline check never ran must not read as a
+# full pass. The deny-list is the check this script is NAMED after, and it is
+# also the one check that is inert on a machine with no personal config --
+# which every freshly installed CCPR is. Measured 25.08.2026 over this
+# repository: `artifact-gate.sh --repo . >/dev/null` printed NOTHING and
+# exited 0, byte-identical to a fully configured clean run redirected the same
+# way, because the "NOT CONFIGURED" notice was on stdout with the findings.
+#
+# The DEFAULT is not what changes here (see the header of artifact-gate.sh for
+# the measurement that settles it): the tests below pin the REPORT, so that
+# "scanned N files" can no longer be read as "every check ran".
+# ---------------------------------------------------------------------------
+class DenyListScopeIsVisibleInTheReportTest(GateTestBase):
+    def summary(self, result):
+        """The single `scanned N files` line — the sentence a reader quotes."""
+        lines = [ln for ln in (result.stdout + result.stderr).splitlines()
+                 if ln.startswith("artifact-gate: scanned ")]
+        self.assertEqual(
+            len(lines), 1,
+            "expected exactly one summary line, got:\n" + result.stdout + result.stderr,
+        )
+        return lines[0]
+
+    def make_repo(self):
+        repo = self.work / ("r" + str(len(list(self.work.iterdir()))))
+        repo.mkdir()
+        env = self.env(GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@host.invalid",
+                       GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@host.invalid")
+        subprocess.run(["git", "init", "-q"], cwd=repo, check=True, env=env)
+        return repo
+
+    def commit_all(self, repo):
+        env = self.env(GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@host.invalid",
+                       GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@host.invalid")
+        subprocess.run(["git", "add", "-A"], cwd=repo, check=True, env=env)
+        subprocess.run(["git", "commit", "-qm", "x"], cwd=repo, check=True, env=env)
+
+    # --- the summary carries the scope of CHECKS, not only of files --------
+    def test_the_summary_of_an_unconfigured_run_says_the_check_did_not_run(self):
+        p = self.write("sample.md", CLEAN_TEXT)
+        r = self.run_gate(p)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("DID NOT RUN", self.summary(r))
+
+    def test_the_summary_of_a_configured_run_says_how_many_names_were_checked(self):
+        # The count, not the names: a CI log is a shipped artifact too. It is
+        # the operator's cheap check that the list arrived at its full length.
+        self.write_config(denyNames=["Zorblatt", "Quuxcorp"])
+        p = self.write("sample.md", CLEAN_TEXT)
+        r = self.run_gate(p)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        line = self.summary(r)
+        self.assertIn("2 name(s)", line)
+        self.assertNotIn("DID NOT RUN", line)
+
+    def test_the_summary_never_echoes_a_configured_name(self):
+        self.write_config(denyNames=["Zorblatt", "Quuxcorp"])
+        p = self.write("sample.md", CLEAN_TEXT)
+        r = self.run_gate(p)
+        self.assertNotIn("zorblatt", self.summary(r).lower())
+        self.assertNotIn("quuxcorp", self.summary(r).lower())
+
+    def test_two_clean_exit_zero_runs_are_told_apart_by_their_summary(self):
+        # The acceptance question in one test: both runs are clean and both
+        # exit 0, so the exit code cannot carry the difference. The summary
+        # must.
+        #
+        # Measured weakness, recorded rather than left to be rediscovered:
+        # this test asserts INEQUALITY, so it survives a mutation that swaps
+        # the two branches (an unconfigured run then reports a name count and
+        # a configured one reports "DID NOT RUN" -- still unequal). The two
+        # tests above are what pin the direction; this one only pins that the
+        # two states are told apart at all.
+        p = self.write("sample.md", CLEAN_TEXT)
+        unconfigured = self.run_gate(p)
+        configured = self.run_gate(p, CCPR_GATE_DENY_NAMES="Zorblatt")
+        self.assertEqual(
+            (unconfigured.returncode, configured.returncode), (0, 0),
+            unconfigured.stdout + unconfigured.stderr + configured.stdout + configured.stderr,
+        )
+        self.assertNotEqual(self.summary(unconfigured), self.summary(configured))
+
+    # --- the notice has to survive a caller that keeps only the findings ---
+    def test_a_caller_that_discards_stdout_still_learns_the_check_did_not_run(self):
+        # `subprocess` captures the two channels separately, which IS the view
+        # of a caller that redirects stdout to a findings file or to /dev/null.
+        # Measured before this test: that view was completely empty.
+        p = self.write("sample.md", CLEAN_TEXT)
+        r = self.run_gate(p)
+        self.assertIn("NOT CONFIGURED", r.stderr)
+
+    def test_the_configured_case_keeps_its_scope_line_in_the_report_on_stdout(self):
+        # The positive statement is part of the report, not a diagnostic about
+        # a run that could not do its job — so it stays where the findings are.
+        self.write_config(denyNames=["Zorblatt"])
+        p = self.write("sample.md", CLEAN_TEXT)
+        r = self.run_gate(p)
+        self.assertIn("deny-list active", r.stdout)
+
+    # --- and the check still finds what it exists to find ------------------
+    def test_a_configured_sweep_still_reports_a_planted_name(self):
+        repo = self.make_repo()
+        (repo / "a.md").write_text("The Zorblatt rollout.\n", encoding="utf-8")
+        self.commit_all(repo)
+        r = self.run_gate("--repo", repo, CCPR_GATE_DENY_NAMES="Zorblatt")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("denylist", self.categories(r))
+        self.assertNotIn("zorblatt", (r.stdout + r.stderr).lower())
+        self.assertIn("1 name(s)", self.summary(r))
+
+    def test_the_same_sweep_reports_nothing_when_the_list_is_absent(self):
+        # The counterpart that makes the test above mean something: the file
+        # is identical, only the configuration differs — this is the gap the
+        # summary now has to announce instead of leaving it to be inferred.
+        repo = self.make_repo()
+        (repo / "a.md").write_text("The Zorblatt rollout.\n", encoding="utf-8")
+        self.commit_all(repo)
+        r = self.run_gate("--repo", repo)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("DID NOT RUN", self.summary(r))
+
+    # --- the default is a decision, and it is written down -----------------
+    def test_the_help_text_states_that_the_unconfigured_default_is_deliberate(self):
+        # Same reason as the sibling test on --require-denylist's exit code:
+        # the next reader must not have to re-derive the choice from the code,
+        # and "flip the default" is the first thing this finding suggests.
+        r = self.run_gate("--help")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("supported configuration", r.stdout)
+        self.assertIn("--require-denylist", r.stdout)
+
+
 # ---------------------------------------------------------------------------
 # 3b. WI-0028 — gate_path_deny_index / gate_redact_path exercised through
 # artifact-gate.sh's own call site (artifact-gate.sh:159-160), including the

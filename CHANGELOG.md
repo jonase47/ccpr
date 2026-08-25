@@ -7,6 +7,43 @@ All notable changes to this project are documented in this file. The format is b
 ## [Unreleased]
 
 ### Fixed
+- **`artifact-gate.sh` could report a clean pass on a run where the check it is named after never
+  executed (WI-0090).** The deny-list of tenant/project names comes from a personal, non-distributed
+  config, so it is unset on every freshly installed CCPR — and on the machine where this was
+  measured. On such a run the other checks did all the work and the summary said `scanned 296 files,
+  0 findings in 0 files`, a true sentence that reads as "every check ran". The notice above it did
+  say the deny-list was unconfigured, but it was printed on **stdout**, next to the findings:
+  `artifact-gate.sh --repo . >/dev/null` printed nothing at all and exited 0 — byte-identical to a
+  fully configured clean run redirected the same way.
+
+  **The default was measured and kept.** Making an unconfigured deny-list fail by default was the
+  first candidate and is the wrong answer here: the list is personal and non-distributed, so the
+  Constitution's "installable and runnable on a clean machine" Inviolable makes running without it a
+  *supported* configuration, not an error. Measured before deciding — flipping the default turns
+  **101 of this repository's 1388 tests** red and contradicts the shipped CI template's documented
+  default (`templates/ci/artifact-gate.ci.sh` ships `REQUIRE_DENYLIST=0` and promises the run "does
+  not pass silently" rather than fail), which makes it a breaking interface change under ADR-0001
+  rather than a style choice. `--require-denylist` remains the opt-in for callers that need the
+  strict answer, and the reasoning is now written into the script's header, which is also its
+  `--help` text.
+
+  **What changed is the report.** The summary line now names the scope of *checks* as well as the
+  scope of *files*: `scanned N files, F findings in D files; deny-list: K name(s) checked`, or
+  `; deny-list check DID NOT RUN (no names configured)`. The count and never a name — a CI log is a
+  shipped artifact too — which also lets an operator see that a five-entry list arrived as five. And
+  the not-configured notice moved to **stderr**, the channel this script already uses for every
+  other "the run could not do its job" line, so a caller that keeps stdout as its findings report
+  cannot lose it. Two clean runs over the same file, one configured and one not, both still exit 0
+  and are now told apart by their summary line.
+
+  **Found by the existing suite while fixing it:** the first version of the summary line used an em
+  dash like its neighbours. Every emitted line passes through the deny-list mask, which escalates to
+  a `python3` subprocess as soon as either the line or the list carries a non-ASCII byte — so an em
+  dash on a line that prints on *every* run started python3 on every run with a configured ASCII
+  deny-list, and under a broken interpreter printed a Python fatal-error dump where an ASCII-only run
+  is meant to be silent. The summary line is ASCII on purpose, with the reason recorded at the call
+  site.
+
 - **The Manual carried the Memory Lint checklist twice, and neither copy matched the script
   (WI-0104).** `Manual/SYSTEM_OVERVIEW.md` and `Manual/system/memory-instincts.md` held the same
   list by intent; the overview had fallen four bullets behind. Copying the four across would have

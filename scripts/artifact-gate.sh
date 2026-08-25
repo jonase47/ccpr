@@ -29,6 +29,25 @@
 #   2  the run could not be performed as asked: bad usage, an unreadable file,
 #      an unusable deny-list entry, or a scan scope that turned out to be empty
 #
+# The DEFAULT is that a missing deny-list is a NOTICE and not a failure, and
+# that is a decision rather than an oversight. The list lives in a personal,
+# non-distributed config, so a freshly installed CCPR never has one: running
+# without it is a supported configuration, and the Constitution's "installable
+# and runnable on a clean machine" Inviolable is what makes it one. Failing by
+# default would mean this gate's first act on every new machine is to refuse.
+# Measured 25.08.2026 (WI-0090) before choosing: flipping that default turns
+# 101 of this repository's own 1388 tests red and changes the shipped CI
+# template's documented default (templates/ci/artifact-gate.ci.sh ships
+# REQUIRE_DENYLIST=0 and promises the run "does not pass silently" rather than
+# fail) -- a breaking interface change under ADR-0001, not a style choice.
+#
+# What the run owes its reader instead is that "scanned N files" must not read
+# as "every check ran". So the summary line names the deny-list scope too --
+# how many names were checked, or that the check did not run -- and the
+# not-configured notice goes to stderr, where a caller that keeps stdout as its
+# findings report cannot lose it. A caller that needs a missing list to be a
+# failure asks for that with --require-denylist.
+#
 # --require-denylist deliberately exits 1 and not 2, although the deny-list
 # defect next to it (an unusable entry) exits 2. Both readings are defensible,
 # so the choice is written down here rather than left to be re-derived: the
@@ -452,17 +471,63 @@ if [ "$exempt_lines" -gt 0 ]; then
     "$PROG" "$exempt_lines" "$(basename "$exempt_file")" "$GATE_EXEMPT_MARKER" "$(basename "$exempt_file")"
 fi
 
+# How many names the deny-list check actually carried. The COUNT, never a name:
+# a CI log is a shipped artifact too (see say() above), so a number is the most
+# the summary may say about the list -- and it answers the one question an
+# operator has, which is whether the list arrived at its configured length.
+# Counted off the LOADED list rather than the config file, because that is the
+# value every check in the loop above ran against.
+deny_count=0
+if [ -n "$GATE_DENY_NAMES" ]; then
+  while IFS= read -r _deny_name; do
+    if [ -n "$_deny_name" ]; then deny_count=$((deny_count + 1)); fi
+  done <<EOF
+$GATE_DENY_NAMES
+EOF
+fi
+
 denylist_missing=0
+deny_scope=""
 case "$GATE_DENY_SOURCE" in
   none)
     denylist_missing=1
-    say '%s: deny-list NOT CONFIGURED — no tenant/project names were checked. Set gate.denyNames in %s, or pass CCPR_GATE_DENY_NAMES.' \
+    deny_scope="deny-list check DID NOT RUN (no names configured)"
+    # stderr, not stdout: this is a statement about what the run could NOT do,
+    # the same class as the empty-scope warning and --require-denylist's line
+    # at the bottom of this file -- and, unlike those two, it used to sit on
+    # stdout among the findings. A caller that keeps stdout as its findings
+    # report, or discards it, then lost the one line saying the headline check
+    # never ran. Measured 25.08.2026 (WI-0090) over this repository:
+    # `artifact-gate.sh --repo . >/dev/null` printed nothing at all and exited
+    # 0 -- byte-identical to a fully configured clean run redirected the same
+    # way.
+    warn '%s: deny-list NOT CONFIGURED — no tenant/project names were checked. Set gate.denyNames in %s, or pass CCPR_GATE_DENY_NAMES.' \
       "$PROG" "$(gate_config_path)"
     ;;
-  *) say '%s: deny-list active (source: %s)' "$PROG" "$GATE_DENY_SOURCE" ;;
+  *)
+    deny_scope="deny-list: $deny_count name(s) checked"
+    say '%s: deny-list active (source: %s)' "$PROG" "$GATE_DENY_SOURCE"
+    ;;
 esac
 
-say '%s: scanned %s files, %s findings in %s files' "$PROG" "$scanned" "$findings" "$dirty_files"
+# The summary names the scope of CHECKS as well as the scope of FILES. "scanned
+# N files, 0 findings" is a true sentence that reads as "every check ran over N
+# files", and that is exactly the reading WI-0090 measured being taken off a run
+# whose headline check was inert. Same reason as the binary and symlink lines
+# below: a part of the scope that was NOT covered belongs in the summary, not
+# only somewhere above it.
+#
+# ASCII only, deliberately, and not the em dash the neighbouring lines use:
+# every line printed goes through gate_redact_path, which escalates to a
+# python3 subprocess as soon as EITHER the line or the deny-list carries a
+# non-ASCII byte. This line prints on every single run, so an em dash here
+# starts python3 on every run with a configured ASCII deny-list -- and under a
+# broken interpreter it prints a Python fatal-error dump plus a "falling back"
+# warning where an ASCII-only run is supposed to be silent. Caught by
+# ContentDenyEscalationTest / ContentDenyBrokenInterpreterTest, which pin that
+# an ASCII deny name never invokes python3 at all.
+say '%s: scanned %s files, %s findings in %s files; %s' \
+  "$PROG" "$scanned" "$findings" "$dirty_files" "$deny_scope"
 
 # Name the part of the scope that was NOT read, so "scanned N files" cannot be
 # mistaken for "N files is all there was". Binaries are excluded from the content
