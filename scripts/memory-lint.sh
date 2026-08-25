@@ -277,20 +277,70 @@ for file in "${FILES[@]:-}"; do
         fi
     fi
 
-    # (e) Stale detection: last_updated older than 90 days
+    # (e) last_updated — its FORM first, then its age.
+    #
+    # The form is `DD.MM.YYYY`, optionally followed by whitespace and a
+    # parenthesised note, and it is checked here explicitly rather than left to
+    # whatever `date` happens to swallow (WI-0106). The note is not a tolerance
+    # granted after the fact: it carries WHY the date moved — which round, which
+    # item — and that is information no other field holds. Ten files in this
+    # repo's own store were already written that way, and PHASE_DOC_SCHEMA.md
+    # has specified the same optional suffix for phase documents all along;
+    # MEMORY_SCHEMA.md now says so too, and this check is what makes the
+    # sentence enforceable.
+    #
+    # Why an explicit pattern and not the parse alone. Before this, the raw
+    # value went straight into date_to_epoch() and "a date came back" WAS the
+    # contract. Both `date` implementations accept trailing text after the value
+    # they matched, so the annotated form passed — but so did every other
+    # trailing text, and the two linters answered the same question differently.
+    # Measured 25.08.2026, identical values through both:
+    #
+    #   `24.08.2026 a note without parentheses`  here: accepted  phase-docs: rejected
+    #   `24.08.2026(WI-0102)`  (no space)        here: accepted  phase-docs: rejected
+    #   `24.08.2026 (unclosed`                   here: accepted  phase-docs: rejected
+    #
+    # The pattern below is character-for-character the one in
+    # phase-docs-lint.sh's check (e), so the two now answer alike on the form.
+    # They still differ on the DATE: a well-formed but impossible value
+    # (`32.13.2026`, `99.99.9999`) is rejected here by the parse below and
+    # accepted there, which has no pattern-independent date check at all.
+    # Deliberately not closed in the same pass — tightening that direction
+    # rejects content phase-docs-lint.sh accepts today, and that is a promotion
+    # decision (ADR-0001), not the writing-down of an existing practice.
+    #
+    # The pattern runs in FRONT of the parse, and it does not replace it: the
+    # pattern says nothing about whether 32.13.2026 is a day, the parse says
+    # nothing about what follows the year. Both are needed, and the test proves
+    # the second half — neutering the parse's error branch turns the
+    # impossible-date case red (measured).
+    #
+    # The ORDER, by contrast, is a diagnosis decision, not a verdict one, and
+    # the comment used to overclaim it. Measured: swapping the two branches
+    # leaves every assertion green, because a malformed value is rejected either
+    # way — only the sentence it is rejected with changes ("not in format …"
+    # naming the shape, vs. "cannot be parsed …" naming a symptom of it). Same
+    # for the pattern's leading `^`: dropping it survives the suite, because a
+    # value with anything in front of the date fails the parse anyway. It stays
+    # for parity with phase-docs-lint.sh, where no parse follows and the anchor
+    # is load-bearing — not because a test here would catch its removal.
     last_updated="$(fm_field "$file" last_updated || true)"
     if [[ -n "$last_updated" ]]; then
-        epoch="$(date_to_epoch "$last_updated")"
-        if [[ "$epoch" != "0" && -n "$epoch" ]]; then
-            age_days=$(( (TODAY_EPOCH - epoch) / 86400 ))
-            if (( age_days > STALE_DAYS )); then
-                status_val="$(fm_field "$file" status || true)"
-                if [[ "$status_val" != "archived" && "$status_val" != "superseded" ]]; then
-                    warn "$rel — last_updated=$last_updated is ${age_days} days old (>${STALE_DAYS}d) — refresh last_updated, or set status='archived'/'superseded' if this file is intentionally no longer maintained"
-                fi
-            fi
+        if ! [[ "$last_updated" =~ ^[0-9]{2}\.[0-9]{2}\.[0-9]{4}([[:space:]]+\(.*\))?$ ]]; then
+            err "$rel — last_updated='$last_updated' not in format 'DD.MM.YYYY' or 'DD.MM.YYYY (note)'"
         else
-            err "$rel — last_updated='$last_updated' cannot be parsed as DD.MM.YYYY"
+            epoch="$(date_to_epoch "$last_updated")"
+            if [[ "$epoch" != "0" && -n "$epoch" ]]; then
+                age_days=$(( (TODAY_EPOCH - epoch) / 86400 ))
+                if (( age_days > STALE_DAYS )); then
+                    status_val="$(fm_field "$file" status || true)"
+                    if [[ "$status_val" != "archived" && "$status_val" != "superseded" ]]; then
+                        warn "$rel — last_updated=$last_updated is ${age_days} days old (>${STALE_DAYS}d) — refresh last_updated, or set status='archived'/'superseded' if this file is intentionally no longer maintained"
+                    fi
+                fi
+            else
+                err "$rel — last_updated='$last_updated' cannot be parsed as DD.MM.YYYY"
+            fi
         fi
     fi
 

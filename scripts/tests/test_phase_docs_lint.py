@@ -346,6 +346,85 @@ class CheckELastUpdatedFormatTest(PhaseDocsLintTestBase):
             errors,
         )
 
+    # The three cases below are what "optionally with a trailing note" means in
+    # the negative, and they exist because the positive tests above could not
+    # tell a correct pattern from a loose one. Measured 25.08.2026, against
+    # mutants of check (e)'s pattern: `[[:space:]]+` -> `[[:space:]]*`, dropping
+    # the parentheses from the note group, and dropping the trailing `$` ALL
+    # survived this class -- the ISO case above is rejected by any of them,
+    # because `2026-05-04` does not start with DD.MM.YYYY under any variant. The
+    # tolerance was written down here and in PHASE_DOC_SCHEMA.md, but its shape
+    # was not held by anything. Each case below kills one of those mutants.
+    #
+    # Same values, same verdicts as memory-lint.sh's check (e) after WI-0106 --
+    # one rule, one answer. The two still differ on a well-formed date that is
+    # not a day (`32.13.2026`, `99.99.9999`): rejected there by a real parse,
+    # accepted here, which has no date check beyond this pattern. Left as is on
+    # purpose -- closing it rejects content this script accepts today, which is
+    # a promotion decision (ADR-0001), not the pinning of an existing rule.
+
+    def test_a_note_without_parentheses_is_rejected(self):
+        """Kills the "note group without parentheses" mutant: the note is a
+        parenthesised group, not "anything after the date"."""
+        value = f"{VALID_DATE} a trailing note"
+        self.write_doc("architecture/date-bare-note.md", doc_text(last_updated=value))
+
+        result = self.run_lint()
+
+        errors = self.findings(result.stdout, "Errors")
+        self.assertTrue(
+            any("date-bare-note.md" in e and f"last_updated='{value}' not in format" in e
+                for e in errors),
+            errors,
+        )
+
+    def test_a_note_not_separated_by_whitespace_is_rejected(self):
+        """Kills the `[[:space:]]*` mutant: at least one space separates the
+        date from its note -- `04.05.2026(WI-0000)` is not the documented form."""
+        value = f"{VALID_DATE}(WI-0000)"
+        self.write_doc("architecture/date-no-space.md", doc_text(last_updated=value))
+
+        result = self.run_lint()
+
+        errors = self.findings(result.stdout, "Errors")
+        self.assertTrue(
+            any("date-no-space.md" in e and f"last_updated='{value}' not in format" in e
+                for e in errors),
+            errors,
+        )
+
+    def test_text_in_front_of_the_date_is_rejected(self):
+        """Kills the "drop the leading `^`" mutant. Unlike memory-lint.sh, this
+        script has no date parse behind the pattern to catch a prefixed value --
+        the anchor is the only thing standing between `updated 04.05.2026` and
+        acceptance, so it needs its own case here rather than parity alone."""
+        value = f"updated {VALID_DATE}"
+        self.write_doc("architecture/date-prefixed.md", doc_text(last_updated=value))
+
+        result = self.run_lint()
+
+        errors = self.findings(result.stdout, "Errors")
+        self.assertTrue(
+            any("date-prefixed.md" in e and f"last_updated='{value}' not in format" in e
+                for e in errors),
+            errors,
+        )
+
+    def test_an_unclosed_note_is_rejected(self):
+        """Kills the "drop the trailing `$`" mutant: the note group runs to the
+        END of the value, so an unclosed parenthesis is not a note."""
+        value = f"{VALID_DATE} (unclosed"
+        self.write_doc("architecture/date-unclosed.md", doc_text(last_updated=value))
+
+        result = self.run_lint()
+
+        errors = self.findings(result.stdout, "Errors")
+        self.assertTrue(
+            any("date-unclosed.md" in e and f"last_updated='{value}' not in format" in e
+                for e in errors),
+            errors,
+        )
+
 
 class CheckFRelatedCrossRefsTest(PhaseDocsLintTestBase):
     """(f) related: entries are resolved relative to the file's own

@@ -7,6 +7,44 @@ All notable changes to this project are documented in this file. The format is b
 ## [Unreleased]
 
 ### Fixed
+- **`last_updated` accepted a trailing note that the memory schema never mentioned, and the two
+  linters disagreed about which notes were legal (WI-0106).** `MEMORY_SCHEMA.md` specified
+  `DD.MM.YYYY` and nothing else, yet ten files in this repository's own store append a note to the
+  value — `24.08.2026 (WI-0102)`, `16.05.2026 (Note: agent migration verified later same day)`.
+  They passed because `memory-lint.sh` never asked about the value's shape: it handed the raw string
+  to `date`, and both implementations accept trailing text after the part they matched. The
+  tolerance was therefore real but accidental, and invisible to anyone reading the schema — which is
+  how it was rediscovered, as the collateral of a WI-0087 fix shape that would have turned all ten
+  into hard errors.
+
+  **Resolved by widening the schema, not the files.** The note says *why* the date moved — which
+  round, which item — and that is context no other field carries; the practice is older than the
+  rule and better than it. `MEMORY_SCHEMA.md` now specifies the form precisely enough to enforce:
+  `DD.MM.YYYY`, optionally followed by whitespace and a single parenthesised group running to the
+  end of the value. `PHASE_DOC_SCHEMA.md` had specified the same optional suffix for phase documents
+  all along.
+
+  **The tolerance is now checked rather than inherited.** `memory-lint.sh` check (e) matches the
+  documented pattern — character-for-character the one `phase-docs-lint.sh` already used — before it
+  parses the date, and keeps the parse behind it: the pattern says nothing about whether `32.13.2026`
+  is a day, the parse says nothing about what follows the year. Measured across the four live
+  inventories: 106 `last_updated` values in scope, 10 annotated, **0 outside the documented form**,
+  and every report byte-identical before and after. This rejects nothing that exists today; it
+  closes three shapes that were silently accepted here while `phase-docs-lint.sh` rejected them
+  (`24.08.2026 a note without parentheses`, `24.08.2026(WI-0102)`, `24.08.2026 (unclosed`).
+
+  **One divergence is left open on purpose.** A well-formed but impossible date (`32.13.2026`,
+  `99.99.9999`) is rejected by `memory-lint.sh` and accepted by `phase-docs-lint.sh`, which has no
+  date check beyond its pattern. Closing it would reject content that script accepts today — an
+  ADR-0001 promotion decision, not the writing-down of an existing practice. Both scripts now say so
+  at the check.
+
+- **`phase-docs-lint.sh`'s `last_updated` tolerance was documented but not held by any test.**
+  Measured against mutants of check (e)'s pattern: loosening the required space before the note,
+  dropping the parentheses from the note group, dropping either anchor — all four survived the
+  suite, because the one negative case it had (`2026-05-04`) fails under every variant. Four cases
+  added; each kills one mutant. No behaviour change.
+
 - **`memory-lint.sh` reported a file's age as a property of the clock, not of the file (WI-0087,
   rediscovered independently as WI-0103).** `date_to_epoch()` parsed `DD.MM.YYYY` with a BSD format
   string carrying no time component, and BSD `date` fills unnamed fields from the RUNNING wall clock.

@@ -5334,5 +5334,148 @@ class TodayIsTheLocalCalendarDayTest(unittest.TestCase):
         )
 
 
+# --------------------------------------------------------------------------- #
+# WI-0106 — the FORM of last_updated, not just whether a date can be read from it
+# --------------------------------------------------------------------------- #
+
+
+class LastUpdatedFormTest(unittest.TestCase):
+    """Check (e) must accept exactly the form MEMORY_SCHEMA.md specifies (WI-0106).
+
+    The schema says `DD.MM.YYYY`, optionally followed by a parenthesised note --
+    the form ten files in this repo's own store already use, and the form
+    PHASE_DOC_SCHEMA.md has spelled out for phase documents all along. Before
+    this, check (e) never asked that question: it handed the raw value to
+    `date_to_epoch()` and treated "a date came back" as the whole contract. Both
+    `date` implementations accept trailing text after the value they matched, so
+    the tolerance was real but accidental -- and it was wider than the schema in
+    one direction and narrower in another. Measured on 25.08.2026, same values
+    through both linters:
+
+        `24.08.2026 a note without parentheses`  memory: accepted  phase: REJECTED
+        `24.08.2026(WI-0102)` (no space)         memory: accepted  phase: REJECTED
+        `24.08.2026 (unclosed`                   memory: accepted  phase: REJECTED
+        `99.99.9999` / `32.13.2026`              memory: REJECTED  phase: accepted
+
+    This class closes the first three -- one rule, one answer -- and leaves the
+    fourth as it stands: tightening phase-docs-lint.sh to reject a
+    well-formed-but-impossible date rejects content it accepts today, which is a
+    separate decision from writing down the tolerance that already exists.
+
+    The date branch is deliberately still exercised (`impossible_day` below): a
+    form check alone would let `32.13.2026` through, so that case is what keeps
+    the pattern an ADDITION to the parse rather than a replacement for it.
+
+    What this suite kills, and what it does not -- measured against mutants of
+    the check, not argued from the source:
+
+        drop the optional `( ... )` group from the pattern   red (3 subtests)
+        drop the pattern's trailing `$`                      red (3 subtests)
+        `[[:space:]]+` -> `[[:space:]]*` before the `(`      red (1 subtest)
+        neuter the date parse's error branch                 red (1 subtest)
+        swap the two branches (parse first, form second)     GREEN
+        drop the pattern's leading `^`                       GREEN
+
+    The last two survive on purpose, and saying so is the point. Both change
+    only the DIAGNOSIS, never the verdict: a malformed value is rejected either
+    way, and `^` is redundant here because anything in front of the date already
+    fails the parse. (`leading_text` below is kept anyway -- it pins that such a
+    value IS rejected, which is a property worth holding even though it does not
+    single out the anchor.) In phase-docs-lint.sh, where no parse follows the
+    pattern, that anchor is load-bearing; here it is parity, not protection.
+
+    One store, one run: the cases differ only in the value under test, and none
+    of them needs a fixture of its own.
+    """
+
+    # (slug, value, must_be_rejected)
+    CASES = (
+        ("plain", TODAY, False),
+        ("annotated", f"{TODAY} (WI-0000)", False),
+        ("annotated_prose", f"{TODAY} (Note: verified later the same day)", False),
+        ("annotated_commas", f"{TODAY} (WI-0096/WI-0099, WI-0101)", False),
+        ("word_salad", "banana", True),
+        ("iso", "2026-08-24", True),
+        ("note_without_parens", f"{TODAY} a trailing note", True),
+        ("note_unclosed", f"{TODAY} (unclosed", True),
+        ("note_without_space", f"{TODAY}(WI-0000)", True),
+        ("leading_text", f"updated {TODAY}", True),
+        ("impossible_day", "32.13.2026", True),
+    )
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.mkdtemp(prefix="ccpr-memory-lint-form-")
+        cls.addClassCleanup(shutil.rmtree, cls.tmp, ignore_errors=True)
+        project_dir = Path(cls.tmp) / "project"
+        memory_dir = project_dir / "docs" / "memory"
+        memory_dir.mkdir(parents=True)
+
+        for slug, value, _ in cls.CASES:
+            (memory_dir / f"project_{slug}.md").write_text(
+                tier1_text(name=f"{slug} probe", last_updated=value),
+                encoding="utf-8",
+            )
+        (memory_dir / "MEMORY.md").write_text("# Memory Index\n\nNo entries.\n", encoding="utf-8")
+
+        fake_home = Path(cls.tmp) / "home"
+        fake_home.mkdir()
+        cls.result = subprocess.run(
+            ["bash", str(SCRIPT_PATH), str(project_dir)],
+            capture_output=True, text=True,
+            env={"HOME": str(fake_home), "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"},
+        )
+        for heading in ("## Errors (", "## Warnings (", "## Info ("):
+            assert heading in cls.result.stdout, (
+                f"memory-lint.sh produced no report (missing {heading!r}) — "
+                f"returncode={cls.result.returncode}, stderr={cls.result.stderr!r}"
+            )
+
+    @classmethod
+    def rejected(cls, slug):
+        """True iff check (e) filed an error against this probe's last_updated.
+
+        Reads the Errors section only: the age warning also names `last_updated`
+        and would make every old-enough file look rejected.
+        """
+        marker = f"project_{slug}.md"
+        return any(
+            marker in line and "last_updated" in line
+            for line in MemoryLintTest.findings(cls.result.stdout, "Errors")
+        )
+
+    def test_the_schema_form_and_its_optional_note_are_accepted(self):
+        for slug, value, must_be_rejected in self.CASES:
+            if must_be_rejected:
+                continue
+            with self.subTest(value=value):
+                self.assertFalse(
+                    self.rejected(slug),
+                    f"{value!r} is the form MEMORY_SCHEMA.md specifies and must pass — "
+                    f"errors: {MemoryLintTest.findings(self.result.stdout, 'Errors')}",
+                )
+
+    def test_a_value_outside_the_schema_form_is_rejected(self):
+        for slug, value, must_be_rejected in self.CASES:
+            if not must_be_rejected:
+                continue
+            with self.subTest(value=value):
+                self.assertTrue(
+                    self.rejected(slug),
+                    f"{value!r} is not 'DD.MM.YYYY' with an optional ' (note)' and "
+                    f"must be rejected — errors: "
+                    f"{MemoryLintTest.findings(self.result.stdout, 'Errors')}",
+                )
+
+    def test_a_rejected_value_makes_the_run_fail(self):
+        """The verdict, separately from the findings (G-127): a finding that does
+        not reach the exit code is a report nobody's gate reads."""
+        self.assertEqual(
+            self.result.returncode, 2,
+            f"a store carrying malformed last_updated values must exit 2, got "
+            f"{self.result.returncode}",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
