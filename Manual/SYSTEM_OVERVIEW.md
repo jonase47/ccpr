@@ -3,7 +3,7 @@
 Comprehensive documentation of the entire workflow, all processes, mechanisms, and infrastructure.
 For the quick reference, see [WORKFLOW_CHEATSHEET.md](WORKFLOW_CHEATSHEET.md).
 
-Last updated: 21.08.2026
+Last updated: 25.08.2026
 
 ---
 
@@ -330,13 +330,13 @@ All commands in detail: [SECTIONS_COMMANDS.md](SECTIONS_COMMANDS.md)
 Mandatory artifact for every Full-Track project — the project's "constitution"
 with three sections that gates load as binding input:
 
-- **Inviolable** (non-negotiable): DSGVO, BFSG/A11y baseline, sectoral compliance, architectural leitplanken from "inviolable" ADRs
+- **Inviolable** (non-negotiable): DSGVO, BFSG/A11y baseline, sectoral compliance, architecture guardrails from "inviolable"-tagged ADRs
 - **Default** (deviate with justification): tech stack, TDD discipline, language, platform targets, monetization pattern
 - **Aspirational** (goals, measured): test coverage threshold, performance budget, A11y-audit quality, user-research minimum
 
 **Creation** via `/constitution` in three modes:
 - **Greenfield**: 5 domain bootstraps available (`saas-b2c`, `mobile-b2c`, `b2b-tool`, `b2c-marketplace`, `on-device-privacy`)
-- **Lean-Vorlauf**: reads Constitution-Light from `docs/FRAME.md` Section 6
+- **Lean pre-run**: reads Constitution-Light from `docs/FRAME.md` Section 6
 - **Existing Full-Track**: drafts from existing phase docs (ADRs, REGULATORY.md, A11Y.md, SECURITY.md, NFR.md)
 
 **Versioning**: Semver-light. MINOR-bump for Default/Aspirational changes, MAJOR-bump for Inviolable changes (requires ADR).
@@ -655,7 +655,7 @@ Two-tier memory: cross-cutting (Tier 1) coexists with persona-specific silos (Ti
 | Tier 1 — cross-cutting | `docs/memory/{type}_{slug}.md` (flat) | Relevant to orchestrator AND ≥2 agents — tooling decisions, project conventions, external references |
 | Tier 2 — agent silos | `docs/memory/{agent}/MEMORY.md` + topic files | Meaningful only inside one agent's domain |
 
-**Tier-separation rule** — cross-cutting → Tier 1; persona-specific → Tier 2. When in doubt, prefer Tier 1 (visibility wins over isolation).
+**Tier-separation rule** — cross-cutting → Tier 1; persona-specific → Tier 2. **When in doubt, do not default to Tier 1**: the earlier "visibility wins over isolation" tiebreaker was reversed after it drifted persona-specific patterns into the global file. Full decision order: [system/memory-instincts.md](system/memory-instincts.md).
 
 ### Memory Types (Tier 1)
 
@@ -691,14 +691,13 @@ Indexes are listings — no frontmatter required.
 
 ### Memory Lint
 
-`~/.claude/scripts/memory-lint.sh [projectdir]` checks:
-- Required frontmatter fields present
-- Naming convention (`{type}_{slug}.md` for Tier 1)
-- Cross-refs in `related:` resolve to existing files
-- `status` is one of `active`/`superseded`/`archived` (WI-0074; any other value errors)
-- `last_updated` older than 90 days → warns, unless `status: archived`/`superseded`
-- Each Tier 1 file referenced in `MEMORY.md`
-- **Dead index links**: a Markdown link in `docs/memory/MEMORY.md` or in any `docs/memory/{agent}/MEMORY.md` whose target file does not exist → **errors** by default since 24.08.2026 (WI-0005); `MEMORY_INDEX_LINK_SEVERITY=warn` downgrades it to a warning. Any other value — the empty string included — exits 3 as a configuration error.
+`~/.claude/scripts/memory-lint.sh [projectdir]` validates `docs/memory/**` and the global tiers:
+frontmatter schema and naming, `related:` cross-references, index consistency in both directions,
+`last_updated` age, and the size caps on `~/.claude/instincts.md` and its topic files. It exits 0
+clean, 1 on warnings, 2 on errors, and 3 when its own configuration is wrong.
+
+**Full chapter**: [system/memory-instincts.md → Memory Lint](system/memory-instincts.md) — the
+check-by-check list lives there, once, next to the script it describes.
 
 ### Templates
 
@@ -745,7 +744,7 @@ Each `/pX-...` sub-skill command must:
 phase: P3                     # required, P0..P8
 subskill: p3-sec-threats      # required, slash command without leading /
 status: active                # required: skeleton|draft|active|frozen|archived|living
-last_updated: 12.05.2026      # required, DD.MM.YYYY (optional " (Notiz)" suffix)
+last_updated: 12.05.2026      # required, DD.MM.YYYY or "DD.MM.YYYY (note)"
 related: [ARCHITECTURE.md]    # optional, paths relative to file
 parent_index: SECURITY.md     # optional, for detail files under a sub-index
 gate: pending                 # optional, for GATE_PX.md files

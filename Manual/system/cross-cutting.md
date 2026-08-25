@@ -2,7 +2,7 @@
 kind: system-doc-detail
 parent_index: ../SYSTEM_OVERVIEW.md
 section: cross-cutting-mechanisms
-last_updated: 15.05.2026
+last_updated: 25.08.2026 (WI-0104)
 ---
 
 # Cross-Cutting Mechanisms
@@ -12,13 +12,13 @@ last_updated: 15.05.2026
 Mandatory artifact for every Full-Track project — the project's "constitution"
 with three sections that gates load as binding input:
 
-- **Inviolable** (non-negotiable): DSGVO, BFSG/A11y baseline, sectoral compliance, architectural leitplanken from "inviolable" ADRs
+- **Inviolable** (non-negotiable): DSGVO, BFSG/A11y baseline, sectoral compliance, architecture guardrails from "inviolable"-tagged ADRs
 - **Default** (deviate with justification): tech stack, TDD discipline, language, platform targets, monetization pattern
 - **Aspirational** (goals, measured): test coverage threshold, performance budget, A11y-audit quality, user-research minimum
 
 **Creation** via `/constitution` in three modes:
 - **Greenfield**: 5 domain bootstraps available (`saas-b2c`, `mobile-b2c`, `b2b-tool`, `b2c-marketplace`, `on-device-privacy`)
-- **Lean-Vorlauf**: reads Constitution-Light from `docs/FRAME.md` Section 6
+- **Lean pre-run**: reads Constitution-Light from `docs/FRAME.md` Section 6
 - **Existing Full-Track**: drafts from existing phase docs (ADRs, REGULATORY.md, A11Y.md, SECURITY.md, NFR.md)
 
 **Versioning**: Semver-light. MINOR-bump for Default/Aspirational changes, MAJOR-bump for Inviolable changes (requires ADR).

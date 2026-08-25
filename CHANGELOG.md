@@ -7,6 +7,38 @@ All notable changes to this project are documented in this file. The format is b
 ## [Unreleased]
 
 ### Fixed
+- **The Manual carried the Memory Lint checklist twice, and neither copy matched the script
+  (WI-0104).** `Manual/SYSTEM_OVERVIEW.md` and `Manual/system/memory-instincts.md` held the same
+  list by intent; the overview had fallen four bullets behind. Copying the four across would have
+  restored parity for a day — `Manual/README.md` already declares `SYSTEM_OVERVIEW.md` a *slim
+  index* over `system/` detail files, so the duplication was an unfinished split, not a design.
+  The chapter is now the single documented list and the overview carries an orientation paragraph
+  plus a `**Full chapter**` pointer, the same shape the `/anchor` section in that file already
+  uses.
+
+  **Counted in the script rather than inherited from the list.** `memory-lint.sh` runs **fifteen**
+  checks — (a)–(n) plus (c2). Both registers named ten of them. Four were undocumented anywhere:
+  the tier-aware `type` enum (c), the `last_updated` *form* check added by WI-0106 (e), the
+  split-layout topic-file schema and size caps (l), and the archive-presence note (m); the
+  project-root fallback in (f) and the two extraction limits in (n) were likewise unmentioned.
+  Every bullet now names its check letter, so a sentence can be traced to the code block that
+  implements it, and severities are stated — the old list said which checks existed but not which
+  of them fail a run.
+
+- **Three German words in shipped English Manual prose, each duplicated across an index/chapter
+  pair (WI-0104, Constitution Inviolable "English in shipped content").** `# required, DD.MM.YYYY
+  (optional " (Notiz)" suffix)` in both frontmatter examples now reads `DD.MM.YYYY or
+  "DD.MM.YYYY (note)"`, matching `PHASE_DOC_SCHEMA.md`'s own wording. `architectural leitplanken`
+  and `Lean-Vorlauf` in `SYSTEM_OVERVIEW.md` + `system/cross-cutting.md` are now `architecture
+  guardrails from "inviolable"-tagged ADRs` and `Lean pre-run` — the terms `commands/constitution.md`
+  itself uses, so the Manual stops describing a mode by a name the command does not have.
+
+- **`SYSTEM_OVERVIEW.md` still taught the tier tiebreaker CLAUDE.md withdrew.** "When in doubt,
+  prefer Tier 1 (visibility wins over isolation)" — the exact phrase removed from
+  `commands/postmortem.md` under WI-0065 for leaking persona-specific patterns into the globally
+  autoloaded file. The correction swept the skill and missed this copy, which is the same defect
+  the item above is filed for, one section further on. Replaced with the reversed rule and a
+  pointer to the full three-step decision order in `system/memory-instincts.md`.
 - **`last_updated` accepted a trailing note that the memory schema never mentioned, and the two
   linters disagreed about which notes were legal (WI-0106).** `MEMORY_SCHEMA.md` specified
   `DD.MM.YYYY` and nothing else, yet ten files in this repository's own store append a note to the

@@ -2,7 +2,7 @@
 kind: system-doc-detail
 parent_index: ../SYSTEM_OVERVIEW.md
 section: memory-doc-splitting-instincts
-last_updated: 20.08.2026
+last_updated: 25.08.2026 (WI-0104)
 ---
 
 # Memory, Document Splitting & Instincts
@@ -64,18 +64,76 @@ Indexes are listings — no frontmatter required.
 
 ### Memory Lint
 
-`~/.claude/scripts/memory-lint.sh [projectdir]` checks:
-- Required frontmatter fields present
-- Naming convention (`{type}_{slug}.md` for Tier 1)
-- Cross-refs in `related:` resolve to existing files
-- `status` is one of `active`/`superseded`/`archived` (WI-0074; any other value errors)
-- `last_updated` older than 90 days → warns, unless `status: archived`/`superseded`
-- Each Tier 1 file referenced in `MEMORY.md`
-- **Dead index links**: a Markdown link in `docs/memory/MEMORY.md` or in any `docs/memory/{agent}/MEMORY.md` whose target file does not exist → **errors** by default since 24.08.2026 (WI-0005); `MEMORY_INDEX_LINK_SEVERITY=warn` downgrades it to a warning. Any other value — the empty string included — exits 3 as a configuration error.
-- **Tier-1-global cap**: warns at 50 KB, errors at 100 KB on `~/.claude/instincts.md` (drift pressure)
-- **Tier-2-global schema**: required `scope: tier-2-global` field and `agent`-matches-directory check
-- **Skeleton silos**: project Tier-2 directory with only a short MEMORY.md (no topic files, <400 bytes body) is flagged
-- **Decay tripwire**: counts of Tier-1-global entries at confidence ≤ 0.4 as review candidates
+`~/.claude/scripts/memory-lint.sh [projectdir]` validates `docs/memory/**` in the project plus the
+global tiers under `~/.claude/`.
+
+**This is the only check-by-check list in the Manual** — `SYSTEM_OVERVIEW.md` links here instead of
+restating it, because a list that grows when the script grows cannot be maintained in two places.
+Ground truth is the script itself: every entry below names the check letter it documents, so a
+bullet can be traced to the code block that implements it.
+
+| Exit | Meaning |
+|---|---|
+| 0 | clean — info findings do not raise it |
+| 1 | at least one warning |
+| 2 | at least one error |
+| 3 | configuration error — the run produced no report, so its findings are unknown |
+
+**Per file** — every `.md` under `docs/memory/`, except the `MEMORY.md` indexes and `instincts.md`:
+
+- **(a) Frontmatter present** — a file without a leading `---` block errors and is skipped.
+- **(b) Required fields** — `name`, `description`, `type`, `last_updated`; each missing one errors.
+- **(c) `type` enum, tier-aware** — Tier 1 (`docs/memory/*.md`) is closed: a value outside
+  `feedback`/`project`/`reference`/`user` errors. Tier 2 (`docs/memory/{agent}/*.md`) adds
+  `patterns` and stays open — an unrecognised value warns rather than errors (WI-0008).
+- **(c2) `status` enum** — `active`/`superseded`/`archived`, or absent; any other value errors.
+  `stale` was removed outright (WI-0074): it was the one value check (e) told the reader to set,
+  and setting it did not silence the warning.
+- **(d) Tier-1 naming** — a Tier-1 file whose name does not start with `{type}_` warns.
+- **(e) `last_updated` — form first, then age.** The form is `DD.MM.YYYY`, optionally followed by
+  whitespace and a parenthesised note (`24.08.2026 (WI-0102)`); anything else errors, as does a
+  well-formed but impossible date. A parsed date older than 90 days warns, unless `status` is
+  `archived` or `superseded`.
+- **(f) `related:` cross-refs** — resolved relative to the file's own directory (the documented
+  form, silent on a hit). A path that only resolves from the project root is reported as info
+  rather than accepted silently; a path that resolves from neither errors.
+
+**Index consistency, both directions:**
+
+- **(g) Tier-1 file missing from the index** — every `docs/memory/{type}_{slug}.md` must appear by
+  basename in `docs/memory/MEMORY.md`, or it warns. The match is literal, so `foo.md` does not
+  satisfy `foo-bar.md`.
+- **(n) Dead index links** — the reverse direction, over `docs/memory/MEMORY.md` and every
+  `docs/memory/{agent}/MEMORY.md`. A Markdown link whose target file does not exist **errors** by
+  default since 24.08.2026 (WI-0005); `MEMORY_INDEX_LINK_SEVERITY=warn` downgrades it to a warning,
+  and any other value — the empty string included — exits 3 as a configuration error. It catches a
+  missing target *file*, not a wrong anchor into a file that exists. Two extraction limits are
+  reported rather than hidden: an unclosed code fence or HTML comment stops link checking for the
+  rest of that file (warning, naming the opening line), and a target carrying an unresolved named
+  HTML entity such as `&num;` is reported as info, because it cannot be resolved in either
+  direction.
+
+**Global tiers under `~/.claude/`:**
+
+- **(h) Tier-1-global cap** — `~/.claude/instincts.md` warns above 50 KB, errors above 100 KB.
+- **(i) Tier-2-global schema** — for `~/.claude/memory/{agent}/*.md` (except `MEMORY.md`): missing
+  frontmatter errors; a missing or wrong `scope: tier-2-global` warns; an `agent:` field that is
+  absent or does not match the parent directory warns.
+- **(j) Skeleton silos** — a project Tier-2 directory holding only a `MEMORY.md` with fewer than
+  400 bytes of body and no topic files is reported as info. A short index *with* topic files is a
+  compact silo, not a skeleton, and is not flagged.
+- **(k) Decay tripwire** — counts the entries marked confidence 0.3 or 0.4 across
+  `~/.claude/instincts.md` and `~/.claude/instincts/*.md` and reports the number as info. A
+  tripwire only; the dated decay check belongs to `/postmortem`.
+- **(l) Split-layout topic files** — only when `~/.claude/instincts/` exists. Per file: missing
+  frontmatter errors; a missing `type: instincts` or `scope: tier-1-global-topic` warns; size warns
+  above 30 KB and errors above 50 KB. A directory that exists but holds no `*.md` is reported as
+  info.
+- **(m) Archive presence** — a split layout without `~/.claude/instincts-archive/HISTORY.md` is
+  reported as info; `/postmortem` expects to append its narrative there.
+
+Nothing is deliberately omitted: the fifteen entries above are every check the script runs. When a
+check is added, removed, or changes severity, this section is the one place to say so.
 
 ### Templates
 
@@ -151,7 +209,7 @@ Each `/pX-...` sub-skill command must:
 phase: P3                     # required, P0..P8
 subskill: p3-sec-threats      # required, slash command without leading /
 status: active                # required: skeleton|draft|active|frozen|archived|living
-last_updated: 12.05.2026      # required, DD.MM.YYYY (optional " (Notiz)" suffix)
+last_updated: 12.05.2026      # required, DD.MM.YYYY or "DD.MM.YYYY (note)"
 related: [ARCHITECTURE.md]    # optional, paths relative to file
 parent_index: SECURITY.md     # optional, for detail files under a sub-index
 gate: pending                 # optional, for GATE_PX.md files
