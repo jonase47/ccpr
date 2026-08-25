@@ -84,6 +84,42 @@ Exit codes:
 A run that scanned zero files exits 2, not 0 — "0 findings" over an empty
 scope looks identical to success unless the tool says so itself.
 
+### Which copy to run — it matters only for CCPR's own repository
+
+Two invocations exist and both are correct, for different targets:
+
+| Target | Invocation |
+|---|---|
+| Any project other than CCPR | the installed copy, `~/.claude/scripts/artifact-gate.sh --repo <dir>` |
+| CCPR's own repository | the repo-local copy, `scripts/artifact-gate.sh --repo .` |
+
+The reason is the pattern-source self-exemption. `lib/discipline_gate.sh` spells
+out what the gate looks for, so it necessarily contains the shapes it hunts —
+`/Users/<name>/` cannot be written down without writing it down. Those lines
+carry the `gate-pattern-source` marker and are blanked while scanning **that
+file**, identified by its absolute path (`discipline_gate.sh`, the
+`_GATE_PATTERN_SOURCE` comparison).
+
+An installed gate pointed at a CCPR checkout is therefore scanning a *different
+copy* of its own pattern library: same content, different absolute path, so the
+exemption does not apply. Measured 25.08.2026 over a fresh clone:
+
+```
+~/.claude/scripts/artifact-gate.sh --repo .   → 3 findings in 1 file, exit 1
+scripts/artifact-gate.sh --repo .             → 0 findings,           exit 0
+```
+
+Both runs are right about what they saw. The three findings are the gate's own
+pattern definitions, and the finding text says so — it asks you to verify
+whether the file is "a foreign or differently-resolved copy" before treating it
+as a leak. For any other project the question does not arise, because that
+project does not contain `lib/discipline_gate.sh`.
+
+This is a deliberate trade-off, not an oversight: identifying the file by
+content rather than by path would let a foreign file carrying a forged marker
+exempt itself. `artifact-gate.sh` records the same reasoning for the related
+case of a project that vendors a copy of the gate.
+
 ## CI template
 
 `templates/ci/artifact-gate.ci.sh` is a dormant, forge-agnostic POSIX shell
