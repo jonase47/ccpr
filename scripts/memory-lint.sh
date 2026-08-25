@@ -1106,6 +1106,17 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
             if (match(d, /^\([^)]*\)[ \t]*$/)) return 1
             return 0
         }
+        # Registers a reference-definition LABEL into refmap and, on pass 2,
+        # prints its destination for the shell side to check — the two-line
+        # body shared by the same-line call site and the WI-0083 next-line
+        # lookahead below, so the "two accumulation keys" registration
+        # (WI-0098) is expressed once, not twice.
+        function register_reference_definition(reflbl, rawlbl, dest,   reslbl) {
+            reslbl = normalize_label(resolve_paragraph(protect_link_destinations(rawlbl)))
+            refmap[reflbl] = 1
+            if (reslbl != reflbl) refmap[reslbl] = 1
+            if (pass == 2) print dest
+        }
         # Counts the run of backslashes immediately BEFORE position pos in s —
         # not including pos itself. A byte at pos is escaped, per CommonMark,
         # exactly when that count is odd: an escaped backslash (an even-length
@@ -1487,6 +1498,7 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
             pbuf_n = 0
             pbuf_para = 0
             pass = 0
+            refdef_pending = 0
         }
         {
             # WI-0093: this program is handed the SAME index file twice, and
@@ -1524,6 +1536,12 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
                 pbuf = ""
                 pbuf_n = 0
                 pbuf_para = 0
+                # A label still awaiting its destination continuation line at
+                # the moment pass 1 ends belongs to pass 1s own input only —
+                # without this reset, pass 2s first record would be read as
+                # the destination for a label pass 1 saw on ITS last line,
+                # corrupting pass 2s very first record.
+                refdef_pending = 0
             }
             # WI-0086: CommonMark counts `\r\n`, `\r` and `\n` all as line
             # endings; awk splits records on `\n` only, so a CRLF file hands
@@ -1548,6 +1566,55 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
             # document arrives as one single record and no per-record strip can
             # recover the line structure it never had.
             sub(/\r$/, "")
+            # WI-0083: a reference definitions destination may stand on the
+            # line AFTER the label — CommonMarks grammar allows "optional
+            # whitespace (including up to one line ending)" between the colon
+            # and the destination, and again between the destination and an
+            # optional title. The label-line check further below defers a
+            # label with nothing after its colon by setting refdef_pending and
+            # returning; THIS record is that deferred labels own destination
+            # candidate, checked with the SAME reference_definition_tail()
+            # grammar the same-line form already uses (so `dest "title"`
+            # together on this record is accepted too, for free — a title on
+            # a THIRD line is not attempted, since CommonMark already treats
+            # the title as optional and a destination alone completes a valid
+            # definition). Pinned by fixture
+            # "reference_definition_third_line_after_destination_is_not_
+            # consumed_as_title" in generate_commonmark_corpus.py: that third
+            # line falls through and is scanned as ordinary paragraph prose,
+            # not as part of this definition.
+            #
+            # Placed as the very first thing after the CRLF strip, before
+            # in_fence/in_html_comment/etc.: those states describe what a
+            # NEW block is allowed to be, and a still-open reference
+            # definition attempt is not yet a new block — CommonMark tries to
+            # parse the destination from the raw next line first, and only if
+            # that fails does the line get to start something else.
+            #
+            # On failure the deferred label was never a valid definition —
+            # CommonMark reverts the whole attempt to ordinary paragraph text
+            # starting at the label line. pbuf_n was 0 when the label
+            # deferred (the same pbuf_n == 0 gate the same-line form uses), so
+            # appending it to pbuf now, one record late, loses nothing; this
+            # record ($0, unmodified) then falls through unchanged to every
+            # check below, exactly as if refdef_pending had never been set —
+            # it may itself open a fence, a blank line, a new label, or
+            # ordinary prose.
+            if (refdef_pending) {
+                refdef_pending = 0
+                cand = $0
+                sub(/^[ \t]+/, "", cand)
+                if (reference_definition_tail(cand)) {
+                    register_reference_definition(refdef_reflbl, refdef_rawlbl, cand)
+                    next
+                }
+                # pbuf is guaranteed empty here (see above), so this mirrors
+                # the ordinary-paragraph-content fallback at the bottom of
+                # this rule without needing its blockquote check — a label
+                # line can never itself open with `>`.
+                pbuf_para = 1
+                append_paragraph(refdef_label_raw)
+            }
             # A fenced code block (```…``` or ~~~…~~~, optionally indented up to 3
             # spaces per CommonMark) is skipped wholesale: an index illustrating its
             # own link syntax inside a fenced example is not a set of live entries.
@@ -1803,11 +1870,27 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
                     rawlbl = substr($0, lstart + 1, lnum - 2)
                     reflbl = normalize_label(rawlbl)
                     if (pbuf_n == 0 && reflbl != "" && reference_definition_tail(raw_rest)) {
-                        reslbl = normalize_label(resolve_paragraph(protect_link_destinations(rawlbl)))
-                        refmap[reflbl] = 1
-                        if (reslbl != reflbl) refmap[reslbl] = 1
+                        register_reference_definition(reflbl, rawlbl, raw_rest)
                         flush_paragraph()
-                        if (pass == 2) print raw_rest
+                        next
+                    }
+                    # WI-0083: nothing follows the colon on THIS line, but a
+                    # definition may still be valid with its destination on
+                    # the NEXT one (CommonMark: "optional whitespace,
+                    # including up to one line ending", between the colon and
+                    # the destination). reference_definition_tail("") itself
+                    # always returns 0 (it requires a non-whitespace first
+                    # byte), so this can only be reached when the branch
+                    # above did not already take it — the two are mutually
+                    # exclusive, never a second attempt at the same content.
+                    # Deferred, not resolved here: the label and its raw text
+                    # are carried into refdef_pending for the NEXT record to
+                    # settle (see the check right after the CRLF strip above).
+                    if (pbuf_n == 0 && reflbl != "" && raw_rest == "") {
+                        refdef_pending = 1
+                        refdef_label_raw = $0
+                        refdef_reflbl = reflbl
+                        refdef_rawlbl = rawlbl
                         next
                     }
                 }
@@ -1992,6 +2075,17 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
         # `<div>`/`<pre>`/`<script>` opener left open to EOF was accidental
         # rather than intentional trailing raw HTML.
         END {
+            # WI-0083: a label deferred by the last record of the file (a
+            # bare `[ref]:` with no following line at all) never got a
+            # destination candidate to check — no line 2 exists, so per
+            # CommonMark it cannot be a definition, and the deferred label
+            # reverts to ordinary paragraph text, same as any other failed
+            # lookahead. Resolved before flush_paragraph() runs, same
+            # ordering as the per-record check above.
+            if (refdef_pending) {
+                pbuf_para = 1
+                append_paragraph(refdef_label_raw)
+            }
             flush_paragraph()
             if (in_fence) print fence_sentinel fence_open_line
             if (in_html_comment) print html_comment_sentinel html_comment_open_line

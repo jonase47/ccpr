@@ -4279,10 +4279,15 @@ class LinkScannerMutationTest(unittest.TestCase):
         a definition may stand AFTER its use. The mutation restricts recording
         to pass 2, i.e. reduces the program to a single effective pass. A
         BACKWARD definition still works — asserted here, so the mutation is not
-        simply switching the feature off — and only the forward one breaks."""
+        simply switching the feature off — and only the forward one breaks.
+
+        WI-0083 moved this line into register_reference_definition(), the
+        helper both the same-line form and the next-line lookahead now share
+        — the mutation target text is the same statement, at the function
+        body's own (shallower) indentation."""
         original, mutated = self._mutate(
-            "                        refmap[reflbl] = 1\n",
-            "                        if (pass == 2) refmap[reflbl] = 1\n",
+            "            refmap[reflbl] = 1\n",
+            "            if (pass == 2) refmap[reflbl] = 1\n",
         )
 
         out = self._run_mutant(
@@ -4378,7 +4383,7 @@ class LinkScannerMutationTest(unittest.TestCase):
         self._assert_script_untouched(original)
 
     _WI0098_RESOLVED_KEY = (
-        "                        reslbl = normalize_label("
+        "            reslbl = normalize_label("
         "resolve_paragraph(protect_link_destinations(rawlbl)))\n"
     )
 
@@ -4389,10 +4394,13 @@ class LinkScannerMutationTest(unittest.TestCase):
         resolve_paragraph(), the stage that deletes a code span — so
         ``[`r`]:`` registers only `` `r` `` again while the scanner looks up the
         empty string, and the outer link the reference does not render comes
-        back as a finding."""
+        back as a finding.
+
+        WI-0083 moved this line into register_reference_definition() (the
+        function body's own, shallower indentation — see _WI0098_RESOLVED_KEY)."""
         original, mutated = self._mutate(
             self._WI0098_RESOLVED_KEY,
-            "                        reslbl = normalize_label("
+            "            reslbl = normalize_label("
             "protect_link_destinations(rawlbl))\n",
         )
 

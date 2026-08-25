@@ -1,7 +1,7 @@
 {
   "commonmark_version": "0.9.2",
   "generated_by": "scripts/tests/fixtures/generate_commonmark_corpus.py",
-  "entry_count": 76,
+  "entry_count": 80,
   "entries": [
     {
       "name": "nested_brackets_in_link_text_simple",
@@ -727,12 +727,10 @@
       "reference_checkable_targets": [
         "dead-refdef1.md"
       ],
-      "expected_check_n_findings": [],
-      "known_divergence": {
-        "direction": "false-negative",
-        "reason": "CommonMark allows a reference definition's destination to sit on the line after `[label]:` (reference href: `dead-refdef1.md`, one real link). check (n)'s `reference_definition_tail()` is invoked with an EMPTY `raw_rest` when the destination is not on the same physical line, so it returns 0 (not a valid reference definition) and the line is dropped entirely; the bare target line that follows and the `[text][ref1]` usage line are both plain prose to check (n) (neither matches its `](...)` inline-link pattern), so the link is invisible end to end. Isolated from the broader (and unrelated-to-this-item) fact that check (n) never resolves shortcut/full reference-link USAGES at all \u2014 see the single-line control below, which the definition-line path DOES catch.",
-        "work_item": "WI-0005"
-      },
+      "expected_check_n_findings": [
+        "dead-refdef1.md"
+      ],
+      "known_divergence": null,
       "documented_intent": null
     },
     {
@@ -1218,6 +1216,58 @@
       "expected_check_n_findings": [
         "dead-em1.md"
       ],
+      "known_divergence": null,
+      "documented_intent": null
+    },
+    {
+      "name": "reference_definition_destination_on_next_line",
+      "category": "reference-definition-multiline",
+      "markdown": "[ref]:\n   dead-multiline-def1.md\n\nsee [text][ref]\n",
+      "reference_hrefs": [
+        "dead-multiline-def1.md"
+      ],
+      "reference_checkable_targets": [
+        "dead-multiline-def1.md"
+      ],
+      "expected_check_n_findings": [
+        "dead-multiline-def1.md"
+      ],
+      "known_divergence": null,
+      "documented_intent": null
+    },
+    {
+      "name": "reference_definition_third_line_after_destination_is_not_consumed_as_title",
+      "category": "reference-definition-multiline",
+      "markdown": "[ref]:\n   dead-multiline-def2.md\n   \"title\"\n\nsee [text][ref]\n",
+      "reference_hrefs": [
+        "dead-multiline-def2.md"
+      ],
+      "reference_checkable_targets": [
+        "dead-multiline-def2.md"
+      ],
+      "expected_check_n_findings": [
+        "dead-multiline-def2.md"
+      ],
+      "known_divergence": null,
+      "documented_intent": null
+    },
+    {
+      "name": "reference_definition_label_only_line_is_not_followed_by_a_destination",
+      "category": "reference-definition-multiline",
+      "markdown": "[ref]:\nsome prose that is not a destination\n",
+      "reference_hrefs": [],
+      "reference_checkable_targets": [],
+      "expected_check_n_findings": [],
+      "known_divergence": null,
+      "documented_intent": null
+    },
+    {
+      "name": "reference_definition_multiline_lookahead_does_not_interrupt_a_paragraph",
+      "category": "reference-definition-multiline",
+      "markdown": "foo\n[ref]:\ndead-multiline-def3.md\n\nsee [text][ref]\n",
+      "reference_hrefs": [],
+      "reference_checkable_targets": [],
+      "expected_check_n_findings": [],
       "known_divergence": null,
       "documented_intent": null
     }

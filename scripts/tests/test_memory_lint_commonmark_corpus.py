@@ -124,6 +124,18 @@ class FixtureIntegrityTest(unittest.TestCase):
     # that re-opening either has to be noticed instead of passing silently. A
     # future round's own findings still get their own new tag, not silently
     # absorbed into any of these three.
+    #
+    # WI-0083 was added here for the RED step (25.08.2026) to pin the
+    # multi-line reference-definition false negative (destination on the
+    # line after the label) BEFORE it was fixed, and is NOT on this list
+    # (never was, in the committed state) because the fix landed in the SAME
+    # round: the two positive corpus entries this WI minted, plus the
+    # pre-existing WI-0005 entry covering the same defect, all agree with
+    # the reference once memory-lint.sh's refdef_pending lookahead is in
+    # place — see those entries' own comment in
+    # generate_commonmark_corpus.py for why the closing edit is deliberate
+    # and explained, not silent, rather than left as if the gap had never
+    # been recorded.
     _KNOWN_DIVERGENCE_WORK_ITEMS = {
         "WI-0005", "WI-0081", "WI-0097", "WI-0098",
     }
@@ -619,20 +631,24 @@ class CommonmarkCorpusDifferentialTest(unittest.TestCase):
         )
         self.assertIsNone(entry["known_divergence"])
 
-    def test_multiline_reference_definition_is_invisible_to_check_n(self):
-        """New this round: `[ref]:` followed by its destination on the NEXT
-        physical line is a valid CommonMark reference definition, but
-        `reference_definition_tail()` is invoked with an empty `raw_rest` on
-        the definition line itself and returns false — the destination line
-        and the `[text][ref]` usage line are both ordinary prose to check (n).
-        The single-line control (same reference-style link, destination on
-        the SAME line) IS found, isolating the defect to the multiline case
-        specifically.
+    def test_multiline_reference_definition_is_now_found_by_check_n(self):
+        """WI-0083, fixed 25.08.2026: `[ref]:` followed by its destination on
+        the NEXT physical line is a valid CommonMark reference definition.
+        `reference_definition_tail()` used to be invoked with an empty
+        `raw_rest` on the definition line itself and return false — the
+        destination line and the `[text][ref1]` usage line were both
+        ordinary prose to check (n). A one-record lookahead (refdef_pending)
+        now defers a label with an empty tail into the next record and
+        resolves it there with the same grammar, so the destination is found
+        and reported dead. The single-line control (same reference-style
+        link, destination on the SAME line) was already found before this
+        fix and stays found — this test previously isolated the defect to
+        the multiline case specifically; it now pins that both cases agree.
         """
         multiline = self._entry("multiline_reference_definition_target_on_next_line")
         control = self._entry("singleline_reference_definition_control")
 
-        self.assertEqual(run_memory_lint_on(multiline["markdown"]), [])
+        self.assertEqual(run_memory_lint_on(multiline["markdown"]), ["dead-refdef1.md"])
         self.assertEqual(
             run_memory_lint_on(control["markdown"]), ["dead-refdef-single.md"],
         )

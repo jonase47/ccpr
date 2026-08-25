@@ -735,6 +735,16 @@ CORPUS = [
         "known_divergence": None,
     },
     # --- multiline reference-style definitions ------------------------------
+    # This entry originally pinned the WI-0005 round's own find of the SAME
+    # defect this round's new "reference-definition-multiline" category
+    # entries pin under WI-0083 — the destination on the line after the
+    # label. Its known_divergence claimed that "check (n) never resolves
+    # shortcut/full reference-link USAGES at all", which is itself stale
+    # (WI-0093 added that resolution — measured, both oracles agree on this
+    # entry now that WI-0083 lets the definition side reach the destination
+    # too). Closed in the SAME round WI-0083 fixed the underlying gap, rather
+    # than left to silently pass once the two-oracle check stopped noticing
+    # the claim no longer reproduces.
     {
         "name": "multiline_reference_definition_target_on_next_line",
         "category": "multiline-reference-definitions",
@@ -744,27 +754,7 @@ CORPUS = [
             "\n"
             "[link with multiline refdef][ref1]\n"
         ),
-        "known_divergence": {
-            "direction": "false-negative",
-            "reason": (
-                "CommonMark allows a reference definition's destination to "
-                "sit on the line after `[label]:` (reference href: "
-                "`dead-refdef1.md`, one real link). check (n)'s "
-                "`reference_definition_tail()` is invoked with an EMPTY "
-                "`raw_rest` when the destination is not on the same "
-                "physical line, so it returns 0 (not a valid reference "
-                "definition) and the line is dropped entirely; the bare "
-                "target line that follows and the `[text][ref1]` usage "
-                "line are both plain prose to check (n) (neither matches "
-                "its `](...)` inline-link pattern), so the link is "
-                "invisible end to end. Isolated from the broader (and "
-                "unrelated-to-this-item) fact that check (n) never resolves "
-                "shortcut/full reference-link USAGES at all — see the "
-                "single-line control below, which the definition-line path "
-                "DOES catch."
-            ),
-            "work_item": "WI-0005",
-        },
+        "known_divergence": None,
     },
     {
         "name": "singleline_reference_definition_control",
@@ -1118,6 +1108,81 @@ CORPUS = [
         "name": "emphasis_in_link_text",
         "category": "emphasis-in-link-text",
         "markdown": "[*a* b](dead-em1.md)\n",
+        "known_divergence": None,
+    },
+    # --- a reference definition's destination on the line AFTER the label --
+    # --- (WI-0083) -----------------------------------------------------------
+    # CommonMark permits the destination (and, separately, the title) of a
+    # link reference definition to follow the `[label]:` line rather than sit
+    # on it — "optional whitespace (including up to one line ending)" per the
+    # spec grammar. reference_definition_tail() in memory-lint.sh used to work
+    # strictly within one record ($0/raw_rest), and the call site requires
+    # pbuf_n == 0 (a reference definition may not interrupt a paragraph); with
+    # nothing after the colon on the label's own line,
+    # reference_definition_tail("") returned 0 and the label never entered
+    # refmap, so every reference link using it went unchecked.
+    #
+    # Opened and closed in the SAME round (25.08.2026): these two entries
+    # were minted with a known_divergence during the RED step, and the fix —
+    # a one-record lookahead (refdef_pending) that defers a label with an
+    # empty tail into the NEXT record, resolved with the same
+    # reference_definition_tail() grammar — makes both agree with the
+    # reference. Recorded here so the entries do not read as if the gap had
+    # ever shipped, per this file's own convention (see how WI-0081/WI-0097/
+    # WI-0098 read above).
+    {
+        "name": "reference_definition_destination_on_next_line",
+        "category": "reference-definition-multiline",
+        "markdown": "[ref]:\n   dead-multiline-def1.md\n\nsee [text][ref]\n",
+        "known_divergence": None,
+    },
+    # This entry's name used to claim "destination and title on separate
+    # lines" as if both were parsed as parts of ONE reference definition.
+    # They are not: reference_definition_tail() is called once per deferred
+    # record (see the WI-0083 comment above memory-lint.sh's refdef_pending
+    # branch), so it resolves "dead-multiline-def2.md" as a destination-only
+    # definition on its own record and returns immediately (`next`). The
+    # THIRD record ("title") is never looked at by the reference-definition
+    # code at all — it falls through as ordinary paragraph prose. The
+    # fixture's expected findings happen to still match the reference only
+    # because that stray prose line contains nothing link-shaped; it does
+    # NOT pin "a title on a separate line is correctly parsed" the way the
+    # old name implied. Renamed (still WI-0083) to say what it actually
+    # proves: a title-shaped third line is deliberately not consumed as
+    # part of the definition, and is scanned as ordinary prose instead —
+    # a known, deliberate scope limit, not a bug.
+    {
+        "name": (
+            "reference_definition_third_line_after_destination_is_not_"
+            "consumed_as_title"
+        ),
+        "category": "reference-definition-multiline",
+        "markdown": (
+            "[ref]:\n   dead-multiline-def2.md\n   \"title\"\n\n"
+            "see [text][ref]\n"
+        ),
+        "known_divergence": None,
+    },
+    # A stray colon at the end of a label-shaped line is not, on its own,
+    # enough to open a lookahead: the NEXT line still has to be a syntactically
+    # valid destination, or the whole thing is ordinary prose. Pinned as a
+    # negative control alongside the two positive entries above (per WI-0095's
+    # own lesson: a lookahead pinned only in the positive direction invents a
+    # false finding the first time it is asked to say no).
+    {
+        "name": "reference_definition_label_only_line_is_not_followed_by_a_destination",
+        "category": "reference-definition-multiline",
+        "markdown": "[ref]:\nsome prose that is not a destination\n",
+        "known_divergence": None,
+    },
+    # The multi-line lookahead must still respect "a reference definition may
+    # not interrupt an open paragraph" — the same pbuf_n == 0 gate the
+    # single-line form already observes. Pinned as its own entry because the
+    # lookahead is new code with its own chance to bypass that gate.
+    {
+        "name": "reference_definition_multiline_lookahead_does_not_interrupt_a_paragraph",
+        "category": "reference-definition-multiline",
+        "markdown": "foo\n[ref]:\ndead-multiline-def3.md\n\nsee [text][ref]\n",
         "known_divergence": None,
     },
 ]
