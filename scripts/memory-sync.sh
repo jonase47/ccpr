@@ -119,8 +119,20 @@ resolve_token() {
 }
 
 # authed URL for a git op — token injected in-memory, never written to .git/config
+#
+# `tok="$(resolve_token)"` looks like a bare assignment, but it is a
+# NON-TAIL statement inside a function that is itself always invoked from
+# inside a `$(...)` (both call sites below capture `authed_url`'s own
+# output). On bash 3.2 that combination does not abort under this file's
+# `set -e` even when resolve_token's own die() fires inside it (verified
+# directly, WI-0105: a failing bare assignment as a non-last statement of a
+# function called via `r="$(fn)"` does not stop the script, while the same
+# line called with no enclosing `$(...)` at all does) — so the rc is
+# captured and checked explicitly instead of trusted to `set -e`.
 authed_url() {
-  local tok; tok="$(resolve_token)"
+  local tok rc=0
+  tok="$(resolve_token)" || rc=$?
+  [[ $rc -eq 0 ]] || die "authed_url: could not resolve token (rc=$rc)"
   printf '%s' "$REPO_URL" | sed -E "s#^http://#http://oauth2:${tok}@#; s#^https://#https://oauth2:${tok}@#"  # exit-status: exempt set-e-sufficient
 }
 
@@ -521,7 +533,22 @@ cmd_promote() {
     note "no change to promote (already up to date)."; return 0
   fi
   git -C "$CLONE" commit --quiet -m "memory: promote $(basename -- "$dst")"  # exit-status: exempt set-e-sufficient
-  git_or_die "git push" git -C "$CLONE" push --quiet "$(authed_url)" HEAD:refs/heads/"$(git -C "$CLONE" rev-parse --abbrev-ref HEAD)"  # exit-status: exempt set-e-sufficient
+  # Both substitutions used to be embedded inline in `git_or_die`'s own
+  # argument word (`HEAD:refs/heads/"$(...)"`) — on bash 3.2, `set -e` only
+  # checks a `$(...)`'s exit status when it is the entire bare right-hand
+  # side of a `var="$(cmd)"` assignment (the LAST one, if several were
+  # concatenated in the same word) or stands alone as the whole simple
+  # command; never when it is one argument, or part of one argument, to
+  # some OTHER command -- which is exactly what both substitutions were
+  # here, glued into `git_or_die`'s own argument word (WI-0105, verified
+  # directly: `echo "wrap: $(false; echo x)"` under `set -euo pipefail`
+  # still reaches the next line). Hoisted to their own bare assignments so
+  # a failing `authed_url` or a failing `git rev-parse` aborts here instead
+  # of `git_or_die` silently receiving an empty/garbage branch name.
+  local aurl branch
+  aurl="$(authed_url)"
+  branch="$(git -C "$CLONE" rev-parse --abbrev-ref HEAD)"  # exit-status: exempt set-e-sufficient
+  git_or_die "git push" git -C "$CLONE" push --quiet "$aurl" HEAD:refs/heads/"$branch"
   note "promoted $dst -> $REPO_URL"
 }
 

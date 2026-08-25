@@ -234,9 +234,31 @@ MARKER_RE = re.compile(r"#\s*exit-status:\s*exempt\s+([A-Za-z0-9_-]+)")
 EXEMPTION_REASONS = {
     "set-e-sufficient": (
         "sed/awk/python3/git (unlike grep) have no '1 = nothing matched, "
-        "not an error' exit convention to confuse with a crash; an "
-        "unguarded failure already aborts the script under this file's "
-        "`set -euo pipefail`, which is the correct, decided response."
+        "not an error' exit convention to confuse with a crash, so relying "
+        "on this file's `set -euo pipefail` to abort on an unguarded "
+        "failure is the correct, decided response -- PROVIDED the "
+        "invocation's own `$(...)` (if any) is checked by `set -e` at all. "
+        "On bash 3.2 that holds in exactly two shapes: (1) it is the "
+        "entire bare right-hand side of a `var=\"$(cmd)\"` assignment -- "
+        "the LAST substitution, if several are concatenated in the same "
+        "word, since only being last matters, not being first or being "
+        "textually 'the whole' right-hand side; or (2) it stands alone as "
+        "the whole simple command. It does NOT hold when the substitution "
+        "is one argument, or part of one argument, to some OTHER command "
+        "(`echo`, `printf`, `git commit -m \"...\"`, etc.) -- there, no "
+        "substitution's exit status is checked at all, regardless of "
+        "position or literal text around it. A separate, unrelated quirk "
+        "applies when the thing inside `$(...)` is a same-file shell "
+        "FUNCTION rather than an external tool: `set -e` is suspended for "
+        "that function body's own internal non-tail statements in both "
+        "shapes above -- out of scope for this precondition, and out of "
+        "scope for SetESufficientNestingTest below by construction (it "
+        "only tracks the 5 external tool names). SetESufficientNestingTest "
+        "enforces shapes (1) and (2) directly (WI-0105, 25.08.2026, "
+        "verified directly; found and fixed the two shipped sites that "
+        "violated this precondition: memory-sync.sh's git-push "
+        "branch-name substitution and run-tests.sh's JSON raw_output "
+        "encoder)."
     ),
     "grep-empty-is-valid": (
         "grep exits 1 when it matches nothing, and here that is a normal, "
@@ -610,9 +632,16 @@ class Invocation:
         return f"{self.path.name}:{self.line}:{self.tool}:{self.disposition}"
 
 
-def scan_file(path):
-    """Enumerates every grep/awk/sed/python3/git invocation in `path` and
-    classifies each one. See the module docstring for the full method."""
+def _scan_file_raw(path):
+    """Internal: the same enumeration as `scan_file()`, but each result also
+    carries the invocation's own character START position plus the file's
+    `scan_text`/`depth` arrays -- needed by a check that inspects an
+    invocation's own LOCAL nesting (e.g. `SetESufficientNestingTest` below)
+    without re-deriving a position from a line number, which a file with
+    more than one same-tool invocation on one physical line would make
+    ambiguous. `scan_file()` is a thin wrapper that drops the extra fields;
+    this function exists so both callers share the one enumeration loop
+    rather than keeping two independently-maintained copies of it."""
     text = path.read_text()
     text = _blank_heredocs(text)
     masked, live = _mask_non_live(text)
@@ -630,8 +659,15 @@ def scan_file(path):
             continue
         line = _line_of(text, start)
         end_line = _line_of(text, max(end, window_end - 1))
-        results.append(Invocation(path, m.group(1), line, end_line, disposition))
+        inv = Invocation(path, m.group(1), line, end_line, disposition)
+        results.append((inv, start, scan_text, depth))
     return results
+
+
+def scan_file(path):
+    """Enumerates every grep/awk/sed/python3/git invocation in `path` and
+    classifies each one. See the module docstring for the full method."""
+    return [inv for inv, _start, _scan_text, _depth in _scan_file_raw(path)]
 
 
 def scan_tree(scripts_dir=SCRIPTS_DIR):
@@ -656,6 +692,226 @@ def find_exemption(path, line, end_line):
         if m:
             return m.group(1)
     return None
+
+
+# --------------------------------------------------------------------------
+# set-e-sufficient nesting check (WI-0105)
+# --------------------------------------------------------------------------
+#
+# `EXEMPTION_REASONS["set-e-sufficient"]` claims an unguarded sed/awk/
+# python3/git failure "already aborts the script under this file's
+# `set -euo pipefail`". That claim has a precondition the reason text did
+# not spell out until this work item: on bash 3.2 (`/bin/bash` on this
+# repo's own target platform), a `$(...)` command substitution's exit
+# status is checked by `set -e` in exactly two shapes, and NOT checked in a
+# third that looks deceptively similar to the first:
+#
+#   1. Assignment context (`var="...$(...)..."` as the sole simple
+#      command): the assignment's own exit status is that of the LAST
+#      command substitution in the word. Literal text before/after a
+#      substitution is irrelevant; when several substitutions are
+#      concatenated in the same word, only being LAST matters, not being
+#      first or being textually "the whole" right-hand side.
+#   2. Standing alone as the whole simple command (`$(...)` with no
+#      assignment at all): checked the same as any other simple command.
+#   3. Command-argument context (the `$(...)` is one argument, or PART of
+#      one argument, to some OTHER command -- `echo`, `printf`,
+#      `git commit -m "..."`, etc.): NO substitution's exit status is
+#      checked at all, regardless of position or literal text around it.
+#      This is the shape both shipped fixes below addressed.
+#
+# A separate, unrelated quirk: a shell function called inside any `$(...)`
+# (`v="$(some_shell_function)"`) suspends `set -e` for that function body's
+# OWN internal non-tail statements, in both assignment and argument
+# context alike -- out of scope for this check by construction, since the
+# scanner only tracks the 5 external tool names below (grep/awk/sed/
+# python3/git), never arbitrary shell functions.
+#
+# Verified directly (WI-0105, reproduced on this machine's /bin/bash
+# 3.2.57, each row a standalone `bash -c '...'` invocation, exit code read
+# directly with no `||` guard):
+#
+#   v="$(false)"                    -> exit 1 (rule 1, sole substitution)
+#   v="a$(false)b"                  -> exit 1 (rule 1, literal text is irrelevant)
+#   v="$(true)$(false)"             -> exit 1 (rule 1, LAST sibling wins)
+#   v="$(false)$(true)"             -> exit 0 (rule 1, first sibling is masked by the trailing one)
+#   $(true)$(false)                 -> exit 1 (rule 2, LAST sibling wins standalone too)
+#   $(false)$(true)                 -> exit 0 (rule 2, first sibling masked, same as rule 1)
+#   echo "x $(false)"               -> exit 0 (rule 3, argument context)
+#   printf '%s\n' "$(false)"        -> exit 0 (rule 3, argument context)
+#   f(){ false; echo x; }; v="$(f)" -> exit 0 (function-nesting quirk, separate from rules 1-3)
+#
+# This check finds every `set-e-sufficient`-exempted invocation's own DIRECT
+# enclosing `$(...)` (if any) and asserts it is bare/standalone under rule 1
+# or rule 2 above -- both share the same "last sibling wins" behaviour when
+# several substitutions are concatenated, per the two rows above measuring
+# rule 2 (standalone, no `VAR=`) directly rather than inferring it by
+# analogy from rule 1 (assignment context). See `SetESufficientNestingTest`'s
+# own docstring for what it can and cannot see.
+
+_STMT_BOUNDARY_CHARS = set(";\n(|&")
+_VAR_EQ_PREFIX_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
+
+
+def _find_enclosing_paren(scan_text, pos):
+    """Backward bracket-stack scan: the position of the nearest UNMATCHED
+    '(' before `pos` -- i.e., whatever paren (of any kind: `$(...)`, a plain
+    `(...)` grouping, `<(...)` process substitution) is innermost-open at
+    `pos`. None if `pos` sits at depth 0 (not nested in any paren at all)."""
+    i, counter = pos, 0
+    while i > 0:
+        i -= 1
+        c = scan_text[i]
+        if c == ")":
+            counter += 1
+        elif c == "(":
+            if counter > 0:
+                counter -= 1
+            else:
+                return i
+    return None
+
+
+def _find_matching_close(scan_text, open_pos):
+    """Forward bracket-depth scan: the position of the ')' that closes the
+    '(' at `open_pos`. None if the file text is malformed enough that it
+    never closes (should not happen on syntactically valid shell)."""
+    depth, i, n = 0, open_pos, len(scan_text)
+    while i < n:
+        c = scan_text[i]
+        if c == "(":
+            depth += 1
+        elif c == ")":
+            depth -= 1
+            if depth == 0:
+                return i
+        i += 1
+    return None
+
+
+def _find_matching_open(scan_text, close_pos):
+    """Reverse counterpart of `_find_matching_close`: the position of the
+    '(' that opens the ')' at `close_pos`. None if the file text is
+    malformed enough that it never opens (should not happen on
+    syntactically valid shell)."""
+    depth, i = 0, close_pos
+    while i >= 0:
+        c = scan_text[i]
+        if c == ")":
+            depth += 1
+        elif c == "(":
+            depth -= 1
+            if depth == 0:
+                return i
+        i -= 1
+    return None
+
+
+def _prefix_is_var_eq_then_sibling_chain(scan_text, start, end):
+    """True if `scan_text[start:end]` is (whitespace-tolerant) an optional
+    `VAR=`, followed by zero or more complete, directly adjacent `$(...)`
+    substitutions, and nothing else. This is the general form of "bare
+    right-hand side of an assignment": with zero sibling substitutions it
+    degenerates to the original bare-assignment check; with one or more, it
+    proves the segment carries no OTHER content (literal text, a different
+    command) that the trailing target substitution could be hiding behind.
+    Whitespace between tokens is tolerated because the scanner's own quote-
+    masking turns a `"` into a literal space in `scan_text` -- e.g. the
+    quote right after `VAR=` in `var="$(a)$(b)"`."""
+    i, n = start, end
+
+    def _skip_ws(pos):
+        while pos < n and scan_text[pos] in " \t":
+            pos += 1
+        return pos
+
+    i = _skip_ws(i)
+    m = _VAR_EQ_PREFIX_RE.match(scan_text[i:n])
+    if m:
+        i += m.end()
+    i = _skip_ws(i)
+    while i < n:
+        if scan_text[i] != "$" or i + 1 >= n or scan_text[i + 1] != "(":
+            return False
+        close = _find_matching_close(scan_text, i + 1)
+        if close is None or close >= n:
+            return False
+        i = _skip_ws(close + 1)
+    return True
+
+
+def _is_bare_or_standalone_substitution(scan_text, open_pos, close_pos):
+    """True if the `$(...)` spanning `open_pos`..`close_pos` is either the
+    ENTIRE right-hand side of a `var=$(...)` assignment (including being
+    the LAST of several `$(...)` substitutions directly concatenated in the
+    same assignment word -- see `_prefix_is_var_eq_then_sibling_chain`) or
+    stands alone as the whole simple command -- nothing else present in the
+    same statement before the `$` (besides an optional `VAR=` prefix, zero
+    or more complete PRECEDING sibling substitutions, and the whitespace
+    the scanner's own quote-masking already turned a `"` into) or after the
+    matching `)` (besides an optional matching quote, same reason). The
+    statement boundary characters mirror `_skip_assignments_back`'s own
+    boundary set (`\\n;|&(`) for consistency with the rest of this module.
+
+    The backward walk treats a complete `$(...)` sibling substitution
+    immediately behind the cursor as one atomic unit to skip over -- not
+    stopping partway through its own interior text -- so a PRECEDING
+    sibling never masks the true statement start behind it."""
+    n = len(scan_text)
+    dollar_pos = open_pos - 1  # position of the '$' that opens "$("
+    i = dollar_pos
+    while i > 0:
+        c = scan_text[i - 1]
+        if c in _STMT_BOUNDARY_CHARS:
+            break
+        if c == ")":
+            sibling_open = _find_matching_open(scan_text, i - 1)
+            if sibling_open is not None and sibling_open > 0 and scan_text[sibling_open - 1] == "$":
+                i = sibling_open - 1
+                continue
+            # The nearest paren behind the cursor closes something that is
+            # not a `$(...)` substitution (a plain `(...)` grouping or a
+            # malformed close) -- conservatively stop here rather than risk
+            # walking into content this function cannot interpret.
+            break
+        i -= 1
+    backward_ok = _prefix_is_var_eq_then_sibling_chain(scan_text, i, dollar_pos)
+    j = close_pos + 1
+    while j < n and scan_text[j] in " \t":
+        j += 1
+    forward_ok = j >= n or scan_text[j] in ";\n)|&"
+    return backward_ok and forward_ok
+
+
+def _set_e_sufficient_nesting_violations(scripts_dir=SCRIPTS_DIR):
+    """Every `set-e-sufficient`-exempted invocation whose own DIRECT
+    enclosing `$(...)` is not bare/standalone (see the module comment
+    above). An invocation with no enclosing paren at all (depth 0 at its own
+    tool-name match position) is not nested in anything and is out of scope
+    -- `set -e` on that top-level statement always applies normally."""
+    violations = []
+    files = sorted(scripts_dir.glob("*.sh")) + sorted((scripts_dir / "lib").glob("*.sh"))
+    for f in files:
+        for inv, start, scan_text, depth in _scan_file_raw(f):
+            if inv.disposition not in NEEDS_EXEMPTION:
+                continue
+            if find_exemption(inv.path, inv.line, inv.end_line) != "set-e-sufficient":
+                continue
+            if depth[start] == 0:
+                continue
+            open_pos = _find_enclosing_paren(scan_text, start)
+            if open_pos is None or open_pos == 0 or scan_text[open_pos - 1] != "$":
+                # The nearest enclosing paren is not a `$(...)` command
+                # substitution at all (a plain `(...)` group or a `<(...)`
+                # process substitution) -- out of scope, see
+                # SetESufficientNestingTest's own "cannot see" list.
+                continue
+            close_pos = _find_matching_close(scan_text, open_pos)
+            if close_pos is None:
+                continue
+            if not _is_bare_or_standalone_substitution(scan_text, open_pos, close_pos):
+                violations.append(inv)
+    return violations
 
 
 # --------------------------------------------------------------------------
@@ -813,6 +1069,21 @@ class ExternalToolExitStatusTest(unittest.TestCase):
         command substitution on bash 3.2 (measured). Net -7 invocations
         (143 total): `checked-condition` +1, `checked-chain` -4,
         `bare-needs-exemption` -4, everything else unchanged.
+        Updated once more 25.08.2026 when WI-0105 (the mechanical successor
+        to WI-0102's "measured" note two entries up) added
+        `SetESufficientNestingTest` and fixed the two shipped sites it
+        found: memory-sync.sh's `git push` branch-name substitution
+        (`$(git ... rev-parse --abbrev-ref HEAD)` embedded inline inside
+        `HEAD:refs/heads/"..."`) hoisted to its own bare `branch=$(...)`
+        assignment (`bare-needs-exemption` +1, still `set-e-sufficient`,
+        same disposition/category as before -- an invocation moving to a
+        safer line, not a new one), and run-tests.sh's JSON `raw_output`
+        encoder (`$(echo "${raw}" | python3 -c ...)` embedded inline inside
+        the outer `echo`'s string literal) rewritten with a real `||`
+        fallback assignment, turning it from `bare-needs-exemption` into
+        `checked-chain` (no exemption marker needed any more). Net 0
+        invocations (143 total): `bare-needs-exemption` -1, `checked-chain`
+        +1, everything else unchanged.
         143 invocations total across the 17 shipped files, split as below.
         A change in these numbers means either a script changed shape or
         the scanner's own logic changed -- worth a deliberate look either
@@ -826,9 +1097,9 @@ class ExternalToolExitStatusTest(unittest.TestCase):
             {
                 "checked-condition": 23,
                 "checked-captured": 5,
-                "checked-chain": 13,
+                "checked-chain": 14,
                 "discard-needs-exemption": 40,
-                "bare-needs-exemption": 62,
+                "bare-needs-exemption": 61,
             },
             by_disposition,
         )
@@ -882,6 +1153,206 @@ class ExemptionMarkersAreWellFormedTest(unittest.TestCase):
                 if m and m.group(1) not in EXEMPTION_REASONS:
                     unregistered.append(f"{f.relative_to(REPO_ROOT)}:{lineno}: {m.group(1)!r}")
         self.assertEqual([], unregistered)
+
+
+class SetESufficientNestingTest(unittest.TestCase):
+    """WI-0105: `EXEMPTION_REASONS["set-e-sufficient"]` is only true under a
+    precondition -- see the module comment above
+    `_set_e_sufficient_nesting_violations` for the measured evidence. This
+    test enforces that precondition: every `set-e-sufficient`-marked
+    invocation's own DIRECT enclosing `$(...)`, if any, must be either the
+    entire bare right-hand side of an assignment (the LAST substitution, if
+    several are concatenated in the same word) or stand alone as the whole
+    simple command -- never one argument, or part of one argument, to some
+    other command.
+
+    What this check CAN see: every `set-e-sufficient`-marked invocation's
+    own DIRECT/OUTERMOST enclosing `$(...)`, checked one level at a time,
+    including recognizing it as bare when it is the LAST of several `$(...)`
+    substitutions directly concatenated in the same assignment word (a
+    PRECEDING sibling is skipped over as one atomic unit, not walked into
+    character by character -- see `_is_bare_or_standalone_substitution`).
+
+    What this check CANNOT see (both confirmed by direct measurement, not
+    assumed):
+      * A call to a same-file shell FUNCTION that is not one of the 5
+        tracked tool names (grep/awk/sed/python3/git) is invisible to
+        `TOOL_RE` regardless of nesting. memory-sync.sh's `resolve_token()`
+        is exactly this shape: `tok="$(resolve_token)"` inside `authed_url()`
+        is textually a bare assignment, yet on bash 3.2 a failing
+        intermediate statement inside a function that is itself running
+        inside a `$(...)`-spawned subshell does not abort that function
+        either (verified directly: `x="$(false)"` as a non-tail statement
+        inside a function called via `r="$(fn)"` does not stop the calling
+        script under `set -euo pipefail`, while the identical line called
+        directly, with no enclosing `$(...)` at all, does). That is a
+        second, distinct quirk from the one this check detects, and it is
+        out of scope for a scanner that only sees the 5 tracked tool names
+        by construction.
+      * Nesting depth beyond the DIRECT enclosing `$(...)`: a
+        `set-e-sufficient` site nested two or more command-substitution
+        levels deep would not be specifically distinguished from one level
+        deep by this check. None exist in the shipped corpus at the time
+        this check was written -- confirmed by measurement (every
+        `set-e-sufficient` site in scripts/*.sh + scripts/lib/*.sh has depth
+        0 or 1), not assumed.
+      * A `set-e-sufficient` site whose nearest enclosing paren is a plain
+        `(...)` subshell grouping or a `<(...)` process substitution rather
+        than a genuine `$(...)` command substitution: this check only asks
+        the question command-substitution embedding raises, and skips that
+        site rather than misclassifying it. Process substitution's own,
+        unrelated observability gap is already covered by the
+        `proc-subst-unobservable` category.
+    """
+
+    def test_set_e_sufficient_invocations_are_not_embedded_inline(self):
+        violations = _set_e_sufficient_nesting_violations()
+        self.assertEqual(
+            [],
+            [f"{v.path.relative_to(REPO_ROOT)}:{v.line}: {v.tool}" for v in violations],
+            "set-e-sufficient invocation(s) whose own $(...) is not the "
+            "bare/standalone shape set -e actually checks on bash 3.2 -- "
+            "either it is one argument (or part of one) to some OTHER "
+            "command, where no substitution's exit status is ever checked, "
+            "or it is a NON-LAST substitution among several concatenated "
+            "in the same assignment word, where its own exit status is "
+            "masked by the trailing sibling's. Either way, the exemption's "
+            "own justification does not hold here. Hoist the substitution "
+            "to its own bare `var=\"$(cmd)\"` assignment on a statement by "
+            "itself before the line that uses it.",
+        )
+
+
+class SetESufficientRedProofTest(unittest.TestCase):
+    """Mutation-based RED proof for SetESufficientNestingTest (same
+    precedent as RedProofTest below: a checker of this kind is untrustworthy
+    until it has been SEEN red, WI-0037/WI-0044). Once memory-sync.sh and
+    run-tests.sh are fixed (WI-0105), the shipped corpus may never again
+    contain an embedded-inline set-e-sufficient site on its own -- this
+    scratch fixture keeps both the positive and the negative case exercised
+    regardless of what the shipped scripts look like. A standalone class
+    (not a RedProofTest subclass) per this file's own convention against
+    subclassing a concrete test class that carries its own tests."""
+
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="wi0105-redproof-"))
+        self.addCleanup(shutil.rmtree, self.tmpdir, ignore_errors=True)
+
+    def test_embedded_inline_set_e_sufficient_is_caught(self):
+        scratch = self.tmpdir / "scratch.sh"
+        scratch.write_text(
+            "#!/usr/bin/env bash\n"
+            "set -euo pipefail\n"
+            'echo "wrap: $(git rev-parse --short HEAD)"  '
+            "# exit-status: exempt set-e-sufficient\n"
+        )
+        violations = _set_e_sufficient_nesting_violations(scripts_dir=self.tmpdir)
+        self.assertTrue(
+            violations,
+            "expected the embedded-inline git call to be flagged -- the "
+            "nesting check did not catch it",
+        )
+
+    def test_bare_assignment_set_e_sufficient_is_not_flagged(self):
+        """Companion positive case: the safe shape (the ENTIRE right-hand
+        side of a bare assignment) must NOT be flagged, so this check does
+        not degenerate into rejecting every nested set-e-sufficient site
+        regardless of shape."""
+        scratch = self.tmpdir / "scratch.sh"
+        scratch.write_text(
+            "#!/usr/bin/env bash\n"
+            "set -euo pipefail\n"
+            "local sha\n"
+            'sha="$(git rev-parse --short HEAD)"  '
+            "# exit-status: exempt set-e-sufficient\n"
+            'echo "$sha"\n'
+        )
+        violations = _set_e_sufficient_nesting_violations(scripts_dir=self.tmpdir)
+        self.assertEqual([], violations)
+
+    def test_last_of_two_sibling_substitutions_is_not_flagged(self):
+        """WI-0105 refinement: on bash 3.2, an assignment's own exit status
+        is that of the LAST `$(...)` in the word when several are
+        concatenated -- position relative to a PRECEDING sibling is
+        irrelevant, only being last matters (measured directly:
+        `v="$(true)$(false)"` under `set -euo pipefail` aborts, exit 1;
+        `v="$(false)$(true)"` does not, exit 0). The checked invocation
+        here (`git`) is the LAST of two substitutions in one assignment
+        word, so it must NOT be flagged."""
+        scratch = self.tmpdir / "scratch.sh"
+        scratch.write_text(
+            "#!/usr/bin/env bash\n"
+            "set -euo pipefail\n"
+            "local combined\n"
+            'combined="$(date +%s)$(git rev-parse --short HEAD)"  '
+            "# exit-status: exempt set-e-sufficient\n"
+            'echo "$combined"\n'
+        )
+        violations = _set_e_sufficient_nesting_violations(scripts_dir=self.tmpdir)
+        self.assertEqual([], violations)
+
+    def test_first_of_two_sibling_substitutions_is_flagged(self):
+        """Companion negative case for the row above: the checked
+        invocation (`git`) is the FIRST of two substitutions in one
+        assignment word -- its own exit status is masked by the trailing
+        `$(date +%s)` that runs after it, so this site must stay flagged
+        even though it is the entire word's own textual right-hand side
+        MINUS the trailing sibling."""
+        scratch = self.tmpdir / "scratch.sh"
+        scratch.write_text(
+            "#!/usr/bin/env bash\n"
+            "set -euo pipefail\n"
+            "local combined\n"
+            'combined="$(git rev-parse --short HEAD)$(date +%s)"  '
+            "# exit-status: exempt set-e-sufficient\n"
+            'echo "$combined"\n'
+        )
+        violations = _set_e_sufficient_nesting_violations(scripts_dir=self.tmpdir)
+        self.assertTrue(
+            violations,
+            "expected the non-last sibling substitution to stay flagged -- "
+            "its exit status is masked by the trailing sibling",
+        )
+
+    def test_last_of_three_sibling_substitutions_is_not_flagged(self):
+        """The atomic-sibling-skip in `_is_bare_or_standalone_substitution`'s
+        backward walk must recurse across MORE THAN ONE preceding sibling,
+        not just the single sibling the two-substitution cases above
+        exercise -- a chain of two `$(...)` sibling-skips in a row is where
+        an off-by-one in that loop would show up (verified directly:
+        `v="$(true)$(true)$(false)"` under `set -euo pipefail` aborts,
+        exit 1 -- the LAST of three still governs)."""
+        scratch = self.tmpdir / "scratch.sh"
+        scratch.write_text(
+            "#!/usr/bin/env bash\n"
+            "set -euo pipefail\n"
+            "local combined\n"
+            'combined="$(date +%s)$(hostname)$(git rev-parse --short HEAD)"  '
+            "# exit-status: exempt set-e-sufficient\n"
+            'echo "$combined"\n'
+        )
+        violations = _set_e_sufficient_nesting_violations(scripts_dir=self.tmpdir)
+        self.assertEqual([], violations)
+
+    def test_sibling_with_its_own_nested_substitution_is_not_flagged(self):
+        """A PRECEDING sibling whose own interior contains a nested
+        `$(...)` must still be skipped as one atomic unit -- this is
+        exactly what `_find_matching_open`'s generic paren-depth counting
+        (not `$(`-aware) exists to get right, as opposed to a naive scan
+        that stops at the first unmatched-looking `)` (verified directly:
+        `v="$(echo $(echo x))$(false)"` under `set -euo pipefail` aborts,
+        exit 1)."""
+        scratch = self.tmpdir / "scratch.sh"
+        scratch.write_text(
+            "#!/usr/bin/env bash\n"
+            "set -euo pipefail\n"
+            "local combined\n"
+            'combined="$(echo $(hostname))$(git rev-parse --short HEAD)"  '
+            "# exit-status: exempt set-e-sufficient\n"
+            'echo "$combined"\n'
+        )
+        violations = _set_e_sufficient_nesting_violations(scripts_dir=self.tmpdir)
+        self.assertEqual([], violations)
 
 
 class RedProofTest(unittest.TestCase):

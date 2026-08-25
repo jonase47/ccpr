@@ -298,9 +298,23 @@ PYEOF
 }
 
 run_npm_test() {
-    local raw
+    local raw json_raw
     raw=$(npm test 2>&1 || true)
-    echo "{\"framework\": \"npm-test\", \"timestamp\": \"${TIMESTAMP}\", \"raw_output\": $(echo "${raw}" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()[:2000]))')}"  # exit-status: exempt set-e-sufficient
+    # The python3 encode used to be embedded inline inside the outer echo's
+    # string literal ($(... ) glued between literal JSON text on both
+    # sides) -- on bash 3.2, set -e only checks a $(...)'s exit status when
+    # it is the entire bare right-hand side of a var="$(cmd)" assignment
+    # (the LAST one, if several are concatenated in the same word) or
+    # stands alone as the whole simple command; never when it is one
+    # argument, or part of one argument, to some OTHER command -- which is
+    # exactly what this substitution was, glued into echo's own string
+    # literal (WI-0105). Hoisted to its own assignment with a real ||
+    # fallback: a best-effort JSON-report generator degrading to a fixed
+    # placeholder string on encode failure fits this file's own tone better
+    # than aborting the whole run (run_pytest/run_jest_or_vitest already
+    # tolerate their own runner's failure via `|| true` for the same reason).
+    json_raw=$(echo "${raw}" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()[:2000]))') || json_raw='"<json-encode-failed>"'
+    echo "{\"framework\": \"npm-test\", \"timestamp\": \"${TIMESTAMP}\", \"raw_output\": ${json_raw}}"
 }
 
 # -- Main --
