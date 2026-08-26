@@ -7,6 +7,18 @@ All notable changes to this project are documented in this file. The format is b
 ## [Unreleased]
 
 ### Fixed
+- **The documented checklist and the checks it describes were never bound to each other
+  (WI-0110).** Measured 26.08.2026: `scripts/memory-lint.sh` and the "Per file" checklist chapter
+  of `Manual/system/memory-instincts.md` already agree — both name the same 15 check letters
+  (`a b c c2 d e f g h i j k l m n`), since WI-0104 repaired the content. What was still missing
+  was a test that would notice the *next* divergence; nothing enforced the binding, it only
+  happened to hold. `scripts/tests/test_memory_lint_checklist_binding.py` extracts both letter
+  sets — the script's `# (x)` comments (distinguishing genuine check-openers, preceded by a blank
+  line, from three in-file back-references to already-defined checks) and the chapter's `**(x)`
+  bullets — and asserts the sets are equal in both directions. Its RED proof was constructed
+  deliberately on in-memory mutations (the real files already agreed, so the test cannot go red on
+  its own): removing a chapter bullet, adding an undefined one, and re-lettering a script opener
+  (a structural mutation, not a deletion) each surface the expected mismatch.
 - **`memory-lint.sh` excluded every `MEMORY.md` index from its checks, on a stated reason that
   turned out to be false (WI-0108).** The exclusion comment read "indexes have no frontmatter" —
   measured 26.08.2026 across the four reference stores this project draws on (ccpr-gh,
