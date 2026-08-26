@@ -84,6 +84,27 @@ Exit codes:
 A run that scanned zero files exits 2, not 0 — "0 findings" over an empty
 scope looks identical to success unless the tool says so itself.
 
+### Where the output goes, and why the deny-list notice is on stderr
+
+Findings go to **stdout**. Statements about what the run could *not* do go to
+**stderr**: the empty-scope warning, `--require-denylist`'s failure line, and —
+since WI-0090 — the notice that no deny-list was configured:
+
+```
+artifact-gate: deny-list NOT CONFIGURED -- no tenant/project names were checked.
+```
+
+That last one used to sit on stdout, among the findings. A caller that keeps
+stdout as its findings report, or discards it, then lost the one line saying the
+headline check never ran. Measured over this repository before the move:
+`artifact-gate.sh --repo . >/dev/null` printed nothing at all and exited 0 —
+byte-identical to a fully configured clean run redirected the same way.
+
+So a wrapper that captures only stdout sees a clean report and cannot tell it
+from a run where the deny-list check did not happen. Capture both streams, or
+read the exit code: a missing deny-list is a notice and exit 0 by default, and
+becomes a finding and exit 1 only with `--require-denylist`.
+
 ### Which copy to run — it matters only for CCPR's own repository
 
 Two invocations exist and both are correct, for different targets:
