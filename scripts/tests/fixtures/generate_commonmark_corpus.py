@@ -734,6 +734,70 @@ CORPUS = [
         ),
         "known_divergence": None,
     },
+    # --- escaped opening bracket ahead of a reference-link usage (WI-0119) --
+    # `\[label]` and `\[label][]` (only the OPENING bracket escaped, per
+    # CommonMark's own escape rule) render as literal text at the reference —
+    # confirmed against commonmark 0.9.2. Measured, and NOT added here as
+    # standalone entries: check (n) already reports the definition's own
+    # target for `[label]: dead.md` UNCONDITIONALLY, via the same
+    # definition-line mechanism `collapsed_reference_link`/
+    # `shortcut_reference_link` above are already flagged as agreeing
+    # through (see that section's header comment) rather than by resolving
+    # the usage, and via WI-0085's own "an unused reference definition is a
+    # dead pointer regardless of whether anything renders it" contract
+    # (`unused_reference_definition_standalone` above). A standalone
+    # `\[label]`/`\[label][]` fixture with its OWN unused definition
+    # reproduces that exact shape — check(n) reports the target either way,
+    # so no entry of that shape can discriminate "escape handling is
+    # correct" from "escape handling is broken"; the generator's own
+    # divergence guard refuses `known_divergence: None` for it while the
+    # underlying WI-0085 print stands, and admitting it as
+    # `documented_intent` would silently reclassify WI-0119 as WI-0085
+    # territory without a PO decision — out of scope for this round (see
+    # docs/HANDOVER.md / the WI-0119 round notes).
+    #
+    # What IS measured and pinned here, uncontaminated by that mechanism —
+    # `[ref]: <dest>` in these two entries is an EXTERNAL URL, which both
+    # oracles skip outright (memory-lint.sh's own scheme exclusion; the
+    # reference never renders it as a checkable href), so nothing here can
+    # print via the definition-line shortcut. The only way either fixture
+    # could report `dead-escgoodN.md` is if the escaped construct actually
+    # got scanned correctly and left the SEPARATE, later, live inline link
+    # on the same line untouched.
+    {
+        "name": "escaped_shortcut_construct_leaves_a_later_link_on_the_line_alive",
+        "category": "backslash-escapes",
+        "markdown": (
+            "\\[label] and [good](dead-escgood2.md)\n\n"
+            "[label]: https://example.com/dead-escgood-ext2\n"
+        ),
+        "known_divergence": None,
+    },
+    {
+        "name": "escaped_collapsed_construct_leaves_a_later_link_on_the_line_alive",
+        "category": "backslash-escapes",
+        "markdown": (
+            "\\[label][] and [good](dead-escgood1.md)\n\n"
+            "[label]: https://example.com/dead-escgood-ext1\n"
+        ),
+        "known_divergence": None,
+    },
+    {
+        # WI-0119's own "must keep working" pin: only the FIRST bracket is
+        # escaped here, so `\[label]` is literal text and the SEPARATE,
+        # unescaped `[ref]` is a live full reference resolving via the
+        # definition below — confirmed at the reference
+        # (`<a href="dead-escref1.md">`). Same caveat as
+        # `shortcut_reference_link`/`collapsed_reference_link` above: this
+        # agrees via the definition-line shortcut (WI-0085), not because
+        # resolving `[ref]` itself is what gets printed — see the two
+        # "later link" entries above for a fixture that isolates the
+        # resolution logic from that mechanism.
+        "name": "full_reference_escaped_first_bracket_still_reports",
+        "category": "backslash-escapes",
+        "markdown": "\\[label][ref]\n\n[ref]: dead-escref1.md\n",
+        "known_divergence": None,
+    },
     # --- multiline reference-style definitions ------------------------------
     # This entry originally pinned the WI-0005 round's own find of the SAME
     # defect this round's new "reference-definition-multiline" category

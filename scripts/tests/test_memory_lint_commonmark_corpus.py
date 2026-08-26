@@ -277,6 +277,57 @@ class CommonmarkCorpusDifferentialTest(unittest.TestCase):
         self.assertEqual(entry["reference_checkable_targets"], ["dead-esc7.md"])
         self.assertIsNone(entry["known_divergence"])
 
+    def test_escaped_shortcut_construct_leaves_a_later_link_on_the_line_alive(self):
+        """WI-0119: `\\[label]` escapes only the OPENING bracket, per
+        CommonMark's own escape rule — the reference renders it as literal
+        text, no link, no reference resolution. Measured directly (not via
+        the definition-line shortcut `shortcut_reference_link` above relies
+        on — this entry's `[label]:` definition is an EXTERNAL URL, which
+        both oracles skip outright, so nothing here can print through that
+        mechanism): the only way `dead-escgood2.md` gets reported is if the
+        escaped construct left the opener stack in the state a correctly
+        scanned `\\[` leaves it in, i.e. it never pushed at all, so the
+        SEPARATE, later, live inline link on the same line is unaffected.
+        """
+        entry = self._entry("escaped_shortcut_construct_leaves_a_later_link_on_the_line_alive")
+        findings = run_memory_lint_on(entry["markdown"])
+
+        self.assertEqual(findings, ["dead-escgood2.md"])
+        self.assertEqual(entry["reference_checkable_targets"], ["dead-escgood2.md"])
+        self.assertIsNone(entry["known_divergence"])
+
+    def test_escaped_collapsed_construct_leaves_a_later_link_on_the_line_alive(self):
+        """Same measurement as the shortcut entry above, for the collapsed
+        form `\\[label][]`. The escaped opening bracket never pushes an
+        opener, so the live `[]` immediately after it resolves against an
+        EMPTY label — not in refmap here — and stays inert; the later,
+        unrelated inline link is unaffected either way."""
+        entry = self._entry("escaped_collapsed_construct_leaves_a_later_link_on_the_line_alive")
+        findings = run_memory_lint_on(entry["markdown"])
+
+        self.assertEqual(findings, ["dead-escgood1.md"])
+        self.assertEqual(entry["reference_checkable_targets"], ["dead-escgood1.md"])
+        self.assertIsNone(entry["known_divergence"])
+
+    def test_full_reference_with_escaped_first_bracket_still_reports(self):
+        """WI-0119's own 'must keep working' pin: `\\[label][ref]` escapes
+        only the first bracket, so `\\[label]` is literal text and the
+        SEPARATE, unescaped `[ref]` is a live full reference resolving via
+        `[ref]: dead-escref1.md` below — confirmed at the reference
+        (`<a href="dead-escref1.md">`). Same caveat as
+        `shortcut_reference_link`/`collapsed_reference_link` above: this
+        agrees via the definition-line's own unconditional report (WI-0085),
+        not because resolving `[ref]` is what gets printed — see the two
+        'later link' entries above for a fixture that isolates the
+        resolution logic itself from that mechanism.
+        """
+        entry = self._entry("full_reference_escaped_first_bracket_still_reports")
+        findings = run_memory_lint_on(entry["markdown"])
+
+        self.assertEqual(findings, ["dead-escref1.md"])
+        self.assertEqual(entry["reference_checkable_targets"], ["dead-escref1.md"])
+        self.assertIsNone(entry["known_divergence"])
+
     def test_nested_brackets_in_the_link_text_no_longer_hide_the_link(self):
         """WI-0080, fixed: `[a [b] c](dead.md)` is one ordinary link per
         CommonMark, but check (n)'s label regex `[^][]*` forbade ANY literal
