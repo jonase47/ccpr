@@ -3,7 +3,7 @@
 Comprehensive documentation of the entire workflow, all processes, mechanisms, and infrastructure.
 For the quick reference, see [WORKFLOW_CHEATSHEET.md](WORKFLOW_CHEATSHEET.md).
 
-Last updated: 25.08.2026
+Last updated: 26.08.2026
 
 ---
 
@@ -141,6 +141,8 @@ The wingman is not a regular agent, but a consolidation mechanism:
 
 **Token savings:** ~1000+ tokens per parallel agent run, because Head-Claude doesn't need all full results in context.
 
+**Full chapter**: [system/agents.md](system/agents.md) — per-agent specialization, access levels, and the Wingman Workflow live there.
+
 ---
 
 ## 3. Phase Model & Gates
@@ -245,6 +247,8 @@ gate-p7 -> /p8-ops
 
 Detailed gate checklists are in [PROJECT_PHASES.md](../docs/PROJECT_PHASES.md).
 
+**Full chapter**: [system/phases-gates.md](system/phases-gates.md) — the full phase-by-phase table, iterative loops, and gate-type reference live there.
+
 ---
 
 ## 4. Command System
@@ -320,6 +324,8 @@ Rules:
 
 Full transition reference: [NEXT_STEPS_REFERENCE.md](../docs/NEXT_STEPS_REFERENCE.md)
 All commands in detail: [SECTIONS_COMMANDS.md](SECTIONS_COMMANDS.md)
+
+**Full chapter**: [system/commands.md](system/commands.md) — the command-count breakdown, naming convention, and full sub-skill sequence diagrams for P3/P5/P6 live there.
 
 ---
 
@@ -420,6 +426,8 @@ Multiple mechanisms work together:
 | Strategic compact | significant | Context compression on long sessions |
 | Agent brief summaries | ~500 per agent | Agents return max. 5 sentences |
 
+**Full chapter**: [system/cross-cutting.md](system/cross-cutting.md) — Constitution, Cross-Check, Handover, Wingman Consolidation and Token Optimization live there in full; Anchored State Verification has its own chapter, linked above.
+
 ---
 
 ## 6. Monitoring & Hooks
@@ -506,12 +514,18 @@ The script `logs-summary.py` analyzes the logs:
 
 Periods: `today`, `week`, `all`
 
+**Full chapter**: [system/monitoring-scripts.md](system/monitoring-scripts.md) — the full hook architecture, loop detection, and log-file layout live there.
+
 ---
 
 ## 7. Local Scripts
 
 Shell and Python scripts in `~/.claude/scripts/` for mechanical tasks.
 Save Claude tokens because they run outside the session.
+
+> Editing one of these scripts (in the repo's `scripts/`, not the installed
+> `~/.claude/scripts/` copy)? Two conventions are enforced by tests before a
+> change ships — see [system/scripts-conventions.md](system/scripts-conventions.md).
 
 ### Before Session Start
 
@@ -578,6 +592,8 @@ Claude automatically detects generated files and uses them as context:
 - `docs/.gate-preflight-pX.md` (< 10 min old) -> uses as gate basis, focuses on content
 - `docs/.quality-scan-report.json` -> uses as basis for /p6-audit and /p6-pentest
 
+**Full chapter**: [system/monitoring-scripts.md](system/monitoring-scripts.md) — the full script catalogue, shared libraries, and shell-alias reference live there. Editing conventions: [system/scripts-conventions.md](system/scripts-conventions.md).
+
 ---
 
 ## 8. Local LLM (Ollama)
@@ -639,6 +655,8 @@ Claude delegates routine tasks to Ollama when the server is reachable:
 - Summaries end up in the preflight report under "Document Summaries"
 - Timeout: 90s per file. On timeout or Ollama failure: section is omitted
 - Saves ~16k tokens per gate run (agent reads summaries instead of raw documents)
+
+**Full chapter**: [system/monitoring-scripts.md](system/monitoring-scripts.md) — setup, wrapper scripts, and the git-hook detail live there.
 
 ---
 
@@ -959,6 +977,8 @@ my-project/
 +-- ...
 ```
 
+**Full chapter**: [system/file-structure.md](system/file-structure.md) — the full directory trees for both the global (`~/.claude/`) and per-project layouts live there.
+
 ---
 
 ## Change History
@@ -970,3 +990,4 @@ my-project/
 | 13.05.2026 | Lean-Track introduced (parallel to Full-Track): /track-decision entry point, /lean-frame + /lean-learn + /lean-promote (4 skills, no gates). Constitution as mandatory Full-Track artifact: /constitution skill (Hybrid mode with 5 domain bootstraps), gate-preflight.py extracts Inviolables, all 8 gates load them as binding input. /cross-check as optional pre-gate consistency check (7 initial rules). 6 new commands, 6 new templates + 5 bootstraps. Command count: 109 -> 115. |
 | 20.08.2026 | Documented `memory-sync.sh` (org-tier memory/instincts sharing, shipped since v0.2.0-beta) and the discipline gate (`artifact-gate.sh` + `lib/discipline_gate.sh` + CI template) — none of the three had appeared anywhere under `Manual/` before. New detail page `system/discipline-gate.md`; `system/memory-instincts.md` gained a "Team Sharing (Org Tier)" subsection. The discipline gate itself is **not yet in any tagged release** (absent from `v0.2.1-beta`) — noted at every mention. |
 | 21.08.2026 | Documented anchored state verification (`/anchor`, `scripts/anchor.sh`, ADR-0009) — checks phase documents against the code they describe rather than against other documents, closing the gap `/cross-check`'s R6 rule names but never closes. New detail page `system/anchored-state.md`; new "Anchored State Verification (`/anchor`)" subsection alongside Cross-Check in §5. `/anchor` is **not yet in any tagged release** (absent from `v0.2.1-beta`) — noted at every mention. Command count 115 → 116 (Utility 13 → 14). |
+| 26.08.2026 | Added the 7 missing "Full chapter" pointers to `system/agents.md`, `phases-gates.md`, `commands.md`, `cross-cutting.md`, `monitoring-scripts.md` (linked from §6, §7 and §8 — the one detail file spans all three index sections), `scripts-conventions.md` and `file-structure.md`, making the "slim index → detail files" README claim true for both `SYSTEM_OVERVIEW.md` and `SECTIONS_COMMANDS.md`. `SECTIONS_COMMANDS.md`'s per-section command tables (108 rows byte-identical to `commands/*.md`, 8 worded differently, `/p5-review-sprint` present only here) were replaced by orientation paragraphs + pointers after reconciling the 8 divergent rows against the source `commands/*.md` files and adding the missing command to `commands/phases.md`. |

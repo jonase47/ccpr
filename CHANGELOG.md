@@ -7,6 +7,29 @@ All notable changes to this project are documented in this file. The format is b
 ## [Unreleased]
 
 ### Fixed
+- **`SECTIONS_COMMANDS.md` and `Manual/commands/*.md` held the same 116-command tables twice, and
+  the two copies had already drifted (WI-0112b).** Measured 26.08.2026: 116 command rows in the
+  index, 115 across the five chapters, 108 identical — the same species of duplicate-content drift
+  WI-0104 found and fixed one level down (`SYSTEM_OVERVIEW.md` vs. its `system/*.md` chapters).
+  `/p5-review-sprint` existed only in the index; `commands/phases.md` was missing it entirely and
+  is now complete. 7 rows were worded differently between the two copies (`/track-decision`,
+  `/constitution`, `/lean-frame`, `/lean-learn`, `/lean-promote`, `/cross-check` in
+  `commands/track.md`, plus a capitalisation-only diff on `/guide` in `commands/utility.md`); each
+  was reconciled clause-by-clause against its source `commands/<name>.md` file rather than
+  defaulting to either copy — see `docs/memory/tech-writer/` for the per-row reasoning. With the
+  duplicate tables removed, `SECTIONS_COMMANDS.md`'s five per-category sections became orientation
+  paragraphs pointing at their chapter (`commands/track.md`, `phases.md`, `gates.md`, `learning.md`,
+  `utility.md`), closing 5 of the 12 `manual-lint.sh` findings from WI-0112a. The other 7 — none of
+  `SYSTEM_OVERVIEW.md`'s 10 `system/*.md` chapters but `anchored-state.md`, `discipline-gate.md`
+  and `memory-instincts.md` were reachable — are closed by adding the missing "Full chapter"
+  pointers to `agents.md`, `phases-gates.md`, `commands.md`, `cross-cutting.md`,
+  `monitoring-scripts.md` (one detail file spanning three index sections: Monitoring & Hooks,
+  Local Scripts, Local LLM), `scripts-conventions.md`, and `file-structure.md` — content stays in
+  `SYSTEM_OVERVIEW.md` as-is, only the back-link was missing, mirroring the pattern WI-0104 already
+  established for `memory-instincts.md` and `anchored-state.md`. Makes `Manual/README.md`'s "slim
+  index → detail files" claim true for both index files, and drives `manual-lint.sh`'s 12
+  `Manual/`-scoped findings to 0 (the 13th, `templates/QA_SKELETON/AUTHZ.md`, is a real defect in
+  shipped templates and deliberately untouched).
 - **`manual-lint.sh`'s reverse-link check answered differently on identical input (WI-0112a
   regression, found the same day it shipped).** Six consecutive runs against an unchanged tree
   reported 0, 1, 2, 3, 0 and 1 findings, naming a different set of files each time. The check read
