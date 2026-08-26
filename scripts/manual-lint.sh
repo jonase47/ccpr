@@ -188,7 +188,24 @@ if [[ ${#PARENT_LINKS[@]} -gt 0 ]]; then
             child="${pair#*|}"
             child_rel="${child#$ROOT_ABS/}"
             target="$(rel_path "$idx_dir" "$child")"
-            if ! printf '%s' "$idx_content" | grep -qF "]($target)"; then
+            # A here-string, not a pipe: under `set -o pipefail` a
+            # `printf | grep -qF` can report the whole pipeline as failed
+            # via SIGPIPE precisely when grep exits early on a match while
+            # printf is still writing the rest of a large index — turning a
+            # real hit into a reported miss (measured 16% false-negative
+            # rate at ~37 KB of content). A here-string keeps grep as the
+            # only command in the statement, so there is no producer left
+            # to receive SIGPIPE. Not switched to `grep -qF ... "$idx_path"`
+            # instead, because idx_content is deliberately read ONCE per
+            # index above and reused across every child in this inner loop
+            # (see the comment on the outer `while` below) — grepping the
+            # file directly here would re-read it once per child again. On
+            # bash 3.2 (this repo's minimum target) a here-string larger
+            # than the pipe buffer is written through a temp file rather
+            # than an in-memory fd, which is a performance cost, not a
+            # correctness one — real Manual/-sized index files are nowhere
+            # near where that would matter.
+            if ! grep -qF "]($target)" <<< "$idx_content"; then
                 warn "$idx_rel — does not link back to $child_rel, which names it as parent_index (expected a link to '$target')"
             fi
         done

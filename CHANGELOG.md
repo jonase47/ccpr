@@ -7,6 +7,22 @@ All notable changes to this project are documented in this file. The format is b
 ## [Unreleased]
 
 ### Fixed
+- **`manual-lint.sh`'s reverse-link check answered differently on identical input (WI-0112a
+  regression, found the same day it shipped).** Six consecutive runs against an unchanged tree
+  reported 0, 1, 2, 3, 0 and 1 findings, naming a different set of files each time. The check read
+  `printf '%s' "$idx_content" | grep -qF "]($target)"` under this file's `set -o pipefail`: `grep -q`
+  exits the instant it matches, `printf` is still writing and takes SIGPIPE, the pipeline's status
+  becomes 141, and `if ! ...` reads that as "the link is missing". A lint that reports a real hit as
+  a miss is worse than no lint, and it did so often enough to matter — isolated with a control that
+  removes the suspected mechanism, 200 iterations each on content that provably contains the
+  pattern: the shipped pipe form reported NOT-FOUND 32 times, a here-string 0 times.
+  The site is now a here-string, so no producer remains to receive SIGPIPE, and the read-once-per-
+  index shape the surrounding loop depends on is preserved. Pinned by `ReverseLinkRaceStabilityTest`,
+  which runs the check 50 times over a ~37 KB fixture and requires every run to agree — at the
+  measured 16% per-run rate that leaves a 0.016% chance a still-racy build passes unnoticed, where a
+  single assertion would have passed 84% of the time. The same `producer | grep -q` shape survives at
+  four other sites in shipped scripts; they are recorded rather than changed here, with
+  `freeze-phase-docs.sh:234` the one carrying unbounded content and therefore the same risk profile.
 - **No linter in this repository looked at `Manual/`'s own structure — measured 26.08.2026:
   `Manual/README.md` calls both `SYSTEM_OVERVIEW.md` and `SECTIONS_COMMANDS.md` "slim index →
   detail files", and that direction was never checked at all (WI-0112a).** `phase-docs-lint.sh`

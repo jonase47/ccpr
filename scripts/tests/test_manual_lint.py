@@ -242,6 +242,66 @@ class CheckBReverseLinkTest(ManualLintTestBase):
         self.assertEqual(self.findings(result.stdout, "Warnings"), [], result.stdout)
 
 
+class ReverseLinkRaceStabilityTest(ManualLintTestBase):
+    """Check (b)'s reverse-link match reads the resolved index's content
+    once per index and greps it for the expected link -- a construct that
+    is racy under `set -o pipefail` when the grep sits on the RECEIVING end
+    of a pipe: `grep -qF` exits the instant it finds a match, the producer
+    upstream can still be mid-write, gets SIGPIPE, exits 141, and under
+    pipefail that 141 becomes the PIPELINE's exit status even though grep
+    itself found the pattern and returned 0 -- turning a real hit into a
+    reported miss. Six consecutive manual runs against an unchanged tree
+    (0, 1, 2, 3, 0, 1 findings) first surfaced this; a control isolating the
+    mechanism (`printf | grep -qF` vs. a here-string) measured a 16%
+    per-run false-negative rate at ~37 KB of index content with the match
+    near the top -- reproduced in-repo at this fixture's exact size.
+
+    A single assertion proves nothing against a probabilistic defect: the
+    lint runs N=50 times over ONE legitimately-linking index/child pair,
+    and every run must report zero warnings. At the measured 16% per-run
+    failure rate, a still-racy build's probability of passing all 50 runs
+    by chance is (1-0.16)**50 ~= 0.016% -- the residual flake probability
+    of this test itself (a false RED on a genuinely fixed build, from the
+    complementary tail of the same distribution, is the same order)."""
+
+    RACE_STABILITY_RUNS = 50
+
+    def setUp(self):
+        super().setUp()
+        # ~37 KB, matching link near the top followed by filler -- the size
+        # this repository measured a 16% per-run reproduction rate at
+        # (see class docstring). Small enough to keep the N=50 sweep fast
+        # (~60 ms/run measured), large enough to exceed the pipe buffer
+        # `printf` writes into, which is what lets `grep -qF` finish and
+        # SIGPIPE the still-writing producer before it has flushed the rest.
+        lines = ["# Index\n\n", "See [system/child.md](system/child.md) for details.\n\n"]
+        for i in range(500):
+            lines.append(
+                f"Filler line {i} with some reasonably long padding text to grow this file.\n"
+            )
+        self.write_doc("INDEX.md", "".join(lines))
+        self.write_doc("system/child.md", doc_text(parent_index="../INDEX.md"))
+
+    def test_reverse_link_check_is_stable_across_repeated_runs(self):
+        finding_counts = []
+        for _ in range(self.RACE_STABILITY_RUNS):
+            result = self.run_lint()
+            finding_counts.append(
+                (
+                    len(self.findings(result.stdout, "Errors")),
+                    len(self.findings(result.stdout, "Warnings")),
+                )
+            )
+
+        self.assertEqual(
+            [(0, 0)] * self.RACE_STABILITY_RUNS,
+            finding_counts,
+            f"expected zero errors/warnings on every one of "
+            f"{self.RACE_STABILITY_RUNS} runs against an unchanged, "
+            f"legitimately-linking fixture; got {finding_counts}",
+        )
+
+
 class ReverseLinkMutationProofTest(ManualLintTestBase):
     """Mutation proof for check (b), structural not presence-based
     (G-107/G-109): a SWAP, not a deletion. `INDEX.md` genuinely links
