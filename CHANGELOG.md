@@ -7,6 +7,41 @@ All notable changes to this project are documented in this file. The format is b
 ## [Unreleased]
 
 ### Fixed
+- **`memory-lint.sh` excluded every `MEMORY.md` index from its checks, on a stated reason that
+  turned out to be false (WI-0108).** The exclusion comment read "indexes have no frontmatter" —
+  measured 26.08.2026 across the four reference stores this project draws on (ccpr-gh,
+  productdata, Kalza, ccpr): 16 of 27 index files DO carry a frontmatter block, and none of those
+  16 had ever been validated, because the `find` populating the checked-files list excluded every
+  file literally named `MEMORY.md` regardless of its content.
+
+  The eleven frontmatter-less indexes in that same census decided the shape of the fix: dropping
+  the exclusion outright (the item's original framing) would have sent all eleven through the
+  "no YAML frontmatter" check as an immediate `err` — eleven errors in files nobody wrote
+  frontmatter for on purpose, the opposite of a fix. The rule this change implements instead is
+  what `templates/MEMORY_SCHEMA.md` already said and the lint had never actually enforced:
+  frontmatter on an index is **optional**, and **validated when present**. An index without one
+  stays silent; an index that does carry one now runs the same field/date/cross-ref checks as any
+  other memory file — required fields, the `type` enum (now including `index` as a legal value on
+  both the Tier-1 closed enum and the Tier-2 open one), `last_updated` form/age, and `related:`
+  cross-refs — with one deliberate exception: `docs/memory/MEMORY.md` itself stays exempt from
+  the Tier-1 `{type}_{slug}.md` naming check, since it is the index, not a Tier-1 memory file the
+  rule was written for.
+
+  Removing the `-not -name "MEMORY.md"` clause from the shared `find` also put the index file
+  itself into the same array check (g) walks to warn about Tier-1 files the index forgot to
+  reference — without a guard, every project's index would have been required to reference its
+  own filename inside its own body, which no index does. That guard is the one change in this fix
+  that reaches outside the frontmatter checks proper; measured against this repository's own
+  `docs/memory/MEMORY.md`, it is what keeps the lint's own 5-warning baseline at 5 instead of 6.
+  `instincts.md` stays excluded from the same `find` — same shape, a different question,
+  deliberately untouched here.
+
+  The sibling exclusion in check (i) (Tier-2-global silo validation,
+  `[[ "$gbase" == "MEMORY.md" ]] && continue`) was aligned the same way, for consistency rather
+  than because it fixes anything measurable today: only one Tier-2-global index exists across the
+  reference stores (`~/.claude/memory/kalza/MEMORY.md`), and it has no frontmatter, so this half
+  changes zero findings in any store currently in use.
+
 - **`phase-docs-lint.sh`'s empty-scope report read like a clean pass, and the generator commands it
   validates against prescribed values it then rejects (WI-0121).** The item was filed against a
   different claim -- five files "self-declaring" as phase docs while never being validated -- which

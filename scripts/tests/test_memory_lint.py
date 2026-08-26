@@ -81,11 +81,11 @@ last_updated: {TODAY}
 Body.
 """
 
-TIER2_INDEX_TEXT = """---
+TIER2_INDEX_TEXT = f"""---
 name: senior-developer project memory index
 description: Index of senior-developer notes.
 type: index
-last_updated: 01.01.2026
+last_updated: {TODAY}
 ---
 
 # Senior-Developer Memory
@@ -3326,11 +3326,20 @@ class MemoryLintTest(MemoryLintFixture, unittest.TestCase):
         self.assertEqual(len(infos), 1, infos)
         self.assertIn("gone_ent_named_live&num;3.md", infos[0])
 
-    def test_the_index_is_checked_even_when_no_memory_files_are_scanned(self):
-        """An index whose entries are all dead scans zero files — and must still fire.
+    def test_the_index_is_checked_even_when_no_content_files_are_scanned(self):
+        """An index whose entries are all dead, with no OTHER memory file around it,
+        must still fire — the dead-link check does not depend on there being real
+        content files to validate.
 
-        The orphan check (g) is gated on FILES_TOTAL because it iterates the files;
-        this check iterates the index and must not inherit that gate.
+        Before WI-0108, docs/memory/MEMORY.md itself was excluded from the FILES
+        array by name, so this scenario reported "Files scanned: 0" — the index
+        was invisible to the file loop entirely. Since the exclusion is gone, the
+        index is now itself one of the scanned files (still with no frontmatter
+        here, so check (a) skips it silently) — "Files scanned: 1", not 0. The
+        orphan check (g) is gated on FILES_TOTAL because it iterates the files;
+        this dead-link check iterates the index directly and never depended on
+        that gate — this test now proves that by observing the gate condition is
+        actually true (FILES_TOTAL == 1) rather than by forcing it to zero.
         """
         bare = Path(tempfile.mkdtemp(prefix="ccpr-memory-lint-bare-"))
         self.addCleanup(shutil.rmtree, bare, ignore_errors=True)
@@ -3342,7 +3351,7 @@ class MemoryLintTest(MemoryLintFixture, unittest.TestCase):
 
         result = self.run_lint(project_dir=bare)
 
-        self.assertIn("**Files scanned:** 0", result.stdout)
+        self.assertIn("**Files scanned:** 1", result.stdout)
         findings = self.link_findings(result.stdout)
         self.assertEqual(len(findings), 1, result.stdout)
         self.assertIn("project_deleted.md", findings[0])
@@ -5681,6 +5690,175 @@ class DecayHintGracePeriodTest(MemoryLintFixture, unittest.TestCase):
             any("older than 30d" in i for i in matches),
             f"decay hint must quote the 30-day decay policy, not check (e)'s "
             f"unrelated STALE_DAYS — got: {matches!r}",
+        )
+
+
+class IndexFrontmatterOptionalTest(MemoryLintFixture, unittest.TestCase):
+    """docs/memory/MEMORY.md and docs/memory/{agent}/MEMORY.md carry frontmatter only
+    when someone chose to write it (WI-0108). Before this fix, memory-lint.sh excluded
+    every MEMORY.md from checks (a)-(f) by filename — the stated reason ("indexes have
+    no frontmatter") was false for 16 of 27 index files measured across four reference
+    stores, and none of the 16 had ever been validated.
+
+    The rule is not "always required" (that would turn all 11 frontmatter-less indexes
+    from that same census into immediate errors) and not "never allowed" (that discards
+    information written on purpose) — frontmatter on an index is OPTIONAL, and validated
+    when present, matching MEMORY_SCHEMA.md's own "do not require" wording literally
+    instead of reading it as "never have".
+    """
+
+    # CLEAN_INDEX's body (not just a placeholder "Body.") on purpose: it links
+    # project_alpha.md, the one other Tier-1 file the default fixture writes. A
+    # body that omits it would trip check (g) ("file not referenced in Tier-1
+    # index") as an unrelated true positive, contaminating every assertion below
+    # that this fixture is otherwise clean.
+    VALID_INDEX_FRONTMATTER = (
+        f"""---
+name: top-level memory index
+description: A Tier-1 index carrying optional frontmatter.
+type: index
+last_updated: {TODAY}
+---
+
+"""
+        + CLEAN_INDEX
+    )
+
+    def test_index_without_frontmatter_is_silent(self):
+        """The pre-existing default: a MEMORY.md with no frontmatter block at all must
+        not be reported — this is what the other ~199 write_index()-based tests in this
+        module already rely on via CLEAN_INDEX, and it is the case the removed
+        exclusion used to cover, just for the wrong stated reason."""
+        self.write_index(CLEAN_INDEX)
+
+        result = self.run_lint()
+
+        errors = self.findings(result.stdout, "Errors")
+        warnings = self.findings(result.stdout, "Warnings")
+        self.assertFalse(any("MEMORY.md" in e for e in errors), errors)
+        self.assertFalse(any("MEMORY.md" in w for w in warnings), warnings)
+
+    def test_index_with_valid_frontmatter_is_silent(self):
+        """A MEMORY.md that DOES carry a complete, valid frontmatter block must pass
+        checks (a)-(f) like any other memory file — silently, since nothing about it
+        is wrong."""
+        self.write_index(self.VALID_INDEX_FRONTMATTER)
+
+        result = self.run_lint()
+
+        errors = self.findings(result.stdout, "Errors")
+        warnings = self.findings(result.stdout, "Warnings")
+        self.assertFalse(any("docs/memory/MEMORY.md" in e for e in errors), errors)
+        self.assertFalse(any("docs/memory/MEMORY.md" in w for w in warnings), warnings)
+
+    def test_type_index_is_accepted_on_the_closed_tier1_enum(self):
+        """docs/memory/MEMORY.md sits at parent_dir == 'memory' — the Tier-1 branch of
+        check (c), which errors on any type value outside its closed enum. 'index' must
+        be a member of that enum, not merely tolerated by the looser Tier-2 one."""
+        self.write_index(self.VALID_INDEX_FRONTMATTER)
+
+        errors = self.findings(self.run_lint().stdout, "Errors")
+
+        self.assertFalse(any("type=" in e for e in errors), errors)
+
+    def test_index_with_a_missing_required_field_is_reported(self):
+        """Once an index carries frontmatter, it is validated like any other file — an
+        incomplete block must still be caught, proving 'optional' does not mean
+        'unchecked when present'."""
+        broken = (
+            f"""---
+name: broken index
+type: index
+last_updated: {TODAY}
+---
+
+"""
+            + CLEAN_INDEX
+        )
+        self.write_index(broken)
+
+        errors = self.findings(self.run_lint().stdout, "Errors")
+
+        self.assertTrue(
+            any("docs/memory/MEMORY.md" in e and "description" in e for e in errors),
+            errors,
+        )
+
+    def test_tier1_naming_convention_does_not_fire_on_the_index_itself(self):
+        """Check (d) expects Tier-1 files to be named '{type}_<slug>.md'. Applied
+        literally to docs/memory/MEMORY.md with type: index it would demand
+        'index_<slug>.md' — the index is not a Tier-1 memory FILE and must stay exempt
+        from this specific check regardless of its type value."""
+        self.write_index(self.VALID_INDEX_FRONTMATTER)
+
+        warnings = self.findings(self.run_lint().stdout, "Warnings")
+
+        self.assertFalse(any("Tier-1 naming convention" in w for w in warnings), warnings)
+
+    def test_default_fixture_file_count_now_includes_the_persona_index(self):
+        """setUp() already writes a Tier-2 persona index (senior-developer/MEMORY.md,
+        valid frontmatter, type: index) that used to be excluded by name. Scanning it
+        now must show up in the file count the report prints — the scope widening this
+        fix makes, pinned to a number rather than 'as expected'.
+
+        Before this fix: project_alpha.md + patterns.md = 2 (the persona index was
+        invisible to the FILES array). After: + senior-developer/MEMORY.md = 3.
+        """
+        result = self.run_lint()
+
+        self.assertIn("**Files scanned:** 3", result.stdout, result.stdout)
+
+    def test_index_with_no_frontmatter_does_not_trigger_the_index_self_reference_check(self):
+        """check (g) iterates every file whose parent dir is 'memory' and warns if the
+        Tier-1 index does not reference it by name — applied to the index FILE itself
+        (parent_dir == 'memory' too, since MEMORY.md is no longer excluded from FILES)
+        this would spuriously demand the index reference its own filename inside its
+        own body. It must not."""
+        self.write_index(CLEAN_INDEX)
+
+        warnings = self.findings(self.run_lint().stdout, "Warnings")
+
+        self.assertFalse(
+            any("MEMORY.md' not referenced in Tier-1 index" in w for w in warnings),
+            warnings,
+        )
+
+
+class Tier2GlobalIndexFrontmatterOptionalTest(MemoryLintFixture, unittest.TestCase):
+    """The sibling of IndexFrontmatterOptionalTest for check (i)'s Tier-2-global silo
+    scan (WI-0108). Measured: only one Tier-2-global index exists across the reference
+    stores (~/.claude/memory/kalza/MEMORY.md) and it has no frontmatter, so aligning
+    this site changes nothing today — these two tests exist to prove the alignment is
+    behaviour-preserving for the no-frontmatter case and correctly permissive for the
+    (currently hypothetical) with-frontmatter case, not because a real fixture needs
+    the coverage yet.
+    """
+
+    def test_tier2_global_index_without_frontmatter_stays_silent(self):
+        agent_dir = self.fake_home / ".claude" / "memory" / "kalza"
+        agent_dir.mkdir(parents=True)
+        (agent_dir / "MEMORY.md").write_text("# Kalza shared memory\n\nBody.\n", encoding="utf-8")
+
+        result = self.run_lint()
+
+        errors = self.findings(result.stdout, "Errors")
+        warnings = self.findings(result.stdout, "Warnings")
+        self.assertFalse(any("memory/kalza/MEMORY.md" in e for e in errors), errors)
+        self.assertFalse(any("memory/kalza/MEMORY.md" in w for w in warnings), warnings)
+
+    def test_tier2_global_index_with_frontmatter_is_validated_like_any_other_silo_file(self):
+        agent_dir = self.fake_home / ".claude" / "memory" / "kalza"
+        agent_dir.mkdir(parents=True)
+        (agent_dir / "MEMORY.md").write_text(
+            "---\nname: kalza index\ndescription: shared index\n---\n\n# Kalza\n",
+            encoding="utf-8",
+        )
+
+        warnings = self.findings(self.run_lint().stdout, "Warnings")
+
+        self.assertTrue(
+            any("memory/kalza/MEMORY.md" in w and "scope: tier-2-global" in w for w in warnings),
+            warnings,
         )
 
 

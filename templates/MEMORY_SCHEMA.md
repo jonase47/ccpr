@@ -3,7 +3,13 @@
 > Formal frontmatter schema for memory files. Applies to Tier 1 (`docs/memory/{type}_{slug}.md`)
 > and Tier-2 topic files (`docs/memory/{agent}/{topic}.md`).
 > Indexes (`docs/memory/MEMORY.md` and `docs/memory/{agent}/MEMORY.md`) follow their own
-> template convention and do not require frontmatter (they are lists, not memories).
+> template convention and do not require frontmatter (they are lists, not memories) — but
+> "do not require" means what it says: an index MAY carry a frontmatter block, and when it
+> does, `bash ~/.claude/scripts/memory-lint.sh` validates its fields, `type`, `last_updated`
+> and `related:` cross-refs the same way it would for any other memory file, instead of
+> skipping it by filename (WI-0108) — with ONE exception: the Tier-1 `{type}_{slug}.md`
+> naming convention below does not apply to `docs/memory/MEMORY.md` itself, since it is the
+> index, not a Tier-1 memory file. An index with no frontmatter stays silent either way.
 
 ## Required fields
 
@@ -11,7 +17,7 @@
 |---|---|---|
 | `name` | free text (1 line) | Human-readable title — also visible in the index. |
 | `description` | free text (1 line) | One-sentence summary. Used for relevance decisions. |
-| `type` | Tier 1: `feedback` \| `project` \| `reference` \| `user`. Tier 2: the same set, plus `patterns` (a persona's general working conventions, not tied to one project fact). | Memory category (see `~/.claude/CLAUDE.md`). `user` stays global, not pushable. The Tier-2 vocabulary is deliberately open: `bash ~/.claude/scripts/memory-lint.sh` only warns — never errors — on a Tier-2 `type` value outside this set, so a persona reaching for a value the schema has not yet named does not fail the lint. Tier 1 keeps the closed enum and errors on drift. |
+| `type` | Tier 1: `feedback` \| `project` \| `reference` \| `user` \| `index`. Tier 2: the same set, plus `patterns` (a persona's general working conventions, not tied to one project fact). | Memory category (see `~/.claude/CLAUDE.md`). `user` stays global, not pushable. `index` is for `docs/memory/MEMORY.md` / `docs/memory/{agent}/MEMORY.md` files that chose to carry a frontmatter block (WI-0108) — it says "this file is the list, not a memory record", distinct from `project`/`reference`/etc. The Tier-2 vocabulary is deliberately open: `bash ~/.claude/scripts/memory-lint.sh` only warns — never errors — on a Tier-2 `type` value outside this set, so a persona reaching for a value the schema has not yet named does not fail the lint. Tier 1 keeps the closed enum and errors on drift; `index` is a member of it, not an exception to it. |
 | `last_updated` | `DD.MM.YYYY`, optionally followed by whitespace and a parenthesised note: `DD.MM.YYYY (note)` | Date of last substantive change. The note is optional and says **why** the date moved — which round, which item — e.g. `24.08.2026 (WI-0102)` or `16.05.2026 (Note: agent migration verified later same day)`. That is context no other field carries, which is why the suffix is part of the schema rather than tolerated beside it (WI-0106); the same optional suffix is specified for phase documents in `PHASE_DOC_SCHEMA.md`. Enforceable form: the date, then either end-of-value or one or more spaces followed by a single `(` … `)` group running to the end — everything inside the parentheses is free text. A value shaped otherwise (`24.08.2026 a note without parentheses`, `24.08.2026(WI-0102)`, `24.08.2026 (unclosed`, `2026-08-24`) is an error, and so is a well-formed date that is not a day (`32.13.2026`). Checked by `bash ~/.claude/scripts/memory-lint.sh`, check (e). |
 
 ## Optional fields
@@ -26,6 +32,9 @@
 
 - Tier 1 (cross-cutting): `docs/memory/{type}_{slug}.md` — e.g. `feedback_wording.md`, `project_watch_penetration.md`, `reference_apple_review_guidelines.md`.
 - Tier 2 (persona-specific): `docs/memory/{agent}/{topic}.md` — topic slug is freely chosen (e.g. `patterns.md`, `swiftdata-tdd-patterns.md`).
+- `docs/memory/MEMORY.md` itself is exempt from the Tier-1 `{type}_{slug}.md` rule even when it
+  carries `type: index` — it is the index the rule's `{type}_` prefix would otherwise misfile
+  it into looking for (`index_MEMORY.md`), not a Tier-1 memory file.
 
 ## Instinct ID namespaces
 

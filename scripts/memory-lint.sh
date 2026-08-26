@@ -165,11 +165,16 @@ TODAY_EPOCH=$(fm_date_to_epoch "$(date +%d.%m.%Y)")
 
 FILES=()
 if [[ -d "$MEMORY_DIR" ]]; then
-    # Collect all .md files under docs/memory/, exclude MEMORY.md (indexes have no frontmatter)
+    # Collect all .md files under docs/memory/. MEMORY.md indexes used to be excluded
+    # here on the stated reason "indexes have no frontmatter" — false for 16 of 27
+    # index files measured across four reference stores on 26.08.2026 (WI-0108); none
+    # of the 16 had ever been validated. Indexes are OPTIONAL-frontmatter, not
+    # frontmatter-less by definition: check (a) below skips one silently when it truly
+    # has none, and validates it like any other file when it does. instincts.md stays
+    # excluded — same shape, a different question, deliberately untouched by this fix.
     while IFS= read -r line; do
         FILES+=("$line")
     done < <(find "$MEMORY_DIR" -type f -name "*.md" \
-        -not -name "MEMORY.md" \
         -not -name "instincts.md")
 else
     info "no docs/memory/ structure under $PROJECT_DIR (project-scope checks skipped)"
@@ -180,9 +185,19 @@ FILES_TOTAL=${#FILES[@]}
 for file in "${FILES[@]:-}"; do
     [[ -n "$file" ]] || continue
     rel="${file#$PROJECT_DIR/}"
+    basename_file="$(basename "$file")"
+    is_index_file=false
+    [[ "$basename_file" == "MEMORY.md" ]] && is_index_file=true
 
-    # (a) Frontmatter present?
+    # (a) Frontmatter present? An index (docs/memory/MEMORY.md or
+    # docs/memory/{agent}/MEMORY.md) is the one exception MEMORY_SCHEMA.md
+    # actually makes: frontmatter on it is OPTIONAL, not forbidden, so a missing
+    # block there is silently fine — everything below this still runs for an
+    # index that DOES carry one (WI-0108).
     if ! fm_has "$file"; then
+        if [[ "$is_index_file" == true ]]; then
+            continue
+        fi
         err "$rel — no YAML frontmatter (---) at start of file"
         continue
     fi
@@ -202,17 +217,21 @@ for file in "${FILES[@]:-}"; do
     # Tier-1 enum does not offer, so it is added there. The Tier-2 set stays open —
     # an unrecognised value is a warning, not an error, so an unforeseen but
     # legitimate persona-specific label does not repeat the defect this fixes.
+    #
+    # 'index' is a member of both enums, not an exception carved out for it
+    # (WI-0108): a MEMORY.md that chose to carry frontmatter is validated exactly
+    # like any other file, and its 'type' value needs a legal answer too.
     parent_dir="$(basename "$(dirname "$file")")"
     type_val="$(fm_field "$file" type || true)"
     if [[ "$parent_dir" == "memory" ]]; then
         case "$type_val" in
-            feedback|project|reference|user|"") ;;
-            *) err "$rel — type='$type_val' is not in {feedback,project,reference,user}" ;;
+            feedback|project|reference|user|index|"") ;;
+            *) err "$rel — type='$type_val' is not in {feedback,project,reference,user,index}" ;;
         esac
     else
         case "$type_val" in
-            feedback|project|reference|user|patterns|"") ;;
-            *) warn "$rel — type='$type_val' is not in the Tier-2 topic-file enum {feedback,project,reference,user,patterns}" ;;
+            feedback|project|reference|user|patterns|index|"") ;;
+            *) warn "$rel — type='$type_val' is not in the Tier-2 topic-file enum {feedback,project,reference,user,patterns,index}" ;;
         esac
     fi
 
@@ -246,9 +265,11 @@ for file in "${FILES[@]:-}"; do
     esac
 
     # (d) Tier 1 naming convention: {type}_{slug}.md
-    if [[ "$parent_dir" == "memory" ]]; then
+    # docs/memory/MEMORY.md is exempt regardless of its type value (WI-0108): it is
+    # the Tier-1 INDEX, not a Tier-1 memory file, and the rule's own '{type}_' prefix
+    # would otherwise demand it rename itself to 'index_MEMORY.md'.
+    if [[ "$parent_dir" == "memory" && "$is_index_file" == false ]]; then
         # Tier 1 — filename must start with type_
-        basename_file="$(basename "$file")"
         if [[ -n "$type_val" && "$basename_file" != "${type_val}_"* ]]; then
             warn "$rel — Tier-1 naming convention: expected '${type_val}_<slug>.md', got '$basename_file'"
         fi
@@ -348,12 +369,18 @@ for file in "${FILES[@]:-}"; do
 done
 
 # (g) MEMORY.md index consistency: every Tier-1 file referenced in the index?
+# docs/memory/MEMORY.md is not among "every Tier-1 file" here (WI-0108 follow-on): it
+# is now itself a member of $FILES (the -not -name "MEMORY.md" exclusion that used to
+# keep it out of this array is gone, see the find() above), and its own parent_dir is
+# "memory" like any Tier-1 file's — without this guard the index would be required to
+# reference itself by filename inside its own body, which no index does.
 TIER1_INDEX="$MEMORY_DIR/MEMORY.md"
 if [[ -f "$TIER1_INDEX" && $FILES_TOTAL -gt 0 ]]; then
     for file in "${FILES[@]}"; do
         parent_dir="$(basename "$(dirname "$file")")"
         if [[ "$parent_dir" == "memory" ]]; then
             basename_file="$(basename "$file")"
+            [[ "$basename_file" == "MEMORY.md" ]] && continue
             if ! grep -qF "$basename_file" "$TIER1_INDEX"; then
                 warn "docs/memory/MEMORY.md — file '$basename_file' not referenced in Tier-1 index"
             fi
@@ -378,8 +405,15 @@ if [[ -d "$TIER2_GLOBAL_DIR" ]]; then
     while IFS= read -r gfile; do
         grel="${gfile#$HOME/}"
         gbase="$(basename "$gfile")"
-        # MEMORY.md indexes have no frontmatter — skip
-        [[ "$gbase" == "MEMORY.md" ]] && continue
+        # MEMORY.md indexes MAY have no frontmatter — skip only when they truly
+        # don't, aligned with the project-scope rule (WI-0108). Measured
+        # 26.08.2026: the only Tier-2-global index that exists today
+        # (~/.claude/memory/kalza/MEMORY.md) has none, so this alignment changes
+        # nothing for any store currently in use — it only stops this site from
+        # drifting from the rule the project-scope checks now follow.
+        if [[ "$gbase" == "MEMORY.md" ]] && ! fm_has "$gfile"; then
+            continue
+        fi
 
         if ! fm_has "$gfile"; then
             err "~/${grel} — Tier-2-global file without YAML frontmatter"
