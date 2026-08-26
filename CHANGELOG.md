@@ -6,6 +6,33 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+### Fixed
+- **`workitems.py list --status <typo>` returned `[]` and exit 0, and a gate would have
+  believed it.** An unknown filter value produced an empty array indistinguishable from a
+  genuine no-match. That is not merely a usability wart: `Manual/WORKITEMS.md`'s adoption
+  guard instructs every wired command that an **empty result is real** and that for a gate it
+  is "a genuine finding (e.g. 'no Ready story' = Not Met)". A single typo in a gate command's
+  `--status` therefore produced a false **Not Met** verdict, with nothing anywhere saying so.
+
+  The same gap existed on `--priority`, which has its own closed vocabulary. Both are
+  validated on the **write** path already (`set_status`, `validate_priority`); only the
+  **filter** path checked nothing.
+
+  **The fix warns rather than rejects, and the reason is measured, not preferred.** An item
+  carrying a value outside the vocabulary can exist today on both backends — a hand-edited
+  local frontmatter file, or a YouTrack project's own State/Priority bundle, which
+  `_item_from_issue` already passes through deliberately so that "a value already on the issue
+  must still be readable". Rejecting the filter would have made such an item **unfindable**.
+  So `list()` now warns on stderr and runs the filter unchanged.
+
+  Deliberately unchanged: the exit code stays 0 (the filter did run correctly, and every
+  existing caller — the adoption guard included — reads that code), and stdout stays pure
+  JSON. Verified end to end: stderr is byte-for-byte empty for a valid filter value, so
+  nothing new appears on the happy path.
+
+  This is the same defect family as WI-0121 (`phase-docs-lint` reporting `Files scanned: 0`
+  with exit 0) — a run that checked nothing reading as a run that found nothing.
+
 ### Added
 - **A test that can see the two bracket scans drift apart (WI-0117).** WI-0095 brought the
   bracket scan into `scripts/memory-lint.sh` a second time — `protect_link_destinations()`

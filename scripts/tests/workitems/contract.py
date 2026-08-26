@@ -12,6 +12,8 @@ id scheme, not part of the contract (a remote backend's id, e.g. YouTrack's `PRO
 looks nothing like it). Every test captures the id `create` returns and uses that.
 """
 
+import contextlib
+import io
 import os
 import shutil
 import tempfile
@@ -142,6 +144,23 @@ class WorkItemsContractTestCase:
         items = self.backend.list(owner="bob")
 
         self.assertEqual([item["id"] for item in items], [bob_id])
+
+    def test_list_with_a_status_value_outside_the_vocabulary_warns_and_returns_empty(self):
+        """A filter value outside STATUS_VALUES is almost always a caller's typo, not
+        a legitimate query -- but it must not silently produce the SAME `[]` a real
+        "no items have this status" query would (Manual/WORKITEMS.md's "empty result
+        is real" contract, §"The adoption guard"). The filter still runs (an item CAN
+        carry such a value -- see the backend-specific out-of-vocabulary fixtures in
+        test_local.py/test_youtrack.py), but a stderr warning makes a typo visible
+        instead of indistinguishable from a genuine empty match."""
+        self.create_item(status="Done")
+
+        captured_stderr = io.StringIO()
+        with contextlib.redirect_stderr(captured_stderr):
+            items = self.backend.list(status="ZZZNOTASTATUS")
+
+        self.assertEqual(items, [])
+        self.assertIn("ZZZNOTASTATUS", captured_stderr.getvalue())
 
     # --- get ---
 
@@ -749,6 +768,20 @@ class WorkItemsContractTestCase:
         items = self.backend.list(priority="Low")
 
         self.assertEqual(items, [])
+
+    def test_list_with_a_priority_value_outside_the_vocabulary_warns_and_returns_empty(self):
+        """Same reasoning as the status equivalent above: a `--priority` filter value
+        outside PRIORITY_VALUES still runs (the filter can legitimately match an item
+        carrying such a value), but must warn on stderr so a typo is distinguishable
+        from a real "no item has this priority" empty result."""
+        self.create_item()
+
+        captured_stderr = io.StringIO()
+        with contextlib.redirect_stderr(captured_stderr):
+            items = self.backend.list(priority="ZZZNOTAPRIORITY")
+
+        self.assertEqual(items, [])
+        self.assertIn("ZZZNOTAPRIORITY", captured_stderr.getvalue())
 
     # --- set-estimate ---
     #

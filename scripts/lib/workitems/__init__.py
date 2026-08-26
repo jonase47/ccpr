@@ -7,6 +7,7 @@ imports the matching module by name.
 """
 
 import re
+import sys
 
 # Ids are bare identifiers: no path separators, no `.`, no leading `/`. Validated
 # here (not only in the `local` backend) because an id can end up in a filesystem
@@ -144,6 +145,28 @@ def validate_priority(priority):
     if priority not in PRIORITY_VALUES:
         raise WorkItemError(
             f"Unknown priority {priority!r}. Valid values: {', '.join(PRIORITY_VALUES)}"
+        )
+
+
+def warn_if_filter_value_unknown(kind, value, vocabulary):
+    """`list(status=...)`/`list(priority=...)` accepts a filter value outside the
+    closed vocabulary rather than rejecting it (unlike `set_status`/`set_priority`,
+    which validate a WRITE target): an item can legitimately carry such a value today
+    -- a hand-edited local frontmatter file, or a YouTrack project's own State/Priority
+    bundle (see youtrack.py's `_item_from_issue`) -- and must stay findable via
+    `list --status`/`--priority`. But silently running the filter would produce the
+    exact same `[]` a genuine "no item has this value" query returns -- indistinguishable
+    from a caller's plain typo, and Manual/WORKITEMS.md's "empty result is real"
+    contract (§"The adoption guard") depends on being able to trust that `[]` at face
+    value. This warns on stderr instead, then lets the filter run unchanged. Called
+    once per unknown filter value, by both backends' `list()`, before filtering.
+    """
+    if value is not None and value not in vocabulary:
+        print(
+            f"Warning: {value!r} is outside the CCPR {kind} vocabulary "
+            f"({', '.join(vocabulary)}). Filtering for it anyway -- if no work item "
+            "carries this value, the result will be an empty list.",
+            file=sys.stderr,
         )
 
 

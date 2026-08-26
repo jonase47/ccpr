@@ -11,8 +11,9 @@ import re
 from pathlib import Path
 
 from workitems import (
-    STATUS_VALUES, WorkItemError, frontmatter, reject_result_marker, validate_estimate,
-    validate_item_id, validate_link_type, validate_priority, validate_tag,
+    PRIORITY_VALUES, STATUS_VALUES, WorkItemError, frontmatter, reject_result_marker,
+    validate_estimate, validate_item_id, validate_link_type, validate_priority,
+    validate_tag, warn_if_filter_value_unknown,
 )
 
 RESULT_HEADING = "## Result"
@@ -128,6 +129,10 @@ class LocalBackend:
                 "the local backend does not support --query -- use --tag/--type/"
                 "--status/--owner filters instead"
             )
+        if status is not None:
+            warn_if_filter_value_unknown("status", status, STATUS_VALUES)
+        if priority is not None:
+            warn_if_filter_value_unknown("priority", priority, PRIORITY_VALUES)
         if not self.workitems_dir.is_dir():
             return []
 

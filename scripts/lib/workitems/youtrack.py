@@ -41,9 +41,10 @@ import urllib.parse
 import urllib.request
 
 from workitems import (
-    DEFAULT_STALE_AFTER_SECONDS, RESULT_MARKER, STATUS_VALUES, WorkItemError,
-    is_reserved_tag, reject_result_marker, safe_parse_datetime, validate_estimate,
-    validate_item_id, validate_link_type, validate_priority, validate_tag,
+    DEFAULT_STALE_AFTER_SECONDS, PRIORITY_VALUES, RESULT_MARKER, STATUS_VALUES,
+    WorkItemError, is_reserved_tag, reject_result_marker, safe_parse_datetime,
+    validate_estimate, validate_item_id, validate_link_type, validate_priority,
+    validate_tag, warn_if_filter_value_unknown,
 )
 
 # `links(direction,linkType(name),issues(idReadable))` (ADR-0008) lets _item_from_issue
@@ -340,6 +341,7 @@ class YouTrackBackend:
         ]
         items = [self._item_from_issue(issue) for issue in issues]
         if status is not None:
+            warn_if_filter_value_unknown("status", status, STATUS_VALUES)
             items = [item for item in items if item["status"] == status]
         if owner is not None:
             items = [item for item in items if item["owner"] == owner]
@@ -350,6 +352,7 @@ class YouTrackBackend:
         if sprint is not None:
             items = [item for item in items if item["sprint"] == sprint]
         if priority is not None:
+            warn_if_filter_value_unknown("priority", priority, PRIORITY_VALUES)
             items = [item for item in items if item["priority"] == priority]
         return items
 

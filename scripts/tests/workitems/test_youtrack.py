@@ -350,6 +350,44 @@ class YouTrackStateOutsideVocabularyTest(unittest.TestCase):
         self.assertIn("Under Review", captured_stderr.getvalue())
 
 
+class YouTrackUnknownFilterValueTest(unittest.TestCase):
+    """An issue's State or Priority custom field can carry a value outside CCPR's
+    closed vocabulary (see YouTrackStateOutsideVocabularyTest above for State;
+    Priority's own bundle is equally unconstrained -- `_unmap_priority` has the same
+    identity-fallback shape as `_unmap_state`). `list --status`/`--priority` must
+    stay able to find such an item, with a stderr warning so a caller's plain typo in
+    the filter value doesn't produce the same silent `[]` a genuine "no match" would."""
+
+    def setUp(self):
+        self.transport = FakeYouTrackTransport(project_short_name="TEST")
+        self.backend = youtrack.YouTrackBackend(
+            base_url="https://faketrack.example.org", project="TEST",
+            token="fake-token", transport=self.transport,
+        )
+
+    def test_list_by_status_finds_the_out_of_vocabulary_state_with_a_warning(self):
+        item = self.backend.create(title="New feature")
+        self.transport._require_issue(item["id"])["state"] = "Under Review"
+
+        captured_stderr = io.StringIO()
+        with contextlib.redirect_stderr(captured_stderr):
+            items = self.backend.list(status="Under Review")
+
+        self.assertEqual([i["id"] for i in items], [item["id"]])
+        self.assertIn("Under Review", captured_stderr.getvalue())
+
+    def test_list_by_priority_finds_the_out_of_vocabulary_priority_with_a_warning(self):
+        item = self.backend.create(title="New feature")
+        self.transport._require_issue(item["id"])["priority"] = "Urgentissimo"
+
+        captured_stderr = io.StringIO()
+        with contextlib.redirect_stderr(captured_stderr):
+            items = self.backend.list(priority="Urgentissimo")
+
+        self.assertEqual([i["id"] for i in items], [item["id"]])
+        self.assertIn("Urgentissimo", captured_stderr.getvalue())
+
+
 class YouTrackResolveProjectIdTest(unittest.TestCase):
     """_resolve_project_id() calls GET /api/admin/projects, which requires an
     admin-scoped token -- a minimally-scoped token (a common real-world setup)

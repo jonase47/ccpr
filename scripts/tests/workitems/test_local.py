@@ -5,6 +5,8 @@ backend-agnostic contract suite (e.g. the .tmp-file write-failure cleanup below,
 which depends on local's own atomic-write implementation detail).
 """
 
+import contextlib
+import io
 import shutil
 import sys
 import tempfile
@@ -238,6 +240,47 @@ class LocalBackendQueryRejectionTest(unittest.TestCase):
 
         with self.assertRaises(WorkItemError):
             self.backend.list(query="Sprint: 4")
+
+
+class LocalBackendUnknownFilterValueTest(unittest.TestCase):
+    """`local`'s frontmatter files can be hand-edited directly -- nothing on the read
+    path (`_item_from_path`) enforces STATUS_VALUES/PRIORITY_VALUES; only `set_status`/
+    `set_priority` (WRITE) reject a value outside the vocabulary. So a hand-written
+    `status:`/`priority:` field outside the vocabulary is a real, reachable item shape
+    on this backend today -- `list --status`/`--priority` must still be able to find
+    it, with a stderr warning distinguishing that outcome from a caller's plain typo."""
+
+    def setUp(self):
+        self.tmp_dir = tempfile.mkdtemp(prefix="ccpr-workitems-unknown-filter-")
+        self.addCleanup(shutil.rmtree, self.tmp_dir, ignore_errors=True)
+        self.backend = local.create({"workitems_dir": self.tmp_dir})
+
+    def test_list_by_status_finds_a_hand_written_out_of_vocabulary_status(self):
+        (Path(self.tmp_dir) / "WI-0001.md").write_text(
+            "---\nid: WI-0001\ntitle: Scratch\nstatus: Under Review\n---\nBody.\n",
+            encoding="utf-8",
+        )
+
+        captured_stderr = io.StringIO()
+        with contextlib.redirect_stderr(captured_stderr):
+            items = self.backend.list(status="Under Review")
+
+        self.assertEqual([item["id"] for item in items], ["WI-0001"])
+        self.assertIn("Under Review", captured_stderr.getvalue())
+
+    def test_list_by_priority_finds_a_hand_written_out_of_vocabulary_priority(self):
+        (Path(self.tmp_dir) / "WI-0001.md").write_text(
+            "---\nid: WI-0001\ntitle: Scratch\nstatus: Backlog\n"
+            "priority: Urgentissimo\n---\nBody.\n",
+            encoding="utf-8",
+        )
+
+        captured_stderr = io.StringIO()
+        with contextlib.redirect_stderr(captured_stderr):
+            items = self.backend.list(priority="Urgentissimo")
+
+        self.assertEqual([item["id"] for item in items], ["WI-0001"])
+        self.assertIn("Urgentissimo", captured_stderr.getvalue())
 
 
 class LocalBackendCreateTest(unittest.TestCase):

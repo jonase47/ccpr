@@ -291,6 +291,15 @@ A project may not have adopted the structured store yet (no `docs/workitems/`, s
 > store and a never-adopted project — only the directory's existence tells them apart. Treating an
 > adopted-empty store as never-adopted would **false-pass a gate** (skip a real Not-Met via the prose
 > exemption).
+>
+> **Third signal: check stderr.** The rule above — "the empty result is real" — assumes the filter you
+> passed was a filter the store understands. A `--status` or `--priority` value outside the closed
+> vocabulary used to return the same `[]` as a genuine no-match, so one typo in a gate command turned
+> into a false **Not Met**. `list` now prints a warning on **stderr** for such a value and runs the
+> filter anyway (an item can legitimately carry an out-of-vocabulary value — a hand-edited local
+> frontmatter file, or a YouTrack project's own State bundle — and must stay findable). Exit code and
+> stdout are unchanged, so nothing about the two branches above moves: **an `[]` accompanied by a
+> stderr warning is not a finding, it is a typo.** Surface that line rather than swallowing it.
 
 Rationale: **dual-write** re-creates two writable registers (the §7 drift). **Requiring `lift`** breaks
 every project on upgrade. Feature-detect honours "old and new coexist" and the empty-list case is
