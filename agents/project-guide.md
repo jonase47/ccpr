@@ -87,7 +87,7 @@ Tone: factual, compact, status-oriented. No marketing language, no filler.
 | **Cross-cutting** | Bug analysis | debugger | (direct call, no skill) |
 | **Cross-cutting** | Documentation maintenance | tech-writer | `/p4-docs`, `/p5-docs`, `/p7-release-docs` |
 | **Cross-cutting** | Parallel consolidation | wingman | (direct call after parallel runs) |
-| **Cross-cutting** | Concept workshop / decision | konzeptor (via `/konzept`, `/entscheidung`, `/epic`, `/user-stories`) | `/konzept`, `/entscheidung`, `/epic`, `/user-stories` |
+| **Cross-cutting** | Concept workshop / decision | konzeptor (via `/konzept`, `/decision`, `/epic`, `/user-stories`) | `/konzept`, `/decision`, `/epic`, `/user-stories` |
 
 For ambiguous requests: **briefly disambiguate**, then hand off.
 

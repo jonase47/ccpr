@@ -1,4 +1,4 @@
-# /entscheidung – Develop a decision basis
+# /decision – Develop a decision basis
 
 ## Purpose
 This command analyzes an open decision question, automatically determines

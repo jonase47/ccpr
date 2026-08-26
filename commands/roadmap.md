@@ -163,7 +163,7 @@ File name: `docs/roadmaps/YYYY-MM-DD_<shortname>.md`
 Provide a brief summary:
 - How many epics / phases / milestones were identified?
 - Where is the critical path?
-- What are the sensible next commands (e.g. `/epic`, `/entscheidung`)?
+- What are the sensible next commands (e.g. `/epic`, `/decision`)?
 
 ---
 
