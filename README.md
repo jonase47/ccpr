@@ -20,7 +20,7 @@ Concretely: 15 specialised subagents cover the whole arc of a project — discov
 
 **Two tracks:** Full-Track (P0–P8) for production projects; Lean-Track (4 skills, no gates) for quick prototypes and internal experiments.
 
-> **Status: public beta (`v0.1.0-beta`).** CCPR is usable end-to-end but pre-1.0 — expect rough edges (see [`BETA.md`](BETA.md) for known limitations). Feedback is exactly what's wanted right now: [open an issue](https://github.com/jonase47/ccpr/issues), the bar is low.
+> **Status: public beta (`v0.3.0-beta`).** CCPR is usable end-to-end but pre-1.0 — expect rough edges (see [`BETA.md`](BETA.md) for known limitations). Feedback is exactly what's wanted right now: [open an issue](https://github.com/jonase47/ccpr/issues), the bar is low.
 
 ---
 
@@ -180,7 +180,7 @@ CCPR follows [SemVer](https://semver.org/). Releases are tagged `vMAJOR.MINOR.PA
 ```bash
 git clone https://github.com/jonase47/ccpr.git
 cd ccpr
-git checkout v0.1.0-beta   # latest tag; run `git tag -l` to see all available tags
+git checkout v0.3.0-beta   # latest tag; run `git tag -l` to see all available tags
 ```
 
 ### 2. Run the installer
@@ -300,7 +300,7 @@ newer version:
 
 ```bash
 cd ccpr
-git fetch --tags && git checkout v0.1.0-beta   # or the version you want
+git fetch --tags && git checkout v0.3.0-beta   # or the version you want
 ./install.sh --update                           # framework only — keeps your local files
 ```
 

@@ -6,6 +6,10 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+_Nothing yet._
+
+## [v0.3.0-beta] – 26.08.2026
+
 ### Changed
 - **`Manual/SYSTEM_OVERVIEW.md` §9–§11 were copies of `Manual/system/memory-instincts.md`,
   and §11 had drifted away from the model it describes.** The "slim index → detail files"
@@ -1940,7 +1944,8 @@ Initial public release on GitHub. CCPR (Claude Code Project Runner) is a phase-b
 - **Safe installer** — `install.sh` with timestamped backup, overwrite preview, `--update` (framework-only, preserves personal files + matured instincts) and `--dry-run`; user-owned sub-paths preserved across wholesale replace. Windows guidance (WSL / Git Bash / PowerShell fallback) in the README.
 - **Open-source scaffolding** — `LICENSE` (MIT), `AUTHORS`, `CONTRIBUTING.md`, `SECURITY.md`, `BETA.md` (public-beta charter), and GitHub issue templates under `.github/ISSUE_TEMPLATE/` (bug / feedback / question).
 
-[Unreleased]: https://github.com/jonase47/ccpr/compare/v0.2.1-beta...HEAD
+[Unreleased]: https://github.com/jonase47/ccpr/compare/v0.3.0-beta...HEAD
+[v0.3.0-beta]: https://github.com/jonase47/ccpr/compare/v0.2.1-beta...v0.3.0-beta
 [0.2.1-beta]: https://github.com/jonase47/ccpr/compare/v0.2.0-beta...v0.2.1-beta
 [0.2.0-beta]: https://github.com/jonase47/ccpr/compare/v0.1.0-beta...v0.2.0-beta
 [v0.1.0-beta]: https://github.com/jonase47/ccpr/releases/tag/v0.1.0-beta
