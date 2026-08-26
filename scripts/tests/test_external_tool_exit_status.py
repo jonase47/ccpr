@@ -116,9 +116,9 @@ NOT on a bare file+substring pair in this test, which would itself drift the
 moment the invocation's own text changes.
 
 `<category>` must be a key in `EXEMPTION_REASONS` below, one shared reason
-per category rather than one per site: most of the ~80 exemption sites are
-routine (a HANDOVER.md field extraction degrading to blank output, a git
-overlay-clone refresh already designed to tolerate failure). `known-risk-
+per category rather than one per site: most exemption sites are routine (a
+HANDOVER.md field extraction degrading to blank output, a git overlay-clone
+refresh already designed to tolerate failure). `known-risk-
 not-yet-fixed` was, until WI-0056/WI-0057, the category meant to stand out
 from the routine ones -- see "Findings surfaced, not fixed" below for why no
 site carries it any more.

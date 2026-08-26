@@ -305,9 +305,9 @@ class MemoryLintFixture:
         arguments — the script still runs to completion and prints a well-formed,
         clean-looking report. The only way to tell that apart from an actually
         clean run is to already know the answer: a fixture with a single, known
-        dead link. Deliberately not folded into `run_lint()` (which every one of
-        this class's ~600 tests calls) — one extra script invocation per test
-        would double the suite's ~60s runtime for no added coverage, since the
+        dead link. Deliberately not folded into `run_lint()` (which every test
+        in this class calls) — one extra script invocation per test would
+        double the suite's ~60s runtime for no added coverage, since the
         thing being checked (is the awk extraction intact at all) does not vary
         per test. One run before any test in the class executes is exactly the
         "must hold before any other assertion runs" semantics this precondition

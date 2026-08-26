@@ -7,6 +7,17 @@ All notable changes to this project are documented in this file. The format is b
 ## [Unreleased]
 
 ### Fixed
+- **A hand-typed test count in a docstring was three times the actual value, and the class it
+  describes is exactly the one place that overstatement can cause a real regression (WI-0120).**
+  `scripts/tests/test_memory_lint.py:309` said "this class's ~600 tests" where `MemoryLintTest`
+  measured 26.08.2026 carries 205. The same class's size already caused a defect once: a sibling
+  test class inherited from `MemoryLintTest` for its fixtures and silently inherited ~200 duplicate
+  test executions with it (suite count 1397 → 1599, still exit 0 since duplicates pass). Both
+  occurrences are reworded to state their point without a hand-maintained count that goes stale the
+  same way the class grows — `test_memory_lint.py:198`'s "~200" is correct and left alone. The
+  demanded sibling sweep found one more of the same species, milder: `test_external_tool_exit_status.py:119`
+  said "~80 exemption sites" against a measured 95 (19%, already hedged with `~`); reworded the
+  same stale-proof way.
 - **The documented checklist and the checks it describes were never bound to each other
   (WI-0110).** Measured 26.08.2026: `scripts/memory-lint.sh` and the "Per file" checklist chapter
   of `Manual/system/memory-instincts.md` already agree — both name the same 15 check letters
