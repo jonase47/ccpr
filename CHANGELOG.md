@@ -7,6 +7,38 @@ All notable changes to this project are documented in this file. The format is b
 ## [Unreleased]
 
 ### Changed
+- **`Manual/SYSTEM_OVERVIEW.md` §9–§11 were copies of `Manual/system/memory-instincts.md`,
+  and §11 had drifted away from the model it describes.** The "slim index → detail files"
+  split was started and never finished for these three sections: the `Full chapter` pointers
+  added earlier made the duplication visible without removing it. All three are now
+  summaries plus a pointer, matching the shape §5 and §7 already use.
+
+  §11 had drifted furthest — it named **three** instinct levels where the model has **four
+  scopes**, omitted global Tier 2 (`~/.claude/memory/{agent}/instincts.md`) entirely, and
+  gave the ID schema without `{prefix}-G-NNN`. §9 said "Two-tier" for a 2×2 model, had no
+  Global column, omitted `scope: tier-2-global` / `agent:` from its frontmatter block, and
+  never mentioned org-tier sharing although §7 links to it.
+
+  **The copies were deliberately not re-synced.** Restoring parity would rebuild the exact
+  mechanism that produced the drift. Instead every surviving claim was checked against its
+  *source* rather than against the other copy — which found three places where **both
+  copies agreed with each other and neither agreed with the source**:
+
+  - the memory `type` table was missing `index` (Tier 1) and `patterns` (Tier 2), and did
+    not mention that Tier 1 is a closed enum while Tier 2 deliberately only warns
+    (`templates/MEMORY_SCHEMA.md`);
+  - a new instinct starts at **0.4**, not "0.4-0.5", and `reject`'s 0.3 is a *delete
+    prompt*, not a floor (`commands/instinct.md`);
+  - `doc-volume-check.sh`'s bands are info / warning / error at 25 / 40 / 50 KB, and the
+    info band does **not** raise the exit code (the script's own header and exit logic).
+
+  Those three were fixed in `system/memory-instincts.md`, which is now the single copy.
+  `SYSTEM_OVERVIEW.md` 43.7 KB → 41.1 KB.
+
+  **Still open, and named rather than silently left:** §12 File Structure is the same
+  defect one section further — a 129-line directory tree that `system/file-structure.md`
+  already carries in full, and the ~4 KB that keeps the index in `doc-volume-check.sh`'s
+  40–50 KB warning band.
 - **`CONTRIBUTING.md` did not mention the test suite at all.** Its "Quality checks before
   opening a PR" section listed three linters and two syntax checks; the 1458-test Python
   suite under `scripts/tests/` — the only thing that actually covers the shipped scripts —

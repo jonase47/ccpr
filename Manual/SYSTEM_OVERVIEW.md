@@ -664,67 +664,37 @@ Claude delegates routine tasks to Ollama when the server is reachable:
 
 ### Concept
 
-Two-tier memory: cross-cutting (Tier 1) coexists with persona-specific silos (Tier 2). Memories are versioned in the project repository and pushable. Global personal memories (`type: user`) remain in personal global memory and are not pushed.
+Memory is factual knowledge Claude carries between sessions, organised as a **2×2
+matrix**: two tiers (cross-cutting vs. persona-specific) × two scopes (global vs.
+project). The four slots coexist on purpose — a rule about this codebase and a rule about
+a language's idioms do not belong in the same file.
 
-### Tiers
-
-| Tier | Path | Scope |
+|  | **Tier 1 — cross-cutting** | **Tier 2 — persona-specific** |
 |---|---|---|
-| Tier 1 — cross-cutting | `docs/memory/{type}_{slug}.md` (flat) | Relevant to orchestrator AND ≥2 agents — tooling decisions, project conventions, external references |
-| Tier 2 — agent silos | `docs/memory/{agent}/MEMORY.md` + topic files | Meaningful only inside one agent's domain |
+| **Global** (`~/.claude/`) | `instincts.md` (slim index) + `instincts/{theme}.md` + `instincts-archive/HISTORY.md` | `memory/{agent}/instincts.md` (+ topic files) |
+| **Project** (`docs/memory/`) | `{type}_{slug}.md` (flat) | `{agent}/MEMORY.md` + topic files |
 
-**Tier-separation rule** — cross-cutting → Tier 1; persona-specific → Tier 2. **When in doubt, do not default to Tier 1**: the earlier "visibility wins over isolation" tiebreaker was reversed after it drifted persona-specific patterns into the global file. Full decision order: [system/memory-instincts.md](system/memory-instincts.md).
+Project-scoped memory is versioned in the project repository and pushable; global memory
+stays in personal global storage and is never pushed — `type: user` never leaves it.
 
-### Memory Types (Tier 1)
+**Tier-separation rule** — cross-cutting → Tier 1; persona-specific → Tier 2.
+**When in doubt, do not default to Tier 1**: the earlier "visibility wins over isolation"
+tiebreaker was reversed after it drifted persona-specific patterns into the global file.
 
-| Type | Use case |
-|---|---|
-| `feedback` | Guidance from the user — what to do, what to avoid, with reasoning |
-| `project` | Project-specific facts, decisions, deadlines, constraints |
-| `reference` | Pointers to external systems (URLs, dashboards, ticket trackers) |
-| `user` | Personal user info — stays in `~/.claude/projects/.../memory/`, not pushed |
+Required frontmatter is `name`, `description`, `type`, `last_updated`; a Tier-2-global
+file additionally carries `scope: tier-2-global` and `agent: <name>`. The `type`
+vocabulary is a **closed enum in Tier 1 and deliberately open in Tier 2**, so an
+unforeseen persona label warns rather than fails.
 
-### Frontmatter Schema
+`memory-lint.sh` validates all of it — schema, naming, `related:` cross-references, index
+consistency in both directions, age, and the size caps on the global instinct files.
+`memory-sync.sh` shares entries with a team through a read-only overlay and a discipline
+gate (§7).
 
-```yaml
----
-name: short-slug-or-title                 # required
-description: one-line summary             # required
-type: feedback|project|reference          # required (user stays global)
-last_updated: DD.MM.YYYY                   # required
-status: active|superseded|archived        # optional
-related: [other_memory.md]                # optional, paths relative to file
-confidence: 0.4                           # optional, for instinct memories
----
-```
-
-Full schema: `templates/MEMORY_SCHEMA.md`.
-
-### Indexes
-
-- Tier 1 index: `docs/memory/MEMORY.md` (template: `templates/MEMORY_INDEX_TEMPLATE.md`)
-- Tier 2 index: `docs/memory/{agent}/MEMORY.md` (one per agent silo, slim)
-
-Indexes are listings — no frontmatter required.
-
-### Memory Lint
-
-`~/.claude/scripts/memory-lint.sh [projectdir]` validates `docs/memory/**` and the global tiers:
-frontmatter schema and naming, `related:` cross-references, index consistency in both directions,
-`last_updated` age, and the size caps on `~/.claude/instincts.md` and its topic files. It exits 0
-clean, 1 on warnings, 2 on errors, and 3 when its own configuration is wrong.
-
-**Full chapter**: [system/memory-instincts.md → Memory Lint](system/memory-instincts.md) — the
-check-by-check list lives there, once, next to the script it describes.
-
-### Templates
-
-| File | Purpose |
-|---|---|
-| `templates/MEMORY_SCHEMA.md` | Full field reference |
-| `templates/MEMORY_PAGE_TEMPLATE.md` | Starter for a new memory file |
-| `templates/MEMORY_INDEX_TEMPLATE.md` | Starter for `MEMORY.md` index |
-| `templates/MEMORY_LINT_REPORT_TEMPLATE.md` | Lint output format reference |
+**Full chapter**: [system/memory-instincts.md → Memory](system/memory-instincts.md) — the
+type table, the full frontmatter block, the index conventions, the check-by-check lint
+list, the template catalogue and the org-tier sharing protocol live there.
+Schema: `templates/MEMORY_SCHEMA.md`.
 
 ---
 
@@ -732,76 +702,28 @@ check-by-check list lives there, once, next to the script it describes.
 
 ### Concept
 
-Phases P3 (Architecture & Design) and P6 (Quality Assurance) produce many concerns. A single monolithic phase document would bloat past 30–50 KB and force re-reading large blocks. The solution: a **two-level pattern** — slim phase index + one detail file per sub-skill.
+Phases P3 and P6 produce many concerns at once, and a single monolithic phase document
+bloats past 30–50 KB. The answer is a **two-level pattern**: a slim phase index plus one
+detail file per sub-skill.
 
-### Pattern
+The index (`docs/<phase>/<PHASE>.md`, 5–15 KB) carries state, key decisions and pointers;
+each sub-skill owns one detail file beside it; P3 and P6 add a sub-index level that groups
+several detail files under one lead command.
 
-```
-docs/<phase-folder>/
-+-- <PHASE>.md              # Phase index (5–15 KB) — current state, key decisions, file pointers
-+-- <DETAIL_1>.md           # Sub-skill detail file with full content
-+-- <DETAIL_2>.md
-+-- <SUB_INDEX>.md          # P3/P6 only — groups several detail files under one lead command
-```
+Each `/pX-…` sub-skill **overwrites** its detail file (never appends), then refreshes the
+index row and lifts any one-line key decision or risk into the index. Gate commands read
+the index first and pull a detail file only when a content check demands it — that is what
+keeps a gate's context window small.
 
-**Examples**
-- P3: `architecture/ARCHITECTURE.md` (index) + `THREATS.md`, `ADRs.md`, `SECURITY.md` (sub-index for `/p3-sec-*`)
-- P6: `quality/QA.md` (index) + sub-indexes for each lead command (`A11Y.md`, `AUDIT.md`, `PENTEST.md`, …)
+Required frontmatter is `phase` (P0..P8), `subskill`, `status`, `last_updated`, with
+`status` one of `skeleton | draft | active | frozen | archived | living`. Phase docs have
+**no stale detection**: unlike memory, `frozen` is a wanted end state, not a warning.
+`phase-docs-lint.sh` validates the schema; `doc-volume-check.sh` watches size (info at
+25–40 KB, warning at 40–50, error at ≥50).
 
-### Sub-Skill Responsibilities
-
-Each `/pX-...` sub-skill command must:
-
-1. **Write detail file** — overwrite (not append) `docs/<phase>/<DETAIL>.md` with YAML frontmatter
-2. **Update phase index** — refresh the detail-file row, lift any one-line key decision or risk into the index
-
-### Frontmatter Schema
-
-```yaml
----
-phase: P3                     # required, P0..P8
-subskill: p3-sec-threats      # required, slash command without leading /
-status: active                # required: skeleton|draft|active|frozen|archived|living
-last_updated: 12.05.2026      # required, DD.MM.YYYY or "DD.MM.YYYY (note)"
-related: [ARCHITECTURE.md]    # optional, paths relative to file
-parent_index: SECURITY.md     # optional, for detail files under a sub-index
-gate: pending                 # optional, for GATE_PX.md files
----
-```
-
-Full schema: `templates/PHASE_DOC_SCHEMA.md`.
-
-### Status Semantics
-
-| Status | Meaning |
-|---|---|
-| `skeleton` | Empty placeholder (e.g. P6 sub-index pre-implementation) |
-| `draft` | Work in progress |
-| `active` | Usable, current |
-| `frozen` | Locked after gate pass; baseline mode |
-| `archived` | Replaced by newer file, kept for history |
-| `living` | Detail file designed to grow over time (e.g. `SPRINT-XX.md`, `RISKS.md`) |
-
-Phase docs have **no stale detection** (unlike memory) — `frozen` is a wanted state, not a warning.
-
-### Gate Reading Pattern
-
-Gate commands (`/gate-pX`) read the phase index first. Detail files are pulled only when content checks demand it. This keeps the gate's context window small.
-
-### Validation
-
-`~/.claude/scripts/phase-docs-lint.sh [projectdir] [--scope <glob>]` checks:
-- Required frontmatter fields present
-- `status` is one of the allowed enum values
-- Cross-refs in `related:` and `parent_index:` resolve
-- Each detail file referenced in its phase index or sub-index
-
-### Volume Watch
-
-`~/.claude/scripts/doc-volume-check.sh [docs-root]` flags files at thresholds:
-- ≥25 KB → review whether splitting helps
-- ≥40 KB → split recommended
-- ≥50 KB → split required (G-017 protection — large files erode Claude's effectiveness)
+**Full chapter**: [system/memory-instincts.md → Document Splitting](system/memory-instincts.md)
+— the worked P3/P6 examples, the status semantics table and the per-check validation list
+live there. Schema: `templates/PHASE_DOC_SCHEMA.md`.
 
 ---
 
@@ -809,56 +731,29 @@ Gate commands (`/gate-pX`) read the phase index first. Detail files are pulled o
 
 ### Concept
 
-Instincts are experience-based rules with confidence score (0.3-0.9).
-They emerge from session experience and are confirmed or rejected over time.
+Instincts are behavioural rules with a confidence score (0.3–0.9), mined from session
+experience by `/postmortem` and confirmed or contradicted over time. Memory is *what is
+true*; an instinct is *how to work*. Claude follows one proportionally to its confidence.
 
-### Levels
+### Four scopes
 
-| Level | File | Scope |
-|---|---|---|
-| Global | `~/.claude/instincts.md` | All projects, all agents |
-| Agent | `docs/memory/{agent}/instincts.md` | Specific agent |
-| Project | `docs/instincts.md` | Specific project |
+Instincts sit in the same 2×2 as memory (§9), so there are **four** instinct files, not
+three: global Tier 1 (`~/.claude/instincts.md` + `instincts/{theme}.md` +
+`instincts-archive/HISTORY.md`), global Tier 2 (`~/.claude/memory/{agent}/instincts.md`),
+project Tier 1 (`docs/instincts.md`) and project Tier 2
+(`docs/memory/{agent}/instincts.md`). A subagent reads all four layers that apply to it;
+on conflict the more specific wins (project over global, Tier 2 over Tier 1).
 
-### Instinct Format
+**ID schema**: `G-NNN` global Tier 1 · `{prefix}-G-NNN` global Tier 2 (`SD-G-001`,
+`DV-G-001`, …) · `SD-NNN` / `QA-NNN` / … project Tier 2. A namespaced overlay from another
+contributor or a shared org tier keeps its own prefix, so nothing collides on re-sync.
 
-```markdown
-### [ID] Short Title
-**Confidence: 0.X** | Source: [context]
-> Rule in one sentence.
-```
+**Lifecycle**: `/postmortem` proposes; `/instinct add|confirm|reject|promote|cleanup`
+maintains; `instinct-check.sh` reports age and decay candidates without an LLM.
 
-**ID schema:** `G-NNN` (Global), `SD-NNN` (Senior-Dev), `QA-NNN` (QA-Tester), etc.
-
-### Confidence Rules
-
-| Action | Effect |
-|---|---|
-| Newly created | 0.4-0.5 |
-| Confirmed (`/instinct confirm`) | +0.1 (max 0.9) |
-| Contradicted (`/instinct reject`) | -0.2 (min 0.3) |
-| Decay (> 30 days unconfirmed) | -0.1 |
-
-Claude follows instincts proportional to their confidence score.
-
-### Management Commands
-
-| Command | Effect |
-|---|---|
-| `/postmortem` | Analyze session, propose instincts |
-| `/instinct list` | Show all instincts |
-| `/instinct add [rule]` | Create new instinct |
-| `/instinct confirm [ID]` | Increase confidence |
-| `/instinct reject [ID]` | Decrease confidence |
-| `/instinct promote [ID]` | Promote agent instinct to global |
-| `/instinct cleanup` | Remove outdated instincts |
-
-### Instinct Check (Script)
-
-`~/.claude/scripts/instinct-check.sh` checks without LLM:
-- Age of instincts.md
-- Number of active instincts
-- Warning if > 30 days since last update
+**Full chapter**: [system/memory-instincts.md → Continuous Learning](system/memory-instincts.md)
+— the entry format, the confidence arithmetic with its source of truth per row, and the
+command-by-command effects live there.
 
 ---
 
@@ -991,3 +886,4 @@ my-project/
 | 20.08.2026 | Documented `memory-sync.sh` (org-tier memory/instincts sharing, shipped since v0.2.0-beta) and the discipline gate (`artifact-gate.sh` + `lib/discipline_gate.sh` + CI template) — none of the three had appeared anywhere under `Manual/` before. New detail page `system/discipline-gate.md`; `system/memory-instincts.md` gained a "Team Sharing (Org Tier)" subsection. The discipline gate itself is **not yet in any tagged release** (absent from `v0.2.1-beta`) — noted at every mention. |
 | 21.08.2026 | Documented anchored state verification (`/anchor`, `scripts/anchor.sh`, ADR-0009) — checks phase documents against the code they describe rather than against other documents, closing the gap `/cross-check`'s R6 rule names but never closes. New detail page `system/anchored-state.md`; new "Anchored State Verification (`/anchor`)" subsection alongside Cross-Check in §5. `/anchor` is **not yet in any tagged release** (absent from `v0.2.1-beta`) — noted at every mention. Command count 115 → 116 (Utility 13 → 14). |
 | 26.08.2026 | Added the 7 missing "Full chapter" pointers to `system/agents.md`, `phases-gates.md`, `commands.md`, `cross-cutting.md`, `monitoring-scripts.md` (linked from §6, §7 and §8 — the one detail file spans all three index sections), `scripts-conventions.md` and `file-structure.md`, making the "slim index → detail files" README claim true for both `SYSTEM_OVERVIEW.md` and `SECTIONS_COMMANDS.md`. `SECTIONS_COMMANDS.md`'s per-section command tables (108 rows byte-identical to `commands/*.md`, 8 worded differently, `/p5-review-sprint` present only here) were replaced by orientation paragraphs + pointers after reconciling the 8 divergent rows against the source `commands/*.md` files and adding the missing command to `commands/phases.md`. |
+| 26.08.2026 (2) | Finished the index/chapter split for §9 Memory, §10 Document Splitting and §11 Instincts, which had been **copied** into the index rather than moved out of it — the pointers added earlier the same day made the duplication visible without removing it. All three are now summaries plus a `system/memory-instincts.md` pointer, in the shape §5 and §7 already used. §11 had drifted furthest: it named **three** instinct levels where the model has **four scopes**, omitted global Tier 2 (`~/.claude/memory/{agent}/instincts.md`) entirely and gave the ID schema without `{prefix}-G-NNN`. §9 said "Two-tier" for a 2×2 model, had no Global column, omitted `scope: tier-2-global` / `agent:` from the frontmatter and never mentioned org-tier sharing although §7 links to it. **The copies were not re-synced** — restoring parity would rebuild the mechanism that produced the drift. Each surviving claim was checked against its source rather than against the other copy, which found three places where **both** copies agreed with each other and neither with the source: the memory `type` table was missing `index` and Tier-2 `patterns` (`templates/MEMORY_SCHEMA.md`), a new instinct starts at **0.4** not "0.4-0.5" and `reject`'s 0.3 is a delete **prompt**, not a floor (`commands/instinct.md`), and `doc-volume-check.sh`'s three bands are info/warning/error at 25/40/50 KB with the info band not raising the exit code (the script's own header). Those were fixed in the detail chapter, which is now the single copy. Index 43.7 KB → 41.1 KB. |

@@ -27,7 +27,7 @@ Memory is organised in a 2×2 matrix (tier × scope): cross-cutting (Tier 1) coe
 2. ≥2 agent domains genuinely consume the rule today → Tier 1.
 3. Still uncertain → start in Tier 2 of the surfacing persona; promote to Tier 1 at the 3rd cross-reference from a different domain.
 
-### Memory Types (Tier 1)
+### Memory Types
 
 | Type | Use case |
 |---|---|
@@ -35,6 +35,15 @@ Memory is organised in a 2×2 matrix (tier × scope): cross-cutting (Tier 1) coe
 | `project` | Project-specific facts, decisions, deadlines, constraints |
 | `reference` | Pointers to external systems (URLs, dashboards, ticket trackers) |
 | `user` | Personal user info — stays in `~/.claude/projects/.../memory/`, not pushed |
+| `index` | For a `MEMORY.md` index file that chose to carry frontmatter — "this file is the list, not a memory record" |
+
+Tier 2 uses the same set plus `patterns` (a persona's general working conventions,
+not tied to one project fact).
+
+**The two tiers enforce that vocabulary differently, and the asymmetry is deliberate.**
+Tier 1 is a closed enum and `memory-lint.sh` errors on a value outside it. Tier 2 is
+open: an unrecognised value only warns, so a persona reaching for a label the schema has
+not yet named does not fail the lint. Full field reference: `templates/MEMORY_SCHEMA.md`.
 
 ### Frontmatter Schema
 
@@ -245,10 +254,18 @@ Gate commands (`/gate-pX`) read the phase index first. Detail files are pulled o
 
 ### Volume Watch
 
-`~/.claude/scripts/doc-volume-check.sh [docs-root]` flags files at thresholds:
-- ≥25 KB → review whether splitting helps
-- ≥40 KB → split recommended
-- ≥50 KB → split required (G-017 protection — large files erode Claude's effectiveness)
+`~/.claude/scripts/doc-volume-check.sh [docs-root]` flags files in three bands, and the
+band names are the script's own (`scripts/doc-volume-check.sh`, header):
+
+| Band | Severity | Meaning |
+|---|---|---|
+| 25–40 KB | info | splitting recommended |
+| 40–50 KB | warning | splitting urgent |
+| ≥ 50 KB | error | read-fail risk (cf. G-017 — a file this large erodes what a Read actually delivers) |
+
+Exit code: **2** if any file is in the error band, **1** if any is in the warning band,
+otherwise **0**. The info band does not raise it — a run reporting only 25–40 KB files
+exits clean.
 
 ---
 
@@ -279,12 +296,13 @@ Instincts are experience-based rules with confidence score (0.3-0.9). They emerg
 
 ### Confidence Rules
 
-| Action | Effect |
-|---|---|
-| Newly created | 0.4-0.5 |
-| Confirmed (`/instinct confirm`) | +0.1 (max 0.9) |
-| Contradicted (`/instinct reject`) | -0.2 (min 0.3) |
-| Decay (> 30 days unconfirmed) | -0.1 |
+| Action | Effect | Defined in |
+|---|---|---|
+| Newly created | **0.4** | `commands/instinct.md` → `add` |
+| Confirmed (`/instinct confirm`) | +0.1, capped at 0.9 | `commands/instinct.md` → `confirm` |
+| Contradicted (`/instinct reject`) | −0.2 — and at ≤ 0.3 you are **asked whether to delete or keep**, which is a prompt, not a floor | `commands/instinct.md` → `reject` |
+| Promoted (`/instinct promote`) | new global entry starts at 0.4 (fresh start); the agent original is kept | `commands/instinct.md` → `promote` |
+| Decay (> 30 days unconfirmed) | −0.1 | the decay policy in `instincts.md` itself, not the command |
 
 Claude follows instincts proportional to their confidence score.
 
