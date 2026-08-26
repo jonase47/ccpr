@@ -6,6 +6,41 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+### Added
+- **A test that can see the two bracket scans drift apart (WI-0117).** WI-0095 brought the
+  bracket scan into `scripts/memory-lint.sh` a second time — `protect_link_destinations()`
+  (depth + escape) and `process_link_line()` (depth + escape, plus per-level
+  `st_act[]`/`st_img[]`/`st_pos[]`, image markers, rule-3 deactivation, shortcut and
+  collapsed references). These are **not** one rule written twice and were deliberately not
+  merged: one caller needs a per-level struct, the other a counter.
+
+  What the duplication cost was mutation strength. `_mutate_both()` restored it for the
+  shared case by mutating both copies in lockstep — but a lockstep mutation can never
+  produce a disagreement between them, so nothing could notice the two **drifting apart**.
+  Tighten the escape handling in one and not the other and every test stayed green.
+
+  Both functions compute the shared verdict — "is a live, unescaped opener open right now" —
+  as a plain local boolean (`had_opener = (sp > 0)`; the `sp == 0` guard before rule 3).
+  A scratch **copy** of the shipped script gets one `print` inserted after each of those two
+  decision points, gated on an environment variable, and the two verdict *sequences* are
+  compared over eight bracket fixtures. Neither function's control flow changes; the shipped
+  script is never written to (asserted by md5 in a `finally`), and the environment variable
+  does not appear in it at all, so a real run cannot emit the trace.
+
+  The instrument's discriminating power is itself a permanent test rather than a one-off
+  manual check: `test_a_deliberate_divergence_between_the_two_scans_is_caught` tightens
+  **only** `protect_link_destinations()`'s escape check to a naive one-byte lookbehind and
+  feeds it an **even** run of backslashes — precisely the input where escape *parity* (what
+  both actually implement) and a one-byte lookbehind disagree. An odd run would have proven
+  nothing. The agreement test additionally asserts each trace is **non-empty** before
+  comparing, so two silently empty traces cannot pass as agreement.
+
+  Documented limit, stated rather than left to be discovered: the eight fixtures are chosen
+  so a resolved destination's length change never lands *between* two positions being
+  correlated. A fixture with a second destination following an already-resolved one on the
+  same line would need correlation by ordinal occurrence instead of byte offset — that change
+  first, then the fixture.
+
 ### Fixed
 - **check (n): a block quote interrupting a paragraph could hide a real link (WI-0089).**
   CommonMark lets a block quote interrupt an open paragraph. `memory-lint.sh`'s paragraph

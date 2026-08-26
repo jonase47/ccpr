@@ -4754,6 +4754,227 @@ class LinkScannerMutationTest(unittest.TestCase):
         self._assert_script_untouched(original)
 
 
+class LinkScannerAgreementTest(unittest.TestCase):
+    """WI-0117 obligation: nothing pins that protect_link_destinations()
+    (~1025) and process_link_line() (~1368) AGREE on the one thing WI-0095's
+    own consolidation note says they must agree on — where a live, unescaped
+    opener sits. LinkScannerMutationTest's _mutate_both() restores mutation
+    STRENGTH for the shared case by mutating both copies in lockstep; by
+    construction it cannot notice the two copies drifting APART, because a
+    lockstep mutation can never produce a disagreement between them. This
+    class is the missing instrument: it observes each function's own verdict
+    ("is there a live opener open right now") at every unescaped `]`, on the
+    identical input text, and pins that the two SEQUENCES of verdicts agree —
+    not that the two functions behave identically overall, which they do not
+    and are not meant to (rule-3 deactivation, image markers, the per-level
+    st_act/st_img/st_pos arrays, and the destination scan itself exist in
+    one, not the other).
+
+    Observability. Neither function returns "where the live opener sits" as
+    an inspectable value — protect_link_destinations() only exposes it
+    indirectly (whether a dest_mark span gets drawn), and process_link_line()
+    only exposes it via which branch it takes next. Both compute the verdict
+    explicitly, though, as a plain local boolean, right where the shared
+    concept lives: `had_opener = (sp > 0)` at ~1041, and the `sp == 0` test
+    guarding rule 3 at ~1416. A scratch COPY of the shipped script (never the
+    file on disk — proven by md5, same discipline as every other mutation
+    test in this module) gets one print statement inserted immediately after
+    each of those two decision points, writing the position and the boolean
+    to a debug file named by an environment variable. Nothing about either
+    function's control flow changes; the insertion is a pure side-effecting
+    print placed after the decision is already made and stored in a local.
+    Real (non-test) runs never set the environment variable, and the shipped
+    script on disk is never touched — this print has never existed there.
+
+    Discriminates by construction, not by accident:
+    test_a_deliberate_divergence_between_the_two_scans_is_caught below
+    tightens ONLY protect_link_destinations()'s opening-bracket escape check
+    (the WI-0079 one-byte-lookbehind mutation LinkScannerMutationTest applies
+    to BOTH functions via _mutate_both() — here to ONE only, on purpose) and
+    shows the two traces disagree where they used to agree. That is the RED
+    step this obligation asks for, kept as a permanent regression test rather
+    than a one-off manual check, so the instrument's own discriminating power
+    stays proven going forward.
+
+    What this deliberately does NOT test: equality of the two functions'
+    full behaviour (they read different texts at different pipeline stages —
+    protect_link_destinations() runs per raw line, process_link_line() runs
+    once on the fully resolved paragraph via resolve_paragraph(pbuf), where
+    pbuf is already protect's own output). The eight fixtures below are
+    chosen so that resolved destinations sit at the END of the live-opener
+    positions being compared, or draw no destination at all — so a dest_mark
+    substitution's length change never lands BETWEEN two `]` positions being
+    correlated. A fixture with a second destination following an already-
+    resolved one on the same line would need position correlation by ORDINAL
+    occurrence instead of raw byte offset; none of the eight need that, and
+    adding one that does would need that change made first.
+    """
+
+    _DEBUG_ENV = "MEMLINT_WI0117_DEBUG"
+
+    _PROTECT_ANCHOR = (
+        '                    had_opener = (sp > 0)\n'
+        '                    if (had_opener) sp--\n'
+    )
+    _PROTECT_INSTRUMENTED = (
+        '                    had_opener = (sp > 0)\n'
+        '                    if (ENVIRON["' + _DEBUG_ENV + '"] != "") '
+        'print "P", i, (had_opener ? 1 : 0) >> ENVIRON["' + _DEBUG_ENV + '"]\n'
+        '                    if (had_opener) sp--\n'
+    )
+
+    _PROCESS_ANCHOR = (
+        '                if (ch == "]" && !is_escaped(line, i)) {\n'
+        '                    if (sp == 0) {   # no opener left — a literal `]`\n'
+    )
+    _PROCESS_INSTRUMENTED = (
+        '                if (ch == "]" && !is_escaped(line, i)) {\n'
+        '                    if (ENVIRON["' + _DEBUG_ENV + '"] != "") '
+        'print "Q", i, (sp > 0 ? 1 : 0) >> ENVIRON["' + _DEBUG_ENV + '"]\n'
+        '                    if (sp == 0) {   # no opener left — a literal `]`\n'
+    )
+
+    def _instrumented_script(self, extra_pairs=()):
+        """Returns (original, instrumented) script text. `extra_pairs` are
+        additional (old, new) substitutions applied on top of the two
+        instrumentation insertions — used by the divergence test below to
+        also mutate one function's escape check. Every anchor is checked for
+        a unique target first, same discipline as LinkScannerMutationTest's
+        own _mutate()/_mutate_both(), so a drifted line fails this test
+        loudly instead of silently instrumenting nothing."""
+        original = SCRIPT_PATH.read_text(encoding="utf-8")
+        for anchor in (self._PROTECT_ANCHOR, self._PROCESS_ANCHOR):
+            self.assertEqual(
+                original.count(anchor), 1,
+                "instrumentation anchor moved — update this test's fixture",
+            )
+        mutated = original.replace(self._PROTECT_ANCHOR, self._PROTECT_INSTRUMENTED, 1)
+        mutated = mutated.replace(self._PROCESS_ANCHOR, self._PROCESS_INSTRUMENTED, 1)
+        for old, new in extra_pairs:
+            self.assertEqual(
+                original.count(old), 1,
+                "mutation target moved — update this test's fixture",
+            )
+            mutated = mutated.replace(old, new, 1)
+        self.assertNotEqual(mutated, original, "mutation did not change the script")
+        return original, mutated
+
+    def _traces_for(self, mutated, pattern):
+        """Runs `mutated` against a one-line scratch index body holding
+        `pattern` as its own paragraph (blank lines on both sides — none of
+        the fixtures start with a list marker, blockquote or heading prefix,
+        so each is read as ordinary paragraph text), and returns
+        (protect_trace, process_trace): ordered (position, is_live) tuples
+        read from the debug file the instrumentation writes."""
+        with tempfile.TemporaryDirectory() as tmp:
+            script_dir = Path(tmp) / "scriptdir"
+            shutil.copytree(SCRIPT_PATH.parent / "lib", script_dir / "lib")
+            mutant_script = script_dir / "memory-lint.sh"
+            mutant_script.write_text(mutated, encoding="utf-8")
+
+            project_dir = Path(tmp) / "project"
+            (project_dir / "docs" / "memory").mkdir(parents=True)
+            (project_dir / "docs" / "memory" / "MEMORY.md").write_text(
+                "# Memory Index\n\n" + pattern + "\n",
+                encoding="utf-8",
+            )
+            fake_home = Path(tmp) / "home"
+            fake_home.mkdir()
+            debug_file = Path(tmp) / "trace.txt"
+
+            subprocess.run(
+                ["bash", str(mutant_script), str(project_dir)],
+                capture_output=True, text=True,
+                env={
+                    "HOME": str(fake_home),
+                    "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+                    self._DEBUG_ENV: str(debug_file),
+                },
+            )
+
+            protect_trace, process_trace = [], []
+            if debug_file.exists():
+                for line in debug_file.read_text(encoding="utf-8").splitlines():
+                    tag, pos, live = line.split()
+                    entry = (int(pos), live == "1")
+                    if tag == "P":
+                        protect_trace.append(entry)
+                    else:
+                        process_trace.append(entry)
+            # protect_link_destinations() runs once per PASS (WI-0093's
+            # two-pass design), twice total for a single-line paragraph, both
+            # deterministic and byte-identical — dedup preserving order
+            # rather than asserting an exact count, so a genuine THIRD
+            # distinct entry (a future architecture change) still shows up
+            # instead of being silently averaged away.
+            protect_trace = list(dict.fromkeys(protect_trace))
+            process_trace = list(dict.fromkeys(process_trace))
+            return protect_trace, process_trace
+
+    def _assert_script_untouched(self, original):
+        after = SCRIPT_PATH.read_text(encoding="utf-8")
+        md5 = __import__("hashlib").md5
+        self.assertEqual(
+            md5(original.encode("utf-8")).hexdigest(),
+            md5(after.encode("utf-8")).hexdigest(),
+        )
+        self.assertEqual(after, original)
+
+    _AGREEMENT_FIXTURES = [
+        ("x](y [a](dead.md) z)", "the round's own false-negative repro (WI-0095)"),
+        ("x\\](y [a](dead.md) z)", "the escaped sibling of the same repro"),
+        ("[a] b](dead.md)", "an opener that already closed before this ]"),
+        ("[](()", "a live opener/closer pair with no resolvable destination"),
+        ("[[]](()", "two live openers, neither destination resolves"),
+        ("[a](t.md)", "control: the ordinary, single, live case"),
+        ("\\[a](t.md)", "control: an ESCAPED opener, agreement via is_escaped"),
+        ("[a [b] c](t.md)", "a NESTED live opener at depth 2, not just depth 1"),
+    ]
+
+    def test_the_two_scans_agree_on_where_a_live_unescaped_opener_sits(self):
+        original, instrumented = self._instrumented_script()
+        try:
+            for pattern, reason in self._AGREEMENT_FIXTURES:
+                with self.subTest(pattern=pattern, reason=reason):
+                    protect_trace, process_trace = self._traces_for(instrumented, pattern)
+                    self.assertTrue(
+                        protect_trace,
+                        f"no `]` observed by protect_link_destinations() for "
+                        f"{pattern!r} — fixture or instrumentation broke",
+                    )
+                    self.assertEqual(
+                        protect_trace, process_trace,
+                        f"the two scans disagree on live-opener position for "
+                        f"{pattern!r} ({reason})",
+                    )
+        finally:
+            self._assert_script_untouched(original)
+
+    def test_a_deliberate_divergence_between_the_two_scans_is_caught(self):
+        r"""Tightens ONLY protect_link_destinations()'s opening-bracket
+        escape check to a naive one-byte lookbehind. `\\[x](t.md)` has an
+        EVEN run of backslashes before the `[` — escape PARITY (what both
+        functions actually implement) says the bracket is live; a one-byte
+        lookbehind sees the immediate backslash and says escaped instead.
+        protect_link_destinations() now disagrees with the untouched
+        process_link_line(), which still finds the opener live — proving
+        this module's agreement test can fail for the reason it claims to,
+        not pass because it happens to check nothing discriminating."""
+        original, instrumented = self._instrumented_script(extra_pairs=[
+            ('                if (ch == "[" && !is_escaped(s, i)) {',
+             '                if (ch == "[" && substr(s, i - 1, 1) != "\\\\") {'),
+        ])
+        try:
+            protect_trace, process_trace = self._traces_for(instrumented, "\\\\[x](t.md)")
+            self.assertNotEqual(
+                protect_trace, process_trace,
+                "the injected divergence did not flip the trace — this "
+                "instrument cannot discriminate the two scans drifting apart",
+            )
+        finally:
+            self._assert_script_untouched(original)
+
+
 class DestinationEscapeAndEntityMutationTest(unittest.TestCase):
     """WI-0081 obligation: mutation-proof for the destination-normalisation
     fix (escaped closing paren + numeric-entity decode) — both live inside
