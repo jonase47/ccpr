@@ -1,7 +1,7 @@
 {
   "commonmark_version": "0.9.2",
   "generated_by": "scripts/tests/fixtures/generate_commonmark_corpus.py",
-  "entry_count": 87,
+  "entry_count": 89,
   "entries": [
     {
       "name": "nested_brackets_in_link_text_simple",
@@ -1117,6 +1117,42 @@
       ],
       "known_divergence": null,
       "caveat": "The counterpart of the entry above, and the reason the thematic-break branch must NOT carry the same pbuf_para gate as the setext branch: unlike a `=`-run, a `---` line is not lazy continuation inside a list item. The reference renders `<ul><li>\u2026</li></ul>`, `<hr />` and a separate paragraph, so the item's stray backtick never reaches the closing one and BOTH links are real. Gating the branch would pair them and hide the first \u2014 a false negative.",
+      "documented_intent": null
+    },
+    {
+      "name": "block_quote_interrupts_paragraph_code_span_straddle",
+      "category": "block-quote-interrupts-paragraph",
+      "markdown": "foo `x\n> bar [a](dead-bqint-a.md) y` [b](dead-bqint-b.md)\n",
+      "reference_hrefs": [
+        "dead-bqint-a.md",
+        "dead-bqint-b.md"
+      ],
+      "reference_checkable_targets": [
+        "dead-bqint-a.md",
+        "dead-bqint-b.md"
+      ],
+      "expected_check_n_findings": [
+        "dead-bqint-a.md",
+        "dead-bqint-b.md"
+      ],
+      "known_divergence": null,
+      "caveat": "Reference: `<p>foo `x</p>` \u2014 the interrupt ends the paragraph before the backtick finds a partner, so it stays literal \u2014 plus a blockquote paragraph `bar <a href=\"dead-bqint-a.md\">a</a> y` <a href=\"dead-bqint-b.md\">b</a>`, whose own backtick is unpaired too. Both links are real. Before the fix the two lines shared one buffer, the two backticks paired across the join, and the first link was swallowed as code.",
+      "documented_intent": null
+    },
+    {
+      "name": "block_quote_interrupts_paragraph_no_straddle_control",
+      "category": "block-quote-interrupts-paragraph",
+      "markdown": "foo\n> bar [a](dead-bqint-ctrl.md)\n",
+      "reference_hrefs": [
+        "dead-bqint-ctrl.md"
+      ],
+      "reference_checkable_targets": [
+        "dead-bqint-ctrl.md"
+      ],
+      "expected_check_n_findings": [
+        "dead-bqint-ctrl.md"
+      ],
+      "known_divergence": null,
       "documented_intent": null
     },
     {

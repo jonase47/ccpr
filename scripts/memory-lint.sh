@@ -2070,10 +2070,26 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
             # continuation line of an already-open container must not promote
             # that container to a plain paragraph.
             #
-            # This extractor models no other part of block quotes, and does
-            # not start to here — it only declines to claim a setext boundary
-            # inside one.
-            if ($0 ~ /^[ ]{0,3}>/) pbuf_para = 0
+            # WI-0089: clearing the flag was not enough — the quote line was
+            # still appended into the SAME buffer as the paragraph it
+            # interrupts, so a code span straddling the join could pair
+            # across two blocks CommonMark keeps separate and hide a real
+            # link. Flushing on the interrupt (pbuf_n > 0 && pbuf_para, i.e.
+            # an ordinary, not-yet-quoted paragraph is open) resolves the
+            # paragraph above on its own before the quote line starts a new
+            # buffer. A `>` line that merely CONTINUES an already-open quote
+            # (pbuf_para already 0) must NOT flush here — that would split a
+            # block CommonMark keeps whole (measured: the quotes own paragraph
+            # legitimately spans several `>` lines, and a code span may
+            # straddle THAT join the same way it does inside any paragraph).
+            #
+            # This extractor still models no other part of block quotes
+            # beyond this one interrupt boundary and the pre-existing setext
+            # guard.
+            if ($0 ~ /^[ ]{0,3}>/) {
+                if (pbuf_n > 0 && pbuf_para) flush_paragraph()
+                pbuf_para = 0
+            }
             else if (pbuf_n == 0) pbuf_para = 1
             append_paragraph($0)
         }

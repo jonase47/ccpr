@@ -1083,6 +1083,43 @@ CORPUS = [
             "first — a false negative."
         ),
     },
+    # --- block quote interrupting a paragraph (WI-0089) ---------------------
+    # WI-0082 already handles a `>` line that OPENS the buffer via pbuf_para
+    # at the setext branch. It never flushed the paragraph buffer on the
+    # interrupt itself — the quote line was appended into the SAME buffer as
+    # the paragraph it interrupts, so a code span straddling the join could
+    # pair across two blocks CommonMark keeps separate and hide a real link.
+    {
+        "name": "block_quote_interrupts_paragraph_code_span_straddle",
+        "category": "block-quote-interrupts-paragraph",
+        "markdown": (
+            "foo `x\n"
+            "> bar [a](dead-bqint-a.md) y` [b](dead-bqint-b.md)\n"
+        ),
+        # Closed by WI-0089 (26.08.2026): the ordinary-paragraph-content
+        # branch now flushes the buffer when a `>` line interrupts an open,
+        # not-yet-quoted paragraph (pbuf_n > 0 && pbuf_para), before
+        # appending the quote line into a fresh buffer.
+        "known_divergence": None,
+        "caveat": (
+            "Reference: `<p>foo `x</p>` — the interrupt ends the paragraph "
+            "before the backtick finds a partner, so it stays literal — plus "
+            "a blockquote paragraph `bar <a href=\"dead-bqint-a.md\">a</a> "
+            "y` <a href=\"dead-bqint-b.md\">b</a>`, whose own backtick is "
+            "unpaired too. Both links are real. Before the fix the two "
+            "lines shared one buffer, the two backticks paired across the "
+            "join, and the first link was swallowed as code."
+        ),
+    },
+    {
+        "name": "block_quote_interrupts_paragraph_no_straddle_control",
+        "category": "block-quote-interrupts-paragraph",
+        "markdown": "foo\n> bar [a](dead-bqint-ctrl.md)\n",
+        # Control: without a code span crossing the boundary, the merged
+        # buffer already found the link before the fix — agreement here is
+        # not new, it is the shape the fix must not disturb.
+        "known_divergence": None,
+    },
     # --- reference-link usage forms — agree, but only via the definition- --
     # --- line shortcut documented above, not by resolving the USAGE --------
     {

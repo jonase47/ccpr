@@ -6,7 +6,33 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
-_Nothing yet._
+### Fixed
+- **check (n): a block quote interrupting a paragraph could hide a real link (WI-0089).**
+  CommonMark lets a block quote interrupt an open paragraph. `memory-lint.sh`'s paragraph
+  buffer cleared its `pbuf_para` flag when a `>` line arrived — WI-0082's fix, which stopped
+  the setext branch from wrongly claiming a boundary inside a quote — but still appended the
+  quote's line into the **same** buffer as the paragraph it interrupts. A code span opened in
+  the paragraph and closed inside the quote therefore paired **across a join CommonMark keeps
+  separate**, swallowing a link that the reference renders.
+
+  Direction: **false negative** — the link was silently not checked, so a dead target passed.
+  It needs a code span straddling the boundary; the plain case always worked, because the
+  merged buffer still found the link. Measured against `commonmark` 0.9.2 with controls at
+  both ends of the series, per this project's rule that conformance is decided by running the
+  reference, never by arguing.
+
+  The guard now flushes the paragraph before the quote line starts a new buffer, but **only**
+  when an ordinary, not-yet-quoted paragraph is actually open (`pbuf_n > 0 && pbuf_para`). A
+  `>` line that merely *continues* an already-open quote must not flush — a quote's own
+  paragraph legitimately spans several `>` lines, and a code span may straddle that join the
+  way it may straddle any paragraph's.
+
+  Covered by two behaviour tests, a mutation test that restores the guard to its **exact**
+  pre-fix form (not a deletion — deleting code makes any test red and proves nothing), and
+  two corpus entries: the diverging fixture plus a no-straddle control. The corpus generator,
+  which queries the reference parser and the real script as two independent oracles and
+  refuses to write a fixture where they disagree silently, accepted both with no recorded
+  divergence — i.e. the script now agrees with the reference on this shape. 87 → 89 entries.
 
 ## [v0.3.0-beta] – 26.08.2026
 

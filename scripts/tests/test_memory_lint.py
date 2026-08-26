@@ -3792,6 +3792,52 @@ class MemoryLintTest(MemoryLintFixture, unittest.TestCase):
         self.assertTrue(any("project_tbli_a.md" in f for f in findings), findings)
         self.assertTrue(any("project_tbli_b.md" in f for f in findings), findings)
 
+    # --- a block quote interrupting a paragraph (WI-0089) ---------------------
+    # WI-0082 already handles the other direction — a `>` line OPENING the
+    # buffer — via the pbuf_para flag at the setext branch. It never flushed
+    # the paragraph buffer on the interrupt itself: the quote's content was
+    # still appended into the SAME buffer as the paragraph above it. A code
+    # span straddling that join can then pair across the two blocks and hide
+    # a real link, exactly the way an unrecognised boundary always does in
+    # this extractor. Measured at the reference (commonmark 0.9.2), not
+    # derived from the spec text.
+
+    def test_a_block_quote_interrupting_a_paragraph_does_not_hide_a_link_in_a_straddling_code_span(self):
+        """Measured at the reference: `foo `x` / `> bar [a](…) y` [b](…)`
+        renders `<p>foo `x</p>` (the backtick never pairs — the quote ends
+        the paragraph) plus a blockquote paragraph `bar <a>a</a> y` <a>b</a>`
+        (the backtick there is unpaired too). Both links are real. Before the
+        fix the two lines share one buffer, the two backticks pair across the
+        join, and the first link is swallowed as code.
+        """
+        self.write_index(
+            "# Memory Index\n\n"
+            "foo `x\n"
+            "> bar [a](project_bqint_a.md) y` [b](project_bqint_b.md)\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertTrue(any("project_bqint_a.md" in f for f in findings), findings)
+        self.assertTrue(any("project_bqint_b.md" in f for f in findings), findings)
+
+    def test_a_block_quote_interrupting_a_paragraph_without_a_straddling_span_still_finds_both_links(self):
+        """Control for the fixture above: without a code span crossing the
+        boundary, the merged buffer already found both links before this fix
+        — this must stay true after it. Measured at the reference: `foo` /
+        `> bar [a](…)` renders `<p>foo</p>` plus a blockquote holding a real
+        link.
+        """
+        self.write_index(
+            "# Memory Index\n\n"
+            "foo\n"
+            "> bar [a](project_bqint_ctrl.md)\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertTrue(any("project_bqint_ctrl.md" in f for f in findings), findings)
+
 
 class ScriptActuallyRanTest(unittest.TestCase):
     """WI-0037: a broken memory-lint.sh must not be able to pass its own tests.
@@ -4929,7 +4975,10 @@ class ParagraphBoundaryMutationTest(unittest.TestCase):
         "            if (pbuf_n > 0 && $0 ~ /^[ ]{0,3}(=+|-+)[ \\t]*$/) {\n"
     )
     _CONTAINER_GUARD = (
-        "            if ($0 ~ /^[ ]{0,3}>/) pbuf_para = 0\n"
+        "            if ($0 ~ /^[ ]{0,3}>/) {\n"
+        "                if (pbuf_n > 0 && pbuf_para) flush_paragraph()\n"
+        "                pbuf_para = 0\n"
+        "            }\n"
         "            else if (pbuf_n == 0) pbuf_para = 1\n"
     )
     _CONTAINER_GUARD_PRE_FIX = (
@@ -4937,6 +4986,14 @@ class ParagraphBoundaryMutationTest(unittest.TestCase):
         "                if ($0 ~ /^[ ]{0,3}>/) pbuf_para = 0\n"
         "                else pbuf_para = 1\n"
         "            }\n"
+    )
+    # WI-0089: the shape between the review round above and this fix — the
+    # container guard already cleared pbuf_para on an interrupt (so the
+    # setext branch stayed correctly gated), but never flushed the
+    # paragraph buffer at the interrupt itself.
+    _CONTAINER_GUARD_PRE_WI_0089 = (
+        "            if ($0 ~ /^[ ]{0,3}>/) pbuf_para = 0\n"
+        "            else if (pbuf_n == 0) pbuf_para = 1\n"
     )
     _GATED_THEMATIC_BREAK = (
         "            if (pbuf_para && $0 ~ /^[ ]{0,3}((\\*[ \\t]*){3,}|(-[ \\t]*){3,}|(_[ \\t]*){3,})$/) {\n"
@@ -5061,6 +5118,34 @@ class ParagraphBoundaryMutationTest(unittest.TestCase):
             "the mid-paragraph block quote no longer discriminates — the "
             "pre-fix guard must produce the false positive it was fixed for",
         )
+
+    def test_restoring_the_pre_wi_0089_container_guard_hides_a_link_across_the_block_quote_boundary(self):
+        """WI-0089's own pre-fix restoration: the guard goes back to its
+        EXACT previous form, where a `>` line correctly cleared pbuf_para on
+        an interrupt but never flushed the paragraph buffer there — so the
+        quote line was still appended into the SAME buffer as the paragraph
+        above it, and a code span straddling the join could pair across two
+        blocks CommonMark keeps separate.
+        """
+        def mutate(src):
+            self.assertIn(self._CONTAINER_GUARD, src)
+            return src.replace(
+                self._CONTAINER_GUARD, self._CONTAINER_GUARD_PRE_WI_0089, 1
+            )
+
+        result = self._run_mutant(
+            mutate,
+            "# Memory Index\n\n"
+            "foo `x\n> bar [a](project_mut_bqint.md) y` [b](project_mut_bqint2.md)\n",
+        )
+
+        self.assertNotIn(
+            "project_mut_bqint.md", result.stdout,
+            "the block-quote interrupt no longer discriminates — the "
+            "pre-WI-0089 guard must reproduce the false negative it was "
+            "fixed for",
+        )
+        self.assertIn("project_mut_bqint2.md", result.stdout)
 
     def test_gating_the_thematic_break_hides_a_link_in_the_list_item_above_it(self):
         """The opposite direction from the guard mutations above: this one ADDS
