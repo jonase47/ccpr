@@ -829,6 +829,62 @@ class CommonmarkCorpusDifferentialTest(unittest.TestCase):
         self.assertEqual(entry["reference_checkable_targets"], ["dead-esc4).md"])
         self.assertIsNone(entry["known_divergence"])
 
+    def test_an_unbalanced_open_paren_in_a_destination_invents_no_target(self):
+        """WI-0100/WI-0118, fixed: `[](()` renders as plain text at the
+        reference (a lone, unbalanced `(` inside the destination never finds
+        a closing `)` of its own). check (n)'s destination-closing scan used
+        to take the first unescaped `)` as the delimiter regardless — the
+        `)` that closes the nested `(` — and reported a target named `(`
+        that no reader ever wrote."""
+        entry = self._entry("unbalanced_open_paren_in_destination_invents_no_target")
+        findings = run_memory_lint_on(entry["markdown"])
+
+        self.assertEqual(findings, [])
+        self.assertEqual(entry["reference_checkable_targets"], [])
+        self.assertIsNone(entry["known_divergence"])
+
+    def test_nested_empty_brackets_before_an_unbalanced_paren_invent_no_target(self):
+        """WI-0100's second witness, fixed alongside WI-0118: `[[]](()` is
+        the same unbalanced-paren gap, reached through a different route —
+        the WI-0080 bracket-stack scanner correctly treats the outer `[]` as
+        a live opener/closer pair, so it still reaches the same broken
+        destination scan the first fixture pins directly."""
+        entry = self._entry("nested_empty_brackets_before_unbalanced_paren_invents_no_target")
+        findings = run_memory_lint_on(entry["markdown"])
+
+        self.assertEqual(findings, [])
+        self.assertEqual(entry["reference_checkable_targets"], [])
+        self.assertIsNone(entry["known_divergence"])
+
+    def test_balanced_parens_inside_a_destination_resolve_to_the_full_path(self):
+        """WI-0118, fixed: `[a](dead-bp1(paren)suffix.md)` — a balanced pair
+        of parens inside the destination is CommonMark-valid destination
+        TEXT, not a delimiter. check (n)'s scan used to stop at the first
+        `)` (right after "paren"), truncating the reported target instead of
+        resolving the full, balanced path."""
+        entry = self._entry("balanced_parens_inside_destination_resolve_to_the_full_path")
+        findings = run_memory_lint_on(entry["markdown"])
+
+        self.assertEqual(findings, ["dead-bp1(paren)suffix.md"])
+        self.assertEqual(
+            entry["reference_checkable_targets"], ["dead-bp1(paren)suffix.md"]
+        )
+        self.assertIsNone(entry["known_divergence"])
+
+    def test_angle_bracket_destination_paren_balance_is_left_untouched(self):
+        """WI-0118's negative control: the angle-bracket destination form
+        (WI-0060) has its own termination rule — an unescaped `>` closes it,
+        and a paren inside carries no balance requirement at all. The
+        WI-0118 fix gates its paren-depth counter on the destination NOT
+        starting with `<`, so this fixture must keep resolving exactly as it
+        did before the fix."""
+        entry = self._entry("angle_bracket_destination_paren_is_not_balance_checked")
+        findings = run_memory_lint_on(entry["markdown"])
+
+        self.assertEqual(findings, ["dead-bp2(inner.md"])
+        self.assertEqual(entry["reference_checkable_targets"], ["dead-bp2(inner.md"])
+        self.assertIsNone(entry["known_divergence"])
+
 
 class MutationProvesTheDifferentialTestCanFail(unittest.TestCase):
     """WI-0005 obligation: the new differential test must have been seen RED

@@ -1103,6 +1103,62 @@ CORPUS = [
             "work_item": "WI-0005",
         },
     },
+    # --- balanced parens inside a destination (WI-0100/WI-0118) ------------
+    # protect_link_destinations()'s destination-closing scan used to take the
+    # FIRST unescaped `)` as the delimiter, without requiring the parens
+    # inside a destination to balance — CommonMark's link-destination grammar
+    # requires balance for the unbracketed (non-`<...>`) form. Two false
+    # POSITIVES and one wrong-target case, plus the angle-bracket sibling
+    # that must be left exactly as it already behaved. Fixed 26.08.2026 (WI-
+    # 0118) by tracking a paren depth: an unescaped `(` opens a nested pair,
+    # an unescaped `)` at depth > 0 closes one and is consumed as destination
+    # TEXT, and only an unescaped `)` at depth 0 is the delimiter.
+    {
+        # WI-0100's minimal witness. A lone, unbalanced `(` inside the
+        # destination never finds a depth-0 `)` to close it, so the whole
+        # remainder is carried through unresolved — same as any other
+        # unterminated destination — instead of inventing a target named `(`.
+        "name": "unbalanced_open_paren_in_destination_invents_no_target",
+        "category": "balanced-parens-in-destination",
+        "markdown": "[](()\n",
+        "known_divergence": None,
+    },
+    {
+        # WI-0100's second witness — not a new class, only a new ROUTE into
+        # the first: the WI-0080 bracket-stack scanner sees the outer `[]`
+        # as a live, unescaped opener/closer pair (correctly, per rule 1),
+        # so it reaches the same unbalanced destination-closing scan.
+        "name": "nested_empty_brackets_before_unbalanced_paren_invents_no_target",
+        "category": "balanced-parens-in-destination",
+        "markdown": "[[]](()\n",
+        "known_divergence": None,
+    },
+    {
+        # WI-0118's own repro (renamed to a dead-* target, this corpus's
+        # convention): a balanced pair of parens INSIDE the destination is
+        # ordinary destination text per CommonMark, not a delimiter. Before
+        # the fix this resolved to the wrong, truncated target
+        # ("dead-bp1(paren" — the scan stopped at the first `)`, right after
+        # "paren"); the field measurement never caught it because 0
+        # occurrences of parens-in-destinations exist across the four live
+        # memory stores WI-0100 measured.
+        "name": "balanced_parens_inside_destination_resolve_to_the_full_path",
+        "category": "balanced-parens-in-destination",
+        "markdown": "[a](dead-bp1(paren)suffix.md)\n",
+        "known_divergence": None,
+    },
+    {
+        # The angle-bracket destination form (WI-0060) has its own
+        # termination rule — an unescaped `>` closes it, and a paren inside
+        # has no balance requirement at all. This fixture must keep resolving
+        # exactly as it did before the WI-0118 fix: the paren-depth counter
+        # is gated on the destination NOT starting with `<`, so this scan
+        # path is untouched.
+        "name": "angle_bracket_destination_paren_is_not_balance_checked",
+        "category": "balanced-parens-in-destination",
+        "markdown": "[a](<dead-bp2(inner.md>)\n",
+        "known_divergence": None,
+    },
     # --- emphasis inside link text ------------------------------------------
     {
         "name": "emphasis_in_link_text",

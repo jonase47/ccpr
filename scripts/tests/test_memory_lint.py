@@ -2290,6 +2290,74 @@ class MemoryLintTest(MemoryLintFixture, unittest.TestCase):
         self.assertIn("gone_esc_paren2).md", joined)
         self.assertIn("gone_esc_paren3.md", joined)
 
+    def test_an_unbalanced_open_paren_in_the_destination_invents_no_target(self):
+        """WI-0100/WI-0118, fixed: `[](()` is plain text at the reference — a
+        lone, unbalanced `(` inside the destination never finds a `)` of its
+        own to close it. check (n)'s destination-closing scan used to take
+        the first unescaped `)` as the delimiter regardless (the `)` that
+        actually closes the nested `(`), and reported an invented target
+        named `(`."""
+        self.write_index(CLEAN_INDEX + "- [](()\n")
+
+        result = self.run_lint()
+
+        self.assertEqual(self.link_findings(result.stdout), [])
+
+    def test_nested_empty_brackets_before_an_unbalanced_paren_invent_no_target(self):
+        """WI-0100's second witness: `[[]](()` reaches the same broken scan
+        through a different route — the outer `[]` is a live, unescaped
+        opener/closer pair (correctly recognised as one), so it still hits
+        the unbalanced destination-closing scan the fixture above pins
+        directly."""
+        self.write_index(CLEAN_INDEX + "- [[]](()\n")
+
+        result = self.run_lint()
+
+        self.assertEqual(self.link_findings(result.stdout), [])
+
+    def test_balanced_parens_inside_a_destination_resolve_to_the_full_path(self):
+        """WI-0118, fixed: `[a](gone_bp1(paren)suffix.md)` — a balanced pair
+        of parens inside the destination is ordinary destination TEXT per
+        CommonMark, not a delimiter. check (n)'s scan used to stop at the
+        first `)` (right after "paren"), truncating the reported target to
+        `gone_bp1(paren` instead of resolving the full, balanced path."""
+        self.write_index(CLEAN_INDEX + "- [a](gone_bp1(paren)suffix.md) — dead\n")
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("gone_bp1(paren)suffix.md", findings[0])
+
+    def test_a_destination_after_a_balanced_paren_pair_is_still_reached_on_the_same_line(self):
+        """Same companion pattern as the escaped-paren and numeric-entity
+        fixtures above: a balanced-paren destination must not swallow a
+        second, later destination on the same line."""
+        self.write_index(
+            CLEAN_INDEX
+            + "- [First](gone_bp2(x)y.md) and [Second](gone_bp3.md) — both dead\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+        joined = " ".join(findings)
+
+        self.assertEqual(len(findings), 2, findings)
+        self.assertIn("gone_bp2(x)y.md", joined)
+        self.assertIn("gone_bp3.md", joined)
+
+    def test_angle_bracket_destination_paren_balance_is_left_untouched(self):
+        """WI-0118's negative control: the angle-bracket destination form
+        (WI-0060) has its own termination rule — an unescaped `>` closes it,
+        and a paren inside carries no balance requirement at all. The fix
+        gates its paren-depth counter on the destination NOT starting with
+        `<`, so `[a](<gone_bp4(inner.md>)` must keep resolving exactly as it
+        did before the fix."""
+        self.write_index(CLEAN_INDEX + "- [a](<gone_bp4(inner.md>) — dead\n")
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("gone_bp4(inner.md", findings[0])
+
     def test_a_decimal_numeric_entity_in_the_destination_decodes_before_resolving(self):
         """`&#35;` is CommonMark's decimal numeric character reference for `#`
         — the reference resolves `[x](gone_ent_dec&#35;3.md)` to the single

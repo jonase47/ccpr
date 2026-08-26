@@ -97,6 +97,13 @@ TIER1_TOPIC_ERR_KB=50
 # such construct occurs in any measured index, which is what the field
 # measurement above says and all it says.
 #
+# CLOSED 26.08.2026 (WI-0118): the destination-closing scan in
+# protect_link_destinations() now tracks a paren depth for the unbracketed
+# form, so `[](()` no longer invents a target and `[a](b(c)d.md)` resolves to
+# its full, balanced destination. The angle-bracket form's own scan is
+# untouched. This caveat is left in place, corrected rather than deleted, as
+# the record of what the 24.08.2026 promotion actually shipped with.
+#
 # What this flip is NOT: it makes the check LOUDER, not complete. The false
 # negatives stay, named, in the corpus.
 #
@@ -989,10 +996,18 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
         # matched every `](` unconditionally too), so it is not a new
         # divergence — just not one this repair needed to remove.
         #
-        # A second, independent limit remains and is NOT what WI-0095 closed:
-        # the PARENS inside a destination are not required to balance
-        # (`[](()` reports a target named `(` — WI-0100, a PO decision to
-        # leave open, not the opener/escape gap this function closes).
+        # A second, independent limit — NOT what WI-0095 closed — is now
+        # fixed too (WI-0118): the destination-closing scan tracks a paren
+        # DEPTH for the unbracketed form, per the CommonMark link-destination
+        # grammar. An unescaped `(` opens a nested pair (depth++); an
+        # unescaped `)` at depth > 0 closes one and is consumed as
+        # destination TEXT (depth--); only an unescaped `)` at depth == 0 is
+        # the delimiter. `[](()` no longer invents a target named `(` — the
+        # lone `(` never finds a depth-0 `)` to close it, so `dend` stays 0
+        # and the whole remainder is carried through unresolved, same as any
+        # other unterminated destination. `[a](b(c)d.md)` — balanced parens
+        # INSIDE a destination, which CommonMark accepts — now resolves to
+        # the full `b(c)d.md` instead of truncating at the first `)`.
         #
         # Where no unescaped `)` closes the destination this still gives up
         # (`dend == 0` below) and carries the whole remainder through
@@ -1017,7 +1032,8 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
         # one escaping rule, now three call sites (the opener, the destination
         # closer, and the `]` in this function).
         function protect_link_destinations(s,    out, dstart, dend, dest, n, pos,
-                                           i, ch, sp, had_opener) {
+                                           i, ch, sp, had_opener, pdepth, pch,
+                                           is_angle) {
             out = ""
             n = length(s)
             sp = 0
@@ -1037,10 +1053,31 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
                         dstart = i + 2
                         dend = 0
                         pos = dstart
+                        pdepth = 0
+                        # The `<...>` bracketed destination form (WI-0060) has
+                        # its own termination rule — an unescaped `>` closes
+                        # it, and a paren inside has no special meaning at all
+                        # (measured against the reference: `[a](<b)c.md>)`
+                        # resolves to `b)c.md`, a `)` before the `>`). This
+                        # scan does not implement that rule; it only keeps the
+                        # paren-depth balance below from firing on it, so the
+                        # existing first-unescaped-`)` behaviour is left
+                        # exactly as it was for this form (it already resolves
+                        # `[a](<b(c.md>)` correctly today because no `)`
+                        # appears before the real delimiter in that fixture —
+                        # not because this scan parses `<...>` itself).
+                        is_angle = (substr(s, dstart, 1) == "<")
                         while (pos <= n) {
-                            if (substr(s, pos, 1) == ")" && count_trailing_backslashes(s, pos) % 2 == 0) {
-                                dend = pos
-                                break
+                            pch = substr(s, pos, 1)
+                            if (pch == ")" && count_trailing_backslashes(s, pos) % 2 == 0) {
+                                if (!is_angle && pdepth > 0) {
+                                    pdepth--
+                                } else {
+                                    dend = pos
+                                    break
+                                }
+                            } else if (!is_angle && pch == "(" && count_trailing_backslashes(s, pos) % 2 == 0) {
+                                pdepth++
                             }
                             pos++
                         }
@@ -1252,14 +1289,15 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
             # terminate a label early, landing the advance this function
             # returns in the middle of that span, where the invariant the
             # argument above rests on no longer held -- exactly the class
-            # WI-0095 closed. One imprecision remains in the same function
-            # (WI-0100 duplicate, still open): the destination-closing scan
-            # does not require the parens inside a destination to balance,
-            # which can pick the wrong `)` as the delimiter and mis-target an
-            # otherwise correctly SCOPED span. That is a wrong TARGET, not a
-            # wrongly swallowed `]`, so it does not reopen the precondition of
-            # this branch -- it bears on the contract of check (n) itself
-            # (WI-0100), not this branch, and this branch inherits neither.
+            # WI-0095 closed. A second imprecision in the same function
+            # (WI-0100/WI-0118, CLOSED 26.08.2026): the destination-closing
+            # scan used to not require the parens inside a destination to
+            # balance, which could pick the wrong `)` as the delimiter and
+            # mis-target an otherwise correctly SCOPED span. That was a wrong
+            # TARGET, not a wrongly swallowed `]`, so it never reopened the
+            # precondition of this branch -- it bore on the contract of check
+            # (n) itself (WI-0100), not this branch, and this branch
+            # inherited neither, before or after the fix.
             # The dropped finding is real and is recorded
             # as a corpus entry (`known_divergence`, direction false-negative):
             # an UNDEFINED non-ASCII label now silences the link around it. The
@@ -1824,11 +1862,11 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
             # so long as protect_link_destinations() draws correctly SCOPED
             # spans (WI-0095, closed; see the same proviso on
             # reference_link_span above, which is where a resolving reference
-            # also CONSUMES bytes). The one imprecision left in that function
-            # (WI-0100 duplicate, still open — unbalanced parens inside a
-            # destination can pick the wrong `)`) mis-targets an already
-            # correctly scoped span rather than mis-scoping one, so it does
-            # not reopen this precondition either.
+            # also CONSUMES bytes). A second imprecision in that function
+            # (WI-0100/WI-0118, CLOSED 26.08.2026 — unbalanced parens inside a
+            # destination could pick the wrong `)`) mis-targeted an already
+            # correctly scoped span rather than mis-scoping one, so it never
+            # reopened this precondition either, before or after the fix.
             # Under that precondition the error it can make is dropping one,
             # and it makes exactly one -- a CLASS, not a shape. The resolution
             # is not INJECTIVE: distinct raw labels share one resolved key, and

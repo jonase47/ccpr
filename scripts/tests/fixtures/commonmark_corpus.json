@@ -1,7 +1,7 @@
 {
   "commonmark_version": "0.9.2",
   "generated_by": "scripts/tests/fixtures/generate_commonmark_corpus.py",
-  "entry_count": 80,
+  "entry_count": 84,
   "entries": [
     {
       "name": "nested_brackets_in_link_text_simple",
@@ -1201,6 +1201,58 @@
         "reason": "Same exception as empty_destination_plain_parens \u2014 CommonMark trims the whitespace-only destination to an empty href (`<a href=\"\">`), and check (n) lands on the same empty target, silently skipped by the same guard.",
         "work_item": "WI-0005"
       },
+      "documented_intent": null
+    },
+    {
+      "name": "unbalanced_open_paren_in_destination_invents_no_target",
+      "category": "balanced-parens-in-destination",
+      "markdown": "[](()\n",
+      "reference_hrefs": [],
+      "reference_checkable_targets": [],
+      "expected_check_n_findings": [],
+      "known_divergence": null,
+      "documented_intent": null
+    },
+    {
+      "name": "nested_empty_brackets_before_unbalanced_paren_invents_no_target",
+      "category": "balanced-parens-in-destination",
+      "markdown": "[[]](()\n",
+      "reference_hrefs": [],
+      "reference_checkable_targets": [],
+      "expected_check_n_findings": [],
+      "known_divergence": null,
+      "documented_intent": null
+    },
+    {
+      "name": "balanced_parens_inside_destination_resolve_to_the_full_path",
+      "category": "balanced-parens-in-destination",
+      "markdown": "[a](dead-bp1(paren)suffix.md)\n",
+      "reference_hrefs": [
+        "dead-bp1(paren)suffix.md"
+      ],
+      "reference_checkable_targets": [
+        "dead-bp1(paren)suffix.md"
+      ],
+      "expected_check_n_findings": [
+        "dead-bp1(paren)suffix.md"
+      ],
+      "known_divergence": null,
+      "documented_intent": null
+    },
+    {
+      "name": "angle_bracket_destination_paren_is_not_balance_checked",
+      "category": "balanced-parens-in-destination",
+      "markdown": "[a](<dead-bp2(inner.md>)\n",
+      "reference_hrefs": [
+        "dead-bp2(inner.md"
+      ],
+      "reference_checkable_targets": [
+        "dead-bp2(inner.md"
+      ],
+      "expected_check_n_findings": [
+        "dead-bp2(inner.md"
+      ],
+      "known_divergence": null,
       "documented_intent": null
     },
     {
