@@ -368,7 +368,7 @@ Optional pre-gate consistency check across phases. 7 initial rules:
 
 ### Anchored State Verification (`/anchor`)
 
-> Not shipped in any tagged release yet — see [system/anchored-state.md](system/anchored-state.md).
+> Shipped since `v0.3.0-beta` — see [system/anchored-state.md](system/anchored-state.md).
 
 Where `/cross-check` compares Markdown to Markdown, `/anchor` compares a phase document's
 recorded `anchor_commit`/`anchor_date` frontmatter against the repository's actual git
@@ -556,11 +556,29 @@ Scopes for quality-scan: `all`, `deps`, `sast`, `config`, `dsgvo`
 | `instinct-check.sh` | `~/.claude/scripts/instinct-check.sh` | Check instinct decay (no LLM needed) |
 | `memory-sync.sh` | `~/.claude/scripts/memory-sync.sh pull\|promote\|gate\|status` | Sync a shared org-tier memory/instincts repo into `~/.claude` (read-only overlay); share local entries via a discipline gate. Details: [system/memory-instincts.md → Team Sharing (Org Tier)](system/memory-instincts.md) |
 
-### Not Yet Released
+### Doc Hygiene & Validation
 
-| Script | Usage | Purpose |
-|---|---|---|
-| `artifact-gate.sh` | `~/.claude/scripts/artifact-gate.sh [--repo <dir>] [--require-denylist] [<file> ...]` | Sweeps a repository's tracked files for secrets, personal data and configured tenant/project names (Constitution Inviolable enforcement). **Absent from `v0.2.1-beta`, CCPR's most recent tag — ships with the next release.** Details: [system/discipline-gate.md](system/discipline-gate.md) |
+Five read-only validators, all non-zero on findings: `memory-lint.sh` (memory schema,
+cross-refs, index consistency, age, size caps), `phase-docs-lint.sh` (phase-doc
+frontmatter — **scoped by folder name**, so `Files scanned: 0` means it looked at
+nothing, not that it passed), `manual-lint.sh` (a documentation index↔detail contract:
+`parent_index`, the back-link, `kind` — run by `/cleanup`), `doc-volume-check.sh` (size:
+info 25–40 KB, warning 40–50, error ≥50) and `instinct-check.sh` (decay, no LLM).
+
+### State, Baselines & Migration
+
+`anchor.sh` behind `/anchor` (stage-1 mechanical, no verdict) · `freeze-phase-docs.sh`
+(`frozen` after a Gate-Go, from `draft`/`active` only; P5 and P8 no-ops) · `baseline.sh`
+(`<version>` required, writes `docs/.baseline-prep.md`) · `workitems.py` (CLI dispatcher,
+ADR-0002, default backend `local` — see [WORKITEMS.md](WORKITEMS.md)) ·
+`migrate-review-headers.sh` (one-off, idempotent header backfill) · `log-cleanup.sh`
+(trims `~/.claude/logs/`, default 7 days) · `artifact-gate.sh` (secret / personal-data /
+deny-list sweep over tracked files, Constitution Inviolable — shipped since
+**`v0.3.0-beta`**, details: [system/discipline-gate.md](system/discipline-gate.md)).
+
+**Every one of these, with its full usage line and exit-code contract, lives once in
+[system/monitoring-scripts.md](system/monitoring-scripts.md)** — the index names them so
+you know they exist, not so you can look them up here.
 
 ### Shared Libraries
 
@@ -886,4 +904,5 @@ my-project/
 | 20.08.2026 | Documented `memory-sync.sh` (org-tier memory/instincts sharing, shipped since v0.2.0-beta) and the discipline gate (`artifact-gate.sh` + `lib/discipline_gate.sh` + CI template) — none of the three had appeared anywhere under `Manual/` before. New detail page `system/discipline-gate.md`; `system/memory-instincts.md` gained a "Team Sharing (Org Tier)" subsection. The discipline gate itself is **not yet in any tagged release** (absent from `v0.2.1-beta`) — noted at every mention. |
 | 21.08.2026 | Documented anchored state verification (`/anchor`, `scripts/anchor.sh`, ADR-0009) — checks phase documents against the code they describe rather than against other documents, closing the gap `/cross-check`'s R6 rule names but never closes. New detail page `system/anchored-state.md`; new "Anchored State Verification (`/anchor`)" subsection alongside Cross-Check in §5. `/anchor` is **not yet in any tagged release** (absent from `v0.2.1-beta`) — noted at every mention. Command count 115 → 116 (Utility 13 → 14). |
 | 26.08.2026 | Added the 7 missing "Full chapter" pointers to `system/agents.md`, `phases-gates.md`, `commands.md`, `cross-cutting.md`, `monitoring-scripts.md` (linked from §6, §7 and §8 — the one detail file spans all three index sections), `scripts-conventions.md` and `file-structure.md`, making the "slim index → detail files" README claim true for both `SYSTEM_OVERVIEW.md` and `SECTIONS_COMMANDS.md`. `SECTIONS_COMMANDS.md`'s per-section command tables (108 rows byte-identical to `commands/*.md`, 8 worded differently, `/p5-review-sprint` present only here) were replaced by orientation paragraphs + pointers after reconciling the 8 divergent rows against the source `commands/*.md` files and adding the missing command to `commands/phases.md`. |
-| 26.08.2026 (2) | Finished the index/chapter split for §9 Memory, §10 Document Splitting and §11 Instincts, which had been **copied** into the index rather than moved out of it — the pointers added earlier the same day made the duplication visible without removing it. All three are now summaries plus a `system/memory-instincts.md` pointer, in the shape §5 and §7 already used. §11 had drifted furthest: it named **three** instinct levels where the model has **four scopes**, omitted global Tier 2 (`~/.claude/memory/{agent}/instincts.md`) entirely and gave the ID schema without `{prefix}-G-NNN`. §9 said "Two-tier" for a 2×2 model, had no Global column, omitted `scope: tier-2-global` / `agent:` from the frontmatter and never mentioned org-tier sharing although §7 links to it. **The copies were not re-synced** — restoring parity would rebuild the mechanism that produced the drift. Each surviving claim was checked against its source rather than against the other copy, which found three places where **both** copies agreed with each other and neither with the source: the memory `type` table was missing `index` and Tier-2 `patterns` (`templates/MEMORY_SCHEMA.md`), a new instinct starts at **0.4** not "0.4-0.5" and `reject`'s 0.3 is a delete **prompt**, not a floor (`commands/instinct.md`), and `doc-volume-check.sh`'s three bands are info/warning/error at 25/40/50 KB with the info band not raising the exit code (the script's own header). Those were fixed in the detail chapter, which is now the single copy. Index 43.7 KB → 41.1 KB. |
+| 26.08.2026 (2) | Finished the index/chapter split for §9 Memory, §10 Document Splitting and §11 Instincts — they were **copies** of `system/memory-instincts.md`, not summaries of it, and §11 had drifted: three instinct levels where the model has four scopes, global Tier 2 missing entirely, ID schema without `{prefix}-G-NNN`. §9 said "Two-tier" for a 2×2 model. The copies were **not** re-synced; each surviving claim was checked against its source instead, which found three places where both copies agreed and neither matched the code (memory `type` missing `index`/`patterns`; a new instinct starts at 0.4, not "0.4-0.5"; the `doc-volume` band labels). Those are fixed in the chapter, now the single copy. Full detail: `CHANGELOG.md`, `v0.3.0-beta`. |
+| 26.08.2026 (3) | Release-readiness pass for `v0.3.0-beta`. `system/monitoring-scripts.md` calls itself the full script catalogue and was missing **10 of 20** shipped scripts, three of which (`baseline.sh`, `manual-lint.sh`, `migrate-review-headers.sh`) appeared nowhere in `Manual/` or the README at all. Two new groups added there; §7 names them and points rather than copying. Every row was written from the script's own header, correcting five drafts. The "Not Yet Released" sections and both "not shipped in any tagged release yet" banners were resolved — the tag makes them false. The test suite is now named in `README.md` and `Manual/README.md`, with its required `-t .`. Full detail: `CHANGELOG.md`, `v0.3.0-beta`. |

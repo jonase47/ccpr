@@ -11,6 +11,45 @@ _Nothing yet._
 ## [v0.3.0-beta] – 26.08.2026
 
 ### Changed
+- **The chapter that calls itself "the full script catalogue" was missing half the scripts,
+  and three shipped scripts were documented nowhere at all.** Measured across `Manual/` and
+  `README.md` while preparing this release: `Manual/system/monitoring-scripts.md` — which
+  `SYSTEM_OVERVIEW.md` §7 points to as "the full script catalogue" — listed **10 of the 20**
+  scripts under `scripts/`. Absent: `anchor.sh`, `baseline.sh`, `doc-volume-check.sh`,
+  `freeze-phase-docs.sh`, `log-cleanup.sh`, `manual-lint.sh`, `memory-lint.sh`,
+  `migrate-review-headers.sh`, `phase-docs-lint.sh`, `workitems.py`. Of those,
+  `baseline.sh`, `manual-lint.sh` and `migrate-review-headers.sh` appeared in **no**
+  documentation whatsoever — `manual-lint.sh` although `commands/cleanup.md` runs it, so an
+  adopter would first meet it as an unexplained red lint.
+
+  Two groups were added — "Doc Hygiene & Validation" and "State, Baselines & Migration" —
+  and §7 now *names* them and points to the catalogue rather than restating it. (A first
+  draft copied both tables into the index, which is precisely the defect the same release
+  fixed in §9–§11; it was rolled back before commit.)
+
+  **Each row was written from the script's own header rather than from what the name
+  suggested**, which corrected five drafts before they shipped: `baseline.sh` writes
+  `docs/.baseline-prep.md` (not `BASELINE.md`) and its `<version>` argument is **required**;
+  `freeze-phase-docs.sh` promotes only from `draft`/`active`, is a deliberate no-op in P5
+  and P8, and does **not** stamp the anchor; `log-cleanup.sh` defaults to 7 days;
+  `anchor.sh` is a stage-1 mechanical check that renders no verdict; `workitems.py` reads
+  `.claude/settings.json`, not a repo-root settings file.
+
+- **The "not shipped in any tagged release yet" notices are false as of this tag, and were
+  resolved rather than left to rot.** `artifact-gate.sh`, `lib/discipline_gate.sh`,
+  `anchor.sh` and `commands/anchor.md` were absent from `v0.2.1-beta`, and five places said
+  so — two "Not Yet Released" table sections plus banner blocks in
+  `system/anchored-state.md` and `system/discipline-gate.md`. All now read "shipped since
+  `v0.3.0-beta`" and tell a reader on an older installation what to do about it.
+
+- **The test suite was invisible outside one detail chapter.** Before this release it was
+  named only in `system/scripts-conventions.md`, as a side note to two shell conventions.
+  `README.md` and `Manual/README.md` now name it, its mandatory `-t .`, and the fact that
+  `scripts/run-tests.sh` is for downstream projects rather than for CCPR's own suite.
+  `Manual/README.md` also gained rows for `WORKITEMS.md` and `system/scripts-conventions.md`,
+  and `README.md`'s scripts tree gained `tests/`, `manual-lint.sh`, `artifact-gate.sh` and
+  `anchor.sh`.
+
 - **`Manual/SYSTEM_OVERVIEW.md` §9–§11 were copies of `Manual/system/memory-instincts.md`,
   and §11 had drifted away from the model it describes.** The "slim index → detail files"
   split was started and never finished for these three sections: the `Full chapter` pointers

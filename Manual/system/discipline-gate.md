@@ -7,11 +7,10 @@ last_updated: 20.08.2026
 
 # Discipline Gate
 
-> **Not shipped in any tagged release yet.** `scripts/artifact-gate.sh` and
-> `scripts/lib/discipline_gate.sh` are absent from `v0.2.1-beta` (CCPR's most
-> recent tag) — they exist on the repository's main branch and ship with the
-> next release. If you installed CCPR from a tagged release, your
-> `~/.claude/scripts/` does not have them yet.
+> **Shipped since `v0.3.0-beta`.** `scripts/artifact-gate.sh` and
+> `scripts/lib/discipline_gate.sh` are absent from `v0.2.1-beta` and every
+> earlier tag. If your installation predates `v0.3.0-beta`, your `~/.claude/scripts/`
+> does not have them — re-run the install step against the newer tag.
 
 Enforces the Constitution's Inviolable "No personal or tenant data in
 shipped artifacts" mechanically instead of by hand review. Built after that

@@ -7,10 +7,10 @@ last_updated: 21.08.2026
 
 # Anchored State Verification
 
-> **Not shipped in any tagged release yet.** `scripts/anchor.sh` and `commands/anchor.md`
-> are absent from `v0.2.1-beta` (CCPR's most recent tag) — they exist on the repository's
-> main branch and ship with the next release. If you installed CCPR from a tagged release,
-> your `~/.claude/scripts/` and `~/.claude/commands/` do not have them yet.
+> **Shipped since `v0.3.0-beta`.** `scripts/anchor.sh` and `commands/anchor.md` are absent from
+> `v0.2.1-beta` and every earlier tag. If your installation predates `v0.3.0-beta`, your
+> `~/.claude/scripts/` and `~/.claude/commands/` do not have them — re-run the install
+> step against the newer tag.
 
 Checks phase documents against the **code** they describe, not against other documents.
 Built after a gap named in `docs/adr/ADR-0009-anchored-state-verification.md`: every

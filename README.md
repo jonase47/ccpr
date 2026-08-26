@@ -335,9 +335,13 @@ Your `memory/` and `scripts/local-llm/` are out of scope and never touched.
 +-- commands/              # 116 slash commands (P0-P8 + Lean-Track + cross-cutting)
 +-- scripts/               # Automation scripts (save tokens)
 |   +-- lib/               # Shared libraries (Python + Bash helpers)
+|   +-- tests/             # The project's own test suite (see CONTRIBUTING.md)
 |   +-- memory-lint.sh     # Validate docs/memory/** against schema
 |   +-- phase-docs-lint.sh # Validate docs/<phase>/** against schema
+|   +-- manual-lint.sh     # Validate an index<->detail doc contract (parent_index, back-links, kind)
 |   +-- doc-volume-check.sh # Watch for files ≥25/40/50 KB (G-017 protection)
+|   +-- artifact-gate.sh   # Secret / personal-data sweep over tracked files
+|   +-- anchor.sh          # Anchored-state check behind /anchor
 +-- docs/                  # Runtime reference docs (PROJECT_PHASES, NEXT_STEPS, CONSTITUTION, adr/, memory/)
 +-- templates/             # HANDOVER, project, lean & schema templates
 |   +-- MEMORY_SCHEMA.md            # Frontmatter for docs/memory/**
@@ -429,7 +433,10 @@ are exactly what helps.
 
 - **Open an issue** on GitHub: [github.com/jonase47/ccpr/issues](https://github.com/jonase47/ccpr/issues). Templates are provided for **bug**, **feedback / UX**, and **question**.
 - See [`BETA.md`](BETA.md) for what we're especially looking for and the current known limitations.
-- Want to contribute code or docs? See [`CONTRIBUTING.md`](CONTRIBUTING.md).
+- Want to contribute code or docs? See [`CONTRIBUTING.md`](CONTRIBUTING.md). The shipped
+  scripts are covered by a **1458-test Python suite** — run it from the repository root
+  with `python3 -m unittest discover -s scripts/tests -t .` (the `-t .` is required;
+  `scripts/run-tests.sh` is for *your* projects, not for CCPR's own).
 - Found a security issue? Report it privately — see [`SECURITY.md`](SECURITY.md), not a public issue.
 
 ---

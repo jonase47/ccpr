@@ -18,6 +18,8 @@ phase system, the agent team, installation). The runtime references Claude reads
 | [SYSTEM_OVERVIEW.md](SYSTEM_OVERVIEW.md) | Understand the architecture and every mechanism in depth (slim index → `system/` detail files) |
 | [SECTIONS_COMMANDS.md](SECTIONS_COMMANDS.md) | Browse all 116 commands grouped by section (slim index → `commands/` detail files) |
 | [LEAN_TRACK.md](LEAN_TRACK.md) | Understand the Lean-Track decision tree and design (transient — sunset at v1.0) |
+| [WORKITEMS.md](WORKITEMS.md) | Use the work-item CLI and its backend contract (ADR-0002) |
+| [system/scripts-conventions.md](system/scripts-conventions.md) | **Change a shipped script** — the two conventions the test suite enforces, and how to run it |
 
 ### Detail files
 
@@ -26,6 +28,11 @@ phase system, the agent team, installation). The runtime references Claude reads
   scripts-conventions, discipline-gate, anchored-state.
 - [`commands/`](commands/) — `SECTIONS_COMMANDS.md` split into phases, gates,
   track, learning, utility.
+
+> **Changing CCPR itself rather than using it?** The contributor checklist —
+> the 1458-test suite (`python3 -m unittest discover -s scripts/tests -t .`), the
+> read-only linters and what their stable non-zero baseline means — lives in
+> [`../CONTRIBUTING.md`](../CONTRIBUTING.md).
 
 ## A reasonable reading order
 

@@ -128,11 +128,30 @@ Scopes for quality-scan: `all`, `deps`, `sast`, `config`, `dsgvo`
 | `instinct-check.sh` | `~/.claude/scripts/instinct-check.sh` | Check instinct decay (no LLM needed) |
 | `memory-sync.sh` | `~/.claude/scripts/memory-sync.sh pull\|promote\|gate\|status` | Sync a shared org-tier memory/instincts repo into `~/.claude` (read-only overlay); share local entries via a discipline gate. Details: [memory-instincts.md → Team Sharing (Org Tier)](memory-instincts.md) |
 
-### Not Yet Released
+### Doc Hygiene & Validation
+
+Read-only validators. Each exits 0 clean, non-zero on findings — see each script's
+header for its exact exit-code contract.
 
 | Script | Usage | Purpose |
 |---|---|---|
-| `artifact-gate.sh` | `~/.claude/scripts/artifact-gate.sh [--repo <dir>] [--require-denylist] [<file> ...]` | Sweeps a repository's tracked files for secrets, personal data and configured tenant/project names (Constitution Inviolable enforcement). **Absent from `v0.2.1-beta`, CCPR's most recent tag — ships with the next release.** Details: [discipline-gate.md](discipline-gate.md) |
+| `memory-lint.sh` | `~/.claude/scripts/memory-lint.sh [projectdir]` | Validates `docs/memory/**` and the global tiers: frontmatter schema and naming, `related:` cross-refs, index consistency both ways, `last_updated` age, size caps on the global instinct files. Exits 0 / 1 warn / 2 error / 3 own-config error. Details: [memory-instincts.md → Memory Lint](memory-instincts.md) |
+| `phase-docs-lint.sh` | `~/.claude/scripts/phase-docs-lint.sh [projectdir] [--scope <glob>]` | Validates phase-doc frontmatter. **Scoped by folder name** — a project with none of the nine phase folders reports `Files scanned: 0`, which is not a pass. |
+| `manual-lint.sh` | `~/.claude/scripts/manual-lint.sh <root>` | Validates a documentation index↔detail contract: `parent_index` resolves, the named index links the detail file **back**, and `kind` against the vocabulary in `templates/PHASE_DOC_SCHEMA.md`. An unrecognised `kind` is a **warning** — that vocabulary is the known set, not the allowed set. Run by `/cleanup`. |
+| `doc-volume-check.sh` | `~/.claude/scripts/doc-volume-check.sh [docs-root]` | Size watch: info 25–40 KB, warning 40–50, error ≥50. Exit 2 / 1 / 0 — the info band does not raise it. |
+| `instinct-check.sh` | `~/.claude/scripts/instinct-check.sh [projectdir]` | Instinct decay report across the index + topic-file layout. No LLM. |
+
+### State, Baselines & Migration
+
+| Script | Usage | Purpose |
+|---|---|---|
+| `anchor.sh` | `~/.claude/scripts/anchor.sh` (via `/anchor`) | Stage-1 **mechanical, no-verdict** check: compares a phase document's recorded `anchor_commit` / `anchor_date` against the repository's real git history and reports drift. The verdict is the command's job, not the script's. Design: `docs/adr/ADR-0009`. Details: [anchored-state.md](anchored-state.md) |
+| `freeze-phase-docs.sh` | `~/.claude/scripts/freeze-phase-docs.sh` | Sets `status: frozen` on phase detail files after a Gate-Go — **only** from `draft` or `active`; `skeleton`, `living`, `archived` and already-`frozen` are left untouched. P5 and P8 are no-ops by design (iterative and operational phases never freeze). Details: [anchored-state.md](anchored-state.md) |
+| `baseline.sh` | `~/.claude/scripts/baseline.sh <version> [projectdir]` | Mechanical preparation for a release baseline cut. Writes `docs/.baseline-prep.md` (a volatile report, not `BASELINE.md` itself) for `/release-baseline` to work from. **`<version>` is required**, not optional. |
+| `workitems.py` | `~/.claude/scripts/workitems.py <subcommand>` | Work-item CLI dispatcher (ADR-0002). Reads `workitems.provider` from **`.claude/settings.json`** — not a repo-root settings file — and dispatches to `lib/workitems/<provider>.py`. Default and reference backend is `local`: no server, no token, structured Markdown under `docs/workitems/`. Full reference: [../WORKITEMS.md](../WORKITEMS.md) |
+| `migrate-review-headers.sh` | `~/.claude/scripts/migrate-review-headers.sh [projectdir]` | One-off backfill of `kind: review` + `sprint` + the commit-anchor family onto `docs/reviews/SPRINT-<N>-review.md` files that predate the header schema. Idempotent; a no-op once migrated. |
+| `log-cleanup.sh` | `~/.claude/scripts/log-cleanup.sh [--days N] [--dry-run]` | Trims session and aggregated logs under `~/.claude/logs/`. Default: everything older than **7 days**. |
+| `artifact-gate.sh` | `~/.claude/scripts/artifact-gate.sh [--repo <dir>] [--require-denylist] [<file> ...]` | Sweeps a repository's tracked files for secrets, personal data and configured tenant/project names (Constitution Inviolable enforcement). Shipped since **`v0.3.0-beta`**. Details: [discipline-gate.md](discipline-gate.md) |
 
 ### Shared Libraries
 
