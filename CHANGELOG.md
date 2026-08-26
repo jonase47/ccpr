@@ -7,6 +7,28 @@ All notable changes to this project are documented in this file. The format is b
 ## [Unreleased]
 
 ### Fixed
+- **The YouTrack read path warned about an out-of-vocabulary `status` but said nothing about
+  `priority`.** `_item_from_issue` reads both through structurally identical one-line helpers
+  (`self._reverse_X_map.get(name, name)` — an identity fallback), so a project value absent
+  from the configured map arrives verbatim in both cases. Only `status` noticed. After the
+  filter-path fix below made the two fields consistent, this read path was the one place left
+  where they diverged.
+
+  Priority now warns the same way, through a shared `_warn_if_field_outside_vocabulary()`
+  helper called from both blocks. The existing status warning's wording is **byte-for-byte
+  unchanged** — verified by rendering the helper with the state arguments and comparing to the
+  pre-refactor literal, not by reading it. The helper keeps the field's display name and the
+  vocabulary's name as separate parameters because they differ for State (YouTrack's field is
+  "state", CCPR's vocabulary is "status") and coincide only for Priority; collapsing them
+  would have silently reworded the existing message.
+
+  Field impact, measured against the live consuming project rather than estimated: of its
+  **187 issues**, priorities are `Normal` 119, `Major` 35, `Minor` 31, `Critical` 1 — all four
+  reverse-map cleanly and stay silent — plus one `Show-stopper`, which is in no map. Simulated
+  over that exact distribution: **187 items in, one warning line out.** The warning sits inside
+  `_item_from_issue`, which `list()` calls once per issue and `get()` once, so it cannot fire
+  per field access.
+
 - **`workitems.py list --status <typo>` returned `[]` and exit 0, and a gate would have
   believed it.** An unknown filter value produced an empty array indistinguishable from a
   genuine no-match. That is not merely a usability wart: `Manual/WORKITEMS.md`'s adoption

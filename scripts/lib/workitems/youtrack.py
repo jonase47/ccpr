@@ -108,6 +108,29 @@ def _stripped_or_none(value):
     return stripped or None
 
 
+def _warn_if_field_outside_vocabulary(
+    issue, field_display_name, vocab_name, value, vocabulary, config_key
+):
+    """Shared shape for the State/Priority outside-vocabulary read-path warnings
+    in _item_from_issue: a project's own bundle may legitimately carry a value
+    outside CCPR's closed vocabulary (and outside any configured map) -- pass it
+    through rather than raising (set_status/set_priority already refuse to WRITE
+    such a value; a value already on the issue must still be readable), but make
+    this visible instead of silently returning an item whose field looks
+    ordinary. `field_display_name` and `vocab_name` differ for State (YouTrack's
+    field is "state", CCPR's vocabulary is "status"); they're the same word for
+    Priority -- kept as separate params rather than assuming they always match."""
+    if value is None or value in vocabulary:
+        return
+    print(
+        f"Warning: YouTrack issue {issue.get('idReadable')} has {field_display_name} "
+        f"{value!r}, which is outside the CCPR {vocab_name} vocabulary "
+        f"({', '.join(vocabulary)}). Passing it through as-is; consider "
+        f"adding it to workitems.youtrack.{config_key}.",
+        file=sys.stderr,
+    )
+
+
 def create(config):
     """Factory used by the CLI dispatcher (scripts/workitems.py)."""
     base_url = config.get("baseUrl")
@@ -741,19 +764,9 @@ class YouTrackBackend:
         state_value = custom_fields.get("State")
         status = state_value.get("name") if isinstance(state_value, dict) else None
         status = self._unmap_state(status)
-        if status is not None and status not in STATUS_VALUES:
-            # A project's State bundle may legitimately have values outside CCPR's
-            # vocabulary (and outside any stateMap) — pass it through rather than
-            # raising (set_status already refuses to WRITE such a value; a value
-            # already on the issue must still be readable), but make this visible
-            # instead of silently returning an item whose status looks ordinary.
-            print(
-                f"Warning: YouTrack issue {issue.get('idReadable')} has state "
-                f"{status!r}, which is outside the CCPR status vocabulary "
-                f"({', '.join(STATUS_VALUES)}). Passing it through as-is; consider "
-                "adding it to workitems.youtrack.stateMap.",
-                file=sys.stderr,
-            )
+        _warn_if_field_outside_vocabulary(
+            issue, "state", "status", status, STATUS_VALUES, "stateMap"
+        )
 
         assignee_value = custom_fields.get("Assignee")
         owner = None
@@ -769,6 +782,9 @@ class YouTrackBackend:
         priority_value = custom_fields.get("Priority")
         priority_name = priority_value.get("name") if isinstance(priority_value, dict) else None
         priority = self._unmap_priority(priority_name)
+        _warn_if_field_outside_vocabulary(
+            issue, "priority", "priority", priority, PRIORITY_VALUES, "priorityMap"
+        )
 
         # Unlike the Enum fields above (State/Type/Sprint/Priority, read via
         # value(name)), the estimate field's YouTrack value is a bare SCALAR number

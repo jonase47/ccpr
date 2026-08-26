@@ -350,6 +350,36 @@ class YouTrackStateOutsideVocabularyTest(unittest.TestCase):
         self.assertIn("Under Review", captured_stderr.getvalue())
 
 
+class YouTrackPriorityOutsideVocabularyTest(unittest.TestCase):
+    """Mirrors YouTrackStateOutsideVocabularyTest above, for the Priority field.
+    _unmap_priority has the same identity-fallback shape as _unmap_state (a
+    project's Priority bundle may legitimately carry a value outside CCPR's
+    PRIORITY_VALUES vocabulary and outside any configured priorityMap) -- get/list
+    must pass such a value through as-is rather than raising, with the same
+    one-line stderr warning so this stays visible instead of silently producing
+    an item whose priority looks like any other."""
+
+    def setUp(self):
+        self.transport = FakeYouTrackTransport(project_short_name="TEST")
+        self.backend = youtrack.YouTrackBackend(
+            base_url="https://faketrack.example.org", project="TEST",
+            token="fake-token", transport=self.transport,
+        )
+
+    def test_priority_outside_vocabulary_passes_through_with_a_stderr_warning(self):
+        item = self.backend.create(title="New feature")
+        # Simulate a project priority outside CCPR's vocabulary and outside any
+        # priorityMap, set directly via the transport (bypassing any write-side guard).
+        self.transport._require_issue(item["id"])["priority"] = "Urgentissimo"
+
+        captured_stderr = io.StringIO()
+        with contextlib.redirect_stderr(captured_stderr):
+            fetched = self.backend.get(item["id"])
+
+        self.assertEqual(fetched["priority"], "Urgentissimo")
+        self.assertIn("Urgentissimo", captured_stderr.getvalue())
+
+
 class YouTrackUnknownFilterValueTest(unittest.TestCase):
     """An issue's State or Priority custom field can carry a value outside CCPR's
     closed vocabulary (see YouTrackStateOutsideVocabularyTest above for State;
