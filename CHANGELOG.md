@@ -7,6 +7,34 @@ All notable changes to this project are documented in this file. The format is b
 ## [Unreleased]
 
 ### Fixed
+- **`/p4-sprint` prescribed a `status:` value `phase-docs-lint.sh` rejects, and this one was not a
+  typo.** In the `kind: risk-detail` block, `status: open | mitigated | accepted | closed` is the
+  RISK lifecycle; `status` in the document schema is the DOCUMENT lifecycle. Two axes on one field
+  name. Reproduced rather than argued: a `docs/planning/RISK_R-01.md` written exactly as prescribed
+  gave exit 2, `status='open' is not in {skeleton draft active frozen archived living}`. The risk
+  lifecycle moves to `risk_status:`, joining the block's already risk-namespaced `risk_id` /
+  `severity` / `sprint_identified`, and the document `status` becomes `living` — the schema's own
+  wording for "actively maintained detail file designed to keep growing", which is what a risk file
+  does through its `## History` section. Same block after the change: exit 0.
+  WI-0121's corpus test carried a narrow exemption for this genre, and
+  `RiskDetailExemptionIsNarrowTest` existed to prove the exemption was load-bearing rather than
+  vacuous. With the collision fixed at the source the exemption has nothing left to exempt, so it is
+  **removed** rather than kept as a standing hole; the proof-test is replaced by one pinning the new
+  state on a synthetic block, since the real corpus entry can no longer distinguish "no exemption"
+  from "nothing to catch".
+- **Four more `producer | grep -q` sites under `set -o pipefail`, the shape `9b1fdf5` fixed in
+  `manual-lint.sh`.** `freeze-phase-docs.sh` (unbounded `anchor set` output — the one with the same
+  risk profile as the site that actually failed), `artifact-gate.sh` (one file line, but a minified
+  or base64 line has no small bound), `run-tests.sh` (two sites) and `lib/discipline_gate.sh`, whose
+  sibling site at :477 already carried the here-string form with its own comment. All four converted,
+  not just the large one: the alternative was to classify sites by content size against a threshold
+  that could not be measured — synthetic reproductions stayed clean from 8 to 60 KB while the real
+  43 KB file failed 18% and its 41 KB predecessor 0%. The sweep is complete and its two negatives are
+  proven rather than assumed: `artifact-gate.sh:242` pipes into `grep -v`, and `_gate_hits` is called
+  36 times with printing flags and never `-q` — both read to EOF, so neither can exit early on a
+  match. `artifact-gate.sh`'s `sed` moves from `checked-condition` to `bare-needs-exemption`
+  (`downstream-checks-result`) since it is now an argument rather than the tested command; the pinned
+  total stays at 144.
 - **Three shipped files named `/entscheidung`, a command that does not exist.** The file is
   `commands/decision.md`, so the invocable command is `/decision`, and the Manual says so in four
   places — but the command's own H1 announced `/entscheidung`, and `agents/project-guide.md`'s

@@ -1084,7 +1084,30 @@ class ExternalToolExitStatusTest(unittest.TestCase):
         `checked-chain` (no exemption marker needed any more). Net 0
         invocations (143 total): `bare-needs-exemption` -1, `checked-chain`
         +1, everything else unchanged.
-        143 invocations total across the 17 shipped files, split as below.
+        Updated once more 26.08.2026 when the four remaining `producer |
+        grep -q` sites under `set -o pipefail` (the same SIGPIPE
+        false-negative shape scripts/manual-lint.sh's `idx_content` site
+        was already fixed for) were converted to here-strings.
+        freeze-phase-docs.sh's anchor-message check, run-tests.sh's
+        `vitest`/`jest` detection, and discipline_gate.sh's IP-allowlist
+        membership test all keep the same disposition: their producer
+        (`printf`/`echo`) is not one of this scanner's five tracked tool
+        names, and grep stays the direct, first word governed by the
+        enclosing `if`/`elif` -- still `checked-condition`, nothing moves.
+        artifact-gate.sh's exempt-marker check is the one site where the
+        fix DOES move a disposition: pulling sed out of the piped `if`
+        condition (`sed ... | grep -qF ...`) and nesting it as `$(sed
+        ...)` inside grep's here-string argument takes it out of being,
+        transitively via the pipeline, that `if`'s own tested command --
+        the substitution is now ARGUMENT context (rule 3 in the
+        `set-e-sufficient` precondition above), where no substitution's
+        exit status is checked by `set -e` at all. Marked
+        `downstream-checks-result` instead: grep, on the very same
+        statement, already treats a failed/empty sed extraction as "marker
+        not found", the same outcome this branch already tolerated before
+        the fix. Net 0 invocations (144 total): `checked-condition` -1,
+        `bare-needs-exemption` +1, everything else unchanged.
+        144 invocations total across the 17 shipped files, split as below.
         A change in these numbers means either a script changed shape or
         the scanner's own logic changed -- worth a deliberate look either
         way, not a silent drift."""
@@ -1095,11 +1118,11 @@ class ExternalToolExitStatusTest(unittest.TestCase):
         self.assertEqual(144, len(invocations))
         self.assertEqual(
             {
-                "checked-condition": 24,
+                "checked-condition": 23,
                 "checked-captured": 5,
                 "checked-chain": 14,
                 "discard-needs-exemption": 40,
-                "bare-needs-exemption": 61,
+                "bare-needs-exemption": 62,
             },
             by_disposition,
         )

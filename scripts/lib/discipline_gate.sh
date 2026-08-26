@@ -822,7 +822,11 @@ EOF
     # rather than silently allowlisted), the opposite direction from the
     # "0 findings for a check that never ran" shape this file's other sites
     # were fixed for. Left alone deliberately, not an oversight.
-    if [ -n "$GATE_IP_ALLOWLIST" ] && printf '%s\n' "$ip" | grep -qE -e "$GATE_IP_ALLOWLIST"; then
+    # A here-string, not a pipe -- see the same-file `gate_path_deny_index`
+    # site above and scripts/manual-lint.sh's `idx_content` site for why a
+    # producer piped into `grep -q` can report a real hit as a SIGPIPE-miss
+    # under `set -o pipefail`.
+    if [ -n "$GATE_IP_ALLOWLIST" ] && grep -qE -e "$GATE_IP_ALLOWLIST" <<< "$ip"; then
       continue
     fi
     _gate_emit "${line%%:*}" network "IPv4 literal not in the configured allowlist -- verify it is not a third-party/public address"

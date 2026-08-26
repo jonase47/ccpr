@@ -23,8 +23,11 @@ detect_framework() {
             # Check for test script
             local test_cmd
             test_cmd=$(python3 -c "import json; d=json.load(open('package.json')); print(d.get('scripts',{}).get('test',''))" 2>/dev/null || true)  # exit-status: exempt downstream-checks-result
-            if echo "${test_cmd}" | grep -q "vitest"; then echo "vitest"
-            elif echo "${test_cmd}" | grep -q "jest"; then echo "jest"
+            # Here-strings, not pipes -- see scripts/manual-lint.sh's
+            # `idx_content` site for why a producer piped into `grep -q`
+            # can report a real hit as a miss under `set -o pipefail`.
+            if grep -q "vitest" <<< "${test_cmd}"; then echo "vitest"
+            elif grep -q "jest" <<< "${test_cmd}"; then echo "jest"
             else echo "npm-test"
             fi
         fi

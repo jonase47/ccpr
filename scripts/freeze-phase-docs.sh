@@ -231,7 +231,16 @@ if ! $DRY_RUN; then
             # branch gates on. The grep below is a redundant sanity
             # check only, logged but never gating, so the two scripts
             # are not coupled through message text alone.
-            if ! printf '%s' "$ANCHOR_OUTPUT" | grep -q "already carries an anchor"; then
+            # A here-string, not a pipe: under `set -o pipefail` a
+            # `printf | grep -q` can report the pipeline as failed via
+            # SIGPIPE when grep exits early on a match while printf is
+            # still writing -- see scripts/manual-lint.sh's `idx_content`
+            # site for the measured false-negative rate. $ANCHOR_OUTPUT is
+            # `anchor set`'s output over a whole --scope folder, unbounded
+            # in size; on bash 3.2 a here-string above the pipe-buffer size
+            # spills to a temp file rather than an in-memory fd, a
+            # performance cost only, not a correctness one.
+            if ! grep -q "already carries an anchor" <<< "$ANCHOR_OUTPUT"; then
                 echo "  anchor: unexpected message for exit code 3: $ANCHOR_OUTPUT" >&2
             fi
             EXISTING_SHA="$(fm_field "docs/$FOLDER/$INDEX_NAME" anchor_commit 2>/dev/null || true)"  # exit-status: exempt downstream-checks-result

@@ -455,7 +455,15 @@ while IFS= read -r f; do
     # path. Widening the exemption to recognise it would let any file under
     # that name carry the marker as a suppression backdoor -- the finding
     # stays, only the message gains the context a human needs to triage it.
-    if LC_ALL=C sed -n "${ln}p" "$f" 2>/dev/null | LC_ALL=C grep -qF "$GATE_EXEMPT_MARKER"; then
+    # A here-string, not a pipe: under `set -o pipefail` a `sed | grep -q`
+    # can report the pipeline as failed via SIGPIPE when grep exits early
+    # on a match -- see scripts/manual-lint.sh's `idx_content` site for the
+    # measured false-negative rate. sed's own exit status is not checked
+    # here (it is nested as an argument to grep, not the tested command
+    # itself); grep already checks the OUTPUT for the marker string, so a
+    # failed/empty sed extraction just reads as "marker not found", the
+    # same outcome this branch already tolerates.
+    if LC_ALL=C grep -qF "$GATE_EXEMPT_MARKER" <<< "$(LC_ALL=C sed -n "${ln}p" "$f" 2>/dev/null)"; then  # exit-status: exempt downstream-checks-result
       msg="$msg -- this line carries the gate's own '$GATE_EXEMPT_MARKER' marker but $rel was not recognised as the pattern-source file; verify it is a foreign or differently-resolved copy of scripts/lib/discipline_gate.sh before treating it as a leak"
     fi
     say '%s:%s: [%s] %s' "$rel" "$ln" "$cat_" "$msg"
