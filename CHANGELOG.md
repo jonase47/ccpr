@@ -6,6 +6,32 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+### Changed
+- **`CONTRIBUTING.md` did not mention the test suite at all.** Its "Quality checks before
+  opening a PR" section listed three linters and two syntax checks; the 1458-test Python
+  suite under `scripts/tests/` — the only thing that actually covers the shipped scripts —
+  appeared nowhere, so a new contributor had no way to learn it exists. The section now
+  names the command, and three things a first run gets wrong:
+
+  **`-t .` is not optional, and omitting it is partly silent.** Measured: with it,
+  discovery collects 1458 tests and 0 import errors; without it, 1118 tests and 11 failing
+  module imports (the two relative `from .test_artifact_gate` importers plus the whole
+  `scripts/tests/workitems/` subpackage). The run goes red on those 11, so something is
+  visible — but ~340 tests never execute and nothing says so.
+
+  **`scripts/run-tests.sh` is not the entry point**, despite the name being the obvious
+  thing to reach for. It is a framework script for downstream *projects* and detects their
+  runner from `package.json` / `pyproject.toml` / `Cargo.toml` / `go.mod`. CCPR has none,
+  so it answers `{"framework": "unknown"}` on its own repository.
+
+  **A non-zero lint exit is not automatically the contributor's regression.** This
+  repository has a stable baseline (`memory-lint.sh` exits 1, `doc-volume-check.sh` exits
+  2), and `phase-docs-lint.sh` reports `Files scanned: 0` because CCPR has no phase folders
+  — which, per the project's own rule, is not a pass either.
+
+  `scripts/manual-lint.sh` was also missing from the linter list although `commands/cleanup.md`
+  now runs it; the list is a table now, one row per script and what it validates.
+
 ### Fixed
 - **`manual-lint.sh` shipped a `kind` vocabulary derived from one repository and enforced it as an
   error.** Pointed at the two real projects that use CCPR, on its first day: **21 errors in one,
