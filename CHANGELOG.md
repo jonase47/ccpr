@@ -7,6 +7,37 @@ All notable changes to this project are documented in this file. The format is b
 ## [Unreleased]
 
 ### Fixed
+- **`manual-lint.sh` shipped a `kind` vocabulary derived from one repository and enforced it as an
+  error.** Pointed at the two real projects that use CCPR, on its first day: **21 errors in one,
+  6 in the other**, every one an unrecognised-but-legitimate genre — `memory-archive`,
+  `handover-archive`, `analysis`, `story-detail`, `story-index`, `portable-learnings`,
+  `living-list`, `gate-protocol`, `coverage-map`, `sprint-review`. None of them wrong; all of them
+  unforeseen. Since `commands/cleanup.md` now runs this lint, every adopter's hygiene loop would
+  have gone red on documents that are fine.
+
+  `memory-lint.sh` had already answered this question one field over, and its own comment says why:
+  the Tier-2 `type` set stays open, "so an unforeseen but legitimate persona-specific label does not
+  repeat the defect this fixes". The same reasoning applies to `kind` and had simply not been
+  carried across. An unrecognised value is now a **warning**: the value being *named* is useful
+  signal, the value being *unknown to this list* is not a defect. Finding counts are unchanged
+  (21+4 → 25 warnings, 6+0 → 6) — a severity change, not a coverage change — and `review` keeps its
+  status as the one value `phase-docs-lint.sh` reads as a behavioural switch, because it stays a
+  *recognised* value either way.
+
+  **The list was deliberately not widened.** Two values recur across both projects (`story-index`,
+  `sprint-review`) — normally the bar for adopting one — but each has a canonical CCPR equivalent
+  those projects deviated from (`sub-index`, `review`), so codifying them would reward drift rather
+  than name a new genre. `templates/PHASE_DOC_SCHEMA.md` now states plainly that the vocabulary is
+  the KNOWN set, not the ALLOWED set.
+- **`templates/QA_SKELETON/QA.md`, the P6 phase index, carried `subskill: p6-functional` — its own
+  sub-index's identity.** Copy-paste, inherited by every project bootstrapped from the skeleton.
+  Measured before choosing a replacement: `subskill` is presence-checked only, nothing reads the
+  value, and the convention already exists in the field — one reference project carries
+  `subskill: index` on all five of its phase indexes and `subskill: gate` on its gate documents.
+  `QA.md` is now `index`. The schema's own definition of the field ("Slash-command without leading
+  `/`") was the thing actually wrong: that project carries **117 distinct values against CCPR's 116
+  commands**, many mapping to no command at all. The row now describes what the field is rather
+  than what it was assumed to be — with no enum, because 117 values is not an enumerable set.
 - **`/p4-sprint` prescribed a `status:` value `phase-docs-lint.sh` rejects, and this one was not a
   typo.** In the `kind: risk-detail` block, `status: open | mitigated | accepted | closed` is the
   RISK lifecycle; `status` in the document schema is the DOCUMENT lifecycle. Two axes on one field

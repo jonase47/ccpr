@@ -1,6 +1,6 @@
 ---
 phase: P6
-subskill: p6-functional
+subskill: index
 status: skeleton
 last_updated: {{DD.MM.YYYY}}
 related:

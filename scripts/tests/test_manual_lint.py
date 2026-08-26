@@ -356,30 +356,49 @@ class ReverseLinkMutationProofTest(ManualLintTestBase):
 
 class CheckCKindVocabularyTest(ManualLintTestBase):
     """(c) kind: -- opt-in (only fires when the field is actually set),
-    validated against the vocabulary documented in
-    templates/PHASE_DOC_SCHEMA.md's `## kind` section."""
+    checked against the KNOWN (not ALLOWED) vocabulary documented in
+    templates/PHASE_DOC_SCHEMA.md's `## kind` section (WI-0112a follow-up,
+    measured 26.08.2026, no separate WI filed). An
+    unrecognised value is a WARNING, not an error: CCPR cannot enumerate
+    every document genre a downstream project legitimately invents (same
+    open-enum precedent as memory-lint.sh check (c)'s Tier-2 `type:`
+    field)."""
 
-    def test_invalid_kind_value_is_reported_as_error(self):
+    def test_unknown_kind_value_is_reported_as_a_warning_not_an_error(self):
         self.write_doc("bogus.md", doc_text(kind="not-a-real-kind"))
 
         result = self.run_lint()
 
+        self.assertEqual(result.returncode, 1, result.stdout)
         errors = self.findings(result.stdout, "Errors")
+        warnings = self.findings(result.stdout, "Warnings")
+        self.assertEqual(errors, [], errors)
         self.assertTrue(
             any(
-                "bogus.md" in e
-                and "kind='not-a-real-kind' is not in the defined vocabulary" in e
-                for e in errors
+                "bogus.md" in w
+                and "kind='not-a-real-kind' is not in the known vocabulary" in w
+                for w in warnings
             ),
-            errors,
+            warnings,
         )
+
+    def test_known_kind_value_is_not_reported(self):
+        self.write_doc("known.md", doc_text(kind="detail"))
+
+        result = self.run_lint()
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(self.findings(result.stdout, "Errors"), [], result.stdout)
+        self.assertEqual(self.findings(result.stdout, "Warnings"), [], result.stdout)
 
     def test_document_without_kind_is_not_reported(self):
         self.write_doc("no-kind.md", doc_text(kind=None))
 
         result = self.run_lint()
 
+        self.assertEqual(result.returncode, 0, result.stdout)
         self.assertEqual(self.findings(result.stdout, "Errors"), [], result.stdout)
+        self.assertEqual(self.findings(result.stdout, "Warnings"), [], result.stdout)
 
 
 class KindVocabularyExhaustiveTest(ManualLintTestBase):
@@ -394,7 +413,9 @@ class KindVocabularyExhaustiveTest(ManualLintTestBase):
 
         result = self.run_lint()
 
+        self.assertEqual(result.returncode, 0, result.stdout)
         self.assertEqual(self.findings(result.stdout, "Errors"), [], result.stdout)
+        self.assertEqual(self.findings(result.stdout, "Warnings"), [], result.stdout)
         self.assertEqual(self.files_scanned(result.stdout), len(VALID_KINDS))
 
 
@@ -412,20 +433,26 @@ class KindVocabularyMutationProofTest(ManualLintTestBase):
         result = self.run_lint()
 
         self.assertEqual(self.findings(result.stdout, "Errors"), [], result.stdout)
+        self.assertEqual(self.findings(result.stdout, "Warnings"), [], result.stdout)
 
     def test_adjacent_typo_fires_and_reverting_silences_it_again(self):
         self.doc_path.write_text(doc_text(kind="sub-indexes"), encoding="utf-8")
 
         mutated = self.run_lint()
+        self.assertEqual(mutated.returncode, 1, mutated.stdout)
         errors = self.findings(mutated.stdout, "Errors")
+        warnings = self.findings(mutated.stdout, "Warnings")
+        self.assertEqual(errors, [], errors)
         self.assertTrue(
-            any("adjacent.md" in e and "kind='sub-indexes'" in e for e in errors),
-            errors,
+            any("adjacent.md" in w and "kind='sub-indexes'" in w for w in warnings),
+            warnings,
         )
 
         self.doc_path.write_text(doc_text(kind="sub-index"), encoding="utf-8")
         reverted = self.run_lint()
+        self.assertEqual(reverted.returncode, 0, reverted.stdout)
         self.assertEqual(self.findings(reverted.stdout, "Errors"), [], reverted.stdout)
+        self.assertEqual(self.findings(reverted.stdout, "Warnings"), [], reverted.stdout)
 
 
 class ReportScopeLineTest(ManualLintTestBase):

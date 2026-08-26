@@ -19,8 +19,13 @@
 #       has named this direction as a documented-but-unvalidated
 #       convention since it shipped ("Index-↔-detail consistency" —
 #       "Nothing checks them"); this is the first check that does.
-#   (c) `kind:` — when set, must be one of the vocabulary documented in
-#       templates/PHASE_DOC_SCHEMA.md's `## kind` section.
+#   (c) `kind:` — when set, checked against the vocabulary documented in
+#       templates/PHASE_DOC_SCHEMA.md's `## kind` section. That vocabulary is
+#       the KNOWN set, not the ALLOWED set: CCPR cannot enumerate every
+#       document genre a downstream project will legitimately invent, so an
+#       unrecognised value is a WARNING (surface it for deliberate curation),
+#       not an error (same open-enum precedent as memory-lint.sh check (c)'s
+#       Tier-2 `type:` field — see that script's comment).
 #
 # Usage:
 #   bash scripts/manual-lint.sh [<root-dir>]
@@ -42,10 +47,20 @@ source "$SCRIPT_DIR/lib/frontmatter.sh"
 
 ROOT="${1:-$(pwd)}"
 
-# The kind: vocabulary — measured across this repository 26.08.2026 (WI-0112a):
+# The kind: KNOWN set — measured across this repository 26.08.2026 (WI-0112a):
 # every distinct value any shipped file, template, or command prescribes.
 # Mirrored verbatim in templates/PHASE_DOC_SCHEMA.md's `## kind` section —
-# keep both in sync when a new kind is introduced.
+# keep both in sync when a new kind is introduced. This is not a closed
+# allow-list: a project may legitimately carry its own document genres this
+# repository never saw (measured 26.08.2026 against two real CCPR-using
+# projects — productdata, Kalza — 16 distinct unrecognised-but-legitimate
+# values between them). is_valid_kind() below therefore only decides whether
+# a value is RECOGNISED; check (c) reports an unrecognised one as a warning,
+# not an error (measured 26.08.2026, follow-up to WI-0112a — no separate WI filed).
+# Near-miss values seen in that measurement but deliberately NOT added, because
+# each already has a canonical equivalent below that the source project deviated
+# from rather than a genuinely new genre: `sprint-review` → use `review`;
+# `story-index` → use `sub-index`. Don't re-add them without checking this note.
 VALID_KINDS="adr api-resource-detail commands-doc-detail component-detail constitution detail entity-detail epic-detail frame learnings promotion-brief review risk-detail setup-detail sprint-detail sub-index system-doc-detail track-decision wireframe-detail"
 
 is_valid_kind() {
@@ -144,7 +159,7 @@ for file in ${FILES[@]+"${FILES[@]}"}; do
     # (c) kind: vocabulary — opt-in, only fires when kind: is actually set.
     kind_val="$(fm_field "$file" kind || true)"
     if [[ -n "$kind_val" ]] && ! is_valid_kind "$kind_val"; then
-        err "$rel — kind='$kind_val' is not in the defined vocabulary (see templates/PHASE_DOC_SCHEMA.md)"
+        warn "$rel — kind='$kind_val' is not in the known vocabulary (see templates/PHASE_DOC_SCHEMA.md) — add it there deliberately if this project uses it on purpose"
     fi
 
     # (a) parent_index — document-relative first, ROOT-fallback second,
@@ -217,7 +232,7 @@ NOW="$(date '+%d.%m.%Y %H:%M')"
 echo "# Manual Lint Report"
 echo
 echo "**Root:** $ROOT"
-echo "**Checks:** (a) parent_index resolves (document-relative first, root-fallback second) · (b) the resolved index links the claiming file back · (c) kind: is in the defined vocabulary"
+echo "**Checks:** (a) parent_index resolves (document-relative first, root-fallback second) · (b) the resolved index links the claiming file back · (c) kind: is in the known vocabulary (warning if not)"
 echo "**Run:** $NOW"
 echo "**Files scanned:** $FILES_TOTAL"
 echo
