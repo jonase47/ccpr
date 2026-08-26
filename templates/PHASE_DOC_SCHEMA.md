@@ -23,9 +23,49 @@
 |---|---|---|
 | `related` | YAML list (inline or block) | Paths to related phase docs. **Document-relative** (relative to the file's own directory) is the documented, preferred form. The lint also accepts a **project-root-relative** path (e.g. `docs/architecture/SECURITY.md`) as a fallback when the document-relative resolution misses — reported as an `info` finding, not silently, so root-relative usage stays visible instead of unnoticed drift (WI-0071). |
 | `parent_index` | Path | Sub-indexes link to their phase index (e.g. `ARCHITECTURE.md`). Phase indexes leave this field empty. Resolved the same document-relative-first, project-root-fallback way as `related` above. |
+| `kind` | See `## kind` below | Document genre — a free-standing marker used ALONGSIDE (`commands/*.md` templates) or INSTEAD OF (`Manual/**`, `docs/adr/*.md`, `templates/*_TEMPLATE.md`) the phase/subskill/status triple above. Validated against a fixed vocabulary by `scripts/manual-lint.sh` when set; `phase-docs-lint.sh` does not read this field at all except for the single literal `review` (see below). |
 | `base_commit`, `reviewed_head`, `reviewed_base` | Commit SHA | Written by `/p4-sprint` (`base_commit`, the sprint's starting `HEAD`) and by `/p5-review-sprint` (`reviewed_head`, the `HEAD` the review covered); `/gate-p5` compares `reviewed_head` against the current `HEAD` to decide whether a sprint review is stale. When present, the lint checks the **form** (7–40 hex characters, error) and, in a git repository, whether the SHA **resolves** to a commit (warning — a shallow clone, a rewritten history or a SHA from another repository are legitimate reasons to miss). Not to be confused with the anchor of ADR-0009, which is a separate key. |
 | `gate` | `pending` \| `conditional_go` \| `go` \| `no_go` | Only meaningful for `GATE_PX.md` files. |
 | `covers` | YAML list (inline or block) | **Code** paths (not doc paths) this document describes, e.g. `internal/auth/`, `src/domain/` — **relative to the project root**, exclusively (no document-relative fallback, unlike `related`/`parent_index` above). Lint checks path existence and flags an existing-but-empty directory. |
+
+## kind
+
+The vocabulary `scripts/manual-lint.sh` validates `kind:` against (WI-0112a), measured
+26.08.2026 across every shipped file, template and command in this repository — mirrored
+verbatim in `VALID_KINDS` in that script; keep both in sync when a new kind is introduced:
+
+`adr` · `api-resource-detail` · `commands-doc-detail` · `component-detail` · `constitution` ·
+`detail` · `entity-detail` · `epic-detail` · `frame` · `learnings` · `promotion-brief` ·
+`review` · `risk-detail` · `setup-detail` · `sprint-detail` · `sub-index` ·
+`system-doc-detail` · `track-decision` · `wireframe-detail`
+
+**`review` is load-bearing, not decorative.** `scripts/phase-docs-lint.sh` reads `kind:`
+exactly once (`fm_field "$file" kind`, called at the top of the `reviews` profile branch) and
+uses the literal value `review` as a behavioural switch: a document under `docs/reviews/**`
+only gets the WI-0072 required-fields check (`sprint`, `reviewed_head`/`reviewed_base`,
+`reviewer`, `last_updated`) when it self-identifies via `kind: review`. Any other value — no
+`kind:` at all, or a different one such as `story-review`/`review-convention` — stays silent
+there. No other `kind:` value changes `phase-docs-lint.sh`'s behaviour; the rest of this
+vocabulary is enforced only by `manual-lint.sh`, and only on a tree you point it at.
+
+## manual-lint.sh — index-↔-detail contract for a `kind`/`parent_index` tree
+
+`bash ~/.claude/scripts/manual-lint.sh [<root-dir>]` validates the checks below over any
+documentation tree that carries `kind:`/`parent_index:` frontmatter — generic over the root
+argument, NOT hardwired to `Manual/` (this repository's own `Manual/` is the reference
+example, but `install.sh` does not ship it into `~/.claude/`, so the script cannot default to
+it). Exit codes: 0 clean, 1 warnings, 2 errors.
+
+- **(a) `parent_index` resolves** — same document-relative-first, root-fallback cascade as
+  `phase-docs-lint.sh`'s checks (f)/(g) above, with the script's own `ROOT` argument standing
+  in for `PROJECT_DIR`.
+- **(b) the reverse direction** — the index a working `parent_index:` resolves to must itself
+  contain a markdown link to the claiming file (document-relative from the index's own
+  directory, the exact shape this repository's `Manual/` links already use — no leading `./`,
+  no anchor). A miss is a `warning`, not an `error`: the child's own pointer is still correct,
+  only the index's back-reference is missing.
+- **(c) `kind:` vocabulary** — validated against the list above; opt-in, only fires when the
+  field is actually set.
 
 ## Status semantics (vs. Memory schema)
 
@@ -42,14 +82,18 @@ The lint enforces **one** part of this:
   check, resolved document-relative first and against the project root as a fallback (see the
   `parent_index` row above; a root-relative hit is reported as `info`).
 
-Two further expectations are **conventions, not validations**. Nothing checks them:
+Two further expectations are **conventions**, unchecked **by `phase-docs-lint.sh` itself**:
 
 1. Every file with frontmatter under `docs/<phase>/**` should be listed in the phase index or a
-   sub-index.
-2. The index named by `parent_index:` should list the detail file back.
+   sub-index. Still unvalidated by anything shipped as of WI-0112a.
+2. The index named by `parent_index:` should list the detail file back. `manual-lint.sh`'s check
+   (b) above now validates exactly this — but it is a separate script you must point at the tree
+   in question (`docs/<phase>/`, `Manual/`, or any other `kind`/`parent_index` tree); it does not
+   run as part of `phase-docs-lint.sh`, and a clean `phase-docs-lint.sh` run is still not evidence
+   that (2) holds.
 
-Both would require the lint to parse an index's contents, which it does not do. Do not read a clean
-lint run as evidence that either holds.
+(1) would require the lint to parse an index's contents to discover what it does NOT list, which
+neither script does. Do not read a clean `phase-docs-lint.sh` run as evidence that (1) holds.
 
 ## Example (sub-index)
 
@@ -93,5 +137,8 @@ parent_index: QA.md
 
 ## Lint
 
-`bash ~/.claude/scripts/phase-docs-lint.sh [<project-dir>] [--scope <glob>]` validates this schema.
-Exit codes: 0 clean, 1 warnings, 2 errors.
+`bash ~/.claude/scripts/phase-docs-lint.sh [<project-dir>] [--scope <glob>]` validates the
+`phase`/`subskill`/`status`/`last_updated` schema above. `bash ~/.claude/scripts/manual-lint.sh
+[<root-dir>]` validates the `kind`/`parent_index` index-↔-detail contract (see `## kind` and
+`## manual-lint.sh` above) — a separate script, over whichever root you point it at. Exit codes
+for both: 0 clean, 1 warnings, 2 errors.

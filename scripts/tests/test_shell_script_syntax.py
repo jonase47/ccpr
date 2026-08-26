@@ -91,6 +91,7 @@ class ShellScriptSyntaxTest(unittest.TestCase):
                 "lib/discipline_gate.sh",
                 "lib/frontmatter.sh",
                 "log-cleanup.sh",
+                "manual-lint.sh",
                 "memory-lint.sh",
                 "memory-sync.sh",
                 "migrate-review-headers.sh",

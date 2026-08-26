@@ -1,9 +1,9 @@
 # /cleanup – Doc Hygiene: HANDOVER cap + lint aggregator
 
 Runs a one-shot hygiene pass on a project's docs to keep them lean and
-machine-readable: HANDOVER inbox triage and size cap enforcement plus the three
-existing lint scripts (`memory-lint.sh`, `phase-docs-lint.sh`, `doc-volume-check.sh`)
-bundled into one consolidated drift report. Use this between phases (after a Gate)
+machine-readable: HANDOVER inbox triage and size cap enforcement plus the four
+existing lint scripts (`memory-lint.sh`, `phase-docs-lint.sh`, `doc-volume-check.sh`,
+`manual-lint.sh`) bundled into one consolidated drift report. Use this between phases (after a Gate)
 or whenever the project-guide warns about HANDOVER size, an unprocessed inbox,
 stale memory or doc volume drift.
 
@@ -162,7 +162,18 @@ Run `bash ~/.claude/scripts/phase-docs-lint.sh [projectdir]`. Same output handli
 
 Run `bash ~/.claude/scripts/doc-volume-check.sh [projectdir]/docs`. Same output handling as §3. Volume warnings (≥25/40/50 KB) typically point at splitting work — surface the top 3 offenders for the user to consider.
 
-### 6. Consolidated drift report
+### 6. Manual-lint: index-↔-detail contract (read-only)
+
+Run `bash ~/.claude/scripts/manual-lint.sh [projectdir]/docs`. Same output handling as §3.
+Validates the `kind`/`parent_index` frontmatter contract (`templates/PHASE_DOC_SCHEMA.md`'s
+`## kind` and `## manual-lint.sh` sections) — generic over its root argument, not hardwired to
+this repository's own `Manual/` (`install.sh` never ships `Manual/`, see `Manual/README.md:2-5`).
+Most projects will scan clean here today (`kind`/`parent_index` are optional fields few sub-
+indexes use yet) — that is expected, not a sign the check did not run; the report's own
+`Files scanned` line and stderr notice on an empty scope make the difference legible. A project
+maintaining its own `Manual`-style tree can point this step at that root instead.
+
+### 7. Consolidated drift report
 
 Print a compact summary table at the end:
 
@@ -175,6 +186,7 @@ Drift Report — <project>
 | memory-lint         | clean | warn | error | <command to inspect> |
 | phase-docs-lint     | clean | warn | error | <command to inspect> |
 | doc-volume          | clean | warn | error | <top offender + split hint> |
+| manual-lint         | clean | warn | error | <command to inspect> |
 ```
 
 Then offer 1–3 concrete next-step commands:

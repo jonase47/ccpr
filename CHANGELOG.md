@@ -7,6 +7,27 @@ All notable changes to this project are documented in this file. The format is b
 ## [Unreleased]
 
 ### Fixed
+- **No linter in this repository looked at `Manual/`'s own structure — measured 26.08.2026:
+  `Manual/README.md` calls both `SYSTEM_OVERVIEW.md` and `SECTIONS_COMMANDS.md` "slim index →
+  detail files", and that direction was never checked at all (WI-0112a).** `phase-docs-lint.sh`
+  validates a different schema (`phase`/`subskill`/`status`) under `docs/<phase>/`,
+  `memory-lint.sh` scans `docs/memory/**` only, `doc-volume-check.sh` measures size, not
+  structure — none of the three read `Manual/`'s `kind`/`parent_index` frontmatter. New
+  `scripts/manual-lint.sh` (generic over any root — not hardwired to `Manual/`, which
+  `install.sh` never ships into `~/.claude/`) validates three checks: (a) every `parent_index:`
+  resolves (document-relative first, root-fallback second, reusing `phase-docs-lint.sh`'s
+  checks (f)/(g) cascade rather than a second rule); (b) the reverse direction — the index a
+  working `parent_index:` names must itself link the claiming file back; (c) `kind:` against a
+  fixed 19-value vocabulary, now documented in `templates/PHASE_DOC_SCHEMA.md` (`review` flagged
+  as load-bearing: `phase-docs-lint.sh` reads it as a behavioural switch for the `docs/reviews/**`
+  profile). Measured against this repository's own `Manual/` (22 files): the `parent_index`
+  direction (check (a)) was already fully correct — all 15 pointers resolve, nothing to find —
+  but the reverse direction (check (b)) was not: `SECTIONS_COMMANDS.md` links 0 of the 5 chapters
+  that name it as parent, `SYSTEM_OVERVIEW.md` links only 3 of its 10 (`anchored-state`,
+  `discipline-gate`, `memory-instincts`) — 12 findings total, left red on purpose; repairing
+  `Manual/`'s own back-links is follow-up work, not part of this item. Registered as a fourth
+  `/cleanup` step (`commands/cleanup.md` §6, pointed at `[projectdir]/docs` by default, since
+  `Manual/`-style trees are not universal across CCPR projects).
 - **A hand-typed test count in a docstring was three times the actual value, and the class it
   describes is exactly the one place that overstatement can cause a real regression (WI-0120).**
   `scripts/tests/test_memory_lint.py:309` said "this class's ~600 tests" where `MemoryLintTest`

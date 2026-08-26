@@ -1092,10 +1092,10 @@ class ExternalToolExitStatusTest(unittest.TestCase):
         by_disposition = {}
         for inv in invocations:
             by_disposition[inv.disposition] = by_disposition.get(inv.disposition, 0) + 1
-        self.assertEqual(143, len(invocations))
+        self.assertEqual(144, len(invocations))
         self.assertEqual(
             {
-                "checked-condition": 23,
+                "checked-condition": 24,
                 "checked-captured": 5,
                 "checked-chain": 14,
                 "discard-needs-exemption": 40,
@@ -1125,6 +1125,7 @@ class ExternalToolExitStatusTest(unittest.TestCase):
                 "lib/discipline_gate.sh",
                 "lib/frontmatter.sh",
                 "log-cleanup.sh",
+                "manual-lint.sh",
                 "memory-lint.sh",
                 "memory-sync.sh",
                 "migrate-review-headers.sh",
