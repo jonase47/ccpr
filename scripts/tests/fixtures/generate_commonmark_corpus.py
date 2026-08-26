@@ -1120,6 +1120,96 @@ CORPUS = [
         # not new, it is the shape the fix must not disturb.
         "known_divergence": None,
     },
+    # --- block quote interrupting a LIST ITEM's paragraph (WI-0089 follow- -
+    # --- up: same review round that closed the plain-paragraph gap above, --
+    # --- one container over) ------------------------------------------------
+    # pbuf_para cannot tell "continuing an open quote" (pbuf_para == 0)
+    # apart from "a list item paragraph is open" (pbuf_para == 0 too, by
+    # design — the list-item branch never sets it, so the WI-0082 setext
+    # guard does not fire inside a list item). A `>` line following an open
+    # list item never flushed on pbuf_para alone, joined its buffer, and hid
+    # a link across the join. pbuf_quote (a second flag tracking whether the
+    # open buffer is CURRENTLY a quote) fixes this: flush whenever the open
+    # buffer is non-empty and is not already a quote.
+    {
+        "name": "block_quote_interrupts_list_item_code_span_straddle",
+        "category": "block-quote-interrupts-list-item",
+        "markdown": (
+            "- foo `x\n"
+            "> bar [a](dead-liq-a.md) y` [b](dead-liq-b.md)\n"
+        ),
+        # Closed in the same round: the interrupt guard now reads pbuf_quote
+        # instead of pbuf_para, so it flushes on a list item paragraph the
+        # same way it already flushed on an ordinary one.
+        "known_divergence": None,
+        "caveat": (
+            "Reference: `<ul><li>foo `x</li></ul>` — the interrupt ends the "
+            "list item's paragraph before the backtick finds a partner, so "
+            "it stays literal — plus a blockquote paragraph "
+            "`bar <a href=\"dead-liq-a.md\">a</a> y` "
+            "<a href=\"dead-liq-b.md\">b</a>`, whose own backtick is unpaired "
+            "too. Both links are real. Before the fix the list item and the "
+            "quote line shared one buffer, the two backticks paired across "
+            "the join, and the first link was swallowed as code."
+        ),
+    },
+    {
+        "name": "block_quote_interrupts_ordered_list_item_code_span_straddle",
+        "category": "block-quote-interrupts-list-item",
+        "markdown": (
+            "1. foo `x\n"
+            "> bar [a](dead-oliq-a.md) y` [b](dead-oliq-b.md)\n"
+        ),
+        # Same gap, ordered-list marker: the list-item branch's regex covers
+        # both `[-+*]` and `[0-9]{1,9}[.)]` markers identically.
+        "known_divergence": None,
+    },
+    {
+        "name": "block_quote_interrupts_list_item_indented_code_span_straddle",
+        "category": "block-quote-interrupts-list-item",
+        "markdown": (
+            "- foo `x\n"
+            "  > bar [a](dead-ilq-a.md) y` [b](dead-ilq-b.md)\n"
+        ),
+        # Same gap, quote line indented under the item: the boundary regex
+        # allows up to three leading spaces regardless of which container is
+        # open, so an indented interrupt hits the same guard.
+        "known_divergence": None,
+    },
+    {
+        "name": "block_quote_continues_block_quote_code_span_straddle_control",
+        "category": "block-quote-interrupts-list-item",
+        "markdown": (
+            "> foo `x\n"
+            "> bar [a](dead-bqbq-a.md) y` [b](dead-bqbq-b.md)\n"
+        ),
+        # Control that must NOT change: a block quote's own paragraph
+        # legitimately spans several `>` lines, and a code span may straddle
+        # THAT join the same way it does inside any paragraph (measured:
+        # the reference renders one blockquote paragraph whose code span
+        # crosses the two `>` lines, so `[a]` is code text, not a link, and
+        # only b.md is a real, rendered `<a href>`). A second `>` line
+        # merely continuing an already-open quote must not flush —
+        # pbuf_quote stays 1 across it, same as pbuf_para did before this
+        # round for the equivalent case, and check (n) already agreed with
+        # the reference before this round too — this is the shape the fix
+        # must not disturb, not a new agreement.
+        "known_divergence": None,
+    },
+    {
+        "name": "atx_heading_before_block_quote_code_span_straddle_control",
+        "category": "block-quote-interrupts-list-item",
+        "markdown": (
+            "# foo `x\n"
+            "> bar [a](dead-hq-a.md) y` [b](dead-hq-b.md)\n"
+        ),
+        # Control that must stay green throughout: an ATX heading flushes
+        # immediately and buffers nothing (WI-0084), so it never shares a
+        # buffer with what follows — the gap this round closes is specific
+        # to a list item's paragraph, which (unlike a heading) stays open
+        # across lines.
+        "known_divergence": None,
+    },
     # --- reference-link usage forms — agree, but only via the definition- --
     # --- line shortcut documented above, not by resolving the USAGE --------
     {

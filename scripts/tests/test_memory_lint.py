@@ -3838,6 +3838,109 @@ class MemoryLintTest(MemoryLintFixture, unittest.TestCase):
 
         self.assertTrue(any("project_bqint_ctrl.md" in f for f in findings), findings)
 
+    # --- a block quote interrupting a LIST ITEM's paragraph (WI-0089 gap) ---
+    # WI-0089 flushed the buffer when a `>` line interrupts an ordinary,
+    # not-yet-quoted paragraph (pbuf_n > 0 && pbuf_para). A list item's own
+    # paragraph never sets pbuf_para at all — the list-item branch buffers
+    # content without touching the flag, by design, so the WI-0082 setext
+    # guard does not fire inside a list item. That leaves the interrupt guard
+    # unable to tell "continuing an open quote" (pbuf_para == 0, must NOT
+    # flush) apart from "a list item's paragraph is open" (pbuf_para == 0
+    # too, but MUST flush) — both read the same flag value. The list-item
+    # case falls through unflushed, the quote line joins the list item's
+    # buffer, and a code span straddling that join hides a real link.
+    # Measured at the reference (commonmark 0.9.2): a block quote interrupts
+    # a list item's paragraph the same way it interrupts an ordinary one —
+    # two separate blocks, two separate inline-parsing scopes — so both
+    # links are real.
+
+    def test_a_block_quote_interrupting_a_list_item_does_not_hide_a_link_in_a_straddling_code_span(self):
+        """Measured at the reference: `- foo `x` / `> bar [a](…) y` [b](…)`
+        renders `<ul><li>foo `x</li></ul>` (the backtick never pairs — the
+        quote ends the list item's paragraph) plus a blockquote paragraph
+        `bar <a>a</a> y` <a>b</a>` (its own backtick is unpaired too). Both
+        links are real.
+        """
+        self.write_index(
+            "# Memory Index\n\n"
+            "- foo `x\n"
+            "> bar [a](project_liq_a.md) y` [b](project_liq_b.md)\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertTrue(any("project_liq_a.md" in f for f in findings), findings)
+        self.assertTrue(any("project_liq_b.md" in f for f in findings), findings)
+
+    def test_a_block_quote_interrupting_an_ordered_list_item_does_not_hide_a_link_in_a_straddling_code_span(self):
+        """Same shape, ordered-list marker: the list-item branch's regex
+        covers both `[-+*]` and `[0-9]{1,9}[.)]` markers identically, so the
+        gap and the fix apply the same way here.
+        """
+        self.write_index(
+            "# Memory Index\n\n"
+            "1. foo `x\n"
+            "> bar [a](project_oliq_a.md) y` [b](project_oliq_b.md)\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertTrue(any("project_oliq_a.md" in f for f in findings), findings)
+        self.assertTrue(any("project_oliq_b.md" in f for f in findings), findings)
+
+    def test_a_block_quote_interrupting_a_list_item_hides_a_link_the_same_way_when_indented(self):
+        """Same shape, quote line indented under the item (`  > …`): the
+        boundary regex allows up to three leading spaces regardless of which
+        container is open, so an indented interrupt hits the same gap.
+        """
+        self.write_index(
+            "# Memory Index\n\n"
+            "- foo `x\n"
+            "  > bar [a](project_ilq_a.md) y` [b](project_ilq_b.md)\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertTrue(any("project_ilq_a.md" in f for f in findings), findings)
+        self.assertTrue(any("project_ilq_b.md" in f for f in findings), findings)
+
+    def test_a_block_quote_continuing_a_block_quote_keeps_a_straddling_code_span_paired(self):
+        """Control that must NOT change: unlike a list item's paragraph, a
+        block quote's own paragraph legitimately spans several `>` lines, and
+        a code span may straddle THAT join the same way it does inside any
+        paragraph (measured). A second `>` line merely CONTINUING an
+        already-open quote must not flush — flushing here would split a
+        block CommonMark keeps whole and report a link buried in code as
+        real.
+        """
+        self.write_index(
+            "# Memory Index\n\n"
+            "> foo `x\n"
+            "> bar [a](project_bqbq_a.md) y` [b](project_bqbq_b.md)\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertFalse(any("project_bqbq_a.md" in f for f in findings), findings)
+        self.assertTrue(any("project_bqbq_b.md" in f for f in findings), findings)
+
+    def test_an_atx_heading_before_a_block_quote_already_finds_both_links(self):
+        """Control that must stay green throughout: an ATX heading flushes
+        immediately and buffers nothing (WI-0084), so it never shares a
+        buffer with what follows it — the gap above is specific to a list
+        item's paragraph, which (unlike a heading) stays open across lines.
+        """
+        self.write_index(
+            "# Memory Index\n\n"
+            "# foo `x\n"
+            "> bar [a](project_hq_a.md) y` [b](project_hq_b.md)\n"
+        )
+
+        findings = self.link_findings(self.run_lint().stdout)
+
+        self.assertTrue(any("project_hq_a.md" in f for f in findings), findings)
+        self.assertTrue(any("project_hq_b.md" in f for f in findings), findings)
+
 
 class ScriptActuallyRanTest(unittest.TestCase):
     """WI-0037: a broken memory-lint.sh must not be able to pass its own tests.
@@ -5195,10 +5298,15 @@ class ParagraphBoundaryMutationTest(unittest.TestCase):
     _NAIVE_SETEXT = (
         "            if (pbuf_n > 0 && $0 ~ /^[ ]{0,3}(=+|-+)[ \\t]*$/) {\n"
     )
+    # Current shape: pbuf_quote (WI-0089 follow-up) answers "is the buffer
+    # currently an open quote", which pbuf_para alone could not — a list
+    # item's paragraph also reads pbuf_para == 0, the same value as "already
+    # continuing a quote", so the flush guard could not tell them apart.
     _CONTAINER_GUARD = (
         "            if ($0 ~ /^[ ]{0,3}>/) {\n"
-        "                if (pbuf_n > 0 && pbuf_para) flush_paragraph()\n"
+        "                if (pbuf_n > 0 && !pbuf_quote) flush_paragraph()\n"
         "                pbuf_para = 0\n"
+        "                pbuf_quote = 1\n"
         "            }\n"
         "            else if (pbuf_n == 0) pbuf_para = 1\n"
     )
@@ -5214,6 +5322,18 @@ class ParagraphBoundaryMutationTest(unittest.TestCase):
     # paragraph buffer at the interrupt itself.
     _CONTAINER_GUARD_PRE_WI_0089 = (
         "            if ($0 ~ /^[ ]{0,3}>/) pbuf_para = 0\n"
+        "            else if (pbuf_n == 0) pbuf_para = 1\n"
+    )
+    # The shape WI-0089 shipped and this round follows: the interrupt guard
+    # reads pbuf_para (rather than pbuf_quote), and so cannot distinguish
+    # "continuing an open quote" from "a list item paragraph is open" — both
+    # read pbuf_para == 0. A `>` line following an open list item never
+    # flushed, and a code span straddling that join hid a real link.
+    _CONTAINER_GUARD_PRE_PBUF_QUOTE = (
+        "            if ($0 ~ /^[ ]{0,3}>/) {\n"
+        "                if (pbuf_n > 0 && pbuf_para) flush_paragraph()\n"
+        "                pbuf_para = 0\n"
+        "            }\n"
         "            else if (pbuf_n == 0) pbuf_para = 1\n"
     )
     _GATED_THEMATIC_BREAK = (
@@ -5367,6 +5487,35 @@ class ParagraphBoundaryMutationTest(unittest.TestCase):
             "fixed for",
         )
         self.assertIn("project_mut_bqint2.md", result.stdout)
+
+    def test_restoring_the_pre_pbuf_quote_container_guard_hides_a_link_across_a_list_item_boundary(self):
+        """This round's own pre-fix restoration: the guard goes back to its
+        EXACT immediately-previous form (the shape WI-0089 shipped), which
+        reads pbuf_para for the flush decision. pbuf_para cannot distinguish
+        "continuing an open quote" from "a list item paragraph is open" —
+        both read pbuf_para == 0 — so a `>` line following an open list item
+        never flushed, and a code span straddling that join hid a real link,
+        exactly the false negative WI-0089 closed one container over.
+        """
+        def mutate(src):
+            self.assertIn(self._CONTAINER_GUARD, src)
+            return src.replace(
+                self._CONTAINER_GUARD, self._CONTAINER_GUARD_PRE_PBUF_QUOTE, 1
+            )
+
+        result = self._run_mutant(
+            mutate,
+            "# Memory Index\n\n"
+            "- foo `x\n> bar [a](project_mut_liq.md) y` [b](project_mut_liq2.md)\n",
+        )
+
+        self.assertNotIn(
+            "project_mut_liq.md", result.stdout,
+            "the list-item block-quote interrupt no longer discriminates — "
+            "the pre-pbuf_quote guard must reproduce the false negative it "
+            "was fixed for",
+        )
+        self.assertIn("project_mut_liq2.md", result.stdout)
 
     def test_gating_the_thematic_break_hides_a_link_in_the_list_item_above_it(self):
         """The opposite direction from the guard mutations above: this one ADDS

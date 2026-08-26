@@ -1496,7 +1496,11 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
             # raised immediately before an append that lifts pbuf_n to 1 — so
             # this is defensive, not a fix: it costs one assignment and keeps a
             # later conditional append from breaking the setext gate silently.
+            # pbuf_quote (WI-0089 follow-up) resets the same way and for the
+            # same reason — see the container-guard branch below for what it
+            # tracks and why pbuf_para alone could not.
             pbuf_para = 0
+            pbuf_quote = 0
             if (pbuf_n == 0) return
             resolved = resolve_paragraph(pbuf)
             # Pass 1 exists only to fill refmap (see the pass gate in the record
@@ -1526,6 +1530,7 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
             pbuf = ""
             pbuf_n = 0
             pbuf_para = 0
+            pbuf_quote = 0
             pass = 0
             refdef_pending = 0
         }
@@ -2074,21 +2079,46 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
             # still appended into the SAME buffer as the paragraph it
             # interrupts, so a code span straddling the join could pair
             # across two blocks CommonMark keeps separate and hide a real
-            # link. Flushing on the interrupt (pbuf_n > 0 && pbuf_para, i.e.
-            # an ordinary, not-yet-quoted paragraph is open) resolves the
-            # paragraph above on its own before the quote line starts a new
-            # buffer. A `>` line that merely CONTINUES an already-open quote
-            # (pbuf_para already 0) must NOT flush here — that would split a
-            # block CommonMark keeps whole (measured: the quotes own paragraph
-            # legitimately spans several `>` lines, and a code span may
-            # straddle THAT join the same way it does inside any paragraph).
+            # link. Flushing on the interrupt resolves the paragraph above on
+            # its own before the quote line starts a new buffer. A `>` line
+            # that merely CONTINUES an already-open quote must NOT flush here
+            # — that would split a block CommonMark keeps whole (measured:
+            # the quotes own paragraph legitimately spans several `>` lines,
+            # and a code span may straddle THAT join the same way it does
+            # inside any paragraph).
+            #
+            # pbuf_para cannot tell those two cases apart, and that is a
+            # SECOND gap, found reviewing this fix rather than by WI-0089
+            # itself: the list-item branch above buffers a list item paragraph
+            # WITHOUT ever setting pbuf_para (by design — it is what keeps the
+            # WI-0082 setext guard from firing inside a list item, see the
+            # comment on that branch). So "continuing an open quote" and "a list
+            # item paragraph is open" both read pbuf_para == 0, and the
+            # interrupt guard could only get one of them right. Before this
+            # fix it got the quote right and the list item wrong: a `>` line
+            # following an open list item never flushed, joined its buffer,
+            # and hid a link across the join — the same false negative
+            # WI-0089 closed for an ordinary paragraph, just one container
+            # over.
+            #
+            # pbuf_quote answers the question pbuf_para cannot: is the buffer
+            # CURRENTLY an open quote, set unconditionally whenever a `>` line
+            # is processed (freshly opened or continued) and cleared wherever
+            # pbuf_para is (both by flush_paragraph() and, defensively, by
+            # construction: it can only be 1 when pbuf_n > 0). The interrupt
+            # guard reads it instead of pbuf_para: flush whenever the open
+            # buffer is non-empty and is NOT already a quote, regardless of
+            # whether that buffer is an ordinary paragraph or a list item
+            # paragraph — both must flush; only a quote continuing itself
+            # must not.
             #
             # This extractor still models no other part of block quotes
             # beyond this one interrupt boundary and the pre-existing setext
             # guard.
             if ($0 ~ /^[ ]{0,3}>/) {
-                if (pbuf_n > 0 && pbuf_para) flush_paragraph()
+                if (pbuf_n > 0 && !pbuf_quote) flush_paragraph()
                 pbuf_para = 0
+                pbuf_quote = 1
             }
             else if (pbuf_n == 0) pbuf_para = 1
             append_paragraph($0)

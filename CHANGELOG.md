@@ -7,6 +7,42 @@ All notable changes to this project are documented in this file. The format is b
 ## [Unreleased]
 
 ### Fixed
+- **A block quote interrupting a LIST ITEM's paragraph still hid a link — three shapes, not
+  the one that was reported.** `709f241` fixed the plain-paragraph case; the `code-reviewer`
+  pass on it found the same defect one container further. Sweeping the family against
+  `commonmark` 0.9.2 found two more the review had not:
+
+  | Shape | Reference | check (n) before |
+  |---|---|---|
+  | `- foo …` then `> …` | both links | one link |
+  | `1. foo …` then `> …` | both links | one link |
+  | `- foo …` then `  > …` (indented) | both links | one link |
+
+  Direction: **false negative** — a real link went unchecked, so a dead target passed.
+  `# foo …` then `> …` was already correct (headings flush), which localised the cause to the
+  list-item branch.
+
+  **Why one guard could not get both right.** The interrupt guard keyed off `pbuf_para`, which
+  records *what opened the buffer*, not *which container is open*. The list-item branch
+  deliberately never sets that flag — that is what stops the WI-0082 setext guard from firing
+  inside a list item — so "continuing an open quote" (which must **not** flush) and "a list
+  item's paragraph is open" (which must) both read `pbuf_para == 0`.
+
+  The repository's own `senior-developer` memory had already written the rule down on
+  23.08.2026, three days before this surfaced: *a container guard must key off the CONTAINER,
+  not off what opened the buffer*, with the generalised test — for a flag set at
+  construct-open, ask whether the construct can appear mid-block; if yes, the clear and the
+  set need different conditions.
+
+  Fixed with an orthogonal `pbuf_quote` flag rather than by widening `pbuf_para`, which would
+  have re-coupled it to the setext guard it must stay decoupled from. Verified afterwards that
+  `pbuf_quote` is **read** in exactly one place — the guard itself — so the one path that
+  leaves it stale (the `END` block's deferred reference-definition case, which never consults
+  the guard) cannot be affected by construction, not merely for want of a fixture.
+
+  Eight shapes now agree with the reference, including a three-line quote and a
+  quote-then-paragraph transition. Corpus 89 → 94.
+
 - **The YouTrack read path warned about an out-of-vocabulary `status` but said nothing about
   `priority`.** `_item_from_issue` reads both through structurally identical one-line helpers
   (`self._reverse_X_map.get(name, name)` — an identity fallback), so a project value absent
