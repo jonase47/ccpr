@@ -138,8 +138,14 @@ if [[ ! -d "$DOCS_DIR" ]]; then
     exit 0
 fi
 
-# Collect files
+# Collect files. FOLDERS_FOUND tracks which of PHASE_FOLDERS actually exist
+# under docs/ on the default (no --scope) walk -- consumed by the summary
+# line and the empty-scope notice below (WI-0121), so a reader can tell
+# "every phase folder was checked and none of them existed" apart from
+# "phase folders exist but every document in them is clean". Left empty
+# (and unused) on a --scope run, which names its own glob instead.
 FILES=()
+FOLDERS_FOUND=()
 if [[ -n "$SCOPE_GLOB" ]]; then
     while IFS= read -r p; do
         # Bash [[ ... == pattern ]] supports *, ?, [...] (no ** globstar required)
@@ -150,6 +156,7 @@ if [[ -n "$SCOPE_GLOB" ]]; then
 else
     for folder in "${PHASE_FOLDERS[@]}"; do
         [[ -d "$DOCS_DIR/$folder" ]] || continue
+        FOLDERS_FOUND+=("$folder")
         while IFS= read -r line; do
             FILES+=("$line")
         done < <(find "$DOCS_DIR/$folder" -type f -name "*.md")
@@ -157,6 +164,28 @@ else
 fi
 
 FILES_TOTAL=${#FILES[@]}
+
+# An empty scope is not a pass (WI-0121) -- the same shape WI-0090 already
+# fixed for artifact-gate.sh's deny-list scope. "Files scanned: 0" printed
+# next to "0 errors, 0 warnings" is a true sentence that reads as "every
+# phase folder was checked and found clean"; on a project with no phase
+# folders yet (pre-P3, or Lean-Track) it instead means there was nothing to
+# check at all. The exit code stays 0 on purpose -- an empty scope is a
+# SUPPORTED configuration here, not an error: PHASE_FOLDERS not existing yet
+# under docs/ is the normal, expected state for a project before P3, and the
+# Constitution's "installable and runnable on a clean machine" Inviolable is
+# what makes that the default rather than a failure (mirrors artifact-gate.sh
+# NOT failing an unconfigured deny-list by default). The notice goes to
+# stderr -- the channel this script already uses for every other "the run
+# could not do its job" line -- so a caller that keeps stdout as its findings
+# report cannot lose it by redirecting.
+if [[ "$FILES_TOTAL" -eq 0 ]]; then
+    if [[ -n "$SCOPE_GLOB" ]]; then
+        echo "phase-docs-lint: no files matched --scope '$SCOPE_GLOB' under $DOCS_DIR" >&2
+    else
+        echo "phase-docs-lint: no phase folders found under $DOCS_DIR (looked for: ${PHASE_FOLDERS[*]})" >&2
+    fi
+fi
 
 for file in ${FILES[@]+"${FILES[@]}"}; do
     rel="${file#$PROJECT_DIR/}"
@@ -348,6 +377,18 @@ SCOPE_DESC="${SCOPE_GLOB:-all phase folders}"
 echo "# Phase Docs Lint Report"
 echo
 echo "**Scope:** $DOCS_DIR/ ($SCOPE_DESC)"
+# Names the scope of FOLDERS as well as the scope of files, same reasoning
+# as artifact-gate.sh's deny-list line: "Files scanned: 0" alone does not
+# say whether that is because every phase folder was empty or because none
+# of them exist. A --scope run already states its own glob on the line
+# above, so this companion line is default-scope only.
+if [[ -z "$SCOPE_GLOB" ]]; then
+    if [[ ${#FOLDERS_FOUND[@]} -gt 0 ]]; then
+        echo "**Phase folders found:** ${FOLDERS_FOUND[*]}"
+    else
+        echo "**Phase folders found:** none (looked for: ${PHASE_FOLDERS[*]})"
+    fi
+fi
 echo "**Run:** $NOW"
 echo "**Files scanned:** $FILES_TOTAL"
 echo
