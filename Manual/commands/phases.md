@@ -2,10 +2,10 @@
 kind: commands-doc-detail
 parent_index: ../SECTIONS_COMMANDS.md
 section: phase-commands
-last_updated: 15.05.2026
+last_updated: 26.08.2026
 ---
 
-# Phase Commands (81 commands, P0–P8)
+# Phase Commands (82 commands, P0–P8)
 
 All P0–P8 phase commands grouped per phase. Lead commands appear first, then sub-skills in execution sequence where applicable.
 
@@ -75,9 +75,9 @@ Lead commands first, each followed by its sub-skills in execution sequence. Afte
 | `/p4-docs` | README, Contributing Guide & Project Structure Documentation | Creates the foundational project documentation: a meaningful README, a contributing guide, and documentation of the project structure. The result is a documentation base that quickly onboards new developers and bindingly establishes standards. |
 | `/p4-sprint` | Plan Sprint | Plans the current sprint: pulls matching stories from the backlog, defines the sprint goal, identifies risks, and creates the sprint document. Called repeatedly at the start of each new sprint. |
 
-## P5: Implementation (11 commands)
+## P5: Implementation (12 commands)
 
-Sprint workflow: `/p5-implement` (with TDD sub-skills) → `/p5-review` → `/p5-acceptance` → `/p5-bugfix` on findings → `/p5-docs` → `/gate-p5` → `/p5-polish`.
+Sprint workflow: `/p5-implement` (with TDD sub-skills) → `/p5-review` → `/p5-acceptance` → `/p5-bugfix` on findings → `/p5-docs` → `/p5-review-sprint` (holistic, once before the gate) → `/gate-p5` → `/p5-polish`.
 
 | Command | Title | Description |
 |---|---|---|
@@ -91,6 +91,7 @@ Sprint workflow: `/p5-implement` (with TDD sub-skills) → `/p5-review` → `/p5
 | `/p5-acceptance` | Acceptance Tests | Tests an implemented feature against its requirements from a user perspective: are all acceptance criteria met? Are edge cases handled correctly? The result is test findings that determine whether the feature counts as "Done". |
 | `/p5-bugfix` | Analyze & Fix Bug | Systematically analyzes a found bug, identifies the root cause and fixes it with an accompanying regression test. Goal: the bug is fixed, secured by a test, and cannot be silently reintroduced. |
 | `/p5-docs` | Keep Code Documentation Up to Date | Keeps code documentation in sync with the implemented code: inline comments, API documentation, changes to README or CONTRIBUTING, and updates to technical specifications if the code deviates from them. Called after implementing a feature. |
+| `/p5-review-sprint` | Holistic Sprint Code Review (whole-context) | Runs the `code-reviewer` agent on **opus** once over the whole sprint diff at sprint end — complementary to the per-story `/p5-review-code`. Reasons across the full diff plus conformance anchors (Constitution Inviolables, touched ADRs, all migrations) to surface findings single-story reviews structurally miss: cross-story interactions, repeated schema/constraint anti-patterns, ADR/Inviolable drift, async/coalescing correctness. Output: `docs/reviews/SPRINT-<n>-review.md`. Wired into `/gate-p5` as an automatic step (guarded by a `reviewed_head` SHA so opus is spent once per sprint state); any unresolved CRITICAL/HIGH finding blocks the gate. |
 | `/p5-polish` | Sprint Polish: Collect & Resolve Small Carry-Over TODOs | Collects small clean-up TODOs accumulated during the sprint (from /p5-review, /p5-acceptance, /p5-bugfix, TODO/FIXME comments) that do not justify a full story but make the next sprint easier. Triages each item into polish-now, backlog, handover, or drop. Optionally executes polish-now items directly (TDD mini-cycle, one commit per item). Runs between /gate-p5 (Sprint Done) and the next /p4-sprint. |
 
 ## P6: Quality Assurance (22 commands)
