@@ -240,13 +240,16 @@ subskill: sprint
 kind: risk-detail
 risk_id: R-NN
 severity: low | medium | high | critical
-status: open | mitigated | accepted | closed
+status: living   # detail file keeps growing via ## History as the risk evolves
+risk_status: open | mitigated | accepted | closed
 sprint_identified: NN
 last_updated: <DD.MM.YYYY>
 ---
 ```
 
-Body: `## Description`, `## Impact`, `## Likelihood`, `## Countermeasure`, `## Trigger / Indicator` (when does this risk become real?), `## Owner`, `## History` (status changes over time).
+`status` is the document-schema field (`phase`/`subskill`/`status`/`last_updated`, required by `phase-docs-lint.sh`) — a risk detail file is always `living`, it is designed to be appended to via `## History` for as long as the risk is tracked. `risk_status` is a separate field for the RISK lifecycle itself; the two must not share a name, or `phase-docs-lint.sh` validates the risk lifecycle value against the document-status enum and rejects it.
+
+Body: `## Description`, `## Impact`, `## Likelihood`, `## Countermeasure`, `## Trigger / Indicator` (when does this risk become real?), `## Owner`, `## History` (risk_status changes over time).
 
 ### 5. Update Phase Index
 Update `docs/planning/PROJECT_PLAN.md` (the P4 phase index, created by `/p4-backlog` if missing):

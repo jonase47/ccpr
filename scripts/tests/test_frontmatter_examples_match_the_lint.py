@@ -43,13 +43,18 @@ VALID_STATUS would be checking the wrong schema, not finding a bug.
 that is what identifies the block as a phase-doc-schema example rather than
 some other document's own header.
 
-One value is deliberately exempted: `commands/p4-sprint.md`'s
-`kind: risk-detail` block's `status: open | mitigated | accepted | closed`
-is the RISK lifecycle, not the document-status lifecycle -- a different axis
-that happens to collide on the field name `status`. The exemption is keyed
-narrowly on `kind: risk-detail` (not on "any block containing a pipe"), see
-`RISK_DETAIL_KIND` below, and RiskDetailExemptionIsNarrowTest proves the
-exemption is doing real, load-bearing work rather than being vacuously true.
+No exemption remains. This test used to carry one, keyed on `kind:
+risk-detail`: `commands/p4-sprint.md`'s risk-detail block put the RISK
+lifecycle (`open | mitigated | accepted | closed`) under the field name
+`status`, colliding with the document-status lifecycle this test enforces.
+The fix moved the risk lifecycle to its own `risk_status:` field (see
+`commands/p4-sprint.md`) and gave the risk-detail block a real document
+`status: living` -- a risk detail file is designed to keep growing via its
+`## History` section for as long as the risk is tracked, which is exactly
+what `living` means in `templates/PHASE_DOC_SCHEMA.md`. With the collision
+gone, `status:` means the same thing in every block this test scans, `kind:
+risk-detail` included, and RiskDetailHasNoStatusExemptionTest pins that no
+kind-based special case has crept back in.
 
 ## How a value is parsed out of a line
 
@@ -75,9 +80,10 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 LINT_SCRIPT = REPO_ROOT / "scripts" / "phase-docs-lint.sh"
 
-# The genre this test exempts from status validation -- narrow and named,
-# not a general "ignore any pipe-separated status". See the module
-# docstring's "risk-detail" paragraph and RiskDetailExemptionIsNarrowTest.
+# The kind that used to be exempted from status validation (see the module
+# docstring). No longer special-cased anywhere in this module -- kept only
+# as the literal RiskDetailHasNoStatusExemptionTest builds its synthetic
+# block against, so that test names the same genre the old exemption did.
 RISK_DETAIL_KIND = "risk-detail"
 
 # Directories walked for ```yaml examples. docs/workitems/ is deliberately
@@ -148,6 +154,24 @@ def _extract_candidates(raw_value):
     return candidates
 
 
+def _status_violations(blocks, valid_status):
+    """Every `status:` value across `blocks` (an iterable of (path, fields))
+    that is not in valid_status. No `kind` is special-cased -- a block's
+    `status:` always means the document-status enum, including a `kind:
+    risk-detail` block (see RiskDetailHasNoStatusExemptionTest)."""
+    violations = []
+    for path, fields in blocks:
+        for raw_value, line_no in fields.get("status", []):
+            for token, source in _extract_candidates(raw_value):
+                if token not in valid_status:
+                    violations.append(
+                        "{}:{}  status: {!r} ({}) not in {}".format(
+                            path, line_no, token, source, sorted(valid_status),
+                        )
+                    )
+    return violations
+
+
 def _iter_frontmatter_blocks():
     """Yields (path, fields, block_start_line) for every ```yaml fence that
     contains a top-level `phase:` key. fields maps field name -> list of
@@ -197,98 +221,54 @@ class PhaseValueTest(unittest.TestCase):
 
 class StatusValueTest(unittest.TestCase):
     """Every `status:` value in a phase-doc frontmatter example (a block
-    that also carries `phase:`) must be accepted by VALID_STATUS -- except
-    a `kind: risk-detail` block, whose `status:` is the risk lifecycle, not
-    the document lifecycle."""
+    that also carries `phase:`) must be accepted by VALID_STATUS. No kind
+    is special-cased, `kind: risk-detail` included -- see
+    RiskDetailHasNoStatusExemptionTest and the module docstring."""
 
     def test_every_status_value_in_examples_is_valid(self):
         valid_status = _read_enum("VALID_STATUS")
-        violations = []
-        for path, fields in _iter_frontmatter_blocks():
-            if fields.get("kind", [(None, None)])[0][0] == RISK_DETAIL_KIND:
-                continue
-            for raw_value, line_no in fields.get("status", []):
-                for token, source in _extract_candidates(raw_value):
-                    if token not in valid_status:
-                        violations.append(
-                            "{}:{}  status: {!r} ({}) not in {}".format(
-                                path.relative_to(REPO_ROOT), line_no,
-                                token, source, sorted(valid_status),
-                            )
-                        )
+        blocks = (
+            (path.relative_to(REPO_ROOT), fields)
+            for path, fields in _iter_frontmatter_blocks()
+        )
+        violations = _status_violations(blocks, valid_status)
         if violations:
             self.fail(
                 "status value(s) outside VALID_STATUS:\n" + "\n".join(violations)
             )
 
 
-class RiskDetailExemptionIsNarrowTest(unittest.TestCase):
-    """Proves the risk-detail exemption is load-bearing rather than
-    vacuous: the exempted block's own status values really are outside
-    VALID_STATUS (so the exemption has something to exempt), and removing
-    the exemption reproduces exactly that block's values as new failures --
-    nothing else in the corpus changes."""
+class RiskDetailHasNoStatusExemptionTest(unittest.TestCase):
+    """Pins the state after the risk-lifecycle/document-status collision was
+    fixed: a `kind: risk-detail` block with an out-of-enum `status:` is
+    reported exactly like any other block. Built on a synthetic block, not
+    the real corpus -- the real corpus's risk-detail block is now valid
+    (`status: living`) precisely because the fix worked, so a corpus-only
+    test could not tell "no exemption left" apart from "nothing to catch
+    right now". This test would fail again the moment a kind-based special
+    case creeps back into `_status_violations`/StatusValueTest."""
 
-    def test_exempted_block_exists_and_its_values_are_themselves_invalid(self):
+    def test_an_out_of_enum_status_in_a_risk_detail_block_is_reported(self):
         valid_status = _read_enum("VALID_STATUS")
-        found = False
-        for path, fields in _iter_frontmatter_blocks():
-            if fields.get("kind", [(None, None)])[0][0] != RISK_DETAIL_KIND:
-                continue
-            found = True
-            tokens = [
-                token
-                for raw_value, _ in fields.get("status", [])
-                for token, _source in _extract_candidates(raw_value)
-            ]
-            self.assertTrue(tokens, "risk-detail block has no status: field")
-            self.assertTrue(
-                all(t not in valid_status for t in tokens),
-                "expected every risk-detail status token to be outside "
-                "VALID_STATUS (proving the exemption is not vacuous): "
-                "{}".format(tokens),
+        synthetic_blocks = [
+            (
+                "synthetic/RISK-01.md",
+                {
+                    "phase": [("P4", 1)],
+                    "kind": [(RISK_DETAIL_KIND, 2)],
+                    # The OLD risk-lifecycle value that used to live under
+                    # `status:` before the risk_status: split -- still
+                    # outside VALID_STATUS, still must be reported.
+                    "status": [("open", 3)],
+                },
             )
+        ]
+        violations = _status_violations(synthetic_blocks, valid_status)
         self.assertTrue(
-            found,
-            "no kind: {} block found in the corpus -- the exemption has "
-            "nothing to exempt".format(RISK_DETAIL_KIND),
+            violations,
+            "a kind: risk-detail block with status: 'open' must be "
+            "flagged like any other block -- no exemption should remain",
         )
-
-    def test_removing_the_exemption_only_adds_the_risk_detail_violations(self):
-        valid_status = _read_enum("VALID_STATUS")
-
-        def violations_with_exemption(apply_exemption):
-            found = []
-            for path, fields in _iter_frontmatter_blocks():
-                if apply_exemption and fields.get("kind", [(None, None)])[0][0] == RISK_DETAIL_KIND:
-                    continue
-                for raw_value, line_no in fields.get("status", []):
-                    for token, source in _extract_candidates(raw_value):
-                        if token not in valid_status:
-                            found.append((str(path.relative_to(REPO_ROOT)), line_no, token, source))
-            return set(found)
-
-        with_exemption = violations_with_exemption(apply_exemption=True)
-        without_exemption = violations_with_exemption(apply_exemption=False)
-
-        new_violations = without_exemption - with_exemption
-        self.assertTrue(
-            new_violations,
-            "removing the exemption produced no new violations -- the "
-            "exemption is not narrowing anything",
-        )
-        self.assertTrue(
-            all(
-                "p4-sprint.md" in path and token in ("open", "mitigated", "accepted", "closed")
-                for path, _line_no, token, _source in new_violations
-            ),
-            "removing the exemption changed more than the risk-detail "
-            "block's own values: {}".format(new_violations),
-        )
-        # And nothing that was ALREADY a violation with the exemption in
-        # place disappears once it is removed -- the exemption only ever
-        # adds a narrow, known set back in, never subtracts.
-        self.assertTrue(with_exemption <= without_exemption)
 
 
 if __name__ == "__main__":
