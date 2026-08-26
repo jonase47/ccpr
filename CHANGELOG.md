@@ -7,6 +7,23 @@ All notable changes to this project are documented in this file. The format is b
 ## [Unreleased]
 
 ### Fixed
+- **Three shipped files named `/entscheidung`, a command that does not exist.** The file is
+  `commands/decision.md`, so the invocable command is `/decision`, and the Manual says so in four
+  places — but the command's own H1 announced `/entscheidung`, and `agents/project-guide.md`'s
+  hand-off table and `commands/roadmap.md`'s next-steps prompt both recommended it to the user by
+  that name. The guide would have routed people to a command that does not resolve, which makes
+  this functional rather than cosmetic. All fifteen sibling commands use `# /<filename> – Title`;
+  these now do too. It was also the last German word in shipped English content outside the
+  gitignored working files (Constitution Inviolable), together with the one below.
+- **`templates/QA_SKELETON/PENTEST.md` listed four of its five sub-skills, omitting the only one
+  that ships a skeleton.** `/p6-pentest` has five sub-skills (recon, injection, auth, authz,
+  logic); the sub-index's Detail Files table carried four, and the missing row was `authz` — the
+  one sub-skill for which `AUTHZ.md` actually exists as a file. `AUTHZ.md` correctly declared
+  `parent_index: PENTEST.md` all along; what was missing was the acknowledgement in the other
+  direction, which is exactly the gap `manual-lint.sh` (WI-0112a) was built to find, and it found
+  this one on its first run over the repository root. The row is now present and links the file;
+  the other four stay plain text because no file exists for them. `QA.md`'s German `## Sub-Indizes`
+  heading is now `## Sub-Indexes`.
 - **`SECTIONS_COMMANDS.md` and `Manual/commands/*.md` held the same 116-command tables twice, and
   the two copies had already drifted (WI-0112b).** Measured 26.08.2026: 116 command rows in the
   index, 115 across the five chapters, 108 identical — the same species of duplicate-content drift

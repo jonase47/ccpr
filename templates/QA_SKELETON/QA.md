@@ -26,7 +26,7 @@ related:
 | Risk / Question | Severity | Status | Where to resolve |
 |---|---|---|---|
 
-## Sub-Indizes
+## Sub-Indexes
 
 | Sub-Index | File | Lead-Skill | Status |
 |---|---|---|---|
