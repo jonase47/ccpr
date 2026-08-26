@@ -85,7 +85,7 @@ in order to place a live tracker inside a file whose documented purpose is to st
 
 ```yaml
 ---
-phase: 3
+phase: P3
 subskill: arch-components
 status: frozen
 last_updated: 18.08.2026

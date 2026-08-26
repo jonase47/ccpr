@@ -180,7 +180,7 @@ subskill: sprint
 kind: sprint-detail
 sprint: NN   # this sprint's number (step 1c) — the source /guide and /gate-p5 read for sprint scoping
 base_commit: <sha>   # HEAD at sprint start — anchors the /p5-review-sprint diff
-status: living | complete   # complete after sprint end
+status: living | frozen   # frozen after sprint end
 last_updated: <DD.MM.YYYY>
 ---
 ```

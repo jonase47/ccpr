@@ -7,6 +7,49 @@ All notable changes to this project are documented in this file. The format is b
 ## [Unreleased]
 
 ### Fixed
+- **`phase-docs-lint.sh`'s empty-scope report read like a clean pass, and the generator commands it
+  validates against prescribed values it then rejects (WI-0121).** The item was filed against a
+  different claim -- five files "self-declaring" as phase docs while never being validated -- which
+  was retracted on re-measurement: those "violations" sat inside fenced `yaml` example blocks, not
+  real frontmatter, and a frontmatter parser found the only files carrying real `phase:` frontmatter in
+  this repository are the six shipped `templates/QA_SKELETON/*.md`, all valid. What survived
+  re-measurement was two smaller, real defects.
+
+  **First, the same empty-scope trap WI-0090 fixed for `artifact-gate.sh`'s deny-list scope.**
+  `bash scripts/phase-docs-lint.sh .` on this repository (which has no `docs/<phase-folder>/` yet)
+  printed `Files scanned: 0` next to `0 errors, 0 warnings` -- a true sentence that reads as "every
+  phase folder was checked and found clean". The exit code is unchanged and stays 0: an empty scope
+  here is a *supported* configuration (a project before P3, or on the Lean-Track, has no phase
+  folders yet), not an error, for the same Constitution "installable and runnable on a clean
+  machine" Inviolable reason WI-0090 decided for artifact-gate.sh's default. What changed is the
+  report: a companion `**Phase folders found:**` line now names which of the nine `PHASE_FOLDERS`
+  actually exist (or, on a `--scope` run, its own glob already said so), and a run that collects zero
+  files emits a notice on **stderr** -- naming the directory and the folder names it looked for --
+  so a caller keeping stdout as its findings report cannot lose it. Unlike artifact-gate.sh, nothing
+  here routes through a deny-list mask that escalates to `python3` on a non-ASCII byte, so the
+  em-dash trap that check found does not apply to this script's summary line.
+
+  **Second, three generator documents prescribed frontmatter values the validator's own
+  `VALID_PHASES`/`VALID_STATUS` enums reject** -- `docs/PROJECT_PHASES.md`'s canonical "Detail file
+  frontmatter" example (`phase: p0` lowercase; `status: complete` with a `# draft | complete |
+  needs-rework` comment, all three of which are outside `VALID_STATUS`), `docs/adr/ADR-0009-...md`
+  and a companion local working note (`phase: 3`, missing the `P` prefix), and three `commands/p4-*.md`
+  detail-file examples (`status: active | partial | pending`, `status: living | complete`, and a
+  comment naming `complete` again) -- so a document written by following one of these examples
+  literally would fail the lint meant to accept it. `complete` has no direct counterpart in
+  `VALID_STATUS`; `frozen` ("completed (phase passed Gate)" per `templates/PHASE_DOC_SCHEMA.md`) is
+  the closest semantic match and is now used at every `complete` site. `p4-setup.md`'s
+  `active | partial | pending` maps onto the existing `active`/`draft`/`skeleton` semantics instead
+  (`partial` = in progress = `draft`, `pending` = not started = `skeleton`) -- a cleaner fit than
+  repurposing `frozen` there. One value was deliberately left alone: `p4-sprint.md`'s
+  `kind: risk-detail` block's `status: open | mitigated | accepted | closed` is the RISK lifecycle,
+  not the document lifecycle -- a different axis that happens to collide on the field name.
+
+  A new corpus test (`scripts/tests/test_frontmatter_examples_match_the_lint.py`) binds every fenced
+  `yaml` frontmatter example under `commands/`, `docs/` and `templates/` to `phase-docs-lint.sh`'s
+  own `VALID_PHASES`/`VALID_STATUS` -- read from the script's source text, never re-typed -- so this
+  generator/validator disagreement cannot recur silently.
+
 - **`artifact-gate.sh` could report a clean pass on a run where the check it is named after never
   executed (WI-0090).** The deny-list of tenant/project names comes from a personal, non-distributed
   config, so it is unset on every freshly installed CCPR — and on the machine where this was

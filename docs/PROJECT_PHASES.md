@@ -157,9 +157,9 @@ docs/planning/
 
 ```yaml
 ---
-phase: p0
+phase: P0
 subskill: problem
-status: complete    # draft | complete | needs-rework
+status: active    # skeleton | draft | active | frozen | archived | living
 last_updated: DD.MM.YYYY
 ---
 ```

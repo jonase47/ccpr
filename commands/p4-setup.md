@@ -125,7 +125,7 @@ phase: P4
 subskill: setup
 kind: setup-detail
 topic: <topic-slug>
-status: active | partial | pending
+status: skeleton | draft | active
 last_updated: <DD.MM.YYYY>
 ---
 ```

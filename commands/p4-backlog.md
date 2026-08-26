@@ -132,7 +132,7 @@ Write `docs/planning/BACKLOG.md` with frontmatter:
 phase: P4
 subskill: backlog
 kind: detail
-status: living   # living | complete (only when project is finished)
+status: living   # living | frozen (only when project is finished)
 last_updated: <DD.MM.YYYY>
 ---
 ```
