@@ -1422,6 +1422,26 @@ All notable changes to this project are documented in this file. The format is b
   self-detection by location cannot distinguish "the same location" from "CCPR's project identity".
 
 ### Changed
+- **`last_updated`'s date check was one rule hand-typed twice, and the two copies had never agreed
+  (WI-0107).** `phase-docs-lint.sh` check (e) matched the `DD.MM.YYYY[ (note)]` shape and stopped
+  there; `memory-lint.sh` check (e) matched the identical shape and then ran the value through a
+  real parse (`date_to_epoch`, WI-0106/WI-0087). Consequence, measured 26.08.2026: a well-formed
+  value that names no real calendar day (`32.13.2026`, `99.99.9999`) was accepted by
+  phase-docs-lint.sh and rejected by memory-lint.sh — the exact drift both linters' own comments
+  already admitted, in one implementation each. Both the shape check and the parse now live once,
+  in `scripts/lib/frontmatter.sh` (`fm_date_shape_ok` / `fm_date_to_epoch`, the latter moved
+  verbatim from memory-lint.sh's `date_to_epoch`, only renamed for the library's `fm_` prefix
+  convention), sourced by both scripts.
+
+  **`phase-docs-lint.sh` now rejects an impossible date, and that is a promotion (ADR-0001), not a
+  write-down.** It turns content that lints clean today into an error, so the blast radius was
+  measured before shipping it, not assumed: neither reference project's `docs/<phase>/**` store nor
+  this repository's own carries a shape-valid-but-impossible `last_updated` value. `memory-lint.sh`'s
+  behaviour is unchanged — same two messages (`not in format 'DD.MM.YYYY' or 'DD.MM.YYYY (note)'`
+  for a shape failure, `cannot be parsed as DD.MM.YYYY` for a shape-valid-but-impossible date), same
+  verdicts, pinned by the existing `LastUpdatedFormTest`. `phase-docs-lint.sh` keeps its single
+  message for both failure modes, since it never distinguished shape from date in its report.
+
 - **check (n) — a dead Markdown link in a memory index is an ERROR by default (WI-0005, ADR-0001).**
   `MEMORY_INDEX_LINK_SEVERITY` still ships as the single knob that decides it; only its default moves,
   `warn` -> `err`. **Scope, stated plainly, because it is wider than the Tier-1 index:** since WI-0040

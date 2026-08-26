@@ -241,25 +241,29 @@ for file in ${FILES[@]+"${FILES[@]}"}; do
     fi
 
     if [[ "$profile" == "full" ]]; then
-        # (e) last_updated: DD.MM.YYYY, optionally followed by " (note)".
+        # (e) last_updated: DD.MM.YYYY, optionally followed by " (note)", AND
+        # a real calendar day (WI-0107, ADR-0001 promotion).
         #
         # The optional note is specified in PHASE_DOC_SCHEMA.md and carries WHY
         # the date moved (which round, which item). memory-lint.sh's check (e)
-        # now enforces the identical pattern for memory files (WI-0106), where
-        # the same tolerance had been an accidental side effect of `date`
-        # accepting trailing text rather than a rule anyone had written down.
+        # enforces the identical pattern for memory files (WI-0106).
         #
-        # One rule, two implementations, and they still disagree in exactly one
-        # place: a value that is well-formed but not a day (`32.13.2026`,
-        # `99.99.9999`) is rejected there — a real `date` parse runs behind the
-        # pattern — and accepted here, where this pattern is the whole check.
-        # Measured 25.08.2026, not read off the source. Left open deliberately:
-        # closing it rejects content this script accepts today, which is a
-        # promotion decision (ADR-0001), not the pinning of an existing rule.
-        # If it is ever closed, the pattern and the parse belong in one shared
-        # helper (scripts/lib/frontmatter.sh) rather than a third copy.
+        # Until WI-0107 this check was shape-only, and a well-formed-but-
+        # impossible value (`32.13.2026`, `99.99.9999`) passed here while
+        # memory-lint.sh — which additionally parses the value through
+        # `fm_date_to_epoch` — rejected it. Measured 25.08.2026 (not read off
+        # the source), and left open deliberately at the time: closing the gap
+        # rejects content this script had been accepting, which is a
+        # promotion decision, not the pinning of an existing rule. The blast
+        # radius was then measured before promoting: no impossible-but-
+        # well-formed value exists in any of the four reference stores. Both
+        # checks now share ONE implementation — `fm_date_shape_ok` for the
+        # pattern and `fm_date_to_epoch` for the parse, both in
+        # scripts/lib/frontmatter.sh — rather than two independently
+        # hand-typed copies that had never agreed.
         last_updated="$(fm_field "$file" last_updated || true)"
-        if [[ -n "$last_updated" ]] && ! [[ "$last_updated" =~ ^[0-9]{2}\.[0-9]{2}\.[0-9]{4}([[:space:]]+\(.*\))?$ ]]; then
+        if [[ -n "$last_updated" ]] \
+            && { ! fm_date_shape_ok "$last_updated" || [[ "$(fm_date_to_epoch "$last_updated")" == "0" ]]; }; then
             err "$rel — last_updated='$last_updated' not in format 'DD.MM.YYYY' or 'DD.MM.YYYY (note)'"
         fi
 

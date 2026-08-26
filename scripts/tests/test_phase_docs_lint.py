@@ -425,6 +425,43 @@ class CheckELastUpdatedFormatTest(PhaseDocsLintTestBase):
             errors,
         )
 
+    # WI-0107 (26.08.2026): the ADR-0001 promotion closing the gap the block
+    # comment above used to document -- a well-formed-but-impossible date
+    # (right shape, no such day) is now rejected here too, matching
+    # memory-lint.sh's check (e) since WI-0106. Both go through the same
+    # pair of helpers in scripts/lib/frontmatter.sh now -- `fm_date_shape_ok`
+    # for the pattern, `fm_date_to_epoch` for the parse -- so there is exactly
+    # one place left to get this wrong, not two.
+
+    def test_a_shape_valid_but_impossible_month_is_rejected(self):
+        """13 is not a month -- `32.13.2026` has the right shape and no
+        matching calendar day."""
+        value = "32.13.2026"
+        self.write_doc("architecture/date-impossible-month.md", doc_text(last_updated=value))
+
+        result = self.run_lint()
+
+        errors = self.findings(result.stdout, "Errors")
+        self.assertTrue(
+            any("date-impossible-month.md" in e and f"last_updated='{value}' not in format" in e
+                for e in errors),
+            errors,
+        )
+
+    def test_a_shape_valid_but_impossible_day_is_rejected(self):
+        """99.99.9999 has the right shape and no matching calendar day."""
+        value = "99.99.9999"
+        self.write_doc("architecture/date-impossible-day.md", doc_text(last_updated=value))
+
+        result = self.run_lint()
+
+        errors = self.findings(result.stdout, "Errors")
+        self.assertTrue(
+            any("date-impossible-day.md" in e and f"last_updated='{value}' not in format" in e
+                for e in errors),
+            errors,
+        )
+
 
 class CheckFRelatedCrossRefsTest(PhaseDocsLintTestBase):
     """(f) related: entries are resolved relative to the file's own

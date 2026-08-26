@@ -10,6 +10,8 @@
 #   fm_field <file> <key>                  → echo the value (first line matching `key:`)
 #   fm_list <file> <key>                   → echo list entries (inline [a, b] OR YAML block)
 #   fm_validate_required <file> <k1,k2,…>  → echo missing fields (one per line), exit 0 if all present
+#   fm_date_shape_ok <value>               → 0 if <value> is DD.MM.YYYY, optionally + " (note)"
+#   fm_date_to_epoch <value>               → echo epoch of <value>'s UTC midnight, or "0" if unparseable
 #   fm_set <file> <key> <value>            → write/replace a flat top-level key, body untouched
 #   fm_set_many <file> <k1=v1> [<k2=v2> …] → write/replace MULTIPLE flat top-level keys as ONE atomic group
 
@@ -117,6 +119,85 @@ fm_validate_required() {
         fi
     done < <(printf '%s\n' "$required_csv" | tr ',' '\n')
     return $missing
+}
+
+# fm_date_shape_ok — Checks the LEXICAL shape of a `last_updated`-style
+# value: `DD.MM.YYYY`, optionally followed by whitespace and a
+# parenthesised note (WI-0106/WI-0107). Says nothing about whether the
+# digits name a real calendar day — pair with fm_date_to_epoch for that.
+#
+# The pattern is shared, byte-for-byte, by phase-docs-lint.sh's check (e)
+# and memory-lint.sh's check (e) — both PHASE_DOC_SCHEMA.md and
+# MEMORY_SCHEMA.md specify the same optional " (note)" suffix, which
+# carries WHY the date moved (which round, which item) and is load-bearing:
+# it must survive here unchanged, not be simplified away.
+fm_date_shape_ok() {
+    local value="$1"
+    [[ "$value" =~ ^[0-9]{2}\.[0-9]{2}\.[0-9]{4}([[:space:]]+\(.*\))?$ ]]
+}
+
+# fm_date_to_epoch — DD.MM.YYYY (optionally + " (note)", see
+# fm_date_shape_ok) → epoch of that day's UTC midnight (BSD and GNU date
+# compatible). Echoes "0" if the value cannot be parsed as a real calendar
+# day — a value can pass fm_date_shape_ok and still fail here (`32.13.2026`,
+# `99.99.9999`: right shape, no such day).
+#
+# Moved verbatim from memory-lint.sh's date_to_epoch (WI-0107) — only the
+# name changed, to match this library's fm_ prefix convention. Do not
+# "improve" this while reading it; the platform handling below is
+# deliberate, not incidental.
+#
+# Both the time zone and the time of day are pinned deliberately, and any
+# age-difference check built on top only works because BOTH sides of its
+# subtraction go through this one function. Two separate defects sit here
+# (WI-0087):
+#
+# 1. Time of day. The BSD branch used to parse with "%d.%m.%Y", a format with no
+#    time component — and BSD date fills unnamed fields from the RUNNING WALL
+#    CLOCK, not from midnight. A reference epoch captured once at script start
+#    then carried a different time of day than a value computed later, and
+#    their difference was short by the script's own elapsed runtime. After
+#    integer truncation that lands one day low: a genuinely 91-day-old file
+#    reported 90 and, at a 90-day threshold, did not warn at all. The reported
+#    age was a property of WHEN IN THE RUN a file was reached, so on a large
+#    store the same date could report two different ages in one run, and the
+#    same store two different ages in two runs. Measured on the live stores
+#    before the fix: six consecutive runs over the same unchanged inventory
+#    reported 93/93/91 four times and 94/94/92 once.
+#
+# 2. Time zone. The GNU branch never had defect 1 — it builds an ISO date, which
+#    date -d anchors on midnight — but anchoring on LOCAL midnight is wrong for a
+#    difference in days: across a spring-forward the two local midnights are only
+#    23 h apart, and the same truncation lands one day low again for every window
+#    spanning that transition. -u puts both ends on UTC midnight, where every day
+#    is exactly 86400 s long and the subtraction is exact by construction.
+#
+# The two branches also disagreed with each other, which is why this never showed
+# on Linux: the same file could warn there and stay silent on macOS. They now
+# return the same number for the same input — verified for both branches, see
+# scripts/tests/test_memory_lint.py.
+fm_date_to_epoch() {
+    local d="$1"
+    # BSD date (macOS), in two steps rather than one. The obvious single call —
+    # -f "%d.%m.%Y %H:%M:%S" against "$d 00:00:00" — also fixes the anchor, but it
+    # tightens what counts as a DATE at the same time, and that is a different
+    # decision than this one. BSD date accepts trailing text after the value it
+    # matched ("16.05.2026 (Note: ...)" parses, with a warning on stderr) and so
+    # does GNU date on the rewritten form; ten files across the live stores lean
+    # on that, and appending a time turns every one of them into a hard parse
+    # error. So: step one reduces the value to the calendar day BSD date reads
+    # out of it, accepting exactly what it accepted before; step two anchors that
+    # day, and only that day, at UTC midnight. Whether the loose form should stay
+    # legal is a schema question, and it is filed as one (WI-0106).
+    local ymd
+    if ymd="$(date -j -f "%d.%m.%Y" "$d" "+%Y-%m-%d" 2>/dev/null)"; then
+        date -j -u -f "%Y-%m-%d %H:%M:%S" "$ymd 00:00:00" "+%s" 2>/dev/null && return 0
+    fi
+    # GNU date: -u -d with the value rewritten to ISO. -d already anchors on
+    # midnight, so only the time zone changes here.
+    local iso
+    iso="$(printf '%s' "$d" | awk -F. '{print $3"-"$2"-"$1}')"  # exit-status: exempt downstream-checks-result
+    date -u -d "$iso" "+%s" 2>/dev/null || echo "0"
 }
 
 # _fm_preserve_mode <original-file> <temp-file> — copies the original's
