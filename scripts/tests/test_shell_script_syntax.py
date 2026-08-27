@@ -85,6 +85,7 @@ class ShellScriptSyntaxTest(unittest.TestCase):
                 "artifact-gate.sh",
                 "baseline.sh",
                 "bootstrap.sh",
+                "conformance-run.sh",
                 "doc-volume-check.sh",
                 "freeze-phase-docs.sh",
                 "instinct-check.sh",

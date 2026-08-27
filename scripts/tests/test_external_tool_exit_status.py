@@ -1107,7 +1107,30 @@ class ExternalToolExitStatusTest(unittest.TestCase):
         not found", the same outcome this branch already tolerated before
         the fix. Net 0 invocations (144 total): `checked-condition` -1,
         `bare-needs-exemption` +1, everything else unchanged.
-        144 invocations total across the 17 shipped files, split as below.
+        Updated once more 27.08.2026 when WI-0124 wave 1 added
+        scripts/conformance-run.sh, a new 18th shipped file (ADR-0010's
+        skeleton conformance runner): `usage()`'s `sed -n '2,/^$/p' ... |
+        sed 's/^# ...//' ` pipeline, the same shape and reason as
+        artifact-gate.sh's own usage() (two `sed` invocations, both
+        `bare-needs-exemption`, marked `set-e-sufficient`); the
+        `_conformance_read_config()` config reader's `python3 - "$1"
+        <<'PY'` heredoc, the tail statement of a small shell helper whose
+        own exit status IS the function's return by design -- the same
+        documented shape as lib/discipline_gate.sh's `_gate_unicode_py`
+        (`bare-needs-exemption`, marked `propagates-as-function-return`,
+        deliberately NOT `optional-config-read`: that category means "the
+        caller's own defaults are the intended fallback", and this reader's
+        caller checks the real exit status via `|| read_rc=$?` and refuses
+        to run on anything nonzero -- ADR-0010 §5's deliberate divergence
+        from `_gate_read_config`'s `except Exception: sys.exit(0)`); and one
+        `awk -F'\\t' '$1 == "ERROR" { print $2; exit }'` extracting the
+        ERROR record's message from that same reader's own well-formed,
+        tab-delimited output (`bare-needs-exemption`, marked
+        `internal-record-parsing`, same reasoning as
+        lib/discipline_gate.sh's other internal-record-parsing sites --
+        this script's own output, not external input). Net +4 invocations
+        (148 total): `bare-needs-exemption` +4, everything else unchanged.
+        148 invocations total across the 18 shipped files, split as below.
         A change in these numbers means either a script changed shape or
         the scanner's own logic changed -- worth a deliberate look either
         way, not a silent drift."""
@@ -1115,14 +1138,14 @@ class ExternalToolExitStatusTest(unittest.TestCase):
         by_disposition = {}
         for inv in invocations:
             by_disposition[inv.disposition] = by_disposition.get(inv.disposition, 0) + 1
-        self.assertEqual(144, len(invocations))
+        self.assertEqual(148, len(invocations))
         self.assertEqual(
             {
                 "checked-condition": 23,
                 "checked-captured": 5,
                 "checked-chain": 14,
                 "discard-needs-exemption": 40,
-                "bare-needs-exemption": 62,
+                "bare-needs-exemption": 66,
             },
             by_disposition,
         )
@@ -1131,9 +1154,11 @@ class ExternalToolExitStatusTest(unittest.TestCase):
         """Pins the file-enumeration side of "cannot be forgotten": the glob
         is scripts/*.sh + scripts/lib/*.sh, re-evaluated on every run, so a
         FILE added later is picked up automatically -- this only pins that
-        the glob itself still reaches the 17 files known at write time
+        the glob itself still reaches the 18 files known at write time
         (updated 21.08.2026 when WI-0021 added scripts/anchor.sh; updated
-        again 22.08.2026 when WI-0072 added scripts/migrate-review-headers.sh)."""
+        again 22.08.2026 when WI-0072 added scripts/migrate-review-headers.sh;
+        updated again 27.08.2026 when WI-0124 wave 1 added
+        scripts/conformance-run.sh)."""
         files = sorted(SCRIPTS_DIR.glob("*.sh")) + sorted((SCRIPTS_DIR / "lib").glob("*.sh"))
         names = sorted(f.relative_to(SCRIPTS_DIR).as_posix() for f in files)
         self.assertEqual(
@@ -1142,6 +1167,7 @@ class ExternalToolExitStatusTest(unittest.TestCase):
                 "artifact-gate.sh",
                 "baseline.sh",
                 "bootstrap.sh",
+                "conformance-run.sh",
                 "doc-volume-check.sh",
                 "freeze-phase-docs.sh",
                 "instinct-check.sh",

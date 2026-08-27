@@ -11,6 +11,14 @@
     "ipAllowlist": "",
     "denyNames": ["<tenant-or-client-name>", "<internal-project-codename>"]
   },
+  "conformance": {
+    "_comment": "Read by scripts/conformance-run.sh (docs/adr/ADR-0010-conformance-runs-against-consumers.md). consumers is a list of real projects this operator maintains, addressed by LOCAL FILESYSTEM PATH ONLY -- nothing is ever fetched over a network. Each consumer's id is what reports show; the path never appears in a report unless --show-paths is given. optional (default false) means a missing path is reported as not-covered instead of failing the run -- useful for a consumer that lives on a machine this config is also used from, but is not always checked out. pins (Wave 3, not read yet by this wave's script) will be concrete, dated, per-consumer expectations -- each needs a why. Keep this file out of every repository, same reasoning as gate.denyNames above: a consumer's path is frequently a home directory.",
+    "consumers": [
+      { "id": "consumer-a", "path": "~/path/to/a-project" },
+      { "id": "consumer-b", "path": "~/path/to/b-project", "optional": true }
+    ],
+    "pins": []
+  },
   "overlay": {
     "instinctsFileInRepo": "instincts/shared.md",
     "instinctsTarget": "~/.claude/instincts/shared.md",
