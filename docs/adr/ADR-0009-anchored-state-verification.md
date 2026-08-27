@@ -12,7 +12,7 @@ related:
 # ADR-0009: Anchored state verification for phase documents
 
 **Status:** Accepted (21.08.2026) — decided 18.08.2026, implemented across WI-0019…WI-0022;
-three addenda below correct and complete the decision
+four addenda below correct and complete the decision
 **Decision-makers:** Repo owner (Jonas)
 
 ## Context
@@ -304,8 +304,11 @@ unnoticed.
 The drift therefore survives for two entirely different reasons, and only these two matter for the
 work:
 
-1. **Scan scope.** `PHASE_FOLDERS` names eight directories. Review reports live outside them and are
-   never read, which is where **six of the ten** invalid values sit.
+1. **Scan scope.** ~~`PHASE_FOLDERS` names eight directories. Review reports live outside them and are
+   never read, which is where **six of the ten** invalid values sit.~~ **True when measured, and
+   made false by the change it caused:** `f6cdbe1` (21.08.2026, WI-0019) added `reviews` to
+   `PHASE_FOLDERS`, which now names **nine** directories, and review reports are read. The
+   measurement is kept as the reason the ninth folder exists; only its present tense was stale.
 2. **Nothing consumes the exit code** — already recorded in this ADR's context as the fourth
    constraint, but not connected to precondition 1 when it was written. An enforced enum whose verdict
    nobody reads enforces nothing.
