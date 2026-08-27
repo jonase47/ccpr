@@ -265,7 +265,11 @@ token and no vendor.
 3. **Separate documentation and code repositories.** Both reference projects keep them together, so
    this ships for the same-repo case; the anchor records repository identity so the split case can be
    added later without a schema break. There is no vendor-neutral mechanism for it yet.
-4. **Acknowledgement authority with more than one maintainer** is undefined.
+4. ~~**Acknowledgement authority with more than one maintainer** is undefined.~~ **Resolved in
+   Addendum 3 (21.08.2026): record the actor, do not restrict them.** Kept in this list, struck
+   through rather than deleted, because the open wording outlived its answer by six days and was
+   read as still-open on 27.08.2026 by someone working from this list — a reader who skims the
+   follow-ups as a work queue never reaches the addendum that closes one.
 5. **`covers:` decay under a refactoring-heavy working style** is unmeasured; the observed rate comes
    from two projects with stable paths.
 
