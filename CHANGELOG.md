@@ -7,6 +7,22 @@ All notable changes to this project are documented in this file. The format is b
 ## [Unreleased]
 
 ### Added
+- **An ADR convention: a resolved open point records its resolution in place (WI-0127)**.
+  ADR-0009's follow-up 4 read "undefined" for six days after an addendum in the same file had
+  answered it, and a proposal contradicting that answer was made on the strength of the stale
+  entry. Resolving a question and updating the list that advertises it are two separate acts,
+  and only the first is satisfying; the reader most likely to be misled is the one using the
+  list the way it invites, as a work queue. A sweep of all ten ADRs found eight more such
+  entries across four files — including one in an ADR a single day old, whose implementation
+  comment names the follow-up it answers while the follow-up still said "not decided here".
+  All are now struck through in place with a pointer to what resolved them, never deleted:
+  an entry that outlived its answer is itself the evidence that a list can drift out of step
+  with its own document. `CONTRIBUTING.md` carries the rule, plus a second half the sweep
+  earned — an addendum's heading must name what it resolves. A mechanical check is
+  deliberately deferred: keyed on headings today it would have found almost nothing, since
+  exactly one of ADR-0009's four addenda names its target, and that one resolves two
+  follow-ups while naming only one.
+
 - **`scripts/tests/test_absence_only_assertions.py` — flagging tests that can never fail (WI-0125)**.
   Six of the eleven `covers:` tests in `test_phase_docs_lint.py` (WI-0122) asserted only the
   ABSENCE of a finding — `assertFalse(any("covers:" in w for w in warnings), warnings)`. When the script died
