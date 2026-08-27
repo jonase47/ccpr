@@ -50,11 +50,11 @@ python3 -m unittest discover -s scripts/tests -t .
 
 - **`-t .` is not optional**, and the failure mode is worth knowing because it is
   partly silent. It sets the top-level directory imports resolve against. Measured
-  on the current tree: **with** it, discovery collects **1458 tests, 0 import
-  errors**; **without** it, **1118 tests and 11 modules that fail to import** — the
+  on the current tree: **with** it, discovery collects **1585 tests, 0 import
+  errors**; **without** it, **1236 tests and 11 modules that fail to import** — the
   two that use a relative `from .test_artifact_gate import …`, plus the entire
   `scripts/tests/workitems/` subpackage. The run does go red on those 11, so you
-  will notice something — but roughly **340 tests simply never execute**, and
+  will notice something — but roughly **350 tests simply never execute**, and
   nothing in the output says so.
 - The full run takes **a couple of minutes**. If you drive it from an agent whose
   tool calls time out, start it in the background and wait for it once rather than
@@ -120,6 +120,46 @@ a violated pin does. The reasoning is in
 Phase docs follow the two-level **phase index + detail file** split and the
 frontmatter schema in `templates/PHASE_DOC_SCHEMA.md`. Documents under `Manual/`
 additionally follow the index↔detail contract that `manual-lint.sh` checks.
+
+### Record an ADR's resolutions in place
+
+Applies to this repository's own ADRs under `docs/adr/`. Whether adopter projects
+should follow it is a separate question and is not decided here.
+
+An ADR that carries both an open-questions list and, later, the answers will drift,
+because resolving a question and updating the list that advertises it are two
+separate acts and only the first is satisfying. The reader most likely to be misled
+is the one using the list the way it invites: as a work queue. This is not
+hypothetical — ADR-0009's follow-up 4 read "undefined" for six days after an
+addendum in the same file had answered it, and a proposal contradicting that answer
+was made on the strength of the stale entry. The sweep that followed (WI-0127) found
+eight more across four ADRs, including one in an ADR a single day old.
+
+Two rules, both cheap at the moment you write the answer and expensive later:
+
+1. **A resolved follow-up is struck through in place, with a pointer to what
+   resolved it — never silently deleted.** Deleting removes the only trace that the
+   list can drift out of step with its own document, which is the evidence this rule
+   rests on. The form, established in `docs/adr/ADR-0009-...md`:
+
+   ```markdown
+   4. ~~**The original wording, kept.**~~ **Resolved in Addendum 3 (21.08.2026):
+      the answer, in one sentence.**
+   ```
+
+   Half-resolved counts as half: say which half is settled and which is still open,
+   rather than striking the whole entry. If the answer diverged from what the
+   follow-up asked for, record the divergence instead of smoothing it over.
+
+2. **An addendum's heading names what it resolves** — `## Addendum 2 (21.08.2026):
+   A7 resolved — where the scope anchor lives`. Without this, a reader working down
+   the follow-up list has no way to find the answer, and no mechanical check keyed
+   on headings could find it either. At the time this rule was written, one of
+   ADR-0009's four addenda did it, and that one resolved two follow-ups while naming
+   only one.
+
+There is no automated check for either rule. Building one was deliberately deferred
+until the convention has produced enough annotated cases to measure a check against.
 
 ## Adding yourself
 
