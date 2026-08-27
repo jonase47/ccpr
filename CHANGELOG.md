@@ -7,6 +7,43 @@ All notable changes to this project are documented in this file. The format is b
 ## [Unreleased]
 
 ### Fixed
+- **A `.gitignore`-only commit set the anchored-state comparison point** (WI-0123). `anchor.sh`
+  classified a commit as production code if it touched anything outside `docs/` and `.claude/` that
+  was not a `.md` file. `.gitignore` passes that test, so a commit changing nothing about the running
+  system became the point every anchor is measured against.
+
+  Two of the three reference projects were in that state simultaneously, measured 27.08.2026:
+
+  | Project | reported | actual last code change | off by |
+  |---|---|---|---|
+  | NutriMatch | `11606deb` — `chore(claude)` + 7 lines of `.gitignore` | `bec9a8a` | 14 days |
+  | productdata | `87641bea` — `.gitignore` only, 5 added lines | `63b0dfc0` | 8 days |
+
+  Frequency was never the issue: hygiene-only commits are ~2% of production-code commits across four
+  repositories. What matters is how often one is the **newest** commit, because that is the one
+  Stage 1 compares against — and that was two out of three on the day it was measured.
+
+  **The criterion, not just the list.** Excluded is a file that describes only *how the repository or
+  the editor is handled*, never *the system that runs*: `.gitignore`, `.gitattributes`,
+  `.editorconfig`, `.prettierignore`. Deliberately kept as production code, each a counter-example to
+  "root-level dotfile ⇒ hygiene": `.dockerignore` (determines image contents), `.env.example`
+  (declares the runtime's required configuration), `.nvmrc` / `.tool-versions` (pin the runtime
+  version). `.env*` needed no rule — no real `.env` is tracked in any of the four repositories, and one
+  that were would be a secrets finding rather than a classification question.
+
+  The question itself is recorded in ADR-0009 Addendum 4, so the next candidate is decided by it
+  rather than by resembling the four names already on the list.
+
+  **Shipped default, not per-project config**, because these files exist in every project and are
+  production-relevant in none — the per-project route means every adopter meets the same misleading
+  measurement once, independently. The trade-off is stated where it is made: `load_exclude_config`
+  extends the defaults rather than replacing them, so a project cannot walk this boundary back, which
+  is why each of the four names is argued individually.
+
+  Each list entry is covered by a test that fails if that entry is dropped — verified by removing all
+  four in turn. The unexercised third entry in WI-0122's placeholder list showed what an unpinned name
+  costs.
+
 - **A `.gitkeep` satisfied the `covers:` emptiness check, so a reserved-but-unbuilt directory
   reported clean** (WI-0122). `phase-docs-lint.sh` check (h) warns when a `covers:` entry points
   at an empty directory — "the list covers nothing". The predicate is `find -type f -print -quit`,

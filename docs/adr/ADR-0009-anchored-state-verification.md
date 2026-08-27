@@ -2,7 +2,7 @@
 kind: adr
 adr_id: ADR-0009
 status: accepted
-last_updated: 21.08.2026
+last_updated: 27.08.2026
 related:
   - ADR-0002-workitem-backend-contract.md
   - ADR-0008-typed-workitem-links.md
@@ -583,3 +583,95 @@ when a project has more than one acknowledging actor. No schema break: the field
 acknowledgement exists, and an acknowledgement written before this addendum simply has no actor
 recorded — which the statistic reports as unattributed rather than silently folding into someone's
 count.
+
+---
+
+## Addendum 4 (27.08.2026): The comparison point, measured again — repo/editor hygiene is not code
+
+The default classification in "The comparison point, measured" excludes `docs/`, `.claude/` and
+`*.md`. Everything else counts as production code, including a file that changes nothing about the
+system that runs.
+
+### The measurement
+
+Two of the three reference projects hit this the same week, independently:
+
+- NutriMatch's reported last production-code commit was a `chore(claude): stop tracking the
+  machine-local permission allowlist` commit that also touched seven lines of `.gitignore`. The real
+  last code change was 14 days earlier.
+- productdata's reported last production-code commit was `chore(gitignore): catch every .env variant,
+  not only the expected ones` — one file, five added lines, nothing else. The real last code change
+  was 8 days earlier.
+
+What matters is not how often a hygiene-only commit occurs, but how often it is the *newest* commit —
+because that is the one Stage 1 compares every anchor against. The answer, measured on the same day
+across the three reference projects, was two out of three.
+
+### The criterion
+
+Not "exclude every dotfile at the repository root" — the original "comparison point, measured" section
+already rejected that direction: `.dockerignore` and `Dockerfile` land together in a real NutriMatch
+commit (`fe94c16`), and a rule that swept dotfiles wholesale would trade the too-recent-comparison-point
+problem for the opposite, worse one — a comparison point that is too OLD, which silently under-reports
+drift instead of over-reporting it.
+
+The line drawn instead, one question, decided by the PO 27.08.2026:
+
+> **Does this file describe the system that runs, or only how the repository or the editor is
+> handled?**
+
+A file that only tells git or an editor how to behave is hygiene, not code, regardless of where in the
+tree it sits or how often it changes. A file that shapes what ships, what the runtime needs, or how the
+system is configured is code, even though it is neither source nor a build artifact itself.
+
+**Excluded (joins the shipped default's `EXCLUDE_SUFFIXES`):**
+
+| File | Why it answers "only how the repo/editor is handled" |
+|---|---|
+| `.gitignore` | Tells git which paths not to track. No effect on anything that runs. |
+| `.gitattributes` | Tells git how to diff/merge/checkout paths (line endings, filters). Same category. |
+| `.editorconfig` | Tells editors indentation/charset conventions. Advisory to a tool, not to the runtime. |
+| `.prettierignore` | Tells a formatter which paths to skip. Governs a dev-time tool, not the shipped system. |
+
+**Deliberately NOT excluded** — each is a real counter-example to "root-level dotfile ⇒ hygiene", kept
+production-relevant on purpose:
+
+| File | Why it answers "the system that runs" |
+|---|---|
+| `.dockerignore` | Determines what goes into the image that ships. A change here changes the artifact. |
+| `.env.example` | Declares which configuration the system requires to run. Documents the runtime contract. |
+| `.nvmrc` / `.tool-versions` | Pin the runtime version the system executes under. A bump is a real change to what runs it. |
+
+`.env*` needed no rule: across all four repositories measured (the three reference projects plus this
+one), no real `.env` file is tracked anywhere. A tracked `.env` would be a secrets finding for
+`security-master`, not a classification question for this ADR. Machine-local files are already covered
+by the existing `.claude/` prefix exclusion and needed no new entry.
+
+### Why the shipped default, not a per-project exclusion
+
+`anchor.excludePaths` (`.claude/settings.json`) exists precisely for project-specific hygiene calls —
+`tests/` is the example already in this document, because whether it counts as code is genuinely
+project-dependent. `.gitignore` and its three siblings are not project-dependent: they exist in every
+project this framework targets and are production-relevant in none of them. Leaving the exclusion
+per-project means every adopter discovers the same misleading measurement once, independently, the way
+two of the three reference projects just did on the same day. A shipped default closes it for everyone
+at once.
+
+This also means the boundary drawn here cannot be walked back by a project: `load_exclude_config`
+*extends* `EXCLUDE_PREFIXES`/`EXCLUDE_SUFFIXES` rather than replacing them (Addendum "the comparison
+point, measured", and enforced in `scripts/anchor.sh`'s own header comment) — a project can add
+exclusions but not remove the shipped ones. That additive-only semantics is why the four names above are
+argued individually rather than assumed: once shipped, no project gets to disagree file-by-file, only
+the framework's next ADR revision does.
+
+### Consequence
+
+`EXCLUDE_SUFFIXES` in `scripts/anchor.sh` gains `.gitignore`, `.gitattributes`, `.editorconfig`,
+`.prettierignore` alongside `.md`. Re-measured: NutriMatch's reported last production-code commit moves
+from the `.gitignore`-touching chore to the real last code commit 14 days earlier; productdata's moves
+similarly, 8 days earlier. The third reference project (`games/erfinderwerkstatt`) is unaffected — zero
+hygiene-only commits in its last 110.
+
+The next candidate for this list is decided by the same question, not by resemblance to the four names
+already here — a file "looking like tool config" is not the test; whether it changes the system that
+runs is.

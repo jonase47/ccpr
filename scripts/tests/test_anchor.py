@@ -1083,7 +1083,9 @@ class SetDashEExitSafetyTest(AnchorTestBase):
 
 class ClassificationConfigTest(AnchorTestBase):
     """ADR-0009 'the comparison point, measured': exclusion-based default
-    (docs/, .claude/, *.md), configurable per project."""
+    (docs/, .claude/, *.md, plus the WI-0123 repo/editor-hygiene suffixes
+    -- .gitignore/.gitattributes/.editorconfig/.prettierignore), configurable
+    per project."""
 
     def setUp(self):
         super().setUp()
@@ -1096,7 +1098,10 @@ class ClassificationConfigTest(AnchorTestBase):
         self.write(".claude/settings.json", "not read without anchor.excludePaths")
         result = self.run_anchor("status", str(self.project_dir))
         self.assertIn("exclude prefixes: docs/,.claude/", result.stdout)
-        self.assertIn("exclude suffixes: .md", result.stdout)
+        self.assertIn(
+            "exclude suffixes: .md,.gitignore,.gitattributes,.editorconfig,.prettierignore",
+            result.stdout,
+        )
         self.assertIn("source: default", result.stdout)
 
     def test_project_settings_extend_the_default_exclusion(self):
@@ -1177,6 +1182,68 @@ class ClassificationConfigTest(AnchorTestBase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("source: default", result.stdout)
         self.assertNotIn("vendor/", result.stdout)
+
+
+class HygieneFileClassificationTest(AnchorTestBase):
+    """WI-0123: a commit touching only repo-/editor-hygiene files (files
+    that describe how the repository or the editor is handled, not the
+    system that runs) must not set the anchored-state comparison point.
+    Two real projects independently hit this the same week -- NutriMatch's
+    reported last production-code commit was a `.gitignore` edit 14 days
+    behind the real one, productdata's was a `.gitignore` edit 8 days
+    behind. See ADR-0009 'The comparison point, measured' for the decided
+    criterion and the sibling names considered and rejected
+    (.dockerignore, .env.example, .nvmrc/.tool-versions).
+
+    One test per excluded name, each provable on its own: dropping just
+    that one suffix from EXCLUDE_SUFFIXES fails only that name's test,
+    with the other three still green -- see the session report for the
+    four individual mutation-restore runs."""
+
+    def setUp(self):
+        super().setUp()
+        self.init_repo()
+        (self.project_dir / "docs" / "architecture").mkdir(parents=True)
+        self.write("src/a.go", "package a\n\nfunc A() {}\n")
+        self.real_code_sha = self.commit("seed real code")
+
+    def _assert_hygiene_only_commit_does_not_move_comparison_point(self, rel_path, content):
+        self.write(rel_path, content)
+        self.commit(f"chore: add {rel_path}")
+
+        result = self.run_anchor("status", str(self.project_dir))
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(f"**Last production-code commit:** {self.real_code_sha}", result.stdout)
+
+    def test_gitignore_only_commit_does_not_move_comparison_point(self):
+        self._assert_hygiene_only_commit_does_not_move_comparison_point(
+            ".gitignore", "*.log\n")
+
+    def test_gitattributes_only_commit_does_not_move_comparison_point(self):
+        self._assert_hygiene_only_commit_does_not_move_comparison_point(
+            ".gitattributes", "* text=auto\n")
+
+    def test_editorconfig_only_commit_does_not_move_comparison_point(self):
+        self._assert_hygiene_only_commit_does_not_move_comparison_point(
+            ".editorconfig", "root = true\n")
+
+    def test_prettierignore_only_commit_does_not_move_comparison_point(self):
+        self._assert_hygiene_only_commit_does_not_move_comparison_point(
+            ".prettierignore", "dist/\n")
+
+    def test_hygiene_file_alongside_real_code_still_moves_comparison_point(self):
+        """The other direction of AC 3: a commit that touches a hygiene
+        file AND real code is still a production-code commit -- exclusion
+        is per-path, not per-commit."""
+        self.write(".gitignore", "*.log\n")
+        self.write("src/b.go", "package a\n\nfunc B() {}\n")
+        mixed_sha = self.commit("feat: add B alongside a .gitignore tweak")
+
+        result = self.run_anchor("status", str(self.project_dir))
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(f"**Last production-code commit:** {mixed_sha}", result.stdout)
 
 
 class GitEdgeCaseTest(AnchorTestBase):

@@ -96,8 +96,20 @@ die() {
 # EXTENDS the default rather than replacing it — a project narrowing what it
 # excludes would silently start treating docs/ or .claude/ as code, which is
 # never the intent of adding a project-specific exclusion.
+#
+# WI-0123: four repo-/editor-hygiene suffixes join the default, decided by
+# one question — does the file describe the system that runs, or only how
+# the repository or the editor is handled? `.gitignore`, `.gitattributes`,
+# `.editorconfig` and `.prettierignore` answer "only how the repo/editor is
+# handled" and are excluded. `.dockerignore` (determines image contents),
+# `.env.example` (declares required configuration) and
+# `.nvmrc`/`.tool-versions` (pin the runtime) answer "the system that runs"
+# and are deliberately NOT excluded — see ADR-0009 "The comparison point,
+# measured" for the full argument and why this is a shipped default rather
+# than a per-project exclusion (every project has these files; none of them
+# is production-relevant in any project).
 EXCLUDE_PREFIXES=("docs/" ".claude/")
-EXCLUDE_SUFFIXES=(".md")
+EXCLUDE_SUFFIXES=(".md" ".gitignore" ".gitattributes" ".editorconfig" ".prettierignore")
 CLASSIFICATION_SOURCE="default"
 
 # load_exclude_config <project-dir> — best-effort. Missing file, missing
