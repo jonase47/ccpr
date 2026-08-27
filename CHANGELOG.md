@@ -7,6 +7,48 @@ All notable changes to this project are documented in this file. The format is b
 ## [Unreleased]
 
 ### Added
+- **`scripts/tests/test_absence_only_assertions.py` — flagging tests that can never fail (WI-0125)**.
+  Six of the eleven `covers:` tests in `test_phase_docs_lint.py` (WI-0122) asserted only the
+  ABSENCE of a finding — `assertFalse(any("covers:" in w for w in warnings), warnings)`. When the script died
+  with empty stdout, `findings()` returned `[]` and every one of them passed: a regression that
+  killed the tool outright was reported by the full suite as clean. The general rule (G-126): an
+  assertion of the form "X did not happen" is worth nothing without a paired assertion that the
+  thing capable of producing X actually ran.
+
+  This ships a meta-scan over the repository's OWN test sources (not a shipped lint — an adopter's
+  test suite is none of CCPR's business) that finds the same shape anywhere in `scripts/tests/`:
+  a test invoking a subprocess whose only assertions about the result are negative
+  (`assertFalse`, `assertNotIn`, an empty-list/zero-length `assertEqual`), with no positive
+  liveness assertion recognised in any of several shapes — a `files_scanned()`-style helper, a
+  `returncode` check, an `assertIn` on a report header line, or an exact nonzero-count assertion.
+  Measured against the exact parent state of the commit that introduced the by-hand fix: flags
+  precisely the six negative-only methods among the two `covers:` classes' 11, never the five
+  siblings that carry a positive assertion — the discriminating acceptance case.
+
+  Narrowed from a deliberately coarse first pass to 53 defensible hits across the current
+  tree after three measured precision fixes, each proven red-then-green: a subprocess call
+  unrelated to the negative assertion it sits beside (`git ls-files` feeding a content check, not
+  a liveness one) was no longer mistaken for coverage; a `_run_*` helper returning extracted
+  stdout TEXT directly, rather than the raw `CompletedProcess`, is now recognised the same as a
+  `.stdout`-bound name; and an exact nonzero `assertEqual(len(x), N)` is now treated as the
+  liveness guard it actually is, not left neutral. A fourth fix, gating the `assertTrue` branch
+  behind `_references_the_result`, closed a masking bug of the exact shape this check itself
+  targets — an unrelated `assertTrue` was hiding a genuinely blind `assertFalse` beside it — and
+  reclassified one previously-`not-flagged` method to flagged, landing the count at 54. Every
+  current hit is individually triaged and accounted for via a `KNOWN_FINDINGS` baseline (51
+  genuine, pre-existing gaps reported to the PO rather than fixed here — outside this item's
+  write boundary — plus three measured false positives: a custom `assert_*` helper this scanner
+  cannot see into, a `run_*`-named helper that is an in-process Python call, not a subprocess,
+  and a `self.<helper>(...)`-bound findings list not literally named `self.findings`, so this
+  scanner's own name-tracking misses it) — any NEW absence-only test added anywhere in the
+  corpus from this point on fails the mandatory pin immediately.
+
+  Also closes the one genuinely blind "clean baseline" guard found while auditing the three
+  candidates the item named: `test_doc_volume_check.py`'s `BaselineTest` asserted stderr/bullets/
+  returncode but nothing about scan scope — a `find` glob collapsing to zero matches over a
+  populated `$DOCS_ROOT` passed the same three assertions vacuously. Proven red with a scratch-copy
+  mutation (never the tracked file) before the `files_scanned()` liveness assertion was added.
+
 - **`scripts/conformance-run.sh` — the shipped checks, run against real projects that use them**
   (WI-0124, ADR-0010). CCPR's checks are rules about documents, and a rule written in the repository
   that defines it is a hypothesis until it meets a consumer. On 27.08.2026 three shipped defects were

@@ -123,6 +123,18 @@ class DocVolumeCheckTestBase(unittest.TestCase):
         """Every finding line of the report, across all three sections."""
         return [line[2:] for line in output.splitlines() if line.startswith("- ")]
 
+    @staticmethod
+    def files_scanned(output):
+        """WI-0125: mirrors test_phase_docs_lint.py's/test_manual_lint.py's
+        identically-named helper -- raises if the "**Files scanned:**" line
+        is missing, so a caller can tell a genuine zero-finding run apart
+        from one that never reached the report at all (or reached it with
+        an empty/wrong SCOPE)."""
+        for line in output.splitlines():
+            if line.startswith("**Files scanned:**"):
+                return int(line.split(":**", 1)[1].strip())
+        raise AssertionError(f"no 'Files scanned' line in output: {output!r}")
+
 
 class BaselineTest(DocVolumeCheckTestBase):
     """The shared negative fixture. Without it, every "exactly one bullet"
@@ -131,9 +143,66 @@ class BaselineTest(DocVolumeCheckTestBase):
     def test_a_file_below_the_info_threshold_is_not_reported(self):
         self.write_doc("small.md", "# Title\n\nShort enough to stay unreported.\n")
         result = self.run_check()
+        # Liveness first (WI-0125): stderr=="" / bullets==[] / returncode==0
+        # ALSO hold if the script scanned zero files (a wrong/empty SCOPE),
+        # not just on a genuine clean run over the one real file below --
+        # see BaselineLivenessRedProofTest for the measured proof.
+        self.assertEqual(self.files_scanned(result.stdout), 1)
         self.assertEqual("", result.stderr)
         self.assertEqual([], self.bullets(result.stdout))
         self.assertEqual(0, result.returncode, result.stdout)
+
+
+class BaselineLivenessRedProofTest(DocVolumeCheckTestBase):
+    """Proves BaselineTest's PRE-fix shape (stderr/bullets/returncode only,
+    no scope assertion) was genuinely unguarded -- not merely "could
+    theoretically be", per G-107/G-109. Mutates a SCRATCH COPY of the
+    script's file-collection `find` glob to a pattern that matches nothing
+    IN THE SAME, REAL `$DOCS_ROOT` (not a nonexistent path -- that would
+    make `find` itself print to stderr, a liveness signal of its own kind
+    and not the silent scope-collapse this fix targets), so it reports
+    zero files scanned even though the fixture's one real file exists and
+    is well below every size threshold. The OLD-shaped assertions
+    (stderr/bullets/returncode) all still pass on that mutant -- a wrong,
+    empty SCOPE is indistinguishable from a genuine clean run by those
+    three alone. The shipped file itself is never touched; mutate-then-
+    restore is not needed because the mutation never happens on the
+    tracked file (G-143)."""
+
+    FIND_NEEDLE = 'find "$DOCS_ROOT" -type f -name "*.md" -not -path "*/.handover-archive/*"'
+
+    def test_a_zero_scope_scan_passes_the_old_assertions_and_fails_the_new_one(self):
+        original = SCRIPT_PATH.read_text(encoding="utf-8")
+        self.assertIn(
+            self.FIND_NEEDLE, original,
+            "fixture assumption broken -- the file-collection find's own literal line changed, update this test",
+        )
+        mutated = original.replace(
+            self.FIND_NEEDLE,
+            'find "$DOCS_ROOT" -type f -name "*.NEVER_MATCHES_ANYTHING_zzz"',
+            1,
+        )
+        self.assertNotEqual(original, mutated)
+
+        scratch_dir = Path(tempfile.mkdtemp(prefix="ccpr-doc-volume-mutant-"))
+        self.addCleanup(shutil.rmtree, scratch_dir, ignore_errors=True)
+        mutant_script = scratch_dir / "doc-volume-check.sh"
+        mutant_script.write_text(mutated, encoding="utf-8")
+
+        self.write_doc("small.md", "# Title\n\nShort enough to stay unreported.\n")
+        result = subprocess.run(
+            ["bash", str(mutant_script), str(self.docs_root)],
+            capture_output=True, text=True,
+        )
+
+        # The pre-fix BaselineTest shape: all three still pass, vacuously.
+        self.assertEqual("", result.stderr)
+        self.assertEqual([], self.bullets(result.stdout))
+        self.assertEqual(0, result.returncode, result.stdout)
+        # What the fix actually catches: the scope collapsed to zero, not one.
+        self.assertEqual(0, self.files_scanned(result.stdout))
+
+        self.assertEqual(original, SCRIPT_PATH.read_text(encoding="utf-8"), "shipped file content changed")
 
 
 class FileWithoutH2SectionsTest(DocVolumeCheckTestBase):
