@@ -728,6 +728,12 @@ class CheckHCoversTest(PhaseDocsLintTestBase):
 
         result = self.run_lint()
 
+        # The run must have actually completed, not died silently -- a
+        # crash (empty stdout) and a genuine zero-findings result both make
+        # the assertFalse()s below vacuously true, so files_scanned() (which
+        # raises if the report body is missing) is asserted first.
+        self.assertEqual(self.files_scanned(result.stdout), 1)
+        self.assertEqual(result.returncode, 0, result.stdout)
         errors = self.findings(result.stdout, "Errors")
         warnings = self.findings(result.stdout, "Warnings")
         self.assertFalse(any("covers:" in e for e in errors), errors)
@@ -743,6 +749,8 @@ class CheckHCoversTest(PhaseDocsLintTestBase):
 
         result = self.run_lint()
 
+        self.assertEqual(self.files_scanned(result.stdout), 1)
+        self.assertEqual(result.returncode, 0, result.stdout)
         errors = self.findings(result.stdout, "Errors")
         warnings = self.findings(result.stdout, "Warnings")
         self.assertFalse(any("covers:" in e for e in errors), errors)
@@ -786,6 +794,216 @@ class CheckHCoversTest(PhaseDocsLintTestBase):
             warnings,
         )
 
+    def test_covers_entry_directory_holding_only_a_placeholder_is_reported_distinctly(self):
+        """WI-0122: a `.gitkeep` satisfies `is_empty_dir`'s `-type f` probe
+        (a placeholder IS a file), so the directory does not fall into the
+        empty-directory branch above -- but it is not real content either.
+        PO decision 27.08.2026 (option b): a distinct warning, not a widened
+        empty-directory check, because "reserved, not built" is a different
+        and more useful statement than "holds nothing"."""
+        (self.project_dir / "src" / "reserved").mkdir(parents=True)
+        (self.project_dir / "src" / "reserved" / ".gitkeep").write_text("")
+        self.write_doc(
+            "architecture/covers-placeholder-only.md",
+            doc_text(extra_lines=["covers: [src/reserved/]"]),
+        )
+
+        result = self.run_lint()
+
+        errors = self.findings(result.stdout, "Errors")
+        warnings = self.findings(result.stdout, "Warnings")
+        self.assertFalse(any("covers:" in e for e in errors), errors)
+        # Distinct from the empty-directory wording ("is an empty
+        # directory ... covers nothing") -- the placeholder name itself
+        # must be named in the message.
+        self.assertFalse(
+            any("covers-placeholder-only.md" in w and "is an empty directory" in w for w in warnings),
+            warnings,
+        )
+        self.assertTrue(
+            any(
+                "covers-placeholder-only.md" in w
+                and "covers:'src/reserved/'" in w
+                and ".gitkeep" in w
+                for w in warnings
+            ),
+            warnings,
+        )
+
+    def test_covers_entry_directory_holding_only_a_dot_keep_placeholder_is_reported(self):
+        """Proves the placeholder names live in a real list (AC4), not a
+        single hardcoded `.gitkeep` string -- `.keep` must trigger the same
+        branch."""
+        (self.project_dir / "src" / "reserved-keep").mkdir(parents=True)
+        (self.project_dir / "src" / "reserved-keep" / ".keep").write_text("")
+        self.write_doc(
+            "architecture/covers-placeholder-keep.md",
+            doc_text(extra_lines=["covers: [src/reserved-keep/]"]),
+        )
+
+        result = self.run_lint()
+
+        warnings = self.findings(result.stdout, "Warnings")
+        self.assertTrue(
+            any(
+                "covers-placeholder-keep.md" in w
+                and "covers:'src/reserved-keep/'" in w
+                and ".keep" in w
+                for w in warnings
+            ),
+            warnings,
+        )
+
+    def test_covers_entry_directory_holding_only_a_dot_placeholder_placeholder_is_reported(self):
+        """PLACEHOLDER_NAMES lists three names (.gitkeep .keep .placeholder)
+        but only the first two had a fixture -- a typo in the third entry
+        (e.g. a stray space, or '.placeholde') would pass the whole suite
+        today. Mirrors the .gitkeep/.keep tests above so all three list
+        entries are independently pinned."""
+        (self.project_dir / "src" / "reserved-placeholder").mkdir(parents=True)
+        (self.project_dir / "src" / "reserved-placeholder" / ".placeholder").write_text("")
+        self.write_doc(
+            "architecture/covers-placeholder-dotplaceholder.md",
+            doc_text(extra_lines=["covers: [src/reserved-placeholder/]"]),
+        )
+
+        result = self.run_lint()
+
+        warnings = self.findings(result.stdout, "Warnings")
+        self.assertTrue(
+            any(
+                "covers-placeholder-dotplaceholder.md" in w
+                and "covers:'src/reserved-placeholder/'" in w
+                and ".placeholder" in w
+                for w in warnings
+            ),
+            warnings,
+        )
+
+    def test_covers_entry_directory_holding_two_placeholders_is_reported_once(self):
+        """Code-review gap (WI-0122, confirmed independently twice): no
+        fixture put TWO placeholder files under one covers: target, so the
+        loop in is_placeholder_only_dir() was only ever exercised for its
+        first iteration.
+
+        From the second placeholder file onward, the loop's last statement
+        `[[ -z "$first" ]] && first="$bn"` evaluates its left side to false
+        (first is already set) -- the AND-list's own exit status is 1. Under
+        `set -euo pipefail` that looks like it should abort the function
+        right there and skip `echo "$first"`, reproducing the exact
+        silent-empty-output failure mode this work item exists to close, for
+        a different input shape (a multi-file placeholder-only directory
+        instead of the crash at the `is_placeholder_only_dir()` call site).
+        It does not abort, and -- measured, after this test was written --
+        it cannot: the call site is `... || true`, which puts the whole
+        command substitution in an AND-OR list and therefore suspends
+        `set -e` for the function body outright. Mutation-checked both ways
+        against a real project (154 docs, one placeholder-only directory):
+        replacing the `&&` with an `if`-form that propagates the failing
+        status leaves the full report intact, while ALSO dropping the
+        `|| true` brings the silent empty-output death straight back.
+
+        So this test does NOT pin the `set -e` interaction, and no test at
+        this call site could -- the guard against that failure mode is the
+        `|| true`, and what protects the `|| true` is the five tests that
+        turn red when it is removed. What this test does pin is narrower
+        and still worth having: a multi-file placeholder-only directory
+        completes the run and yields exactly ONE warning, not one per
+        placeholder file.
+
+        Two placeholders at different depths (top-level .gitkeep, nested
+        .keep) so the multi-file path is genuinely walked, not just a
+        same-directory duplicate."""
+        (self.project_dir / "src" / "reserved-two").mkdir(parents=True)
+        (self.project_dir / "src" / "reserved-two" / ".gitkeep").write_text("")
+        (self.project_dir / "src" / "reserved-two" / "nested").mkdir(parents=True)
+        (self.project_dir / "src" / "reserved-two" / "nested" / ".keep").write_text("")
+        self.write_doc(
+            "architecture/covers-two-placeholders.md",
+            doc_text(extra_lines=["covers: [src/reserved-two/]"]),
+        )
+
+        result = self.run_lint()
+
+        # Liveness first (see placeholder-filtering.md's set -e follow-up):
+        # an empty-list result from a crash and a genuine zero-findings run
+        # both make a bare assertFalse/assertEqual(count, ...) look
+        # trustworthy, so the run's completion is asserted before the
+        # finding-shaped assertions below. Exit code is 1 here (not 0) --
+        # one warning is the expected, correct outcome, unlike the AC3
+        # silent-fixture tests above.
+        self.assertEqual(self.files_scanned(result.stdout), 1)
+        self.assertEqual(result.returncode, 1, result.stdout)
+        errors = self.findings(result.stdout, "Errors")
+        warnings = self.findings(result.stdout, "Warnings")
+        self.assertFalse(any("covers:" in e for e in errors), errors)
+
+        placeholder_warnings = [
+            w
+            for w in warnings
+            if "covers-two-placeholders.md" in w and "covers:'src/reserved-two/'" in w
+        ]
+        self.assertEqual(1, len(placeholder_warnings), warnings)
+        self.assertTrue(
+            ".gitkeep" in placeholder_warnings[0] or ".keep" in placeholder_warnings[0],
+            placeholder_warnings[0],
+        )
+
+    def test_covers_entry_directory_holding_placeholder_and_real_file_produces_no_findings(self):
+        """AC3: a placeholder alongside real content is not "reserved, not
+        built" -- it is built, and stays silent."""
+        (self.project_dir / "src" / "started").mkdir(parents=True)
+        (self.project_dir / "src" / "started" / ".gitkeep").write_text("")
+        (self.project_dir / "src" / "started" / "module.py").write_text("# code\n")
+        self.write_doc(
+            "architecture/covers-placeholder-plus-real.md",
+            doc_text(extra_lines=["covers: [src/started/]"]),
+        )
+
+        result = self.run_lint()
+
+        # files_scanned() is the discriminator between "ran and correctly
+        # said nothing" and "crashed with empty stdout before saying
+        # anything" -- the shape that broke this check silently (WI-0122
+        # regression, see test_covers_entry_directory_holding_only_real_
+        # files_completes_the_run below for the minimal repro).
+        self.assertEqual(self.files_scanned(result.stdout), 1)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        errors = self.findings(result.stdout, "Errors")
+        warnings = self.findings(result.stdout, "Warnings")
+        self.assertFalse(any("covers:" in e for e in errors), errors)
+        self.assertFalse(any("covers:" in w for w in warnings), warnings)
+
+    def test_covers_entry_directory_holding_only_real_files_completes_the_run(self):
+        """WI-0122 regression: is_placeholder_only_dir() returns 1 (no
+        output) the moment it meets a non-placeholder file -- the normal
+        case for any real, in-use directory. The call site was a bare
+        `var=$(cmd)` assignment; under `set -euo pipefail` a failing command
+        substitution kills the whole script, silently (exit 1, zero bytes
+        of stdout), before the report is ever printed. Reproduced against a
+        real project (games/erfinderwerkstatt, covers: src/adapters/
+        purpose-input/, several real files, no placeholder at all) --
+        every existing covers: fixture at the time was either empty,
+        placeholder-only, or a single file/single-entry directory, so none
+        of them exercised the "several real files, iteration must not stop
+        on the first non-placeholder one" shape this reproduces."""
+        (self.project_dir / "src" / "service").mkdir(parents=True)
+        (self.project_dir / "src" / "service" / "handler.py").write_text("# code\n")
+        (self.project_dir / "src" / "service" / "router.py").write_text("# code\n")
+        self.write_doc(
+            "architecture/covers-real-files-only.md",
+            doc_text(extra_lines=["covers: [src/service/]"]),
+        )
+
+        result = self.run_lint()
+
+        self.assertEqual(self.files_scanned(result.stdout), 1)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        errors = self.findings(result.stdout, "Errors")
+        warnings = self.findings(result.stdout, "Warnings")
+        self.assertFalse(any("covers:" in e for e in errors), errors)
+        self.assertFalse(any("covers:" in w for w in warnings), warnings)
+
     def test_covers_entry_pointing_to_an_existing_file_produces_no_findings(self):
         """Guards `-e` vs `-f`: a single-file covers: entry must stay
         silent. `-f` alone would also accept this case -- the discriminator
@@ -800,6 +1018,8 @@ class CheckHCoversTest(PhaseDocsLintTestBase):
 
         result = self.run_lint()
 
+        self.assertEqual(self.files_scanned(result.stdout), 1)
+        self.assertEqual(result.returncode, 0, result.stdout)
         errors = self.findings(result.stdout, "Errors")
         warnings = self.findings(result.stdout, "Warnings")
         self.assertFalse(any("covers:" in e for e in errors), errors)
@@ -833,6 +1053,8 @@ class CheckHCoversTest(PhaseDocsLintTestBase):
 
         result = self.run_lint()
 
+        self.assertEqual(self.files_scanned(result.stdout), 1)
+        self.assertEqual(result.returncode, 0, result.stdout)
         self.assertFalse(any("covers" in e for e in self.findings(result.stdout, "Errors")))
         self.assertFalse(any("covers" in w for w in self.findings(result.stdout, "Warnings")))
 
@@ -906,18 +1128,28 @@ class CheckHCoversEmptyDirectoryDetectionTest(PhaseDocsLintTestBase):
 
         result = self.run_lint()
 
+        # A real, non-placeholder file is exactly the shape that made
+        # is_placeholder_only_dir()'s call site fatal under `set -e`
+        # (WI-0122 regression) -- files_scanned() proves the run completed
+        # instead of dying silently before the assertFalse()s below.
+        self.assertEqual(self.files_scanned(result.stdout), 1)
+        self.assertEqual(result.returncode, 0, result.stdout)
         errors = self.findings(result.stdout, "Errors")
         warnings = self.findings(result.stdout, "Warnings")
         self.assertFalse(any("covers:" in e for e in errors), errors)
         self.assertFalse(any("covers:" in w for w in warnings), warnings)
 
     def test_directory_whose_only_content_is_a_gitkeep_file_is_not_reported_as_empty(self):
-        """Deliberate non-decision, kept as documented behaviour, not a
-        gap: a directory whose sole content is a `.gitkeep` counts as
-        non-empty, same as any other file. `.gitkeep` is a convention, not
-        something the filesystem or `find -type f` treats specially -- a
-        file is a file. Carving out dotfiles would be a rule nobody asked
-        for."""
+        """`is_empty_dir()` itself is unchanged (WI-0122 PO decision:
+        option (b), a distinct warning, not a widened predicate) -- a
+        directory whose sole content is a `.gitkeep` still counts as
+        non-empty for THIS probe, same as any other file, so it does not
+        fall into the "is an empty directory" branch. It is no longer a
+        silent non-decision though: check (h) reports it through its own
+        placeholder-only branch instead (see CheckHCoversTest's
+        placeholder-only tests, which pin the exact wording) -- covered
+        here only to confirm this specific probe still stays out of the
+        empty-directory branch, not that the directory goes unreported."""
         gitkeep_dir = self.project_dir / "src" / "gitkeep-only"
         gitkeep_dir.mkdir(parents=True)
         (gitkeep_dir / ".gitkeep").write_text("")
@@ -928,10 +1160,14 @@ class CheckHCoversEmptyDirectoryDetectionTest(PhaseDocsLintTestBase):
 
         result = self.run_lint()
 
+        self.assertEqual(self.files_scanned(result.stdout), 1)
         errors = self.findings(result.stdout, "Errors")
         warnings = self.findings(result.stdout, "Warnings")
         self.assertFalse(any("covers:" in e for e in errors), errors)
-        self.assertFalse(any("covers:" in w for w in warnings), warnings)
+        self.assertFalse(
+            any("covers-gitkeep-only.md" in w and "is an empty directory" in w for w in warnings),
+            warnings,
+        )
 
 
 class CommitAnchorFamilyTest(PhaseDocsLintTestBase):

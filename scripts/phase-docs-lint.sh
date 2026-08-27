@@ -62,6 +62,11 @@ PHASE_FOLDERS=(discovery concept validation architecture planning quality launch
 LIVING_FILES="HANDOVER.md BASELINE.md BACKLOG.md SPRINT.md MEMORY.md instincts.md"
 VALID_STATUS="skeleton draft active frozen archived living"
 VALID_PHASES="P0 P1 P2 P3 P4 P5 P6 P7 P8"
+# PLACEHOLDER_NAMES — the vcs-emptiness-marker convention check (h) treats
+# as "reserved, not built" rather than real content (WI-0122). Named list
+# (AC4 of that work item), not inlined into the predicate below, so a
+# project convention this repo doesn't use is one line to add.
+PLACEHOLDER_NAMES=".gitkeep .keep .placeholder"
 
 # doc_profile_for — assigns each file (by its path relative to docs/) to the
 # set of checks it must satisfy. bash 3.2 (macOS default) has no associative
@@ -127,10 +132,42 @@ is_valid_phase() {
 # builtins) single-file-or-nothing probe, at any depth. A directory whose
 # only content is a `.gitkeep` therefore counts as non-empty — a file is a
 # file, and carving out dotfiles as a special case would be a rule nobody
-# decided.
+# decided. That case (holds only a placeholder) is not silently accepted
+# either — check (h) reports it with its own, distinct warning via
+# is_placeholder_only_dir() below (WI-0122, PO decision: a separate
+# message, not a widened predicate here — "reserved, not built" is a
+# different statement than "holds nothing").
 is_empty_dir() {
     local d="$1"
     [[ -z "$(find "$d" -type f -print -quit 2>/dev/null)" ]]
+}
+
+is_placeholder_name() {
+    local bn="$1" p
+    for p in $PLACEHOLDER_NAMES; do
+        [[ "$bn" == "$p" ]] && return 0
+    done
+    return 1
+}
+
+# is_placeholder_only_dir — call only once is_empty_dir has already
+# established $d holds at least one real file (at any depth); an empty
+# directory is a different, pre-existing case (see above) and must keep
+# reporting through that branch, unchanged. Walks every file the directory
+# covers: if every one of them is a placeholder name, echoes the basename
+# of the first one found (so the caller can name it in the warning) and
+# returns success. If any single file is not a placeholder name, returns
+# failure with no output — a placeholder alongside real content means the
+# directory is not "reserved, not built", it is built, and must stay
+# silent (AC3).
+is_placeholder_only_dir() {
+    local d="$1" f bn first=""
+    while IFS= read -r f; do
+        bn="$(basename "$f")"
+        is_placeholder_name "$bn" || return 1
+        [[ -z "$first" ]] && first="$bn"
+    done < <(find "$d" -type f 2>/dev/null)
+    echo "$first"
 }
 
 if [[ ! -d "$DOCS_DIR" ]]; then
@@ -337,6 +374,13 @@ for file in ${FILES[@]+"${FILES[@]}"}; do
     # profile — opt-in, only fires when covers: is actually set, so it
     # costs a project nothing until it adopts the field. Measured: covers:
     # appears in zero documents across all three CCPR reference projects.
+    #
+    # Two distinct degenerate-content warnings, deliberately not merged
+    # (WI-0122, PO decision): a genuinely empty directory ("holds nothing")
+    # and a directory holding only a vcs placeholder ("holds nothing but a
+    # placeholder — reserved, not built") say different things to a reader,
+    # even though both were true 0-real-file-content until now indistinct
+    # under is_empty_dir's `-type f` probe alone.
     while IFS= read -r covers_entry; do
         [[ -z "$covers_entry" ]] && continue
         covers_path="$PROJECT_DIR/$covers_entry"
@@ -344,6 +388,22 @@ for file in ${FILES[@]+"${FILES[@]}"}; do
             err "$rel — covers:'$covers_entry' points to non-existent path ($covers_path)"
         elif [[ -d "$covers_path" ]] && is_empty_dir "$covers_path"; then
             warn "$rel — covers:'$covers_entry' is an empty directory ($covers_path) — the list covers nothing"
+        elif [[ -d "$covers_path" ]]; then
+            # `is_placeholder_only_dir` returns 1 (no output) the moment it
+            # meets a real, non-placeholder file -- the ordinary case for
+            # any directory actually in use. A bare `var=$(cmd)` takes the
+            # substitution's exit status as the assignment's own, so under
+            # `set -e` that ordinary case killed the whole script (empty
+            # stdout, exit 1) before the report was ever printed -- the
+            # first real covers: directory in a run took every document
+            # after it down with it. `|| true` makes "not a placeholder-
+            # only dir" a normal, silent outcome again, matching the
+            # function's own contract (failure = no output; $placeholder_hit
+            # stays empty either way, since `echo` never ran on that path).
+            placeholder_hit="$(is_placeholder_only_dir "$covers_path")" || true
+            if [[ -n "$placeholder_hit" ]]; then
+                warn "$rel — covers:'$covers_entry' holds only a placeholder ($placeholder_hit, $covers_path) — reserved, not built"
+            fi
         fi
     done < <(fm_list "$file" covers)
 

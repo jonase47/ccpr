@@ -7,6 +7,46 @@ All notable changes to this project are documented in this file. The format is b
 ## [Unreleased]
 
 ### Fixed
+- **A `.gitkeep` satisfied the `covers:` emptiness check, so a reserved-but-unbuilt directory
+  reported clean** (WI-0122). `phase-docs-lint.sh` check (h) warns when a `covers:` entry points
+  at an empty directory — "the list covers nothing". The predicate is `find -type f -print -quit`,
+  and a `.gitkeep` is a file. A directory whose only content is the placeholder that makes its
+  emptiness representable in git therefore counted as covered, and the warning stayed silent —
+  in exactly the case it exists to name.
+
+  Direction: **false negative**, and one that hit the `.gitkeep`/`.keep`/`.placeholder`
+  convention rather than an exotic setup.
+
+  **Not a widened predicate.** `is_empty_dir()` is untouched: "holds nothing" and "holds nothing
+  but a placeholder" say different things to a reader, and the second one — *reserved, not built*
+  — is the more useful. Check (h) gained a third branch with its own wording:
+
+  ```
+  <doc> — covers:'<entry>' holds only a placeholder (<name>, <path>) — reserved, not built
+  ```
+
+  A directory holding a placeholder **and** real content stays silent, as before.
+
+  **How it was found, and what the first fix broke.** The defect surfaced only when the field was
+  adopted in a real project — `covers:` appears in zero documents across all three CCPR reference
+  projects, so nothing in this repository could have produced it. The first fix then shipped a
+  regression that the suite reported as green: the new helper returns non-zero by contract on any
+  directory with real content, and its call site was a bare `var=$(cmd)` assignment, which under
+  the script's `set -euo pipefail` killed the entire run — exit 1, zero bytes, no report — at the
+  first ordinary `covers:` directory. Every document after it went unchecked.
+
+  Eight `covers:` tests missed it because they asserted only the **absence** of a finding
+  (`assertFalse(any(...))`), which an empty stdout satisfies. They could not tell "ran and
+  correctly said nothing" from "did not run at all". All of them now assert liveness first, via
+  the report's own `Files scanned` line. Removing the call site's guard turns five of them red.
+
+  **Coverage added** beyond the fix: a directory of only real files (the shape that broke, which
+  no fixture had), a directory with two placeholders at different depths, and a `.placeholder`
+  fixture — the third name in the list had no test, so a typo in it would have passed the suite.
+
+  Verified against three real projects: the pilot reports the expected single warning over 154
+  documents; two controls without `covers:` are unchanged at 242 and 95 documents, 0/0/0.
+
 - **A block quote interrupting a LIST ITEM's paragraph still hid a link — three shapes, not
   the one that was reported.** `709f241` fixed the plain-paragraph case; the `code-reviewer`
   pass on it found the same defect one container further. Sweeping the family against
