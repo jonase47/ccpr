@@ -12,12 +12,26 @@
     "denyNames": ["<tenant-or-client-name>", "<internal-project-codename>"]
   },
   "conformance": {
-    "_comment": "Read by scripts/conformance-run.sh (docs/adr/ADR-0010-conformance-runs-against-consumers.md). consumers is a list of real projects this operator maintains, addressed by LOCAL FILESYSTEM PATH ONLY -- nothing is ever fetched over a network. Each consumer's id is what reports show; the path never appears in a report unless --show-paths is given. optional (default false) means a missing path is reported as not-covered instead of failing the run -- useful for a consumer that lives on a machine this config is also used from, but is not always checked out. pins (Wave 3, not read yet by this wave's script) will be concrete, dated, per-consumer expectations -- each needs a why. Keep this file out of every repository, same reasoning as gate.denyNames above: a consumer's path is frequently a home directory.",
+    "_comment": "Read by scripts/conformance-run.sh (docs/adr/ADR-0010-conformance-runs-against-consumers.md). consumers is a list of real projects this operator maintains, addressed by LOCAL FILESYSTEM PATH ONLY -- nothing is ever fetched over a network. Each consumer's id is what reports show; the path never appears in a report unless --show-paths is given. optional (default false) means a missing path is reported as not-covered instead of failing the run -- useful for a consumer that lives on a machine this config is also used from, but is not always checked out. pins are concrete, dated, per-consumer expectations (class C3) -- each MUST carry a non-empty why, printed next to a violation, explaining why this consumer fact is CCPR behaviour rather than consumer content. A pin is exactly one of expectFinding (a substring, or a POSIX ERE when regex: true, that must appear on at least minCount report lines -- default 1) or expectField (one of exit, errors, warnings, info, filesScanned, compared against value -- filesScanned is a floor (>=), every other field is exact equality). Deliberately never a commit SHA, and never a fact about the CONSUMER's own working state either -- a pin's subject must be something CCPR controls, not something that changes the moment that consumer commits. Keep this file out of every repository, same reasoning as gate.denyNames above: a consumer's path is frequently a home directory.",
     "consumers": [
       { "id": "consumer-a", "path": "~/path/to/a-project" },
       { "id": "consumer-b", "path": "~/path/to/b-project", "optional": true }
     ],
-    "pins": []
+    "pins": [
+      {
+        "consumer": "consumer-a",
+        "check": "phase-docs-lint",
+        "expectFinding": "holds only a placeholder",
+        "why": "this consumer's own reserved-but-empty module directory (a .gitkeep only) must keep reporting as such; if this stops firing, either the module got built (fine) or phase-docs-lint's covers: emptiness check regressed (not fine)"
+      },
+      {
+        "consumer": "consumer-a",
+        "check": "memory-lint",
+        "expectField": "errors",
+        "value": 0,
+        "why": "this consumer's docs/memory/ is a frozen fixture and must stay clean against memory-lint"
+      }
+    ]
   },
   "overlay": {
     "instinctsFileInRepo": "instincts/shared.md",

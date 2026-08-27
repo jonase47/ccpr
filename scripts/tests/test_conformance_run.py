@@ -93,6 +93,8 @@ not name them individually.
 """
 
 import json
+import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -804,6 +806,749 @@ class ProductionShapeCouldNotRunTest(ConformanceRunTestBase):
         self.assertIn("_none_", c1_section, self.output(r))
         self.assertIn("_none_", c2_section, self.output(r))
         self.assertIn("**Checks:** 5 invoked, 4 ran, 1 could not", r.stdout, self.output(r))
+
+
+# ---------------------------------------------------------------------------
+# Group C3 (WI-0124 Wave 3) -- pins: a concrete, dated, per-consumer
+# expectation (ADR-0010 decision 2, class C3) that is either expectFinding
+# (a substring, or a POSIX ERE when regex: true, that must appear on at
+# least minCount report lines -- default 1) or expectField (one of
+# exit/errors/warnings/info/filesScanned (Wave 4: anchors.stale and
+# anchors.maxBehind were removed -- both described the CONSUMER's own
+# working state, never CCPR behaviour, so neither is a valid C3 subject),
+# compared against value -- filesScanned is a floor (>=), every other
+# field is exact equality). Every pin MUST carry a non-empty why -- its
+# absence, an unknown check, an unconfigured consumer id, neither/both of
+# expectFinding|expectField, or an unknown expectField name are all
+# malformed config (exit 2), the same "refuse to run rather than guess"
+# discipline the consumers reader already applies (ADR-0010 §5's
+# deliberate divergence from _gate_read_config). A violated pin is C3 and
+# escalates the exit status;
+# a pin whose own check produced no report this run (could-not-run, or
+# the rarer empty-both-streams C1 shape) is NOT EVALUATED -- reported
+# under its own heading, never silently counted as satisfied (WI-0124
+# Wave 3 briefing: "the one most likely to be got wrong").
+# ---------------------------------------------------------------------------
+def c3_section(stdout):
+    return stdout.split("### Pinned expectations (C3)", 1)[1].split("### Pins Not Evaluated", 1)[0]
+
+
+def not_evaluated_section(stdout):
+    return stdout.split("### Pins Not Evaluated", 1)[1].split("### Consumer findings (P)", 1)[0]
+
+
+class PinConfigValidationTest(ConformanceRunTestBase):
+    """The four config-error shapes the WI-0124 Wave 3 briefing names
+    explicitly, plus one defensive extra (both expectFinding AND
+    expectField given -- ambiguous, so refused rather than guessed at,
+    same reasoning as "neither")."""
+
+    def setUp(self):
+        super().setUp()
+        self.consumer = self.make_consumer_dir("alpha")
+
+    def _configure(self, pin):
+        self.write_config(conformance={
+            "consumers": [{"id": "alpha", "path": str(self.consumer)}],
+            "pins": [pin],
+        })
+
+    def test_pin_without_why_is_exit_2(self):
+        self._configure({"consumer": "alpha", "check": "memory-lint", "expectField": "exit", "value": 0})
+        r = self.run_conformance()
+        self.assertEqual(2, r.returncode, self.output(r))
+        self.assertIn("malformed conformance config", r.stderr, self.output(r))
+        self.assertIn("why", r.stderr, self.output(r))
+
+    def test_pin_naming_unknown_check_is_exit_2(self):
+        self._configure({"consumer": "alpha", "check": "not-a-real-check", "expectField": "exit", "value": 0, "why": "x"})
+        r = self.run_conformance()
+        self.assertEqual(2, r.returncode, self.output(r))
+        self.assertIn("malformed conformance config", r.stderr, self.output(r))
+        self.assertIn("not-a-real-check", r.stderr, self.output(r))
+
+    def test_pin_with_neither_expectation_is_exit_2(self):
+        self._configure({"consumer": "alpha", "check": "memory-lint", "why": "x"})
+        r = self.run_conformance()
+        self.assertEqual(2, r.returncode, self.output(r))
+        self.assertIn("malformed conformance config", r.stderr, self.output(r))
+        self.assertIn("expectFinding", r.stderr, self.output(r))
+        self.assertIn("expectField", r.stderr, self.output(r))
+
+    def test_pin_with_both_expectations_is_exit_2(self):
+        self._configure({
+            "consumer": "alpha", "check": "memory-lint",
+            "expectFinding": "x", "expectField": "exit", "value": 0, "why": "x",
+        })
+        r = self.run_conformance()
+        self.assertEqual(2, r.returncode, self.output(r))
+        self.assertIn("malformed conformance config", r.stderr, self.output(r))
+
+    def test_pin_expectfield_unknown_name_is_exit_2(self):
+        self._configure({"consumer": "alpha", "check": "memory-lint", "expectField": "commitSha", "value": 1, "why": "x"})
+        r = self.run_conformance()
+        self.assertEqual(2, r.returncode, self.output(r))
+        self.assertIn("malformed conformance config", r.stderr, self.output(r))
+        self.assertIn("commitSha", r.stderr, self.output(r))
+
+    def test_pin_expectfield_anchors_stale_is_unknown_field_is_exit_2(self):
+        # WI-0124 Wave 4: anchors.stale/anchors.maxBehind were removed --
+        # both describe the CONSUMER's own working state (how far its
+        # checked-out docs trail its production code), not CCPR behaviour,
+        # so they can never be a valid C3 subject (ADR-0010 decision 2).
+        # Same shape as the generic unknown-field test above, kept
+        # separate (paired with the anchors.maxBehind twin below) so a
+        # future regression that reintroduces one of these two specific
+        # names by accident is caught by name, not folded into "some
+        # unknown field or other".
+        self._configure({"consumer": "alpha", "check": "anchor", "expectField": "anchors.stale", "value": 0, "why": "x"})
+        r = self.run_conformance()
+        self.assertEqual(2, r.returncode, self.output(r))
+        self.assertIn("malformed conformance config", r.stderr, self.output(r))
+        self.assertIn("anchors.stale", r.stderr, self.output(r))
+
+    def test_pin_expectfield_anchors_maxbehind_is_unknown_field_is_exit_2(self):
+        # Twin of the anchors.stale test above (code-reviewer finding,
+        # WI-0124 Wave 4: the pair's own stated purpose -- catching a
+        # regression that reintroduces "one of these two specific names"
+        # -- only held for anchors.stale until this test existed; a
+        # regression that reintroduced ONLY anchors.maxBehind would have
+        # passed the suite green without it).
+        self._configure({"consumer": "alpha", "check": "anchor", "expectField": "anchors.maxBehind", "value": 0, "why": "x"})
+        r = self.run_conformance()
+        self.assertEqual(2, r.returncode, self.output(r))
+        self.assertIn("malformed conformance config", r.stderr, self.output(r))
+        self.assertIn("anchors.maxBehind", r.stderr, self.output(r))
+
+    def test_pin_naming_unknown_consumer_id_is_exit_2(self):
+        # A pin's `consumer` field naming an id that was never configured
+        # (a typo, most likely) can never be evaluated -- the operator
+        # wrote an expectation this run can never check. That is a
+        # config error (refuse to run), not a runtime could-not-run
+        # condition (which only applies to a CONFIGURED consumer whose
+        # check declined to run against it this time).
+        self._configure({"consumer": "not-configured", "check": "memory-lint", "expectField": "exit", "value": 0, "why": "x"})
+        r = self.run_conformance()
+        self.assertEqual(2, r.returncode, self.output(r))
+        self.assertIn("malformed conformance config", r.stderr, self.output(r))
+        self.assertIn("not-configured", r.stderr, self.output(r))
+
+    def test_pin_naming_unknown_consumer_id_among_several_configured_is_exit_2(self):
+        # Code-reviewer note (WI-0124 Wave 4): the single-consumer fixture
+        # above never exercises the error message's own
+        # ", ".join(sorted(consumer_ids)) formatting with more than one
+        # element -- this fixture configures three real consumers and
+        # pins a fourth, nonexistent id, so the message an operator
+        # actually sees is proven against a realistic multi-consumer
+        # shape, not just the degenerate single-consumer case.
+        self.write_config(conformance={
+            "consumers": [
+                {"id": "alpha", "path": str(self.consumer)},
+                {"id": "beta", "path": str(self.consumer)},
+                {"id": "gamma", "path": str(self.consumer)},
+            ],
+            "pins": [{"consumer": "delta", "check": "memory-lint", "expectField": "exit", "value": 0, "why": "x"}],
+        })
+        r = self.run_conformance()
+        self.assertEqual(2, r.returncode, self.output(r))
+        self.assertIn("malformed conformance config", r.stderr, self.output(r))
+        self.assertIn("delta", r.stderr, self.output(r))
+        for known in ("alpha", "beta", "gamma"):
+            self.assertIn(known, r.stderr, self.output(r))
+
+
+class PinFindingEvaluationTest(ConformanceRunTestBase):
+    def setUp(self):
+        super().setUp()
+        self.consumer = self.make_consumer_dir("alpha")
+
+    def _configure(self, pin):
+        self.write_config(conformance={
+            "consumers": [{"id": "alpha", "path": str(self.consumer)}],
+            "pins": [pin],
+        })
+
+    def test_substring_satisfied(self):
+        self._configure({
+            "consumer": "alpha", "check": "memory-lint",
+            "expectFinding": "0 errors, 0 warnings", "why": "control fixture stays clean",
+        })
+        r = self.run_conformance()
+        self.assertEqual(0, r.returncode, self.output(r))
+        self.assertIn("**Pins:** 1 checked, 1 satisfied", r.stdout, self.output(r))
+        self.assertIn("_none_", c3_section(r.stdout), self.output(r))
+
+    def test_substring_violated(self):
+        self._configure({
+            "consumer": "alpha", "check": "memory-lint",
+            "expectFinding": "this text never appears in the stub report",
+            "why": "invented to prove the negative path",
+        })
+        r = self.run_conformance()
+        self.assertEqual(1, r.returncode, self.output(r))
+        self.assertIn("**Pins:** 1 checked, 0 satisfied", r.stdout, self.output(r))
+        self.assertIn("pin violated", c3_section(r.stdout), self.output(r))
+        self.assertIn("invented to prove the negative path", c3_section(r.stdout), self.output(r))
+
+    def test_mincount_not_met_is_violated(self):
+        # CLEAN_FILES_SCANNED_REPORT's "## Errors (0)" heading appears
+        # exactly once -- a minCount of 2 can never be satisfied by it.
+        self._configure({
+            "consumer": "alpha", "check": "memory-lint",
+            "expectFinding": "## Errors (0)", "minCount": 2,
+            "why": "deliberately unsatisfiable minCount",
+        })
+        r = self.run_conformance()
+        self.assertEqual(1, r.returncode, self.output(r))
+        self.assertIn("pin violated", c3_section(r.stdout), self.output(r))
+
+    def test_regex_satisfied(self):
+        self._configure({
+            "consumer": "alpha", "check": "memory-lint",
+            "expectFinding": r"^\*\*Files scanned:\*\* [0-9]+$", "regex": True,
+            "why": "the files-scanned line must stay a bare integer",
+        })
+        r = self.run_conformance()
+        self.assertEqual(0, r.returncode, self.output(r))
+        self.assertIn("**Pins:** 1 checked, 1 satisfied", r.stdout, self.output(r))
+
+    def test_regex_violated(self):
+        self._configure({
+            "consumer": "alpha", "check": "memory-lint",
+            "expectFinding": r"^\*\*Files scanned:\*\* [a-z]+$", "regex": True,
+            "why": "invented -- the stub's own count is numeric, never alphabetic",
+        })
+        r = self.run_conformance()
+        self.assertEqual(1, r.returncode, self.output(r))
+        self.assertIn("pin violated", c3_section(r.stdout), self.output(r))
+
+
+class PinFieldEvaluationTest(ConformanceRunTestBase):
+    def setUp(self):
+        super().setUp()
+        self.consumer = self.make_consumer_dir("alpha")
+
+    def _configure(self, pin):
+        self.write_config(conformance={
+            "consumers": [{"id": "alpha", "path": str(self.consumer)}],
+            "pins": [pin],
+        })
+
+    def test_exit_field_satisfied(self):
+        self._configure({"consumer": "alpha", "check": "memory-lint", "expectField": "exit", "value": 0, "why": "control stays exit 0"})
+        r = self.run_conformance()
+        self.assertEqual(0, r.returncode, self.output(r))
+        self.assertIn("**Pins:** 1 checked, 1 satisfied", r.stdout, self.output(r))
+
+    def test_exit_field_violated(self):
+        self._configure({"consumer": "alpha", "check": "memory-lint", "expectField": "exit", "value": 7, "why": "invented -- the stub actually exits 0"})
+        r = self.run_conformance()
+        self.assertEqual(1, r.returncode, self.output(r))
+        self.assertIn("pin violated", c3_section(r.stdout), self.output(r))
+
+    def test_errors_field_satisfied(self):
+        self._configure({"consumer": "alpha", "check": "memory-lint", "expectField": "errors", "value": 0, "why": "control stays clean"})
+        r = self.run_conformance()
+        self.assertEqual(0, r.returncode, self.output(r))
+        self.assertIn("**Pins:** 1 checked, 1 satisfied", r.stdout, self.output(r))
+
+    def test_warnings_field_violated(self):
+        report = CLEAN_FILES_SCANNED_REPORT.replace(
+            "**Summary:** 0 errors, 0 warnings, 0 info.", "**Summary:** 0 errors, 2 warnings, 0 info."
+        ).replace("**Exit:** 0", "**Exit:** 1")
+        self.write_stub("phase-docs-lint.sh", report, 1)
+        self._configure({"consumer": "alpha", "check": "phase-docs-lint", "expectField": "warnings", "value": 0, "why": "invented -- the stub actually reports 2"})
+        r = self.run_conformance()
+        self.assertIn("pin violated", c3_section(r.stdout), self.output(r))
+
+    def test_info_field_satisfied(self):
+        report = CLEAN_FILES_SCANNED_REPORT.replace(
+            "**Summary:** 0 errors, 0 warnings, 0 info.", "**Summary:** 0 errors, 0 warnings, 4 info."
+        )
+        self.write_stub("doc-volume-check.sh", report, 0)
+        self._configure({"consumer": "alpha", "check": "doc-volume-check", "expectField": "info", "value": 4, "why": "control"})
+        r = self.run_conformance()
+        self.assertEqual(0, r.returncode, self.output(r))
+        self.assertIn("**Pins:** 1 checked, 1 satisfied", r.stdout, self.output(r))
+
+    def test_filesscanned_ge_satisfied_by_a_growing_consumer(self):
+        # value 2 <= the stub's own "**Files scanned:** 3" -- a floor, not
+        # an equality, so a growing consumer only strengthens this pin.
+        self._configure({"consumer": "alpha", "check": "memory-lint", "expectField": "filesScanned", "value": 2, "why": "at least 2 files must always exist"})
+        r = self.run_conformance()
+        self.assertEqual(0, r.returncode, self.output(r))
+        self.assertIn("**Pins:** 1 checked, 1 satisfied", r.stdout, self.output(r))
+
+    def test_filesscanned_ge_violated(self):
+        self._configure({"consumer": "alpha", "check": "memory-lint", "expectField": "filesScanned", "value": 10, "why": "invented -- the stub only reports 3"})
+        r = self.run_conformance()
+        self.assertEqual(1, r.returncode, self.output(r))
+        self.assertIn("pin violated", c3_section(r.stdout), self.output(r))
+
+class PinCouldNotRunInteractionTest(ConformanceRunTestBase):
+    """WI-0124 Wave 3 briefing: 'A pin that is not evaluated at all because
+    its check could-not-run must be reported as such, not silently
+    counted as satisfied. That last case is the one most likely to be got
+    wrong; give it its own test.' Two tests, deliberately paired: the
+    could-not-run pin must land in Pins Not Evaluated and must NOT count
+    toward PINS_SATISFIED, while an ordinary satisfied pin on a DIFFERENT,
+    cleanly-running check in the SAME run stays green -- proving the
+    not-evaluated handling does not blanket-suppress every pin in the run."""
+
+    def setUp(self):
+        super().setUp()
+        self.consumer = self.make_consumer_dir("alpha")
+        self.write_stub("anchor.sh", "", 2, stderr_text="anchor: not a git repository (or git not on PATH): /fake/path")
+        self.write_config(conformance={
+            "consumers": [{"id": "alpha", "path": str(self.consumer)}],
+            "pins": [
+                {"consumer": "alpha", "check": "anchor", "expectField": "errors", "value": 0, "why": "cannot be evaluated -- anchor could not run"},
+                {"consumer": "alpha", "check": "memory-lint", "expectField": "exit", "value": 0, "why": "control -- memory-lint's stub runs cleanly"},
+            ],
+        })
+
+    def test_could_not_run_pin_is_not_evaluated_not_satisfied(self):
+        r = self.run_conformance()
+        self.assertEqual(0, r.returncode, self.output(r))
+        self.assertIn("**Pins:** 2 checked, 1 satisfied", r.stdout, self.output(r))
+        self.assertIn("anchor on alpha", not_evaluated_section(r.stdout), self.output(r))
+        self.assertNotIn("anchor on alpha", c3_section(r.stdout), self.output(r))
+
+    def test_ordinary_satisfied_pin_on_a_different_check_stays_green(self):
+        r = self.run_conformance()
+        self.assertEqual(0, r.returncode, self.output(r))
+        self.assertNotIn("memory-lint on alpha", not_evaluated_section(r.stdout), self.output(r))
+        self.assertIn("_none_", c3_section(r.stdout), self.output(r))
+
+
+class PinReportAndExitTest(ConformanceRunTestBase):
+    def setUp(self):
+        super().setUp()
+        self.consumer = self.make_consumer_dir("alpha")
+
+    def test_mixed_satisfied_and_violated_pins_counts_and_why_placement(self):
+        self.write_config(conformance={
+            "consumers": [{"id": "alpha", "path": str(self.consumer)}],
+            "pins": [
+                {"consumer": "alpha", "check": "memory-lint", "expectField": "exit", "value": 0, "why": "control stays exit 0"},
+                {"consumer": "alpha", "check": "phase-docs-lint", "expectField": "exit", "value": 9, "why": "a reason unique enough to grep for -- WHY-MARKER-42"},
+            ],
+        })
+        r = self.run_conformance()
+        self.assertEqual(1, r.returncode, self.output(r))
+        self.assertIn("**Pins:** 2 checked, 1 satisfied", r.stdout, self.output(r))
+        c3 = c3_section(r.stdout)
+        self.assertIn("phase-docs-lint on alpha", c3, self.output(r))
+        self.assertIn("WHY-MARKER-42", c3, self.output(r))
+        violated_line = [line for line in c3.splitlines() if "phase-docs-lint on alpha" in line][0]
+        self.assertIn("WHY-MARKER-42", violated_line, self.output(r))
+
+    def test_a_satisfied_only_run_stays_exit_0(self):
+        self.write_config(conformance={
+            "consumers": [{"id": "alpha", "path": str(self.consumer)}],
+            "pins": [{"consumer": "alpha", "check": "memory-lint", "expectField": "exit", "value": 0, "why": "control"}],
+        })
+        r = self.run_conformance()
+        self.assertEqual(0, r.returncode, self.output(r))
+        self.assertIn("**Pins:** 1 checked, 1 satisfied", r.stdout, self.output(r))
+
+    def test_zero_pins_configured_reports_zero_checked(self):
+        self.write_config(conformance={"consumers": [{"id": "alpha", "path": str(self.consumer)}]})
+        r = self.run_conformance()
+        self.assertEqual(0, r.returncode, self.output(r))
+        self.assertIn("**Pins:** 0 checked, 0 satisfied", r.stdout, self.output(r))
+
+
+# ---------------------------------------------------------------------------
+# Group H (WI-0124 Wave 4b) -- unknown-key rejection. Measured directly
+# (hand-written config, 27.08.2026): nesting `pins` INSIDE a consumer object
+# instead of at `conformance.pins[]` produced "**Pins:** 0 checked, 0
+# satisfied", exit 0 -- a clean pass, silently discarding every expectation
+# the operator wrote. That is the run's own failure mode one level down from
+# what ADR-0010 decision 5 already closes for a malformed config as a whole
+# (unknown scope -> exit 2): an unknown key at any of the three config
+# levels (conformance / consumer / pin) must refuse to run rather than be
+# silently ignored, the same "refuse rather than guess" discipline the
+# reader already applies to every other malformed shape. `_comment` is the
+# one deliberate exception -- the shipped template
+# (templates/memory-sync.example.json) uses it as its own documentation
+# mechanism at all three levels, so rejecting it would refuse this
+# repository's own example.
+# ---------------------------------------------------------------------------
+class UnknownKeyRejectionTest(ConformanceRunTestBase):
+    def setUp(self):
+        super().setUp()
+        self.consumer = self.make_consumer_dir("alpha")
+
+    def test_pins_nested_inside_a_consumer_is_exit_2_and_names_pins_and_the_consumer(self):
+        # The exact hand-written mistake this wave was found by: `pins`
+        # belongs at conformance.pins[], not inside a consumer object.
+        self.write_config(conformance={
+            "consumers": [{
+                "id": "consumer-a",
+                "path": str(self.consumer),
+                "pins": [{"check": "phase-docs-lint", "expectFinding": "x", "why": "y"}],
+            }],
+        })
+        r = self.run_conformance()
+        self.assertEqual(2, r.returncode, self.output(r))
+        self.assertIn("malformed conformance config", r.stderr, self.output(r))
+        self.assertIn("pins", r.stderr, self.output(r))
+        self.assertIn("consumer-a", r.stderr, self.output(r))
+
+    def test_unknown_key_at_the_conformance_level_is_exit_2_and_names_the_key(self):
+        self.write_config(conformance={
+            "consumers": [{"id": "alpha", "path": str(self.consumer)}],
+            "bogusTopLevelKey": True,
+        })
+        r = self.run_conformance()
+        self.assertEqual(2, r.returncode, self.output(r))
+        self.assertIn("malformed conformance config", r.stderr, self.output(r))
+        self.assertIn("bogusTopLevelKey", r.stderr, self.output(r))
+
+    def test_unknown_key_inside_a_consumer_is_exit_2_and_names_the_key(self):
+        self.write_config(conformance={
+            "consumers": [{"id": "alpha", "path": str(self.consumer), "bogusConsumerKey": 1}],
+        })
+        r = self.run_conformance()
+        self.assertEqual(2, r.returncode, self.output(r))
+        self.assertIn("malformed conformance config", r.stderr, self.output(r))
+        self.assertIn("bogusConsumerKey", r.stderr, self.output(r))
+        self.assertIn("alpha", r.stderr, self.output(r))
+
+    def test_unknown_key_inside_a_pin_is_exit_2_and_names_the_key(self):
+        self.write_config(conformance={
+            "consumers": [{"id": "alpha", "path": str(self.consumer)}],
+            "pins": [{
+                "consumer": "alpha", "check": "memory-lint",
+                "expectField": "exit", "value": 0, "why": "x",
+                "bogusPinKey": 1,
+            }],
+        })
+        r = self.run_conformance()
+        self.assertEqual(2, r.returncode, self.output(r))
+        self.assertIn("malformed conformance config", r.stderr, self.output(r))
+        self.assertIn("bogusPinKey", r.stderr, self.output(r))
+        self.assertIn("alpha", r.stderr, self.output(r))
+
+    def test_comment_key_is_accepted_at_the_conformance_level(self):
+        self.write_config(conformance={
+            "_comment": "documentation only",
+            "consumers": [{"id": "alpha", "path": str(self.consumer)}],
+        })
+        r = self.run_conformance()
+        self.assertEqual(0, r.returncode, self.output(r))
+        self.assertIn("alpha: covered", r.stdout, self.output(r))
+
+    def test_comment_key_is_accepted_inside_a_consumer(self):
+        self.write_config(conformance={
+            "consumers": [{"id": "alpha", "path": str(self.consumer), "_comment": "documentation only"}],
+        })
+        r = self.run_conformance()
+        self.assertEqual(0, r.returncode, self.output(r))
+        self.assertIn("alpha: covered", r.stdout, self.output(r))
+
+    def test_comment_key_is_accepted_inside_a_pin(self):
+        self.write_config(conformance={
+            "consumers": [{"id": "alpha", "path": str(self.consumer)}],
+            "pins": [{
+                "consumer": "alpha", "check": "memory-lint",
+                "expectField": "exit", "value": 0, "why": "x",
+                "_comment": "documentation only",
+            }],
+        })
+        r = self.run_conformance()
+        self.assertEqual(0, r.returncode, self.output(r))
+        self.assertIn("**Pins:** 1 checked, 1 satisfied", r.stdout, self.output(r))
+
+    def test_shipped_example_template_produces_no_unknown_key_error(self):
+        # Binding test (same idea as Group F/G): the rule enforced above and
+        # the shipped example (templates/memory-sync.example.json, which
+        # documents this schema for real operators) must never drift apart.
+        # Consumer paths are rewritten to real fixture directories -- the
+        # template's own `~/path/to/...` values are documentation, not meant
+        # to resolve on any machine -- everything else (including every
+        # `_comment` and both pins) is passed through verbatim.
+        template_path = REPO_ROOT / "templates" / "memory-sync.example.json"
+        template_conformance = json.loads(template_path.read_text(encoding="utf-8"))["conformance"]
+        for c in template_conformance["consumers"]:
+            c["path"] = str(self.make_consumer_dir(c["id"]))
+        self.write_config(conformance=template_conformance)
+        r = self.run_conformance()
+        self.assertNotIn("unknown key", r.stderr, self.output(r))
+        self.assertNotIn("malformed conformance config", r.stderr, self.output(r))
+
+
+# ---------------------------------------------------------------------------
+# Group E (WI-0124 Wave 3) -- the contract table stays honest: every
+# CHECK_EXIT_SET entry conformance-run.sh's own table declares for a check
+# must match what that check's OWN shipped header documents about itself,
+# read directly from the file -- never from the table under test. A
+# drifted table (a wording change, a widened/narrowed exit set in either
+# file) fails HERE, locally, instead of surfacing as a C1 false positive
+# against a real consumer months later. The companion class below runs
+# each REAL check over a tiny synthetic fixture and pins the mandatory
+# report-skeleton lines the classifier's own Rule 3 depends on.
+# ---------------------------------------------------------------------------
+EXIT_CODES_LINE_RE = re.compile(r"#\s*Exit[- ]Codes?:\s*(.+)", re.IGNORECASE)
+BULLETED_EXIT_RE = re.compile(r"^#\s+(\d+)\s+\S")
+
+
+def parse_documented_exit_set(script_path):
+    """The set of exit codes a shipped check's OWN header comment documents
+    for itself -- either the single "# Exit codes: 0 clean, 1 warnings,
+    ..." line four of the five checks carry (memory-lint.sh's own spelling
+    is lowercase "Exit codes:", the other three "Exit-Codes:" -- both
+    matched, case-insensitively, by one regex), or, for scripts/anchor.sh,
+    the bulleted "#   <code>  <meaning>" block under its own "Exit-code
+    contract" heading (scripts/anchor.sh:18-36) -- the two documented
+    shapes this repository's five shipped checks actually use. Scanning
+    stops at the first non-comment, non-blank line, so nothing outside
+    the header (dates, ports, unrelated integers) can leak in."""
+    codes = set()
+    lines = script_path.read_text(encoding="utf-8").splitlines()
+    for line in lines:
+        if not line.startswith("#") and line.strip():
+            break
+        m = EXIT_CODES_LINE_RE.search(line)
+        if m:
+            codes.update(int(n) for n in re.findall(r"(\d+)\s+[A-Za-z]", m.group(1)))
+    if codes:
+        return codes
+    for line in lines:
+        if not line.startswith("#") and line.strip():
+            break
+        m = BULLETED_EXIT_RE.match(line)
+        if m:
+            codes.add(int(m.group(1)))
+    return codes
+
+
+def parse_check_exit_set_table(script_path):
+    """conformance-run.sh's own CHECK_NAMES / CHECK_SCRIPTS / CHECK_EXIT_SET
+    parallel-array table, read by parsing the shell source directly --
+    deliberately not by sourcing the script, which would require invoking
+    bash for nothing else this parser needs."""
+    text = script_path.read_text(encoding="utf-8")
+
+    def _array(name):
+        # CHECK_NAMES/CHECK_SCRIPTS are bare (unquoted) word arrays;
+        # CHECK_EXIT_SET's own elements are quoted because each one is
+        # itself a space-separated set ("0 1 2 3") -- both forms must be
+        # read from the same helper, so a bare-word or a quoted token is
+        # accepted per element rather than assuming one shape.
+        m = re.search(r"^%s=\(([^)]*)\)" % re.escape(name), text, re.MULTILINE)
+        assert m is not None, "conformance-run.sh's own %s array not found -- fixture assumption broken" % name
+        return [quoted if quoted else bare for quoted, bare in re.findall(r'"([^"]*)"|(\S+)', m.group(1))]
+
+    names = _array("CHECK_NAMES")
+    scripts = _array("CHECK_SCRIPTS")
+    exit_sets = _array("CHECK_EXIT_SET")
+    assert len(names) == len(scripts) == len(exit_sets), "conformance-run.sh's check-table arrays disagree on length"
+    return {name: (scripts[i], set(int(c) for c in exit_sets[i].split())) for i, name in enumerate(names)}
+
+
+def _table_header_mismatches(table_source_path):
+    table = parse_check_exit_set_table(table_source_path)
+    mismatches = []
+    for name, (script_filename, table_set) in table.items():
+        header_set = parse_documented_exit_set(REPO_ROOT / "scripts" / script_filename)
+        if header_set != table_set:
+            mismatches.append("%s: table says %s, header says %s" % (name, sorted(table_set), sorted(header_set)))
+    return mismatches
+
+
+class ContractTableExitCodeBindingTest(unittest.TestCase):
+    def test_every_checks_documented_exit_set_matches_its_own_header(self):
+        self.assertEqual([], _table_header_mismatches(SCRIPT_PATH))
+
+
+class ContractTableExitCodeBindingRedProofTest(unittest.TestCase):
+    """Mutation-based RED proof (WI-0037/WI-0044 precedent: a checker of
+    this kind is untrustworthy until it has been SEEN red). Drops '3' from
+    memory-lint's own CHECK_EXIT_SET entry in a SCRATCH copy of
+    conformance-run.sh (the shipped file is never touched) and confirms
+    the binding test above goes red, naming memory-lint -- proving Group E
+    binds the table to the headers, not merely to itself."""
+
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="wi0124-redproof-groupE-"))
+        self.addCleanup(shutil.rmtree, self.tmpdir, ignore_errors=True)
+
+    def test_a_narrowed_table_entry_is_caught(self):
+        before = SCRIPT_PATH.read_bytes()
+        before_mode = SCRIPT_PATH.stat().st_mode
+        original = before.decode()
+        needle = 'CHECK_EXIT_SET=("0 1 2 3" "0 1 2" "0 1 2" "0 1 2" "0 2 3")'
+        self.assertIn(needle, original, "fixture assumption broken -- CHECK_EXIT_SET's own literal line changed, update this test")
+        mutated = original.replace(needle, needle.replace('"0 1 2 3"', '"0 1 2"'), 1)
+        self.assertNotEqual(original, mutated)
+        scratch = self.tmpdir / "conformance-run.sh"
+        scratch.write_text(mutated, encoding="utf-8")
+
+        mismatches = _table_header_mismatches(scratch)
+        self.assertTrue(
+            any(m.startswith("memory-lint:") for m in mismatches),
+            "expected the narrowed memory-lint entry to be flagged: %r" % mismatches,
+        )
+
+        self.assertEqual(before, SCRIPT_PATH.read_bytes(), "shipped file content changed")
+        self.assertEqual(before_mode, SCRIPT_PATH.stat().st_mode, "shipped file mode bits changed")
+
+
+class RealCheckSkeletonTest(unittest.TestCase):
+    """Companion to the header-binding test above: pins the PARSING
+    contract the classifier depends on by running each REAL (non-stub)
+    shipped check over a tiny synthetic fixture (an empty git repo with a
+    bare docs/) and asserting its own mandatory report-skeleton lines are
+    present -- the same lines conformance-run.sh's Rule 3
+    (missing-skeleton) requires. Behaviour measured directly before
+    writing this test: every one of the five checks takes its normal,
+    full-skeleton, zero-scope path over an empty docs/ (no early
+    short-circuit with a partial report), unlike phase-docs-lint.sh with
+    docs/ entirely ABSENT (ProductionShapeCouldNotRunTest's own docstring
+    names that different shape)."""
+
+    def setUp(self):
+        self.home = Path(tempfile.mkdtemp(prefix="ccpr-groupE-skeleton-home-"))
+        self.addCleanup(shutil.rmtree, self.home, ignore_errors=True)
+        self.project = self.home / "project"
+        subprocess.run(["git", "init", "-q", str(self.project)], check=True)
+        (self.project / "docs").mkdir(parents=True)
+
+    def env(self):
+        return {"HOME": str(self.home), "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"}
+
+    def _run(self, script, *args):
+        return subprocess.run(
+            ["bash", str(REPO_ROOT / "scripts" / script), *args],
+            capture_output=True, text=True, env=self.env(),
+        )
+
+    def test_memory_lint_skeleton(self):
+        r = self._run("memory-lint.sh", str(self.project))
+        for s in ("**Files scanned:**", "**Summary:**", "**Exit:**"):
+            self.assertIn(s, r.stdout, r.stdout + r.stderr)
+
+    def test_phase_docs_lint_skeleton(self):
+        r = self._run("phase-docs-lint.sh", str(self.project))
+        for s in ("**Files scanned:**", "**Summary:**", "**Exit:**"):
+            self.assertIn(s, r.stdout, r.stdout + r.stderr)
+
+    def test_manual_lint_skeleton(self):
+        r = self._run("manual-lint.sh", str(self.project / "docs"))
+        for s in ("**Files scanned:**", "**Summary:**", "**Exit:**"):
+            self.assertIn(s, r.stdout, r.stdout + r.stderr)
+
+    def test_doc_volume_check_skeleton(self):
+        r = self._run("doc-volume-check.sh", str(self.project / "docs"))
+        for s in ("**Files scanned:**", "**Summary:**", "**Exit:**"):
+            self.assertIn(s, r.stdout, r.stdout + r.stderr)
+
+    def test_anchor_skeleton(self):
+        r = self._run("anchor.sh", "status", str(self.project))
+        for s in ("**Anchors:**", "**Last production-code commit:**"):
+            self.assertIn(s, r.stdout, r.stdout + r.stderr)
+
+
+# ---------------------------------------------------------------------------
+# Group F (WI-0124 Wave 3) -- the always-on configuration test: reads the
+# REAL gate_config_path() (neither HOME nor MEMORY_SYNC_CONFIG is
+# sandboxed here, unlike every other test in this module), and never
+# skips. See test_memory_lint_commonmark_corpus.py:5-15 for why this is
+# conditional STRENGTHENING rather than a `skipIf` -- skipping on "no real
+# config" would make this suite silently green-by-skip on exactly the
+# machine (a fresh install, or CI) this test exists to still say
+# something true about: the not-configured clean-skip contract (ADR-0010
+# decision 4) IS itself an acceptance criterion, so asserting it is
+# non-vacuous everywhere, including a machine that will never carry a real
+# conformance config. A machine that DOES carry one additionally gets
+# every-consumer-resolves / every-pin-has-a-why / never-exit-2 checked
+# against WHATEVER the operator actually configured -- never a specific
+# FINDING, which would make this suite red on a consumer's own document
+# content, the exact conflation ADR-0010 forbids (decision 2).
+# ---------------------------------------------------------------------------
+class RealConfigurationConformanceTest(unittest.TestCase):
+    def _real_config_path(self):
+        override = os.environ.get("MEMORY_SYNC_CONFIG")
+        if override:
+            return Path(override)
+        return Path.home() / ".claude" / "memory-sync.json"
+
+    def _real_conformance_block(self):
+        path = self._real_config_path()
+        if not path.is_file():
+            return None
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return None
+        conformance = data.get("conformance")
+        return conformance if isinstance(conformance, dict) else None
+
+    def test_real_local_configuration_is_conformant(self):
+        cfg_path = self._real_config_path()
+        conformance = self._real_conformance_block()
+        consumers = conformance.get("consumers") if conformance else None
+        consumers = consumers if isinstance(consumers, list) else []
+
+        r = subprocess.run(["bash", str(SCRIPT_PATH)], capture_output=True, text=True, env=None)
+        operator_note = (
+            "a failure here reflects THIS MACHINE'S OWN local conformance "
+            "configuration (%s), not a CCPR defect -- if a consumer moved "
+            "or a pin's `why` is missing, fix that config, not this test.\n"
+            "returncode: %s\nstdout:\n%s\nstderr:\n%s"
+            % (cfg_path, r.returncode, r.stdout, r.stderr)
+        )
+
+        if not consumers:
+            self.assertEqual(0, r.returncode, operator_note)
+            self.assertIn(NOT_CONFIGURED_STATEMENT, r.stdout, operator_note)
+            return
+
+        self.assertIn(r.returncode, (0, 1), operator_note)
+        for c in consumers:
+            cid = c.get("id") if isinstance(c, dict) else None
+            if cid:
+                self.assertIn(str(cid), r.stdout, operator_note)
+        for pin in (conformance.get("pins") or []):
+            if isinstance(pin, dict):
+                self.assertTrue(pin.get("why"), "pin missing why: %r -- %s" % (pin, operator_note))
+
+
+# ---------------------------------------------------------------------------
+# Group G (WI-0124 Wave 3) -- repository hygiene: this mechanism's own
+# shipped source and template stay free of anything Constitution
+# Inviolable #2 ("No personal or tenant data in shipped artifacts")
+# forbids, and no tracked file could ever be mistaken for a checked-in
+# conformance report by its own heading shape.
+# ---------------------------------------------------------------------------
+FORBIDDEN_PERSONAL_SUBSTRINGS = ("jonascode", "/Users/", "/home/", "erfinderwerkstatt")
+
+
+class RepositoryHygieneTest(unittest.TestCase):
+    def test_shipped_conformance_files_carry_no_personal_or_tenant_data(self):
+        offenders = []
+        for path in (SCRIPT_PATH, REPO_ROOT / "templates" / "memory-sync.example.json"):
+            text = path.read_text(encoding="utf-8")
+            for needle in FORBIDDEN_PERSONAL_SUBSTRINGS:
+                if needle in text:
+                    offenders.append("%s contains %r" % (path.relative_to(REPO_ROOT), needle))
+        self.assertEqual([], offenders)
+
+    def test_no_tracked_file_matches_the_conformance_report_heading(self):
+        heading = "# Conformance Run Report"
+        r = subprocess.run(["git", "ls-files"], cwd=str(REPO_ROOT), capture_output=True, text=True, check=True)
+        offenders = []
+        for rel in r.stdout.splitlines():
+            path = REPO_ROOT / rel
+            try:
+                text = path.read_text(encoding="utf-8")
+            except (UnicodeDecodeError, OSError):
+                continue
+            if heading in text.splitlines():
+                offenders.append(rel)
+        self.assertEqual([], offenders)
 
 
 if __name__ == "__main__":

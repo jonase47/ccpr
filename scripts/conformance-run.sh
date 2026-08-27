@@ -3,20 +3,24 @@
 # consumer projects, as part of this repository's own verification.
 # Design: docs/adr/ADR-0010-conformance-runs-against-consumers.md.
 #
-# WAVE 2 (this file, as of WI-0124): the skeleton (Wave 1) plus the
-# classifier — every covered, non-optional consumer now has the five shipped
-# checks in CHECK_NAMES below actually run against it, and every finding is
-# sorted into exactly one of C1 (contract violation), C2 (zero scope over a
-# non-empty target), Could-Not-Run (Wave 2b — the check refused to run
-# against this target and said so on stderr; not a defect, not folded into
-# the exit code, but never allowed to look like a clean pass either — see
-# the **Checks:** accounting line and _run_and_classify_check's own
-# could-not-run comment) or P (a real finding in the consumer's own
-# documents, never CCPR-attributable). Pins (Wave 3, class C3) are not read
-# by this wave at all — see the module comment above CHECK_SCRIPT_DIR
-# below. The report shape Wave 1 decided did not change underneath it: the
-# same headings are still there, now populated instead of empty, plus the
-# one Wave 2b adds.
+# WAVE 3 (this file, as of WI-0124): pins (ADR-0010 decision 2, class C3)
+# join the classifier Wave 2 added. Every covered, non-optional consumer has
+# the five shipped checks in CHECK_NAMES below actually run against it, and
+# every finding is sorted into exactly one of C1 (contract violation), C2
+# (zero scope over a non-empty target), Could-Not-Run (Wave 2b — the check
+# refused to run against this target and said so on stderr; not a defect,
+# not folded into the exit code, but never allowed to look like a clean pass
+# either — see the **Checks:** accounting line and _run_and_classify_check's
+# own could-not-run comment), C3 (Wave 3 — a configured, per-consumer PIN
+# was violated: a concrete, dated expectation the operator recorded in
+# conformance.pins[], each carrying a mandatory `why` printed next to its
+# own violation) or P (a real finding in the consumer's own documents, never
+# CCPR-attributable). A pin whose own check produced no report this run
+# (could-not-run, or the rarer empty-both-streams C1 shape) is NOT
+# EVALUATED — its own heading, never silently counted as satisfied. The
+# report shape Wave 1 decided did not change underneath it: the same
+# headings are still there, now populated instead of empty, plus the ones
+# Wave 2b and Wave 3 each add.
 #
 # Usage:
 #   conformance-run.sh [--require-consumers] [--consumer <id>] [--show-paths] [--help]
@@ -31,12 +35,15 @@
 #
 #   0  a report was produced. This includes the not-configured clean skip
 #      (below) and a run whose only findings are class P.
-#   1  at least one CCPR-attributable finding (C1 or C2 this wave; C3 joins
-#      in Wave 3), OR --require-consumers was given and zero consumers are
+#   1  at least one CCPR-attributable finding (C1, C2 or C3 — a violated
+#      pin), OR --require-consumers was given and zero consumers are
 #      configured.
 #   2  the run could not be performed as asked: bad usage, a configured
 #      consumer with no usable path, a non-optional consumer whose path does
-#      not exist or is not readable, or a malformed conformance config.
+#      not exist or is not readable, a malformed conformance config, or a
+#      malformed pin (missing `why`, an unknown `check`, a `consumer` id
+#      that was never configured, neither/both of
+#      `expectFinding`/`expectField`, or an unknown `expectField` name).
 #
 # There is deliberately NO exit 3 (ADR-0010 decision 3, same reasoning
 # artifact-gate.sh's header already states for its own two-code contract and
@@ -81,11 +88,31 @@
 # directory) with no reason to appear in an output the operator might paste
 # or share. --show-paths is the explicit opt-in that reveals it.
 #
-# `pins` (ADR-0010 §5, class C3) are Wave 3. This wave reads only
-# conformance.consumers[] (`id`, `path`, `optional`) and never looks at
-# `pins` at all — not even to validate its shape — so a `pins` block, in
-# whatever state a consumer's own config happens to carry it, can never make
-# this wave's run fail.
+# `pins` (ADR-0010 §5, class C3) are read starting this wave (Wave 3). Each
+# entry names a `consumer` and a `check`, carries a mandatory non-empty
+# `why`, and is EXACTLY ONE of:
+#   expectFinding  a substring (or, with `regex: true`, a POSIX ERE) that
+#                  must appear on at least `minCount` (default 1) lines of
+#                  that check's own report for that consumer.
+#   expectField    one of exit / errors / warnings / info / filesScanned,
+#                  compared against `value`. filesScanned is a FLOOR (>=) —
+#                  a growing consumer only strengthens it; every other
+#                  field is exact equality. Deliberately never a commit SHA,
+#                  and (as of Wave 4) never a fact about the CONSUMER's own
+#                  working state either (ADR-0010 decision 2) — a pin's
+#                  subject must be something CCPR controls. Wave 3 shipped
+#                  two anchor-only fields, anchors.stale and
+#                  anchors.maxBehind, that violated exactly this: both
+#                  described how far the consumer's checked-out docs trail
+#                  its own production code, so the moment that consumer
+#                  commits, the pin fires as a false CCPR alarm. Removed in
+#                  Wave 4 — see KNOWN_PIN_FIELDS below for the rule this
+#                  leaves in place for the next field.
+# A pin whose named check never produced a report for that consumer THIS RUN
+# (could-not-run, or the rarer empty-both-streams C1 shape) is NOT EVALUATED
+# — reported under its own heading, never silently counted as satisfied. A
+# violated pin is class C3 and escalates the exit status the same way C1/C2
+# already do.
 
 set -euo pipefail
 
@@ -289,6 +316,107 @@ _c2_probe_has_candidates() {
   esac
 }
 
+# --- WAVE 3: pin field/finding extraction (ADR-0010 §5, class C3) ---------
+#
+# _report_summary_info_count <report-text> — the third integer ("K" in
+# "N errors, M warnings, K info.") on the first **Summary:** line, or
+# returns 1 if absent. A SEPARATE function from _report_summary_counts
+# above, not an extension of it: that function's own two-variable `read`
+# (Rule 5's only caller) would silently swallow a third tab-separated field
+# into its LAST variable rather than dropping it, so widening its output
+# shape would corrupt an already-tested caller instead of only adding one.
+_report_summary_info_count() {
+  local text="$1" rest part1 part2 part3 info
+  rest="$(_report_line_value "$text" '**Summary:** ')" || return 1
+  IFS=',' read -r part1 part2 part3 _ < <(printf '%s\n' "$rest")
+  part3="${part3# }"
+  info="${part3%% *}"
+  [ -n "$info" ] || return 1
+  printf '%s\n' "$info"
+}
+
+# _pin_field_value <report-text> <actual-rc> <field> — the five
+# expectField names ADR-0010's Wave 3/4 pin design supports: exit (the
+# ACTUAL process exit status passed in, never the report's own
+# self-declared **Exit:** line — the same trust rule every C1 rule above
+# already applies), errors/warnings/info (the three **Summary:** counts —
+# absent entirely from anchor's report, which has no Summary line at all,
+# so this deliberately FAILS rather than guesses), and filesScanned (the
+# **Files scanned:** line). Prints the value or returns 1 — a caller never
+# sees a guessed value, only a real one or none.
+#
+# WI-0124 Wave 4 removed two anchor-only fields that lived here through
+# Wave 3 (anchors.stale, anchors.maxBehind) — see the comment on
+# KNOWN_PIN_FIELDS above (_conformance_read_config) for why: both described
+# the CONSUMER's own working state, never CCPR behaviour, so no field like
+# them belongs in this function either.
+_pin_field_value() {
+  local text="$1" actual_rc="$2" field="$3"
+  local counts e w
+  case "$field" in
+    exit)
+      printf '%s\n' "$actual_rc"
+      ;;
+    errors|warnings)
+      counts="$(_report_summary_counts "$text")" || return 1
+      IFS=$'\t' read -r e w < <(printf '%s\n' "$counts")
+      if [ "$field" = "errors" ]; then
+        printf '%s\n' "$e"
+      else
+        printf '%s\n' "$w"
+      fi
+      ;;
+    info)
+      _report_summary_info_count "$text"
+      ;;
+    filesScanned)
+      _report_line_value "$text" '**Files scanned:** '
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+# _pin_field_matches <field> <actual> <expected> — filesScanned is a floor
+# an operator declares ("at least N files"), which only STRENGTHENS as a
+# consumer grows (the same reasoning ADR-0010 gives against ever pinning a
+# commit SHA: an equality pin on a growing consumer's file count would rot
+# the moment the consumer adds one document). Every other field is exact.
+_pin_field_matches() {
+  local field="$1" actual="$2" expected="$3"
+  case "$field" in
+    filesScanned)
+      [ "$actual" -ge "$expected" ] 2>/dev/null
+      ;;
+    *)
+      [ "$actual" = "$expected" ]
+      ;;
+  esac
+}
+
+# _pin_count_finding_occurrences <report-text> <pattern> <is-regex 0/1> —
+# LINES of the report containing <pattern>: a literal substring by default
+# (`[[ $line == *"$pattern"* ]]` keeps a quoted variable's own
+# `*`/`?`/`[` characters literal even though the surrounding `*`s are real
+# wildcards — the standard bash idiom for a literal substring test, no
+# external tool), or a POSIX ERE when is-regex is "1" (bash's own built-in
+# `[[ =~ ]]` — G-140: no `grep` needed here, so no pipefail/SIGPIPE
+# exposure either). One line matching twice still counts once: a pin's
+# `why` names a FACT the report must contain, not an occurrence count
+# inside a single line.
+_pin_count_finding_occurrences() {
+  local text="$1" pattern="$2" is_regex="$3" line count=0
+  while IFS= read -r line; do
+    if [ "$is_regex" = "1" ]; then
+      [[ "$line" =~ $pattern ]] && count=$((count + 1))
+    else
+      [[ "$line" == *"$pattern"* ]] && count=$((count + 1))
+    fi
+  done < <(printf '%s\n' "$text")
+  printf '%s\n' "$count"
+}
+
 # Finding accumulators — the same "growing string, one entry per line" shape
 # CONSUMER_REPORT already uses below, for the same reason (a `set -u`-safe
 # alternative to appending to a possibly-empty array whose emptiness is the
@@ -297,21 +425,39 @@ C1_FINDINGS=""
 C2_FINDINGS=""
 P_FINDINGS=""
 COULD_NOT_RUN_FINDINGS=""
+C3_FINDINGS=""
+PIN_NOT_EVALUATED_FINDINGS=""
 C1_COUNT=0
 C2_COUNT=0
 P_COUNT=0
 COULD_NOT_RUN_COUNT=0
+C3_COUNT=0
+PIN_NOT_EVALUATED_COUNT=0
 # TOTAL_CHECKS_INVOKED — every call into _run_and_classify_check, whatever
 # it classifies to (C1/C2/P/could-not-run/clean); the scope-accounting line
 # below reports it alongside COULD_NOT_RUN_COUNT so "N checks ran" is never
 # just asserted, it is CHECKS_RAN = TOTAL_CHECKS_INVOKED - COULD_NOT_RUN_COUNT.
 TOTAL_CHECKS_INVOKED=0
 
+# RESULT_* — one entry per _run_and_classify_check invocation, keyed by
+# position (parallel arrays, bash 3.2 has no associative arrays — same
+# constraint as everywhere else in this file), regardless of what that
+# invocation classified to. This is Wave 3's own seam: pin evaluation
+# (below, after every consumer is resolved) reads a check's raw stdout/rc
+# back OUT of these arrays instead of re-invoking anything — a pin must
+# see EXACTLY what the classifier already saw, not a second, possibly
+# different run of the same check.
+RESULT_CONSUMER_IDS=()
+RESULT_CHECK_NAMES=()
+RESULT_STDOUT=()
+RESULT_RC=()
+
 # _run_and_classify_check <check-index> <consumer-id> <consumer-path> —
-# invokes one check against one covered consumer and appends AT MOST ONE
-# finding to exactly one of the three accumulators above (ADR-0010 decision
-# 2: every finding is exactly one of C1/C2/C3/P; C3 is Wave 3 pins and is
-# never read by this wave at all — this wave classifies only C1, C2 and P).
+# invokes one check against one covered consumer, records its raw result
+# into RESULT_* above unconditionally, and appends AT MOST ONE finding to
+# exactly one of the C1/C2/could-not-run/P accumulators (ADR-0010 decision
+# 2: every finding is exactly one of C1/C2/C3/P — C3, pins, is evaluated
+# separately below, once every consumer's checks have all run).
 _run_and_classify_check() {
   local idx="$1" cid="$2" cpath="$3"
   local name="${CHECK_NAMES[$idx]}" script="${CHECK_SCRIPTS[$idx]}"
@@ -353,6 +499,14 @@ _run_and_classify_check() {
   stdout_text="$(cat "$stdout_file")"
   stderr_text="$(cat "$stderr_file")"
   rm -f "$stdout_file" "$stderr_file"
+
+  # Recorded UNCONDITIONALLY, before any classification below runs — a pin
+  # (Wave 3) evaluates against whatever this check actually produced,
+  # whichever class it lands in (C1/C2/could-not-run/P/clean).
+  RESULT_CONSUMER_IDS+=("$cid")
+  RESULT_CHECK_NAMES+=("$name")
+  RESULT_STDOUT+=("$stdout_text")
+  RESULT_RC+=("$rc")
 
   # Rule 1 — exit code outside the check's own documented set.
   if ! _in_documented_set "$rc" "$exit_set"; then
@@ -509,15 +663,20 @@ _run_and_classify_check() {
 }
 
 # _conformance_read_config <config-path> — print one tab-separated record per
-# configured consumer on stdout: "CONSUMER\t<id>\t<path>\t<0|1 optional>".
-# An absent config file, an absent `conformance` key, an absent or empty
-# `consumers` list all print NOTHING and exit 0 — that is the not-configured
-# state, decided by the caller, not by this reader. Anything the reader
-# cannot safely interpret (invalid JSON, `conformance`/`consumers` present
-# but the wrong shape, a consumer entry missing a usable `id` or `path`)
-# prints exactly one "ERROR\t<message>" record and exits 1 — the caller
-# refuses to run rather than guess at a shortened or reinterpreted scope.
-# `pins` is never read, valid shape or not (see the module header above).
+# configured consumer ("CONSUMER\t<id>\t<path>\t<0|1 optional>") and per
+# configured pin ("PIN\t<consumer>\t<check>\t<finding|field>\t<expect-or-
+# field>\t<mincount-or-value>\t<0|1 regex>\t<why>", eight columns always,
+# so a single `IFS=$'\t' read` shape works for either record once the
+# caller has switched on the leading word) on stdout. An absent config
+# file, an absent `conformance` key, an absent or empty `consumers` list
+# all print NOTHING and exit 0 — that is the not-configured state, decided
+# by the caller, not by this reader. Anything the reader cannot safely
+# interpret (invalid JSON, `conformance`/`consumers`/`pins` present but the
+# wrong shape, a consumer entry missing a usable `id` or `path`, a pin
+# missing `why`, naming an unknown `check`, carrying neither/both of
+# `expectFinding`/`expectField`, or naming an unknown `expectField`) prints
+# exactly one "ERROR\t<message>" record and exits 1 — the caller refuses to
+# run rather than guess at a shortened or reinterpreted scope.
 #
 # This is the tail statement of a small shell helper, and its own exit
 # status IS this function's exit status by design — every caller captures or
@@ -540,12 +699,34 @@ except Exception as e:
     print("ERROR\t" + str(e).replace("\n", " ").replace("\t", " "))
     sys.exit(1)
 
+# WI-0124 Wave 4b: unknown keys, at all three config levels, are refused
+# rather than silently ignored -- measured directly (hand-written config,
+# 27.08.2026): nesting `pins` INSIDE a consumer object instead of at
+# conformance.pins[] produced "0 checked, 0 satisfied", exit 0, discarding
+# every expectation the operator wrote without saying so. This is the same
+# "refuse rather than guess" discipline the rest of this reader already
+# applies (a malformed shape here means the SCOPE is unknown, never "use a
+# narrower default"), one level further in: not just "is this key's VALUE
+# well-formed" but "is this key even part of the schema". `_comment` is
+# accepted everywhere -- the shipped template
+# (templates/memory-sync.example.json) uses it as its own documentation
+# mechanism at all three levels, and rejecting it would refuse this
+# repository's own example (proven by
+# UnknownKeyRejectionTest.test_shipped_example_template_produces_no_unknown_key_error).
+def _reject_unknown_keys(obj, known, where):
+    unknown = sorted(k for k in obj if k not in known and k != "_comment")
+    if unknown:
+        print("ERROR\tunknown key(s) %s in %s -- known keys: %s"
+              % (", ".join(repr(k) for k in unknown), where, ", ".join(sorted(known))))
+        sys.exit(1)
+
 conformance = cfg.get("conformance")
 if conformance is None:
     sys.exit(0)
 if not isinstance(conformance, dict):
     print("ERROR\t'conformance' is not an object")
     sys.exit(1)
+_reject_unknown_keys(conformance, {"consumers", "pins"}, "'conformance'")
 
 consumers = conformance.get("consumers")
 if consumers is None:
@@ -554,10 +735,23 @@ if not isinstance(consumers, list):
     print("ERROR\t'conformance.consumers' is not a list")
     sys.exit(1)
 
+# Built up across the consumers loop below, then consulted by the pins loop
+# further down -- a pin naming a consumer id this run never configured can
+# never be evaluated, which is a config error the operator wrote (most
+# likely a typo), not a runtime could-not-run condition (WI-0124 Wave 4).
+consumer_ids = set()
+
 for position, c in enumerate(consumers, start=1):
     if not isinstance(c, dict):
         print("ERROR\tconsumers[%d] is not an object" % position)
         sys.exit(1)
+    # Named by its own (unvalidated) id when present -- the production shape
+    # this wave was found by (a consumer with a real id, holding a
+    # misplaced `pins` key) reads far better as "consumer 'consumer-a'" than
+    # as a bare position -- falling back to the position when id is absent
+    # or not yet a usable string.
+    consumer_label = "consumer %r" % c["id"] if isinstance(c.get("id"), str) and c.get("id") else "consumers[%d]" % position
+    _reject_unknown_keys(c, {"id", "path", "optional"}, consumer_label)
     cid = c.get("id")
     if not isinstance(cid, str) or not cid:
         print("ERROR\tconsumers[%d] is missing a non-empty string id" % position)
@@ -585,6 +779,113 @@ for position, c in enumerate(consumers, start=1):
     # tab/newline-delimited -- same shape as
     # lib/discipline_gate.sh's NAME/BADNAME records.
     print("CONSUMER\t" + cid + "\t" + cpath + "\t" + ("1" if optional else "0"))
+    consumer_ids.add(cid)
+
+# WI-0124 Wave 3 (ADR-0010 decision 2, class C3): pins. CHECK_NAMES_PY
+# duplicates conformance-run.sh's own bash CHECK_NAMES array by hand --
+# the same accepted duplication commands/cleanup.md:143-196 already has
+# relative to that table (module header above CHECK_SCRIPT_DIR), because
+# a pin naming an unknown check must be refused HERE, at config-read time,
+# and this python process has no access to the calling shell's arrays.
+CHECK_NAMES_PY = ["memory-lint", "phase-docs-lint", "manual-lint", "doc-volume-check", "anchor"]
+# WI-0124 Wave 4: anchors.stale and anchors.maxBehind were REMOVED from this
+# set (they lived here through Wave 3). Both described the CONSUMER's own
+# working state -- how far its checked-out docs trail its production code --
+# never a CCPR behaviour. The moment that consumer commits production code,
+# maxBehind legitimately changes and the pin fires as a false CCPR alarm,
+# which is exactly the misattribution ADR-0010 decision 2 forbids; a
+# comparison operator instead of equality would only delay that, not
+# prevent it. THE RULE THIS ESTABLISHES: a pin's subject must be something
+# CCPR controls, never a fact about the consumer's own state, whatever the
+# comparison. Keep this comment here so the next field added to this set is
+# checked against that rule before it lands.
+KNOWN_PIN_FIELDS = {"exit", "errors", "warnings", "info", "filesScanned"}
+
+pins = conformance.get("pins")
+if pins is None:
+    pins = []
+if not isinstance(pins, list):
+    print("ERROR\t'conformance.pins' is not a list")
+    sys.exit(1)
+
+for position, p in enumerate(pins, start=1):
+    if not isinstance(p, dict):
+        print("ERROR\tpins[%d] is not an object" % position)
+        sys.exit(1)
+    # `regex` is a genuine, tested pin key (an expectFinding modifier, read
+    # further below) -- KNOWN_PIN_FIELDS above is a different vocabulary
+    # entirely (the five expectField NAMES a pin may compare against), not
+    # the set of keys a pin object itself may carry.
+    pin_label = "pin (consumer %r)" % p["consumer"] if isinstance(p.get("consumer"), str) and p.get("consumer") else "pins[%d]" % position
+    _reject_unknown_keys(
+        p,
+        {"consumer", "check", "expectFinding", "expectField", "value", "minCount", "why", "regex"},
+        pin_label,
+    )
+    p_consumer = p.get("consumer")
+    if not isinstance(p_consumer, str) or not p_consumer:
+        print("ERROR\tpins[%d] is missing a non-empty string consumer" % position)
+        sys.exit(1)
+    if p_consumer not in consumer_ids:
+        print("ERROR\tpins[%d] names consumer %r, which is not a configured consumer id -- known consumers: %s"
+              % (position, p_consumer, ", ".join(sorted(consumer_ids)) or "(none configured)"))
+        sys.exit(1)
+    p_check = p.get("check")
+    if not isinstance(p_check, str) or p_check not in CHECK_NAMES_PY:
+        print("ERROR\tpins[%d] (consumer %r) names an unknown check %r -- known checks: %s"
+              % (position, p_consumer, p_check, ", ".join(CHECK_NAMES_PY)))
+        sys.exit(1)
+    # why is a MANDATORY, non-empty explanation (ADR-0010 §5) -- checked
+    # before expectFinding/expectField below so a pin missing BOTH why and
+    # an expectation still reports the why gap first, deterministically.
+    p_why = p.get("why")
+    if not isinstance(p_why, str) or not p_why.strip():
+        print("ERROR\tpins[%d] (consumer %r, check %r) has no why -- every pin must explain, "
+              "at pin time, why this consumer fact is CCPR behaviour rather than consumer content"
+              % (position, p_consumer, p_check))
+        sys.exit(1)
+    p_why_clean = p_why.replace("\n", " ").replace("\t", " ")
+
+    has_finding = "expectFinding" in p
+    has_field = "expectField" in p
+    if has_finding == has_field:
+        print("ERROR\tpins[%d] (consumer %r, check %r) must carry exactly one of expectFinding or expectField"
+              % (position, p_consumer, p_check))
+        sys.exit(1)
+
+    if has_finding:
+        expect = p.get("expectFinding")
+        if not isinstance(expect, str) or not expect:
+            print("ERROR\tpins[%d] (consumer %r, check %r): expectFinding must be a non-empty string"
+                  % (position, p_consumer, p_check))
+            sys.exit(1)
+        min_count = p.get("minCount", 1)
+        if not isinstance(min_count, int) or isinstance(min_count, bool) or min_count < 1:
+            print("ERROR\tpins[%d] (consumer %r, check %r): minCount must be a positive integer"
+                  % (position, p_consumer, p_check))
+            sys.exit(1)
+        is_regex = p.get("regex", False)
+        if not isinstance(is_regex, bool):
+            print("ERROR\tpins[%d] (consumer %r, check %r): regex must be true or false"
+                  % (position, p_consumer, p_check))
+            sys.exit(1)
+        expect_clean = expect.replace("\n", " ").replace("\t", " ")
+        print("PIN\t" + p_consumer + "\t" + p_check + "\tfinding\t" + expect_clean + "\t"
+              + str(min_count) + "\t" + ("1" if is_regex else "0") + "\t" + p_why_clean)
+    else:
+        field = p.get("expectField")
+        if not isinstance(field, str) or field not in KNOWN_PIN_FIELDS:
+            print("ERROR\tpins[%d] (consumer %r, check %r) names an unknown expectField %r -- known fields: %s"
+                  % (position, p_consumer, p_check, field, ", ".join(sorted(KNOWN_PIN_FIELDS))))
+            sys.exit(1)
+        value = p.get("value")
+        if not isinstance(value, int) or isinstance(value, bool):
+            print("ERROR\tpins[%d] (consumer %r, check %r): value must be an integer"
+                  % (position, p_consumer, p_check))
+            sys.exit(1)
+        print("PIN\t" + p_consumer + "\t" + p_check + "\tfield\t" + field + "\t"
+              + str(value) + "\t0\t" + p_why_clean)
+
 sys.exit(0)
 PY
 }
@@ -643,11 +944,40 @@ fi
 CONSUMER_IDS=()
 CONSUMER_PATHS=()
 CONSUMER_OPTIONAL=()
-while IFS=$'\t' read -r rec_type rec_id rec_path rec_optional; do
-  [ "$rec_type" = "CONSUMER" ] || continue
-  CONSUMER_IDS+=("$rec_id")
-  CONSUMER_PATHS+=("$rec_path")
-  CONSUMER_OPTIONAL+=("$rec_optional")
+# WI-0124 Wave 3: PIN_* alongside CONSUMER_* -- CONF_OUT now carries two
+# record shapes (see _conformance_read_config's own comment for the
+# column layout), dispatched by a `case` on the whole line rather than by
+# reading a fixed variable count up front, since CONSUMER records have
+# four columns and PIN records have eight.
+PIN_CONSUMER=()
+PIN_CHECK=()
+PIN_KIND=()
+PIN_EXPECT=()
+PIN_PARAM=()
+PIN_REGEX=()
+PIN_WHY=()
+while IFS= read -r rec_line; do
+  case "$rec_line" in
+    CONSUMER$'\t'*)
+      IFS=$'\t' read -r rec_type rec_id rec_path rec_optional <<<"$rec_line"
+      CONSUMER_IDS+=("$rec_id")
+      CONSUMER_PATHS+=("$rec_path")
+      CONSUMER_OPTIONAL+=("$rec_optional")
+      ;;
+    PIN$'\t'*)
+      IFS=$'\t' read -r rec_type p_consumer p_check p_kind p_expect p_param p_regex p_why <<<"$rec_line"
+      PIN_CONSUMER+=("$p_consumer")
+      PIN_CHECK+=("$p_check")
+      PIN_KIND+=("$p_kind")
+      PIN_EXPECT+=("$p_expect")
+      PIN_PARAM+=("$p_param")
+      PIN_REGEX+=("$p_regex")
+      PIN_WHY+=("$p_why")
+      ;;
+    *)
+      : # blank line (an entirely empty CONF_OUT) or anything unrecognised
+      ;;
+  esac
 done <<EOF
 $CONF_OUT
 EOF
@@ -710,6 +1040,90 @@ while [ "$i" -lt "$CONFIGURED" ]; do
   i=$((i + 1))
 done
 
+# --- WAVE 3: pins (ADR-0010 §5, class C3) -----------------------------------
+#
+# Runs once every consumer's checks have all executed, so RESULT_* above
+# holds every (consumer, check) pair this run actually invoked. Every
+# configured pin gets EXACTLY one outcome: satisfied, violated (a C3
+# finding, escalates the exit status), or not-evaluated (the pin's own
+# check produced no report for this consumer this run -- could-not-run, or
+# the rarer empty-both-streams C1 shape -- so there is nothing to compare
+# the pin against). PINS_TOTAL stays the STATIC count of configured pins
+# (never shrunk by a not-evaluated pin) so a pin that silently stops being
+# evaluated shows up as a drop in PINS_SATISFIED, not as a hidden,
+# shrunk denominator (WI-0124 Wave 3 briefing: "a pin that silently stops
+# being evaluated is visible").
+PINS_TOTAL=${#PIN_CONSUMER[@]}
+PINS_SATISFIED=0
+p_i=0
+while [ "$p_i" -lt "$PINS_TOTAL" ]; do
+  p_consumer="${PIN_CONSUMER[$p_i]}"
+  p_check="${PIN_CHECK[$p_i]}"
+  p_kind="${PIN_KIND[$p_i]}"
+  p_expect="${PIN_EXPECT[$p_i]}"
+  p_param="${PIN_PARAM[$p_i]}"
+  p_regex="${PIN_REGEX[$p_i]}"
+  p_why="${PIN_WHY[$p_i]}"
+  pin_label="${p_check} on ${p_consumer}"
+
+  # Linear search over RESULT_* for the (consumer, check) pair this pin
+  # names -- small N (consumers × 5 checks), no need for anything fancier
+  # on bash 3.2's parallel-array constraint.
+  result_idx=""
+  r_i=0
+  r_n=${#RESULT_CONSUMER_IDS[@]}
+  while [ "$r_i" -lt "$r_n" ]; do
+    if [ "${RESULT_CONSUMER_IDS[$r_i]}" = "$p_consumer" ] && [ "${RESULT_CHECK_NAMES[$r_i]}" = "$p_check" ]; then
+      result_idx="$r_i"
+      break
+    fi
+    r_i=$((r_i + 1))
+  done
+
+  # Short-circuit order matters: when result_idx is empty, the second test
+  # is never reached, so "${RESULT_STDOUT[$result_idx]}" never expands
+  # with an empty index (measured directly: bash evaluates a `||`'s right-
+  # hand word only when it actually runs the command).
+  if [ -z "$result_idx" ] || [ -z "${RESULT_STDOUT[$result_idx]}" ]; then
+    PIN_NOT_EVALUATED_FINDINGS="${PIN_NOT_EVALUATED_FINDINGS}- ${pin_label}: not evaluated — this check produced no report for this consumer this run (see Could Not Run / Contract violations above)
+"
+    PIN_NOT_EVALUATED_COUNT=$((PIN_NOT_EVALUATED_COUNT + 1))
+    p_i=$((p_i + 1))
+    continue
+  fi
+
+  report_text="${RESULT_STDOUT[$result_idx]}"
+  actual_rc="${RESULT_RC[$result_idx]}"
+  satisfied=0
+
+  if [ "$p_kind" = "finding" ]; then
+    count="$(_pin_count_finding_occurrences "$report_text" "$p_expect" "$p_regex")"
+    if [ "$count" -ge "$p_param" ]; then
+      satisfied=1
+    fi
+    detail="expected \"${p_expect}\" at least ${p_param} time(s), found ${count}"
+  else
+    value="$(_pin_field_value "$report_text" "$actual_rc" "$p_expect")" || value=""
+    if [ -n "$value" ] && _pin_field_matches "$p_expect" "$value" "$p_param"; then
+      satisfied=1
+    fi
+    if [ "$p_expect" = "filesScanned" ]; then
+      detail="expected ${p_expect} >= ${p_param}, found ${value:-<unparseable>}"
+    else
+      detail="expected ${p_expect} = ${p_param}, found ${value:-<unparseable>}"
+    fi
+  fi
+
+  if [ "$satisfied" -eq 1 ]; then
+    PINS_SATISFIED=$((PINS_SATISFIED + 1))
+  else
+    C3_FINDINGS="${C3_FINDINGS}- ${pin_label}: pin violated (${detail}) — ${p_why}
+"
+    C3_COUNT=$((C3_COUNT + 1))
+  fi
+  p_i=$((p_i + 1))
+done
+
 # --- report ----------------------------------------------------------------
 NOT_RUN_SUFFIX=""
 [ "$CONFIGURED" -eq 0 ] && NOT_RUN_SUFFIX=" — the conformance check DID NOT RUN"
@@ -728,6 +1142,10 @@ echo "# Conformance Run Report"
 echo
 echo "**Consumers:** $CONFIGURED configured, $COVERED covered$NOT_RUN_SUFFIX"
 echo "**Checks:** $TOTAL_CHECKS_INVOKED invoked, $CHECKS_RAN ran, $COULD_NOT_RUN_COUNT could not"
+# Satisfied pins are reported BY COUNT, not by listing them -- so a pin
+# that silently stops being evaluated shows up as PINS_SATISFIED dropping
+# below PINS_TOTAL (WI-0124 Wave 3 briefing), never as a shrunk total.
+echo "**Pins:** $PINS_TOTAL checked, $PINS_SATISFIED satisfied"
 echo "**Scope:** local paths only — nothing is fetched over a network (ADR-0010, decision 5)"
 echo "**Run:** $NOW"
 echo
@@ -741,16 +1159,20 @@ fi
 echo
 echo "## Findings"
 echo
-# Four headings, always printed, always in this order (ADR-0010 decision
+# Six headings, always printed, always in this order (ADR-0010 decision
 # 2's C1/C2/C3/P split, plus the could-not-run class WI-0124 Wave 2b adds
-# alongside it) -- C3 (pins) is Wave 3 and never populated by this wave, so
-# it has no heading of its own yet; adding one here would claim a
-# classification this wave cannot produce. Could-not-run is deliberately
-# its own heading, not folded into C1 or P: it is neither a contract
-# violation (the check behaved exactly as documented) nor a consumer
-# finding (there is no report to attribute one from) — see
-# _run_and_classify_check's own could-not-run comment for the measurement
-# that separates it from both.
+# and the Pins Not Evaluated class Wave 3 adds). Could-not-run and Pins
+# Not Evaluated are each their OWN heading, not folded into C1/C3 or P:
+# neither is a contract violation (the check behaved exactly as
+# documented) nor a finding to attribute (there is no report, or no
+# evaluable comparison, to attribute one from) — see
+# _run_and_classify_check's own could-not-run comment, and the pin
+# evaluation loop above, for the measurements that separate each from its
+# neighbours. Pinned expectations (C3) sits after Could Not Run rather
+# than beside C1/C2, the same "append the newest class just before P"
+# placement Wave 2b already established for Could Not Run itself — every
+# existing report-slice in this suite that reads "from one heading to the
+# next" stays valid across each wave that adds one.
 echo "### Contract violations (C1)"
 echo
 if [ "$C1_COUNT" -eq 0 ]; then
@@ -775,6 +1197,22 @@ else
   printf '%s' "$COULD_NOT_RUN_FINDINGS"
 fi
 echo
+echo "### Pinned expectations (C3)"
+echo
+if [ "$C3_COUNT" -eq 0 ]; then
+  echo "_none_"
+else
+  printf '%s' "$C3_FINDINGS"
+fi
+echo
+echo "### Pins Not Evaluated"
+echo
+if [ "$PIN_NOT_EVALUATED_COUNT" -eq 0 ]; then
+  echo "_none_"
+else
+  printf '%s' "$PIN_NOT_EVALUATED_FINDINGS"
+fi
+echo
 echo "### Consumer findings (P)"
 echo
 if [ "$P_COUNT" -eq 0 ]; then
@@ -786,20 +1224,21 @@ echo
 echo "---"
 echo
 
-# Only C1 and C2 are CCPR-attributable this wave (C3 is Wave 3) -- P never
-# escalates the exit code (ADR-0010 decision 2/3: "P-class findings ...
-# never escalate a run's exit code"). ATTRIBUTABLE is what the split proof
-# in test group C pins: a run with only P findings must exit 0.
+# C1, C2 and C3 (a violated pin) are CCPR-attributable -- P never escalates
+# the exit code (ADR-0010 decision 2/3: "P-class findings ... never
+# escalate a run's exit code"). ATTRIBUTABLE is what the split proof in
+# test group C pins: a run with only P findings must exit 0.
 #
-# COULD_NOT_RUN_COUNT is DELIBERATELY not folded into ATTRIBUTABLE either
-# (WI-0124 Wave 2b): the check behaved exactly as documented -- an
-# unsuitable target, refused, reason given on stderr -- so escalating the
-# exit for that is punishing correct behaviour, not catching a defect.
-# What must never happen instead is silence: the **Checks:** accounting
-# line above and this class's own report heading make a could-not-run
-# impossible to miss even though it does not fail the run by itself.
-ATTRIBUTABLE=$((C1_COUNT + C2_COUNT))
-echo "**Summary:** $CONFIGURED configured, $COVERED covered, $ATTRIBUTABLE CCPR-attributable finding(s) (C1/C2), $P_COUNT consumer finding(s) (P), $COULD_NOT_RUN_COUNT could-not-run"
+# COULD_NOT_RUN_COUNT and PIN_NOT_EVALUATED_COUNT are DELIBERATELY not
+# folded into ATTRIBUTABLE either (WI-0124 Wave 2b / Wave 3): the check
+# behaved exactly as documented -- an unsuitable target, refused, reason
+# given on stderr -- so escalating the exit for that (or for a pin that
+# consequently cannot be evaluated) punishes correct behaviour, not a
+# defect. What must never happen instead is silence: the **Checks:** /
+# **Pins:** accounting lines above and each class's own report heading
+# make both impossible to miss even though neither fails the run alone.
+ATTRIBUTABLE=$((C1_COUNT + C2_COUNT + C3_COUNT))
+echo "**Summary:** $CONFIGURED configured, $COVERED covered, $ATTRIBUTABLE CCPR-attributable finding(s) (C1/C2/C3), $P_COUNT consumer finding(s) (P), $COULD_NOT_RUN_COUNT could-not-run"
 
 if [ "$CONFIGURED" -eq 0 ]; then
   warn "$PROG: consumers NOT CONFIGURED — the conformance check DID NOT RUN. Set conformance.consumers in $CFG."
