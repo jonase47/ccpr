@@ -64,7 +64,7 @@ Every finding a conformance run produces is sorted into exactly one of four clas
 
 | Class | Meaning | Example shape |
 |---|---|---|
-| **C1** — contract violation | The check's own behaviour disagrees with what it documents about itself | exit code outside the check's own documented set; non-zero exit with empty stdout; a mandatory report-skeleton line missing; the report's self-declared `**Exit:** N` disagreeing with the process's actual exit status; internal contradiction (`0 errors, 0 warnings` alongside a non-zero exit); an interpreter-fatal shape on stderr (traceback, `SyntaxError`, `command not found`) |
+| **C1** — contract violation | The check's own behaviour disagrees with what it documents about itself | exit code outside the check's own documented set; non-zero exit with **both streams** empty (see Addendum 1 — stdout alone misclassifies a deliberate abort); a mandatory report-skeleton line missing; the report's self-declared `**Exit:** N` disagreeing with the process's actual exit status; internal contradiction (`0 errors, 0 warnings` alongside a non-zero exit); an interpreter-fatal shape on stderr (traceback, `SyntaxError`, `command not found`) |
 | **C2** — zero scope over a non-empty target | The check reports it scanned nothing, while an independent per-check candidate probe finds candidates it should have seen | `Files scanned: 0` against a directory the probe shows is non-empty for that check's own kind of input |
 | **C3** — a pinned expectation violated | A concrete, dated, per-consumer expectation (declared in personal config, §5) disagrees with what the check actually produced | a pin says "check X must warn on file Y in consumer Z"; the run's output does not contain that warning |
 | **P** — everything else | A finding about the consumer itself | any other lint/gate finding in a consumer's real documents |
@@ -205,6 +205,53 @@ exactly the false-clean result this ADR exists to close. A malformed `conformanc
   would be wrong. This is not fully solvable by the design decided here: a pin's own expiry is not
   detectable without re-reading the consumer's intent, which no automated check can do. It is recorded
   as a known limitation rather than papered over (see follow-up 3).
+
+## Addendum 1 (27.08.2026): C1 rule 2 corrected, and the class it was hiding
+
+Decision 2's C1 rule "non-zero exit with empty stdout" is wrong as first written, and the implementation
+found it before any acceptance run did.
+
+### What it collides with
+
+Every shipped check in this repository aborts through a `die()`-style path that writes its reason to
+stderr and exits non-zero **before** the report is opened — a pre-flight refusal of an unsuitable target
+is not a malfunction, it is the check declining to guess. A consumer that is not a git repository, or
+has no `docs/`, produces exactly that. Under the rule as written, every such refusal was a CCPR contract
+violation.
+
+### The discriminator, measured 27.08.2026
+
+| | exit | stdout | stderr |
+|---|---|---|---|
+| a check refusing an unsuitable target | 2 | 0 bytes | 166 bytes — it says why |
+| the silent death this rule exists to catch | 1 | 0 bytes | 0 bytes |
+
+**A deliberate abort speaks; a silent death is silent on both streams.** C1 rule 2 therefore requires
+stdout **and** stderr to be empty. That is observable behaviour, not a prior judgement about whether a
+consumer is a suitable target — which the run is in no position to make.
+
+### The class the collision was hiding
+
+Correcting the rule is the smaller half. A check that refuses a target **did not run**, and until now the
+run had no way to say so: such a check fell through to P or vanished. Both are wrong, and the second is
+this ADR's own opening failure one level down — a run that silently did not check something must not
+read like a run that checked it and found nothing.
+
+A fourth reported class is therefore added, `could-not-run`. It is **not C1** (the check behaved
+correctly and said why) and **not P** (it is not a finding about the consumer's documents). It carries
+the check, the consumer id and the reason from stderr, and — the part that matters — it appears in the
+scope accounting: the summary states how many checks were invoked and how many actually ran, not only
+how many consumers were covered. It does not escalate the exit status on its own; a correctly-behaving
+check is not a defect. Being impossible to miss in the report is what it owes instead, which is the same
+answer decision 4 gives for the not-configured state.
+
+### Why this is recorded here rather than by editing decision 2 silently
+
+The rule was wrong for six hours, not six days, and nothing was built on it before the correction. It is
+recorded in place anyway, because the alternative — a quiet edit — removes the only evidence that a rule
+this repository wrote about its own checks did not survive first contact with them. That is the same
+argument this repository applied to ADR-0009's follow-up 4 on the same day.
+
 
 ## Consequences
 
