@@ -102,7 +102,7 @@ The repo enters this ADR at **v0.1.0**. This first tag will be set in a separate
 
 ## Follow-ups
 
-- Land the initial `CHANGELOG.md` at the repo root with `## [Unreleased]` plus a `## [v0.1.0] – DD.MM.YYYY` section that retroactively captures the cleanup-wave commits from 15.05.2026 (researcher removal, Lean transient marker, Constitution v1.0, global Tier-2 memory, doc splitting).
-- Set the `v0.1.0` tag right after the CHANGELOG lands.
-- Reflect the new versioning model in `README.md`'s Install section (replace the silent-overwrite warning with the backup-then-install procedure).
-- Open a placeholder follow-up ADR for the v1.0 installer story once Aspirational targets are within reach.
+- ~~Land the initial `CHANGELOG.md` at the repo root with `## [Unreleased]` plus a `## [v0.1.0] – DD.MM.YYYY` section that retroactively captures the cleanup-wave commits from 15.05.2026 (researcher removal, Lean transient marker, Constitution v1.0, global Tier-2 memory, doc splitting).~~ **Done, and it diverged — recorded rather than smoothed over:** `CHANGELOG.md` exists with `## [Unreleased]`, but the retro section is `## [v0.1.0-beta] – 13.06.2026` and its own note says the changelog "starts fresh at the first public version". The 15.05.2026 cleanup wave is therefore **not** captured; the pre-public history is retained privately instead.
+- ~~Set the `v0.1.0` tag right after the CHANGELOG lands.~~ **Done in beta form only:** the tags are `v0.1.0-beta`, `v0.2.0-beta`, `v0.2.1-beta`, `v0.3.0-beta`. No plain `v0.1.0` was ever set.
+- ~~Reflect the new versioning model in `README.md`'s Install section (replace the silent-overwrite warning with the backup-then-install procedure).~~ **Done:** `README.md` carries a "Versioning & changelog" section, and the installer line reads "backs up ~/.claude, shows what gets overwritten, asks to confirm".
+- Open a placeholder follow-up ADR for the v1.0 installer story once Aspirational targets are within reach. **Still open — no such ADR exists.**

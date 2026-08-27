@@ -307,11 +307,16 @@ understanding what it protected.
 
 ## Follow-ups
 
-1. **Which shipped checks run under this mechanism in its first implementation wave is not decided
+1. ~~**Which shipped checks run under this mechanism in its first implementation wave is not decided
    here.** This ADR settles the attribution rule, the exit contract and the configuration shape; it does
    not enumerate which of this repository's checks (memory-lint, phase-docs-lint, anchor, artifact-gate,
    manual-lint, or others) the first conformance run actually invokes. Record the initial list, and the
-   reasoning for what is included or deferred, here when the implementation wave settles it.
+   reasoning for what is included or deferred, here when the implementation wave settles it.~~
+   **Half resolved in Wave 2 (27.08.2026). The list:** `memory-lint`, `phase-docs-lint`,
+   `manual-lint`, `doc-volume-check`, `anchor` — pinned as `CHECK_NAMES` in
+   `scripts/conformance-run.sh`, whose own comment names this follow-up as the question it settles.
+   **The reasoning half is still open:** `artifact-gate.sh` is named as a candidate above, is not in
+   the table, and nothing anywhere records why it was deferred. Record that here.
 2. **Where the run lives — a local skill only, or a dormant CI hook mirroring ADR-0009 §7's two-tier
    local-default/CI-optional split — is undecided.** WI-0124 does not ask this question and this ADR does
    not answer it. Record the choice here when it is made, rather than defaulting to one shape by

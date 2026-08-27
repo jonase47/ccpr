@@ -270,8 +270,11 @@ token and no vendor.
    through rather than deleted, because the open wording outlived its answer by six days and was
    read as still-open on 27.08.2026 by someone working from this list — a reader who skims the
    follow-ups as a work queue never reaches the addendum that closes one.
-5. **`covers:` decay under a refactoring-heavy working style** is unmeasured; the observed rate comes
-   from two projects with stable paths.
+5. **`covers:` decay under a refactoring-heavy working style** is unmeasured; ~~the observed rate comes
+   from two projects with stable paths.~~ **Premise superseded in A5 (21.08.2026): measured across
+   three projects, not two — 15 renames and 57 deletions for project B alone, roughly five times the
+   rate recorded above, with project A at 0/0 and project C at 3/3.** The question itself stays open;
+   only its stated basis was stale.
 
 ---
 
@@ -415,6 +418,13 @@ which is what defuses the documentation-only base rate. Nothing in the repositor
 production code or not, and the three reference projects have three unrelated code trees. This needs a
 per-project, configurable path classification with a documented default, and it belongs in the first
 implementation sub-wave rather than being discovered inside it.
+
+**Resolved in Addendum 2's "The comparison point, measured" (21.08.2026), refined by Addendum 4
+(27.08.2026): the default is an EXCLUSION** — a commit is production code if it touches at least one
+path that is neither under `docs/` nor `.claude/` nor a Markdown file — configurable per project, and
+it did land in the first implementation sub-wave as this entry asked. Recorded here rather than
+deleted: the answer lives in an addendum whose heading names only A7, so a reader working down this
+list never reaches it (WI-0127).
 
 ### Consequences for the preconditions
 

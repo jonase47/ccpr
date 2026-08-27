@@ -139,12 +139,16 @@ out-of-band events (a commit on a `ticket/<id>` branch, session end). Status sta
 
 ## Follow-ups
 
-- **ADR-0003** — the first remote backend (a self-hosted issue tracker, e.g. YouTrack): REST mapping,
-  the state-set, owner/assignee, claiming.
-- **ADR-0004** — `ccpr workitems lift` (heterogeneous ToDos → the local format; dry-run default,
+- ~~**ADR-0003** — the first remote backend (a self-hosted issue tracker, e.g. YouTrack): REST mapping,
+  the state-set, owner/assignee, claiming.~~ **Written: `ADR-0003-youtrack-backend.md`.**
+- ~~**ADR-0004** — `ccpr workitems lift` (heterogeneous ToDos → the local format; dry-run default,
   idempotent, original text preserved) and `migrate` (local → remote, with an id-mapping written into
-  the repo).
-- **ADR-0005** — the claiming / branch-runner protocol (`Parked`, `ticket/<id>`, heartbeat).
+  the repo).~~ **Written: `ADR-0004-workitem-lift-and-migrate.md`.**
+- ~~**ADR-0005** — the claiming / branch-runner protocol (`Parked`, `ticket/<id>`, heartbeat).~~
+  **Written: `ADR-0005-claiming-runner-protocol.md`.**
+
+All three follow-ups are discharged. Struck through rather than deleted (WI-0127): a follow-up list
+that still reads as open is read as a work queue, and this one had stood so for months.
 
 ## Addendum (09.07.2026): Item-maintenance operations (`comment`, `set-description`, `set-title`, `set-type`)
 
