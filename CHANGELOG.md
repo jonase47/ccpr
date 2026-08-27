@@ -6,6 +6,48 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+### Added
+- **`scripts/conformance-run.sh` — the shipped checks, run against real projects that use them**
+  (WI-0124, ADR-0010). CCPR's checks are rules about documents, and a rule written in the repository
+  that defines it is a hypothesis until it meets a consumer. On 27.08.2026 three shipped defects were
+  found in one session that were structurally invisible from here while the suite reported
+  **1478 tests, OK**: `covers:` appeared in zero documents across all three reference projects, so its
+  check had nothing to check; the production-code classification had never met a repository whose
+  newest commit was hygiene; and a shipped agent's tool list was patched by the maintainer's own
+  installed copy.
+
+  **The attribution rule is the whole design.** A finding belongs to CCPR only when the evidence lies
+  in the check's own contract, or in a difference the consumer did not cause — a contract violation, a
+  zero-scope run over a non-empty target, or a violated pin. Everything else is a finding about the
+  consumer's documents and never moves the exit code. The worked example: one real run produced 25
+  warnings that were all correct behaviour and must exit 0, while another's CCPR defect was a warning
+  that *failed to fire* and must exit 1. An implementation that escalated on "any finding" would
+  report a regression on the first run, every run, forever.
+
+  A fourth class, `could-not-run`, carries a check that refused an unsuitable target and said why. It
+  does not fail the run, but it appears in the scope accounting — `**Checks:** N invoked, M ran, K
+  could not` — because a consumer where four of five checks refused must not read as fully covered.
+
+  **Pins** are how the absent-finding case becomes detectable: a per-consumer expectation with a
+  mandatory `why`, printed beside the finding, so the operator states at pin time why this fact is
+  CCPR behaviour rather than consumer content. A pin's subject must be something CCPR controls; two
+  anchor fields describing a consumer's own working state were removed for inviting exactly the
+  misattribution the rule forbids.
+
+  Consumers are **local paths** — nothing is fetched, so the run works offline and behind a VPN — and
+  live only in the personal, non-distributed config. With none configured the run exits 0 and says so
+  out loud rather than failing on a clean machine. Unknown config keys are refused at all three levels
+  after a hand-written config silently dropped its `pins` block and reported a clean pass.
+
+  Measured: three consumers, fifteen checks, about 30 seconds.
+
+  **The acceptance proof, at one commit.** At `7af990d` the unit suite reports 1478 OK and the
+  conformance run against that same tree reports exit 1 with the pin violated. The second
+  demonstration does the same for the classification default against the tree before `abd5120`. Both
+  run through a `git worktree` at the historical commit, so nothing is reverted.
+
+  Docs: `Manual/system/conformance.md`.
+
 ### Fixed
 - **A `.gitignore`-only commit set the anchored-state comparison point** (WI-0123). `anchor.sh`
   classified a commit as production code if it touched anything outside `docs/` and `.claude/` that

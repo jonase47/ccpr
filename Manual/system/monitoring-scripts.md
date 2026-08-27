@@ -140,6 +140,7 @@ header for its exact exit-code contract.
 | `manual-lint.sh` | `~/.claude/scripts/manual-lint.sh <root>` | Validates a documentation index↔detail contract: `parent_index` resolves, the named index links the detail file **back**, and `kind` against the vocabulary in `templates/PHASE_DOC_SCHEMA.md`. An unrecognised `kind` is a **warning** — that vocabulary is the known set, not the allowed set. Run by `/cleanup`. |
 | `doc-volume-check.sh` | `~/.claude/scripts/doc-volume-check.sh [docs-root]` | Size watch: info 25–40 KB, warning 40–50, error ≥50. Exit 2 / 1 / 0 — the info band does not raise it. |
 | `instinct-check.sh` | `~/.claude/scripts/instinct-check.sh [projectdir]` | Instinct decay report across the index + topic-file layout. No LLM. |
+| `conformance-run.sh` | `~/.claude/scripts/conformance-run.sh [--require-consumers] [--consumer <id>] [--show-paths]` | Runs the five checks above (memory-lint, phase-docs-lint, manual-lint, doc-volume-check, anchor) against real, personally-configured **consumer projects** — a check exercised only against this repository's own fixtures is a hypothesis, not a proof. Sorts every finding into C1 (contract violation) / C2 (zero scope) / C3 (a pinned expectation violated) / P (a real consumer finding, never escalates the exit code); a check refusing an unsuitable target is its own fifth class, Could Not Run. Not-configured is a loud exit 0, not silence. Not yet in any tagged release. Design: `docs/adr/ADR-0010`. Details: [conformance.md](conformance.md) |
 
 ### State, Baselines & Migration
 

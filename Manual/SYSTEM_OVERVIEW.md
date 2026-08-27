@@ -390,6 +390,35 @@ hard technical boundary stops a scripted call).
 **Design**: `docs/adr/ADR-0009-anchored-state-verification.md` (incl. both addenda).
 **Full chapter**: [system/anchored-state.md](system/anchored-state.md).
 
+### Conformance Runs Against Consumers (`conformance-run.sh`)
+
+> Not yet in any tagged release — see [system/conformance.md](system/conformance.md).
+
+Runs this repository's own shipped checks (the lints, the anchor mechanism) against
+real projects that consume them, as part of this repository's own verification —
+a check tested only against its own repository's fixtures is a hypothesis, not a
+proof. Every finding is sorted into exactly one of four classes:
+
+| Class | Meaning | CCPR-attributable? |
+|---|---|---|
+| C1 — contract violation | The check's own behaviour disagrees with what it documents about itself | yes |
+| C2 — zero scope | `Files scanned: 0` over a target an independent probe shows is non-empty | yes |
+| C3 — pinned expectation violated | A configured, per-consumer, dated expectation (with a mandatory `why`) disagrees with the check's output | yes |
+| P — consumer finding | A real finding in the consumer's own documents | no — reported, never escalates the exit code |
+
+A check that refuses an unsuitable target (no git repo, no `docs/`) is reported as
+`Could Not Run`, its own fifth heading — neither a contract violation nor a
+consumer finding, but never allowed to look like a silent clean pass either.
+
+Consumers are declared as **local filesystem paths only** (nothing is fetched over
+a network) in the same personal, non-distributed config `artifact-gate.sh` and
+`memory-sync.sh` already read (`~/.claude/memory-sync.json`, `conformance` key).
+Not-configured is exit 0 with a loud stderr statement, never a silent pass;
+`--require-consumers` turns an empty consumer list into a finding instead.
+
+**Design**: `docs/adr/ADR-0010-conformance-runs-against-consumers.md` (incl. Addendum 1).
+**Full chapter**: [system/conformance.md](system/conformance.md).
+
 ### Handover (HANDOVER.md)
 
 Preserves work state across session transitions. Located in `docs/HANDOVER.md` in the project directory.

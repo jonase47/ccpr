@@ -75,6 +75,7 @@ Run the ones relevant to what you touched — each is read-only:
 | `scripts/phase-docs-lint.sh` | phase-doc frontmatter (scoped to the phase folders) |
 | `scripts/manual-lint.sh` | `Manual/` index↔detail contract: `parent_index`, back-links, `kind` |
 | `scripts/doc-volume-check.sh` | file size against the 25/40/50 KB splitting thresholds |
+| `scripts/conformance-run.sh` | the shipped checks above, run against real consumer projects (see below) |
 
 Two notes on reading their output:
 
@@ -85,6 +86,30 @@ Two notes on reading their output:
 - **`phase-docs-lint.sh` reports `Files scanned: 0` here** — CCPR has no phase
   folders of its own. A run that scanned nothing is not a pass; it just means that
   check has nothing to say about this repository.
+
+### Run the conformance check, if you have consumers configured
+
+`scripts/conformance-run.sh` runs the checks above against real projects that
+*use* CCPR, rather than against fixtures. It exists because a rule written in the
+repository that defines it is a hypothesis until it meets a consumer: on
+27.08.2026 three shipped defects were found in one session that were
+structurally invisible from inside this repository while the suite reported
+**1478 tests, OK**.
+
+It reads its consumer list from the personal, non-distributed config
+(`conformance` key, see `templates/memory-sync.example.json`). **With nothing
+configured it exits 0 and says so out loud** — `0 configured, 0 covered — the
+conformance check DID NOT RUN` — so a clean machine is never blocked, and a run
+that checked nothing never reads as a pass. Use `--require-consumers` when you
+want the unconfigured case to fail instead.
+
+Measured: three consumers, fifteen checks, **about 30 seconds**. Use
+`--consumer <id>` for a single one.
+
+A finding about a consumer's own documents never fails the run; only a check
+disagreeing with its own contract, a zero-scope run over a non-empty target, or
+a violated pin does. The reasoning is in
+[docs/adr/ADR-0010-conformance-runs-against-consumers.md](docs/adr/ADR-0010-conformance-runs-against-consumers.md).
 
 ### Keep scripts syntactically clean
 
