@@ -1000,10 +1000,19 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
         picked up automatically -- this only pins that the glob itself
         still reaches the files known at write time (WI-0125, 27.08.2026).
 
-        Bumped 40 -> 43 across 28.08.2026: WI-0126 tranche 2 added
+        Bumped 40 -> 44 across 28.08.2026: WI-0126 tranche 2 added
         test_next_steps_lists.py, tranche 3c added
         test_quality_scan_sast_patterns.py, WI-0128 wave 1c added
-        test_adr_status_mapping.py. Note the in-scope count above did NOT
+        test_adr_status_mapping.py, wave 2b added
+        test_agent_frontmatter.py.
+
+        That last one is a worked example of the boundary described in
+        ClassificationCountsTest: it drives `git show` through
+        subprocess.run, yet the in-scope count did NOT move, because the
+        call sits in a module-level helper (read_git_show) rather than a
+        `self.<name>(...)` method. The blind spot predicted this file
+        instead of being surprised by it -- which is the whole reason the
+        boundary is written down beside the numbers. Note the in-scope count above did NOT
         move (921) -- that module's 19 tests import next_steps.py directly
         and never invoke a subprocess, so none of them is in scope for the
         absence-only rule. Two pins, two different questions: this one asks
@@ -1011,7 +1020,7 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
         population change"."""
         files = sorted(TESTS_DIR.glob("*.py")) + sorted((TESTS_DIR / "workitems").glob("*.py"))
         names = sorted(f.relative_to(TESTS_DIR).as_posix() for f in files if f.name != "__init__.py")
-        self.assertEqual(43, len(names))
+        self.assertEqual(44, len(names))
         self.assertIn("test_absence_only_assertions.py", names)
         self.assertIn("test_phase_docs_lint.py", names)
         self.assertIn("workitems/test_migrate.py", names)

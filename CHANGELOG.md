@@ -7,6 +7,32 @@ All notable changes to this project are documented in this file. The format is b
 ## [Unreleased]
 
 ### Added
+- **`agents/*.md` frontmatter is validated for the first time** (open finding #4, first half;
+  WI-0128). On 27.08.2026 a shipped agent declared invoking `code-reviewer` MANDATORY in its
+  body while its own `tools:` line lacked `Agent` — it could not do what its own instructions
+  required. That was filed as a shipped-tree-versus-installed-tree divergence, because the
+  maintainer's local copy carried the missing entry and hid it. Planning this check showed
+  that to be the expensive reading of a cheap defect: the contradiction sat **inside one
+  file**, between its frontmatter and its body, and needed no comparison against anything.
+  Until now nothing read agent frontmatter at all — `scripts/lib/frontmatter.sh` exists but
+  serves only the four lints over `docs/`, `Manual/` and `docs/memory/`.
+
+  Four rules: the four required fields, `name` matching the filename, tool names against a
+  closed snapshot, and the one that would have caught the defect — an agent whose **body**
+  requires invoking another agent must carry `Agent`. Proven in both directions against the
+  fixture in history: the rule fires on the pre-fix tool line and is silent on the fixed one,
+  with the two bodies asserted byte-identical first so the comparison isolates the tools line.
+
+  The body restriction is the whole rule. A first probe scanning each file whole reported nine
+  of fifteen agents as violators — every `description:` field explains when a *reader* should
+  launch that agent, which is not the agent invoking anyone. Scoped to the body, exactly one
+  matches, and it is correct. The tool list is documented as a snapshot rather than a source of
+  truth: CCPR cannot know Claude Code's tool set, so a new legitimate tool is meant to fail this
+  test and be looked at. That has already earned its keep once, when `Task` was written for
+  `Agent`.
+
+  The tree comparison — repository against `~/.claude` against a project's own `.claude/agents/`,
+  where `/specialize` copies once and never re-syncs — remains a separate, more expensive item.
 - **Rule 3 of the conformance run had never been seen red** (open finding #10; WI-0128). It
   checks five mandatory report-skeleton lines across two branches — `**Anchors:**` and
   `**Last production-code commit:**` for `anchor`, and `**Files scanned:**`, `**Summary:**`,
