@@ -1138,7 +1138,7 @@ class ExternalToolExitStatusTest(unittest.TestCase):
         by_disposition = {}
         for inv in invocations:
             by_disposition[inv.disposition] = by_disposition.get(inv.disposition, 0) + 1
-        self.assertEqual(148, len(invocations))
+        self.assertEqual(149, len(invocations))
         self.assertEqual(
             {
                 # 28.08.2026, open-findings wave 1a: one invocation moved
@@ -1151,7 +1151,11 @@ class ExternalToolExitStatusTest(unittest.TestCase):
                 # argv, so the exit status is read instead of discarded.
                 # (The `mv` the same fix introduced is not tracked here:
                 # this scanner pins grep/awk/sed/python3/git only.)
-                "checked-condition": 24,
+                # 28.08.2026, wave 1b: +1 total. The failure marker's
+                # own writer is a new python3 call, and it is checked --
+                # `if python3 ... && [ -s ... ]` -- so the growth lands in
+                # the checked bucket, not the bare one.
+                "checked-condition": 25,
                 "checked-captured": 5,
                 "checked-chain": 14,
                 "discard-needs-exemption": 40,

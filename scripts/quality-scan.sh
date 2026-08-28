@@ -33,7 +33,12 @@ TMPDIR=$(mktemp -d /tmp/quality-scan-XXXXXX)
 # up; the file's OWN error handling never gets a chance to run its own
 # cleanup once `exit 1` fires.
 SUMMARY_TMP=""
-trap 'rm -rf "${TMPDIR}"; rm -f "${SUMMARY_TMP}"' EXIT
+# MARKER_TMP is write_failure_marker()'s own scratch file -- same reason,
+# same declare-empty-before-the-trap treatment as SUMMARY_TMP above (see
+# its comment for the full rationale); this one is assigned inside that
+# function instead of by the combiner step further down.
+MARKER_TMP=""
+trap 'rm -rf "${TMPDIR}"; rm -f "${SUMMARY_TMP}"; rm -f "${MARKER_TMP}"' EXIT
 # Note on WI-0055's measured "exit 0 having done nothing": a bash-level fatal
 # abort (the parse error this item fixes; the same applies to a `set -u`
 # unbound-variable hit) never sets $? to anything reflecting the abort, so no
@@ -191,7 +196,7 @@ def findings_semgrep(doc):
         })
     # A silent cap makes "20 results" and "20-plus-unknown-many results"
     # byte-identical output -- the same gap as the pattern-scan's 50-cap,
-    # but undocumented anywhere (WI-0126 wave 1a, defect 3). One extra
+    # but undocumented anywhere (WI-0128 wave 1a, defect 3). One extra
     # finding, appended only when the cap actually trims something, names
     # the real total instead.
     if total > cap:
@@ -329,6 +334,7 @@ TOOLREPORTEOF
 run_py() {
     if ! python3 "$@"; then
         echo "quality-scan.sh: FAILED -- ${1##*/} exited non-zero" >&2
+        write_failure_marker "${1##*/} exited non-zero"
         exit 1
     fi
 }
@@ -425,15 +431,18 @@ import os, json, re
 #
 # There are FOUR os.walk("src") call sites in this file, not three: the CORS
 # walk below, the PII walk and the consent walk in scan_dsgvo(), and a fourth,
-# unfiltered counting walk in scan_dsgvo() ("src_files = sum(...)") that gates
-# whether the consent finding fires at all. Only the first three carry a
-# SKIP_DIRS filter and are unified here; the fourth has no directory filter
-# and is deliberately left alone -- filtering it would change WHEN the
-# consent finding fires, a second, unapproved behaviour change. Consequence
-# (report, not fixed; see CHANGELOG.md and docs/workitems/WI-0126.md):
-# files under node_modules/venv/.git count toward "is there actual code"
-# (`src_files > 2` below), so a project whose only files live in a
-# virtualenv can trip the consent finding on venv noise alone.
+# counting walk in scan_dsgvo() ("src_files = ..." below) that gates whether
+# the consent finding fires at all. WI-0128 wave 1a unified only the first
+# three on this superset and deliberately left the fourth unfiltered --
+# filtering it would have changed WHEN the consent finding fires, a second,
+# unapproved behaviour change at the time (see CHANGELOG.md for that
+# "report, not fixed" record). PO decision (WI-0128 wave 1b, 28.08.2026):
+# filter the fourth walk too, on the same superset as its three siblings.
+# Before this fix, files under node_modules/venv/.git counted toward "is
+# there actual code" (`src_files > 2` below), so a project whose only files
+# live in a virtualenv could trip the consent finding on venv noise alone --
+# see SrcFilesCountWalkVenvBehaviourChangeTest in test_quality_scan.py for
+# the measured before/after.
 #
 # TWO separate definitions of this SKIP_DIRS tuple exist in this file -- this
 # one and scan_dsgvo()'s below -- because each lives inside its own
@@ -479,6 +488,14 @@ for cfg_file in ["config.json", "config.yaml", "config.yml", "settings.py", "app
                 "file": cfg_file,
             })
 
+# Extension filter (WI-0128 wave 1b, ARGUED, not unified with the PII/consent
+# walks below): a CORS header is set from server-side or config code -- a
+# Python backend, a Node/Express middleware, a TypeScript API route handler.
+# .jsx/.tsx are UI-component files (the extension itself signals the file
+# contains JSX markup); setting an HTTP response header is not something
+# that shape of file does. See ExtensionFilterAsymmetryTest in
+# test_quality_scan.py for the full three-way comparison and the reasoning
+# for each of the three walks' differing breadth.
 # CORS wildcard check
 for root, dirs, files in os.walk("src"):
     dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
@@ -521,6 +538,13 @@ SKIP_DIRS = ("node_modules", ".git", "__pycache__", "venv", ".venv")
 findings = []
 
 # Check logging for PII
+#
+# Extension filter (WI-0128 wave 1b, ARGUED, wider than the CORS walk on
+# purpose): a hardcoded email, phone number or IBAN can appear anywhere a
+# developer types a literal string -- including inline in a React/Vue
+# component's JSX markup, or a console.log left in one. This walk claims
+# "any code", not a specific header-setting statement, so its extension set
+# is the wider one. See ExtensionFilterAsymmetryTest in test_quality_scan.py.
 for root, dirs, files in os.walk("src"):
     dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
     for fname in files:
@@ -547,6 +571,13 @@ for root, dirs, files in os.walk("src"):
         except:
             pass
 
+# Extension filter (WI-0128 wave 1b, ARGUED): none, deliberately -- reads
+# every file under src/. A cookie banner, privacy-policy link or
+# "datenschutz" mention is at least as likely to live in an .html template,
+# a .md legal page or a JSON i18n string table under src/ as in a
+# .py/.js/.ts file. Narrowing this walk to source-code extensions would make
+# it blind to the exact places a consent notice usually lives. See
+# ExtensionFilterAsymmetryTest in test_quality_scan.py.
 # Check for consent mechanism
 consent_found = False
 for root, dirs, files in os.walk("src"):
@@ -566,7 +597,10 @@ for root, dirs, files in os.walk("src"):
 
 if not consent_found:
     # Only flag if there's actual code
-    src_files = sum(1 for r, d, f in os.walk("src") for _ in f)
+    src_files = 0
+    for r, d, f in os.walk("src"):
+        d[:] = [x for x in d if x not in SKIP_DIRS]
+        src_files += len(f)
     if src_files > 2:
         findings.append({
             "type": "dsgvo-consent",
@@ -576,6 +610,120 @@ if not consent_found:
 
 print(json.dumps({"scan": "dsgvo", "findings": findings}))
 PYEOF
+}
+
+# Builds the failure-marker JSON written in REPORT_FILE's place when a scan
+# run fails (WI-0128 wave 1b, PO decision 28.08.2026 -- see the comment on
+# the SUMMARY_TMP block further down for the decision itself; wave 2,
+# 28.08.2026, added the two call sites below run_py() and the empty-entry
+# guard use). Defined here, before "-- Main --", because run_py() (above)
+# and the case/for-loop (below) both need it available by the time they
+# actually RUN -- a function's BODY may reference a name defined later in
+# the file (bash does not resolve it until the function is called), but the
+# name must exist by the time that call happens, and every real call
+# happens from inside "-- Main --". A separate heredoc-to-file for the same
+# reason TOOL_REPORT_PY/SUMMARY_PY are: nested inside a `$(...)` command
+# substitution it would break bash's quote tracking; redirected to a file
+# it parses fine.
+FAILURE_MARKER_PY="${TMPDIR}/quality_scan_failure_marker.py"
+cat > "${FAILURE_MARKER_PY}" <<'MARKEREOF'
+"""Builds the failure-marker JSON written in place of a report when report
+generation fails. Takes over an existing report -- if any -- to track a
+streak of consecutive failures: if the existing file already IS a failure
+marker, the streak continues (its own first-failure timestamp is kept, the
+counter increments); otherwise (a real report, no file at all, or
+something unreadable/corrupt) the streak restarts at 1. An unreadable
+existing report must never block writing this marker -- it is read
+best-effort only, never required.
+
+    quality_scan_failure_marker.py <report-file> <timestamp> <reason>
+
+Prints the marker JSON to stdout. Exit status is always 0 -- a failure to
+read the OLD report is absorbed into "streak restarts at 1", never
+propagated as this script's own failure (the caller's own scan failure is
+what matters here, not this best-effort bookkeeping).
+"""
+import json
+import sys
+
+report_file, timestamp, reason = sys.argv[1], sys.argv[2], sys.argv[3]
+
+consecutive_failures = 1
+first_failure_at = timestamp
+
+try:
+    with open(report_file, encoding="utf-8") as f:
+        existing = json.load(f)
+except Exception:
+    existing = None
+
+if isinstance(existing, dict) and existing.get("status") == "failed":
+    try:
+        consecutive_failures = int(existing.get("consecutive_failures", 0)) + 1
+    except (TypeError, ValueError):
+        consecutive_failures = 1
+    first_failure_at = existing.get("first_failure_at") or timestamp
+
+marker = {
+    "status": "failed",
+    "timestamp": timestamp,
+    "reason": reason,
+    "consecutive_failures": consecutive_failures,
+    "first_failure_at": first_failure_at,
+}
+print(json.dumps(marker, indent=2, ensure_ascii=False))
+MARKEREOF
+
+# Writes the failure marker into REPORT_FILE, in place of whatever was
+# there before (a stale report, an earlier marker, or nothing). Same
+# scratch-then-mv discipline as the report itself below -- never move a
+# 0-byte or partial marker into place. A failure inside THIS function
+# (e.g. python3 itself dying) is swallowed on purpose: the caller's own
+# `exit 1` for the underlying scan failure must still fire either way, and
+# a best-effort marker is strictly better than crashing the error-reporting
+# path over a failure to report the error.
+#
+# Four call sites as of wave 2 (:332 run_py(), :767 the empty-entry guard,
+# and :892/:897 the two report-generation branches inside the SUMMARY_TMP
+# combiner below), and they never fire twice for the same failure in one
+# run (measured 28.08.2026, so no de-duplication guard is needed here).
+# The two report-generation call sites are mutually exclusive with EACH
+# OTHER by construction: :892 fires when python3 exits non-zero, :897 only
+# when it exits 0 but writes nothing -- two sequential `if` blocks on the
+# same SUMMARY_TMP, each ending in its own `exit 1`, so whichever fires
+# first exits the script before the second `if` is ever evaluated. A
+# genuine scan_X() crash never reaches the empty-entry loop below, but not
+# because a crash is bash's sole/last command in general -- bash 3.2 does
+# not honour errexit for a failure that happens mid-subshell (see
+# run_py()'s own comment above for that measurement). The real,
+# script-specific reason is spelled out at the empty-entry guard below:
+# every scan_X() ends in a command whose failure becomes the `$(scan_X)`
+# substitution's own exit status, and scan_deps()/scan_sast() additionally
+# rely on run_py()'s own explicit `exit 1`, which fires regardless of
+# position inside the function. The loop's own call site fires only for
+# the OPPOSITE shape: a scan that exits 0 while printing nothing at all.
+write_failure_marker() {
+    local reason="$1"
+    # Re-declares the SAME top-level EXIT trap here, verbatim -- measured:
+    # when this function runs from inside run_py() called by scan_deps()/
+    # scan_sast() (both executed as `$(scan_X)` command substitutions, i.e.
+    # their own forked subshell), an EXTERNAL signal killing that subshell
+    # does NOT run the trap it merely INHERITED from the top-level shell --
+    # only a trap the subshell itself explicitly (re-)registers fires on a
+    # signal-caused exit; an inherited-only one only fires on that
+    # subshell's own NORMAL exit (falling off the end, or its own `exit N`,
+    # both already covered before this fix). At the top level (the other
+    # three call sites: the empty-entry guard and both report-generation
+    # branches, none of them inside a subshell) this is a harmless no-op --
+    # the exact same trap is already active there.
+    trap 'rm -rf "${TMPDIR}"; rm -f "${SUMMARY_TMP}"; rm -f "${MARKER_TMP}"' EXIT
+    MARKER_TMP=$(mktemp "${PROJECT_DIR}/docs/.quality-scan-report.json.tmp.XXXXXX")
+    if python3 "${FAILURE_MARKER_PY}" "${REPORT_FILE}" "${TIMESTAMP}" "${reason}" \
+            > "${MARKER_TMP}" 2>/dev/null && [ -s "${MARKER_TMP}" ]; then
+        mv "${MARKER_TMP}" "${REPORT_FILE}"
+    else
+        rm -f "${MARKER_TMP}"
+    fi
 }
 
 # -- Main --
@@ -596,20 +744,50 @@ case "${SCOPE}" in
     config) results+=("$(scan_config)") ;;
     dsgvo)  results+=("$(scan_dsgvo)") ;;
     *)
+        # No marker here, deliberately (WI-0128 wave 2, ARGUED): this is a
+        # usage error, raised before any scan has run at all -- unlike
+        # run_py()'s and the empty-entry guard's failures above, nothing was
+        # attempted here, so there is nothing this run "broke". Overwriting
+        # a valid earlier report with a failure marker over a typo'd scope
+        # argument would be pure data loss (destroying a real, working
+        # report for zero benefit) -- a genuinely broken scan is still
+        # caught by the two guards above regardless of how the run was
+        # invoked. Same ARGUED-exception treatment as the extension filter
+        # above scan_dsgvo()'s consent walk: an explicit, reasoned no-op
+        # documented in place, not a silent gap.
         echo "Unknown scope: ${SCOPE}" >&2
         echo "Allowed: all, deps, sast, config, dsgvo" >&2
         exit 1
         ;;
 esac
 
-# A scan that produced NOTHING is not a clean scan. Same bash 3.2 fact as
-# above: a crash inside `$(scan_X)` neither aborts the function nor the
-# script, so a broken scan arrives here as an empty string -- and the
-# combiner below skips empty lines, which would silently drop the whole scan
-# from the report while still reporting exit 0 and a plausible summary.
+# A scan that produced NOTHING is not a clean scan. Corrected 28.08.2026
+# (WI-0128 wave 2, corrected again same day): this guard is NOT reached by
+# a scan_X() CRASH, but for a script-specific reason, not a general bash
+# rule. Measured on /bin/bash 3.2.57 with this exact
+# `results+=("$(scan_X)")` call shape: a crash that is NOT the function's
+# last command, followed by anything output-less, does NOT abort the
+# script -- it leaves an empty entry and the script exits 0, i.e. it WOULD
+# reach this guard. What actually holds every scan_X() crash back today is
+# that each one ends in a command whose failure becomes the substitution's
+# own exit status: scan_deps()/scan_sast() end in run_py() --merge, and
+# run_py() itself calls `exit 1` on failure, which terminates the
+# `$(scan_X)` subshell outright regardless of where inside the function it
+# fires (see run_py()'s own comment above for why bash 3.2 needs that
+# explicit exit rather than relying on inherited errexit); scan_config()/
+# scan_dsgvo() end in their own heredoc with no such explicit exit, so
+# their crash protection depends entirely on being the function's literal
+# last command -- append one more output-less line after either and a
+# crash there would reach this guard instead of aborting the script. What
+# DOES reach here today is the opposite shape: a scan that exits 0
+# (nothing "failed" from bash's point of view) while silently printing
+# nothing at all -- and the combiner below skips empty lines, which would
+# drop the whole scan from the report while still reporting exit 0 and a
+# plausible summary.
 for entry in "${results[@]}"; do
     if [ -z "${entry}" ]; then
         echo "quality-scan.sh: FAILED -- a scan produced no record (scope=${SCOPE})" >&2
+        write_failure_marker "a scan produced no record (scope=${SCOPE})"
         exit 1
     fi
 done
@@ -640,7 +818,7 @@ for line in sys.stdin:
 
 # Normalise every finding's severity at this ONE boundary -- the only place
 # all four scans' findings converge (merge() upstream covers only two of
-# them). PO decision (WI-0126 wave 1a, defect 2): a closed vocabulary,
+# them). PO decision (WI-0128 wave 1a, defect 2): a closed vocabulary,
 # folded case-insensitively. Measured 28.08.2026: semgrep reports
 # 'ERROR'/'WARNING' (real semgrep 1.174.0, see test_quality_scan.py's
 # SEMGREP_TWO_RESULTS fixture), and the OLD bucketing below compared
@@ -704,20 +882,20 @@ SUMMARYEOF
 
 # Written to a scratch file first and only moved into place once python3
 # has both exited 0 AND produced non-empty output. Independent of the
-# apostrophe class above (WI-0126 wave 1a's zusatzauflage): an aborted or
+# apostrophe class above (WI-0128 wave 1a's zusatzauflage): an aborted or
 # empty report build must never leave a 0-byte docs/.quality-scan-report.json
 # behind -- CLAUDE.md tells /p6-audit and /p6-pentest to use that file "if
 # it exists", and a 0-byte file measurably exists.
 #
-# Implementation scoping call, not a ratified decision (WI-0126 wave 1a
-# round 2, defect B -- unlike the SKIP_DIRS superset and the error->high
-# bucketing above, there is no PO decision backing this one): on failure,
-# write nothing at all rather than a file naming its own failure, so a
-# pre-existing report from an EARLIER successful run is left untouched
-# rather than clobbered by this run's failure. Open question, not decided
-# here: should a failed run instead delete a stale report, or overwrite it
-# with an explicit failure marker, given that /p6-audit and /p6-pentest only
-# check the file's EXISTENCE, not the exit code of the run that produced it?
+# PO decision (WI-0128 wave 1b, 28.08.2026 -- wave 1a round 2, defect B left
+# this as an open, undecided question): on failure, overwrite the report
+# with an explicit failure marker (write_failure_marker() above) rather than
+# leaving a stale report from an earlier successful run untouched, or
+# writing nothing at all. The marker must be recognisable as a non-result
+# without a consumer knowing the run's exit code, since /p6-audit and
+# /p6-pentest only check the file's EXISTENCE (CLAUDE.md) -- the same reason
+# it must never carry a `summary.total_findings: 0` shape, which would read
+# exactly like a clean report.
 #
 # The scratch file is created directly under the same directory as
 # REPORT_FILE (docs/), not under ${TMPDIR} (mktemp -d /tmp/...) -- `mv` is
@@ -734,10 +912,12 @@ SUMMARY_TMP=$(mktemp "${PROJECT_DIR}/docs/.quality-scan-report.json.tmp.XXXXXX")
 if ! python3 "${SUMMARY_PY}" "${TIMESTAMP}" "${SCOPE}" "${PROJECT_DIR}" \
         <<< "$(printf '%s\n' "${results[@]}")" > "${SUMMARY_TMP}"; then
     echo "quality-scan.sh: FAILED -- report generation exited non-zero" >&2
+    write_failure_marker "report generation exited non-zero"
     exit 1
 fi
 if [ ! -s "${SUMMARY_TMP}" ]; then
     echo "quality-scan.sh: FAILED -- report generation produced no output" >&2
+    write_failure_marker "report generation produced no output"
     exit 1
 fi
 mv "${SUMMARY_TMP}" "${REPORT_FILE}"

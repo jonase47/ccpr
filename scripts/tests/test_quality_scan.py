@@ -44,6 +44,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import stat
 import subprocess
 import tempfile
@@ -253,13 +254,20 @@ class QualityScanExitStatusTest(QualityScanTestBase):
         guard exists to catch, as opposed to an ordinary command failure
         (already covered by `set -e` on its own).
 
-        Updated 28.08.2026 (WI-0126 wave 1a, defect 1's zusatzauflage): the
+        Updated 28.08.2026 (WI-0128 wave 1a, defect 1's zusatzauflage): the
         pre-fix assertion here was `self.assertEqual(0, ...stat().st_size)`
         -- it PINNED the exact 0-byte artefact this wave's fix removes. The
         combiner now writes to a scratch file first and only `mv`s it into
         place once python3 has both exited 0 AND produced non-empty output
         (scripts/quality-scan.sh's SUMMARY_TMP block), so a failed
-        generation now leaves no report file at all, not a 0-byte one."""
+        generation now leaves no report file at all, not a 0-byte one.
+
+        Updated again 28.08.2026 (WI-0128 wave 1b, PO decision): wave 1a's
+        own "leaves no report file at all" is superseded -- a failed run now
+        overwrites the report with an explicit failure marker instead
+        (FailureMarkerTest below covers the marker's shape and streak
+        counter in full; this test only re-confirms the leftover-scratch-
+        file guarantee still holds now that a marker IS written)."""
         with tempfile.TemporaryDirectory(prefix="ccpr-quality-scan-mutant-") as tmp:
             mutant = Path(tmp) / "quality-scan.sh"
             shutil.copy2(SCRIPT, mutant)
@@ -281,22 +289,24 @@ class QualityScanExitStatusTest(QualityScanTestBase):
             )
             self.assertNotEqual(0, r.returncode, r.stdout + r.stderr)
             self.assertIn("FAILED", r.stderr)
-            self.assertFalse(
-                self.report_path().exists(),
-                "a failed report generation must not leave a 0-byte artefact behind",
+            self.assertTrue(
+                self.report_path().is_file(),
+                "a failed report generation must leave a failure marker behind, "
+                "not silence (WI-0128 wave 1b)",
             )
+            marker = json.loads(self.report_path().read_text(encoding="utf-8"))
+            self.assertEqual("failed", marker.get("status"))
             docs_dir = self.report_path().parent
-            leftover = sorted(p.name for p in docs_dir.glob("*")) if docs_dir.exists() else []
+            leftover = sorted(p.name for p in docs_dir.glob("*"))
             self.assertEqual(
-                [], leftover,
-                "a failed report generation must not leave its scratch file behind "
-                "(WI-0126 wave 1a round 2, defect A: the scratch file now lives next "
-                "to REPORT_FILE so mv stays a same-filesystem rename, so cleanup on "
-                "every exit path -- not just the ${TMPDIR} trap -- is load-bearing)",
+                [self.report_path().name], leftover,
+                "a failed report generation must leave exactly the marker behind, "
+                "no scratch file (WI-0128 wave 1a round 2, defect A's guarantee "
+                "still applies to the marker's own scratch-then-mv write)",
             )
 
     def test_the_scratch_report_file_is_created_next_to_the_final_report(self):
-        """Defect A (WI-0126 wave 1a round 2): the pre-round-2 code built
+        """Defect A (WI-0128 wave 1a round 2): the pre-round-2 code built
         SUMMARY_TMP as "${TMPDIR}/quality-scan-report.json.tmp" -- TMPDIR is
         `mktemp -d /tmp/quality-scan-XXXXXX`, a DIFFERENT filesystem from
         REPORT_FILE (`${PROJECT_DIR}/docs/...`) whenever /tmp and the project
@@ -321,6 +331,464 @@ class QualityScanExitStatusTest(QualityScanTestBase):
             "the scratch file must be created directly under the same "
             "directory as REPORT_FILE, so mv is a same-filesystem rename",
         )
+
+
+class FailureMarkerTest(QualityScanTestBase):
+    """WI-0128 wave 1b deliverable 3, PO decision 28.08.2026: a failed
+    report-generation run overwrites docs/.quality-scan-report.json with an
+    explicit failure marker instead of leaving a stale report -- or, as
+    wave 1a's own unresolved "open question" comment put it, writing
+    nothing at all. Same line CLAUDE.md's /p6-audit and /p6-pentest already
+    draw ("use the file if it exists") and conformance-run.sh's loud
+    "DID NOT RUN" already models.
+
+    Wave 1b covered the two failure paths inside the SUMMARY_TMP combiner
+    block ("report generation exited non-zero" / "report generation
+    produced no output"). Wave 2 (28.08.2026) closes the two remaining
+    non-marker exits PO review found: run_py() itself (:332, a helper
+    script exited non-zero -- the scan ran and broke) and the "a scan
+    produced no record" empty-entry guard (:640, a scan silently produced
+    nothing -- the scan ran and broke too, just without a non-zero exit
+    anywhere). The "unknown scope" exit (:629) is a deliberate, ARGUED
+    exception -- see test_an_unknown_scope_still_writes_no_marker below
+    and the comment at its call site in quality-scan.sh -- because it is a
+    usage error raised BEFORE any scan runs; nothing was attempted, so
+    overwriting a valid earlier report there would be pure data loss. The
+    "missing project directory" early exit is untouched for the same
+    reason one level earlier: `cd` fails before `mkdir -p docs` even runs,
+    so there is no docs/ directory to write a marker into.
+
+    run_py() and the empty-entry guard are mutually exclusive within one
+    run -- corrected 28.08.2026, the wording here previously overgeneralised
+    the mechanism to "every scan_X() function's body is bash's SOLE/LAST
+    command in its own `$(scan_X)` subshell", which holds for only two of
+    the four. scan_deps()/scan_sast() are protected by run_py()'s own
+    explicit `exit 1`, which fires regardless of WHERE inside the function
+    it is reached (see run_py()'s own comment in quality-scan.sh);
+    scan_config()/scan_dsgvo() carry no such explicit exit -- each is a
+    single heredoc body with nothing after it, so their crash protection
+    depends entirely on being their own function's literal last/sole
+    command. Either mechanism means a genuine crash (non-zero exit)
+    propagates via errexit immediately and aborts the WHOLE script at its
+    own `results+=("$(scan_X)")` line -- the empty-entry loop is never
+    reached in the same run. The loop's guard is only reachable via the
+    OPPOSITE shape: a scan that exits 0 (nothing "failed" from bash's point
+    of view) while printing nothing at all -- the pre-existing WI-0102
+    mutation shape reused by build_scan_crash_mutant() below. Two disjoint
+    trigger conditions for two disjoint call sites means no same-run
+    double-count is possible,
+    and write_failure_marker() needs no de-duplication guard.
+
+    The marker carries its OWN consecutive-failure counter, because nothing
+    else records a failed run today (measured 28.08.2026: quality-scan.sh
+    writes only the report; ~/.claude/logs/ is written by
+    hooks/agent-monitor.py from Claude-Code tool calls, not by this
+    script). Before overwriting, the existing report -- if any -- is read:
+    if it is already a failure marker, the counter increments and the
+    FIRST failure's timestamp in the streak is kept; otherwise (a real
+    report, no file at all, or something unreadable/corrupt) the streak
+    restarts at 1. A successful run implicitly resets the streak by
+    replacing the marker with a real report. The streak also survives a
+    change in failure REASON within the same ongoing streak (across
+    separate runs) -- test_a_run_py_failure_following_a_report_generation_
+    failure_continues_the_streak below."""
+
+    NO_OUTPUT_NEEDLE = 'print(json.dumps(report, indent=2, ensure_ascii=False))\nSUMMARYEOF'
+    NO_OUTPUT_MUTATION = 'pass  # deliberately writes nothing, still exits 0\nSUMMARYEOF'
+    NONZERO_EXIT_MUTATION = 'raise SystemExit(1)  # deliberately exits non-zero\nSUMMARYEOF'
+
+    # :332 -- run_py() itself. TOOL_REPORT_PY's --merge branch is the ONE
+    # run_py() call reachable with no external tool and no planted fixture
+    # at all (scan_deps() calls it unconditionally at its own end); mutated
+    # to raise BEFORE printing anything, so the call fails exactly the way
+    # run_py() detects (python3 exits non-zero) with empty stdout, exactly
+    # like a real broken helper would.
+    MERGE_NEEDLE = (
+        'if len(argv) == 4 and argv[1] == "--merge":\n'
+        '        print(json.dumps(merge(argv[2], argv[3])))\n'
+        '        return 0'
+    )
+    MERGE_MUTATION = (
+        'if len(argv) == 4 and argv[1] == "--merge":\n'
+        '        raise SystemExit(1)  # deliberately exits non-zero, before any output'
+    )
+
+    # :640 -- the empty-entry guard. Measured 28.08.2026: a scan_X() function
+    # here is bash's SOLE/LAST command in its own subshell (the whole body
+    # is one `python3 <<'PYEOF'` heredoc), so a python3 CRASH (non-zero
+    # exit) propagates via errexit immediately and aborts the WHOLE script
+    # at its own `results+=("$(scan_X)")` line -- never reaching this loop
+    # at all (the same mechanism as run_py()'s own `exit 1` below). The
+    # guard's actually-reachable shape is the opposite: python3 exits 0
+    # (nothing "crashed") but prints nothing, exactly the pre-existing
+    # WI-0102 mutation this reuses -- see
+    # QualityScanFindingIntegrityTest.test_a_scan_producing_no_record_at_
+    # all_fails_loudly, which already pins this exact needle/mutation pair.
+    CONFIG_SCAN_NEEDLE = 'print(json.dumps({"scan": "config", "findings": findings}))\n'
+    CONFIG_SCAN_MUTATION = 'pass\n'
+
+    def build_failing_mutant(self, tmp, mutation):
+        mutant = Path(tmp) / "quality-scan.sh"
+        shutil.copy2(SCRIPT, mutant)
+        shutil.copytree(REPO_ROOT / "scripts" / "lib", Path(tmp) / "lib")
+        content = mutant.read_text(encoding="utf-8")
+        self.assertEqual(
+            1, content.count(self.NO_OUTPUT_NEEDLE),
+            "fixture assumption: report-write step moved",
+        )
+        mutant.write_text(
+            content.replace(self.NO_OUTPUT_NEEDLE, mutation), encoding="utf-8"
+        )
+        return mutant
+
+    def build_run_py_failing_mutant(self, tmp):
+        mutant = Path(tmp) / "quality-scan.sh"
+        shutil.copy2(SCRIPT, mutant)
+        shutil.copytree(REPO_ROOT / "scripts" / "lib", Path(tmp) / "lib")
+        content = mutant.read_text(encoding="utf-8")
+        self.assertEqual(
+            1, content.count(self.MERGE_NEEDLE),
+            "fixture assumption: TOOL_REPORT_PY's --merge branch moved",
+        )
+        mutant.write_text(
+            content.replace(self.MERGE_NEEDLE, self.MERGE_MUTATION), encoding="utf-8"
+        )
+        return mutant
+
+    def run_run_py_failing_scan(self, scope="deps"):
+        with tempfile.TemporaryDirectory(prefix="ccpr-wi0126-runpy-") as tmp:
+            mutant = self.build_run_py_failing_mutant(tmp)
+            return subprocess.run(
+                ["bash", str(mutant), scope, str(self.project)],
+                capture_output=True, text=True, env=self.env(),
+            )
+
+    def build_scan_crash_mutant(self, tmp):
+        mutant = Path(tmp) / "quality-scan.sh"
+        shutil.copy2(SCRIPT, mutant)
+        shutil.copytree(REPO_ROOT / "scripts" / "lib", Path(tmp) / "lib")
+        content = mutant.read_text(encoding="utf-8")
+        self.assertEqual(
+            1, content.count(self.CONFIG_SCAN_NEEDLE),
+            "fixture assumption: scan_config()'s heredoc import line moved",
+        )
+        mutant.write_text(
+            content.replace(self.CONFIG_SCAN_NEEDLE, self.CONFIG_SCAN_MUTATION), encoding="utf-8"
+        )
+        return mutant
+
+    def run_failing_scan(self, mutation=None, scope="sast"):
+        mutation = mutation or self.NO_OUTPUT_MUTATION
+        with tempfile.TemporaryDirectory(prefix="ccpr-wi0126-failmarker-") as tmp:
+            mutant = self.build_failing_mutant(tmp, mutation)
+            return subprocess.run(
+                ["bash", str(mutant), scope, str(self.project)],
+                capture_output=True, text=True, env=self.env(),
+            )
+
+    def marker(self):
+        return json.loads(self.report_path().read_text(encoding="utf-8"))
+
+    def test_a_failed_run_overwrites_a_stale_report_with_a_marker(self):
+        self.plant_sast_finding()
+        good = self.run_scan("sast")
+        self.assertEqual(0, good.returncode, good.stdout + good.stderr)
+        stale_report = self.report_path().read_text(encoding="utf-8")
+
+        r = self.run_failing_scan()
+        self.assertNotEqual(0, r.returncode, r.stdout + r.stderr)
+
+        self.assertTrue(self.report_path().is_file())
+        self.assertNotEqual(stale_report, self.report_path().read_text(encoding="utf-8"))
+        marker = self.marker()
+        self.assertEqual("failed", marker.get("status"))
+        self.assertEqual(1, marker.get("consecutive_failures"))
+
+    def test_the_marker_is_not_mistakable_for_a_zero_findings_report(self):
+        r = self.run_failing_scan()
+        self.assertNotEqual(0, r.returncode, r.stdout + r.stderr)
+        marker = self.marker()
+        self.assertNotIn(
+            "summary", marker,
+            "a marker with a summary key risks being read as a real report",
+        )
+        self.assertNotIn(
+            "scans", marker,
+            "a marker with a scans key risks being read as a real report",
+        )
+        self.assertEqual("failed", marker.get("status"))
+
+    def test_the_marker_is_recognisable_from_its_content_alone(self):
+        """Requirement from the briefing: recognisable as a non-result
+        WITHOUT a consumer knowing the run's exit code -- /p6-audit and
+        /p6-pentest only check the file's existence (CLAUDE.md), never the
+        exit status of whatever produced it."""
+        self.run_failing_scan()
+        marker = self.marker()
+        self.assertEqual("failed", marker.get("status"))
+
+    def test_marker_states_timestamp_reason_and_first_of_streak(self):
+        r = self.run_failing_scan()
+        marker = self.marker()
+        self.assertIn("timestamp", marker)
+        self.assertTrue(marker["timestamp"], "timestamp must not be empty")
+        self.assertIn("reason", marker)
+        self.assertIn("report generation produced no output", marker["reason"])
+        self.assertEqual(1, marker["consecutive_failures"])
+        self.assertEqual(marker["timestamp"], marker["first_failure_at"])
+
+    def test_the_other_failure_path_also_produces_a_marker(self):
+        """The second of the two named failure paths: python3 itself exits
+        non-zero (as opposed to exiting 0 but printing nothing)."""
+        r = self.run_failing_scan(mutation=self.NONZERO_EXIT_MUTATION)
+        self.assertNotEqual(0, r.returncode, r.stdout + r.stderr)
+        marker = self.marker()
+        self.assertEqual("failed", marker.get("status"))
+        self.assertIn("report generation exited non-zero", marker["reason"])
+
+    def test_consecutive_failures_increment_and_reset_on_a_successful_run(self):
+        r1 = self.run_failing_scan()
+        self.assertNotEqual(0, r1.returncode, r1.stdout + r1.stderr)
+        m1 = self.marker()
+        self.assertEqual(1, m1["consecutive_failures"])
+        first_failure_at = m1["first_failure_at"]
+
+        r2 = self.run_failing_scan()
+        self.assertNotEqual(0, r2.returncode, r2.stdout + r2.stderr)
+        m2 = self.marker()
+        self.assertEqual(2, m2["consecutive_failures"])
+        self.assertEqual(first_failure_at, m2["first_failure_at"])
+
+        r3 = self.run_failing_scan()
+        self.assertNotEqual(0, r3.returncode, r3.stdout + r3.stderr)
+        m3 = self.marker()
+        self.assertEqual(3, m3["consecutive_failures"])
+        self.assertEqual(first_failure_at, m3["first_failure_at"])
+
+        self.plant_sast_finding()
+        good = self.run_scan("sast")
+        self.assertEqual(0, good.returncode, good.stdout + good.stderr)
+        report = json.loads(self.report_path().read_text(encoding="utf-8"))
+        self.assertNotIn(
+            "status", report,
+            "a successful run must replace the marker with a real report, "
+            "implicitly resetting the streak",
+        )
+        self.assertIn("summary", report)
+
+    def test_an_unreadable_existing_report_does_not_block_the_marker_and_restarts_the_streak(self):
+        self.report_path().parent.mkdir(parents=True, exist_ok=True)
+        self.report_path().write_text("{not valid json at all", encoding="utf-8")
+
+        r = self.run_failing_scan()
+        self.assertNotEqual(0, r.returncode, r.stdout + r.stderr)
+        marker = self.marker()
+        self.assertEqual("failed", marker.get("status"))
+        self.assertEqual(1, marker["consecutive_failures"])
+        self.assertEqual(marker["timestamp"], marker["first_failure_at"])
+
+    def test_a_normal_report_is_not_mistaken_for_a_marker_and_restarts_the_streak(self):
+        """A pre-existing, perfectly valid, real report (no "status" key at
+        all) must not be misread as a failure-marker streak in progress."""
+        self.plant_sast_finding()
+        good = self.run_scan("sast")
+        self.assertEqual(0, good.returncode, good.stdout + good.stderr)
+
+        r = self.run_failing_scan()
+        self.assertNotEqual(0, r.returncode, r.stdout + r.stderr)
+        marker = self.marker()
+        self.assertEqual(1, marker["consecutive_failures"])
+
+    def test_no_scratch_file_is_left_behind_after_a_failed_run(self):
+        r = self.run_failing_scan()
+        self.assertNotEqual(0, r.returncode, r.stdout + r.stderr)
+        docs_dir = self.report_path().parent
+        leftover = sorted(p.name for p in docs_dir.glob("*"))
+        self.assertEqual([self.report_path().name], leftover)
+
+    def test_a_sigterm_between_mktemp_and_move_leaves_an_orphan_marker_scratch_file(self):
+        """RED proof (WI-0128 wave 2 follow-up): write_failure_marker()'s
+        own scratch file is `local marker_tmp`, so the top-level EXIT trap
+        near TMPDIR's declaration -- which only ever references TMPDIR and
+        SUMMARY_TMP -- never sees it. A SIGTERM delivered while python3 is
+        still writing the marker (i.e. AFTER mktemp has already created the
+        scratch file, BEFORE the `mv`/`rm -f` branch decides its fate) must
+        leave that scratch file behind on the current code.
+
+        No existing test in this file exercises this via an external
+        signal to mirror (grepped for "SIGTERM"/"kill"/"orphan": the only
+        neighbouring "no scratch file" coverage,
+        test_no_scratch_file_is_left_behind_after_a_failed_run right above,
+        only ever drives the trap's SUCCESS path through an ordinary
+        `exit 1` -- the process itself always runs to completion there, so
+        it can never catch a mid-write external kill). This test builds the
+        window from scratch instead: the run_py() failure mutant
+        (build_run_py_failing_mutant, the same one
+        test_a_run_py_helper_failure_gets_a_marker_naming_the_helper below
+        uses) reaches write_failure_marker() unconditionally at
+        scan_deps()'s own end. A `python3` stub placed at the FRONT of PATH
+        signals its OWN process group only when invoked with
+        quality_scan_failure_marker.py as its script argument -- every
+        OTHER python3 call the script makes (the scan heredocs,
+        TOOL_REPORT_PY, SUMMARY_PY) passes straight through to the real
+        interpreter.
+
+        An earlier version of this test drove the kill from the OUTSIDE:
+        an external poll loop watched for the scratch file to appear via
+        glob, then sent the group SIGTERM itself -- measured flaky (see
+        the commit message for the run count and root-cause trace).
+        `MARKER_TMP=$(mktemp ...)` is itself a command substitution -- a
+        subshell that creates the file, then reports its path back to the
+        parent over a pipe, and ONLY THEN does bash perform the
+        `MARKER_TMP=` assignment. An external poll can observe the file on
+        disk (mktemp already created it) and fire the group-kill BEFORE
+        that assignment lands, taking the still-running `mktemp` subshell
+        down with it -- bash's own EXIT trap then runs with `MARKER_TMP`
+        still at its declared-empty value, so `rm -f "${MARKER_TMP}"` is a
+        no-op and the file is genuinely orphaned. That is a real window,
+        but a DIFFERENT one than the "python3 still writing" window this
+        test exists to pin, and no outside poll loop can tell the two
+        apart -- it races bash's own instruction pointer, not the thing
+        under test. This test does not exercise that narrower
+        mktemp-assignment window at all; it would need its own
+        construction and is left as a known, accepted gap.
+
+        Fix: let the STUB signal itself instead of waiting to be observed
+        and signalled from outside. `kill -TERM 0` inside the stub can
+        only run once python3 has actually been invoked, which bash's own
+        program order guarantees happens strictly AFTER
+        `MARKER_TMP=$(mktemp ...)` has already completed and assigned --
+        there is no longer a race to win, because the precondition
+        (MARKER_TMP correctly set) is structurally satisfied before the
+        signal can even be sent. `sleep 5` right after the kill just gives
+        the kernel room to deliver the self-sent, already-pending signal
+        before this stub would otherwise fall through to `exec`ing the
+        real interpreter."""
+        real_python3 = shutil.which("python3")
+        self.assertIsNotNone(real_python3, "test host has no python3 on PATH")
+        slow_python3 = self.stubdir / "python3"
+        slow_python3.write_text(
+            "#!/bin/sh\n"
+            'case "$1" in\n'
+            "  */quality_scan_failure_marker.py) kill -TERM 0; sleep 5 ;;\n"
+            "esac\n"
+            'exec "%s" "$@"\n' % real_python3,
+            encoding="utf-8",
+        )
+        slow_python3.chmod(0o755)
+
+        with tempfile.TemporaryDirectory(prefix="ccpr-wi0126-marker-sigterm-") as tmp:
+            mutant = self.build_run_py_failing_mutant(tmp)
+            docs_dir = self.project / "docs"
+            proc = subprocess.Popen(
+                ["bash", str(mutant), "deps", str(self.project)],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                env=self.env(), start_new_session=True,
+            )
+            try:
+                proc.wait(timeout=5)
+            finally:
+                if proc.poll() is None:
+                    os.killpg(proc.pid, signal.SIGKILL)
+                    proc.wait()
+
+            leftover = sorted(p.name for p in docs_dir.glob("*"))
+            self.assertEqual(
+                [], leftover,
+                "a SIGTERM between mktemp and mv/rm must leave no scratch "
+                "file behind, got %r" % leftover,
+            )
+
+    def test_a_run_py_helper_failure_gets_a_marker_naming_the_helper(self):
+        """:332 -- run_py() itself, not the SUMMARY_TMP combiner. scope=deps
+        with no manifest planted: the only run_py() call that fires is the
+        unconditional `run_py "${TOOL_REPORT_PY}" --merge deps "${parts}"`
+        at the end of scan_deps(). run_py()'s `exit 1` is the LAST command
+        bash ever runs in that `$(scan_deps)` subshell, so it propagates
+        via errexit and aborts the whole script immediately -- this is a
+        single, first-failure event, never reaching (or needing to reach)
+        the :640 empty-entry guard in the same run, hence
+        consecutive_failures == 1 with no de-duplication required."""
+        r = self.run_run_py_failing_scan(scope="deps")
+        self.assertNotEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertIn("FAILED -- quality_scan_tool_report.py exited non-zero", r.stderr)
+        marker = self.marker()
+        self.assertEqual("failed", marker.get("status"))
+        self.assertIn("quality_scan_tool_report.py exited non-zero", marker["reason"])
+        self.assertEqual(1, marker["consecutive_failures"])
+
+    def test_a_scan_producing_no_record_gets_a_marker(self):
+        """:640 -- reached via the OPPOSITE shape from a run_py() crash: the
+        scan itself exits 0 (nothing "fails" from bash's point of view) but
+        prints nothing at all, reusing the pre-existing WI-0102 mutation for
+        the same guard (QualityScanFindingIntegrityTest.test_a_scan_
+        producing_no_record_at_all_fails_loudly). The irony worth noting:
+        this guard exists precisely because a scan that silently produces
+        nothing would otherwise be dropped from the report while the run
+        still exits 0 with a plausible summary -- the same confusion the
+        marker itself exists to prevent, one level up."""
+        with tempfile.TemporaryDirectory(prefix="ccpr-wi0126-emptyentry-") as tmp:
+            mutant = self.build_scan_crash_mutant(tmp)
+            r = subprocess.run(
+                ["bash", str(mutant), "config", str(self.project)],
+                capture_output=True, text=True, env=self.env(),
+            )
+        self.assertNotEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertIn("FAILED -- a scan produced no record (scope=config)", r.stderr)
+        marker = self.marker()
+        self.assertEqual("failed", marker.get("status"))
+        self.assertIn("a scan produced no record", marker["reason"])
+        self.assertEqual(1, marker["consecutive_failures"])
+
+    def test_an_unknown_scope_still_writes_no_marker(self):
+        """:629 -- ARGUED exception (see the comment at its call site in
+        quality-scan.sh): a usage error raised before any scan runs must
+        not destroy a valid earlier report. Complements
+        QualityScanExitStatusTest.test_an_unknown_scope_exits_non_zero_and_
+        writes_no_report, which covers the no-file-at-all case; this one
+        covers the case that actually motivates the exception -- a GOOD
+        report already sitting there must survive a typo'd scope
+        argument untouched."""
+        self.plant_sast_finding()
+        good = self.run_scan("sast")
+        self.assertEqual(0, good.returncode, good.stdout + good.stderr)
+        good_report = self.report_path().read_text(encoding="utf-8")
+
+        r = self.run_scan("not-a-real-scope")
+        self.assertNotEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertEqual(good_report, self.report_path().read_text(encoding="utf-8"))
+
+    def test_a_run_py_failure_following_a_report_generation_failure_continues_the_streak(self):
+        """Cross-reason streak proof: the counter tracks consecutive FAILED
+        RUNS, not one specific failure reason -- a run_py() failure
+        following a report-generation failure must land as failure 2 of
+        the same streak, not restart at 1."""
+        r1 = self.run_failing_scan()  # report generation produced no output
+        self.assertNotEqual(0, r1.returncode, r1.stdout + r1.stderr)
+        m1 = self.marker()
+        self.assertEqual(1, m1["consecutive_failures"])
+        first_failure_at = m1["first_failure_at"]
+
+        r2 = self.run_run_py_failing_scan(scope="deps")
+        self.assertNotEqual(0, r2.returncode, r2.stdout + r2.stderr)
+        m2 = self.marker()
+        self.assertEqual(2, m2["consecutive_failures"])
+        self.assertEqual(first_failure_at, m2["first_failure_at"])
+        self.assertIn("quality_scan_tool_report.py exited non-zero", m2["reason"])
+
+    def test_the_shipped_script_is_untouched_by_the_failure_marker_mutation_probes(self):
+        before = SCRIPT.read_bytes()
+        before_mode = stat.S_IMODE(SCRIPT.stat().st_mode)
+        with tempfile.TemporaryDirectory(prefix="ccpr-wi0126-failmarker-") as tmp:
+            self.build_failing_mutant(tmp, self.NO_OUTPUT_MUTATION)
+        with tempfile.TemporaryDirectory(prefix="ccpr-wi0126-failmarker-") as tmp:
+            self.build_failing_mutant(tmp, self.NONZERO_EXIT_MUTATION)
+        with tempfile.TemporaryDirectory(prefix="ccpr-wi0126-failmarker-") as tmp:
+            self.build_run_py_failing_mutant(tmp)
+        with tempfile.TemporaryDirectory(prefix="ccpr-wi0126-failmarker-") as tmp:
+            self.build_scan_crash_mutant(tmp)
+        self.assertEqual(before, SCRIPT.read_bytes())
+        self.assertEqual(before_mode, stat.S_IMODE(SCRIPT.stat().st_mode))
 
 
 class QualityScanQuotingMutationTest(QualityScanTestBase):
@@ -416,7 +884,7 @@ PYEOF
 
 
 class ApostropheInProjectPathTest(QualityScanTestBase):
-    """WI-0126 wave 1a, defect 1: the final report-combiner step (quoting-scan.sh
+    """WI-0128 wave 1a, defect 1: the final report-combiner step (quoting-scan.sh
     :592-624 as of fc7e7bc) interpolated ${TIMESTAMP}/${SCOPE}/${PROJECT_DIR}
     straight into `python3 -c "..."` source -- the exact class of defect this
     file's own header (:58-65, rule 2) forbids in writing, and the one WI-0055
@@ -1314,6 +1782,169 @@ class SkipDirsMatchesSastModuleTest(unittest.TestCase):
         )
 
 
+class SrcFilesCountWalkVenvBehaviourChangeTest(QualityScanTestBase):
+    """WI-0128 wave 1b deliverable 1: the counting walk scan_dsgvo() uses to
+    decide whether the "no consent mechanism found" finding is even worth
+    reporting (`src_files = sum(...)` / `if src_files > 2:`) was, until this
+    fix, the ONLY one of the file's four os.walk("src") call sites without a
+    SKIP_DIRS filter -- tranche 3a/3b's CHANGELOG entry recorded this as
+    "report, not fixed" (see the comment above scan_config()'s SKIP_DIRS
+    definition for the full reasoning). PO decision (WI-0128 wave 1b,
+    28.08.2026): filter it too, on the same superset as its three siblings.
+
+    Same scratch-copy MUTATION shape as SkipDirsVenvBehaviourChangeTest
+    above: the mutant reverts ONLY this walk's two lines back to their
+    measured pre-fix form (an unfiltered `os.walk("src")` sum), leaving the
+    other three walks and both SKIP_DIRS definitions untouched.
+
+    Fixture: every file under src/ lives under src/venv/, and none of them
+    contain a consent-ish term -- so consent_found stays False either way,
+    since the consent-TERM walk (a separate walk, a few lines above this
+    one) already skips venv since wave 1a and never even opens them. Before
+    this fix, the unfiltered COUNT walk still counts those venv files,
+    pushes src_files past the >2 threshold, and fires "no consent mechanism
+    found" on venv noise alone -- exactly the confusion this whole wave is
+    about, just one level removed (a false POSITIVE finding rather than a
+    suppressed one). After the fix, the same fixture has zero non-venv
+    files, so the finding does not fire."""
+
+    COUNT_NEEDLE = (
+        '    src_files = 0\n'
+        '    for r, d, f in os.walk("src"):\n'
+        '        d[:] = [x for x in d if x not in SKIP_DIRS]\n'
+        '        src_files += len(f)\n'
+        '    if src_files > 2:\n'
+    )
+    COUNT_PRE_FIX = (
+        '    src_files = sum(1 for r, d, f in os.walk("src") for _ in f)\n'
+        '    if src_files > 2:\n'
+    )
+
+    def build_pre_fix_mutant(self, tmp):
+        mutant = Path(tmp) / "quality-scan.sh"
+        shutil.copy2(SCRIPT, mutant)
+        content = mutant.read_text(encoding="utf-8")
+        self.assertEqual(
+            1, content.count(self.COUNT_NEEDLE),
+            "fixture assumption: the counting walk's fixed form moved",
+        )
+        content = content.replace(self.COUNT_NEEDLE, self.COUNT_PRE_FIX)
+        mutant.write_text(content, encoding="utf-8")
+        return mutant
+
+    def plant_venv_only_fixture(self):
+        venv_dir = self.project / "src" / "venv" / "lib"
+        venv_dir.mkdir(parents=True, exist_ok=True)
+        for name in ("a.py", "b.py", "c.py"):
+            (venv_dir / name).write_text("x = 1\n", encoding="utf-8")
+
+    def test_before_the_fix_venv_only_files_trip_the_missing_consent_finding(self):
+        self.plant_venv_only_fixture()
+        with tempfile.TemporaryDirectory(prefix="ccpr-wi0126-countwalk-") as tmp:
+            mutant = self.build_pre_fix_mutant(tmp)
+            r = subprocess.run(
+                ["bash", str(mutant), "dsgvo", str(self.project)],
+                capture_output=True, text=True, env=self.env(),
+            )
+            self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+            report = json.loads(self.report_path().read_text(encoding="utf-8"))
+            types = [f["type"] for f in report["scans"][0]["findings"]]
+            self.assertIn(
+                "dsgvo-consent", types,
+                "fixture assumption: pre-fix walk still counts venv-only files",
+            )
+
+    def test_after_the_fix_venv_only_files_no_longer_trip_the_finding(self):
+        self.plant_venv_only_fixture()
+        r = self.run_scan("dsgvo")
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        report = json.loads(self.report_path().read_text(encoding="utf-8"))
+        types = [f["type"] for f in report["scans"][0]["findings"]]
+        self.assertNotIn("dsgvo-consent", types)
+
+    def test_the_shipped_script_is_untouched_by_the_countwalk_mutation_probe(self):
+        before = SCRIPT.read_bytes()
+        before_mode = stat.S_IMODE(SCRIPT.stat().st_mode)
+        with tempfile.TemporaryDirectory(prefix="ccpr-wi0126-countwalk-") as tmp:
+            self.build_pre_fix_mutant(tmp)
+        self.assertEqual(before, SCRIPT.read_bytes())
+        self.assertEqual(before_mode, stat.S_IMODE(SCRIPT.stat().st_mode))
+
+
+class ExtensionFilterAsymmetryTest(unittest.TestCase):
+    """WI-0128 wave 1a's own CHANGELOG entry recorded the three content
+    os.walk("src") walks' differing extension filters as "report, not
+    fixed" -- a fact, not a judgement. Wave 1b's task was to make that
+    judgement: is each filter's breadth defensible given what the walk
+    looks FOR, or is one of the three an unargued accident?
+
+    - CORS wildcard walk (.py/.js/.ts): a CORS header is set from
+      server-side/config code -- Python backends, Node/Express middleware,
+      TypeScript API route handlers. .jsx/.tsx files are UI components (the
+      extension itself signals JSX markup); setting an HTTP response header
+      is not something that shape of file does.
+    - PII-in-logging walk (.py/.js/.ts/.jsx/.tsx): a hardcoded email, phone
+      number or IBAN can appear anywhere a developer types a literal string
+      -- including inline in a React/Vue component's JSX markup, or a
+      console.log left in one. The wider set matches the wider claim ("any
+      code"), not a specific header-setting statement.
+    - Consent-mechanism walk (no filter): a cookie banner, privacy-policy
+      link or "datenschutz" mention is at least as likely to live in an
+      .html template, a .md legal page or a JSON i18n string table under
+      src/ as in a .py/.js/.ts file -- narrowing this one to source-code
+      extensions would make the walk blind to the exact places a consent
+      notice usually lives.
+
+    All three read as a defensible, ARGUED asymmetry, not an accident --
+    none of the three lacks a reason once read against what it searches
+    for. Pinned here in the same form `ReviewsScopeDeliberatelyAbsentTest`
+    (test_anchor.py) uses for `reviews`' absence from `PHASE_SCOPES`: the
+    shipped extensions read structurally (never retyped), with the reason
+    in the code (see quality-scan.sh's own comments above each walk) and
+    here, not left as a silent "report, not fixed" CHANGELOG line."""
+
+    def setUp(self):
+        self.content = SCRIPT.read_text(encoding="utf-8")
+
+    def test_cors_walk_filters_py_js_ts_only(self):
+        needle = (
+            '    for fname in files:\n'
+            '        if fname.endswith((".py", ".js", ".ts")):\n'
+        )
+        self.assertEqual(
+            1, self.content.count(needle),
+            "CORS walk's extension filter moved or changed shape",
+        )
+
+    def test_pii_walk_additionally_covers_jsx_and_tsx(self):
+        needle = (
+            '    for fname in files:\n'
+            '        if not fname.endswith((".py", ".js", ".ts", ".jsx", ".tsx")):\n'
+            '            continue\n'
+        )
+        self.assertEqual(
+            1, self.content.count(needle),
+            "PII walk's extension filter moved or changed shape",
+        )
+
+    def test_consent_walk_has_no_extension_filter_at_all(self):
+        needle = (
+            'consent_found = False\n'
+            'for root, dirs, files in os.walk("src"):\n'
+            '    dirs[:] = [d for d in dirs if d not in SKIP_DIRS]\n'
+            '    for fname in files:\n'
+            '        fpath = os.path.join(root, fname)\n'
+        )
+        self.assertEqual(
+            1, self.content.count(needle),
+            "consent walk's shape moved -- re-check for a filter having been added",
+        )
+        self.assertNotIn(
+            "endswith", needle,
+            "consent walk must keep reading every file, not just a code-extension subset",
+        )
+
+
 # =============================================================================
 # WI-0126 tranche 3b, deliverable 1: PII_PATTERNS (scripts/quality-scan.sh,
 # scan_dsgvo() heredoc) -- 4 entries, zero references by name anywhere in
@@ -2056,7 +2687,7 @@ class SeveritiesRemovalRedProofTest(ToolReportPyTestBase):
 
 
 # ---------------------------------------------------------------------------
-# WI-0126 wave 1a, defect 3 (second half): findings_semgrep()'s own silent
+# WI-0128 wave 1a, defect 3 (second half): findings_semgrep()'s own silent
 # cap at 20 results (:168 as of fc7e7bc) -- unlike the pattern-scan's 50-cap,
 # this one carries no docstring at all. Same fix shape: one extra finding,
 # appended only when the cap actually trims something, naming the real

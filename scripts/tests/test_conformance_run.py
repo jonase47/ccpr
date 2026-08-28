@@ -1612,7 +1612,7 @@ class RealConfigurationConformanceTest(unittest.TestCase):
 # forbids, and no tracked file could ever be mistaken for a checked-in
 # conformance report by its own heading shape.
 #
-# WI-0126 wave 0.1: a fourth literal used to sit in this tuple -- a real
+# WI-0128 wave 0.1: a fourth literal used to sit in this tuple -- a real
 # consumer/tenant project name. That duplicated, in a second place, exactly
 # what `scripts/artifact-gate.sh --require-denylist` now enforces repo-wide
 # from a single, personal, non-distributed config (gate.denyNames /

@@ -88,7 +88,7 @@ never a retyped copy
 quality-scan.sh's own summary combiner (the SUMMARY_PY block delimited by
 the `SUMMARYEOF` heredoc marker -- see SUMMARY_START_MARKER/
 SUMMARY_END_MARKER below; moved out of an inline `python3 -c "..."` block
-into this heredoc shape by WI-0126 wave 1a, see the comment above those
+into this heredoc shape by WI-0128 wave 1a, see the comment above those
 markers) explicitly buckets only 'critical', 'high' and 'warning' by name
 and assigns EVERYTHING else to 'info' by subtraction. The npm-side
 SEVERITIES vocabulary (also in quality-scan.sh,
@@ -435,7 +435,7 @@ class MissingKeyPositionDependentTruncationTest(unittest.TestCase):
 # quality-scan.sh's own summary combiner before pinning it.
 # ---------------------------------------------------------------------------
 
-# Retargeted 28.08.2026 (WI-0126 wave 1a, defect 1): the combiner moved out
+# Retargeted 28.08.2026 (WI-0128 wave 1a, defect 1): the combiner moved out
 # of an inline `python3 -c "..."` block (which used to interpolate
 # ${TIMESTAMP}/${SCOPE}/${PROJECT_DIR} straight into Python source -- an
 # apostrophe in a project path broke it, see test_quality_scan.py's
@@ -483,7 +483,7 @@ class SeverityBindingTest(unittest.TestCase):
     """quality-scan.sh's summary combiner (extracted verbatim below, never
     retyped).
 
-    Updated 28.08.2026 (WI-0126 wave 1a, defect 2): this class used to pin
+    Updated 28.08.2026 (WI-0128 wave 1a, defect 2): this class used to pin
     the mis-count as fact -- the combiner compared severities
     case-SENSITIVELY against lowercase literals, so semgrep's own
     'ERROR'/'WARNING' (test_quality_scan.py:456,462 prove semgrep's real
@@ -590,7 +590,7 @@ class SeverityBindingTest(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 class TruncationCapTest(unittest.TestCase):
-    """WI-0126 wave 1a, defect 3: the silent 50-match cap used to make "50
+    """WI-0128 wave 1a, defect 3: the silent 50-match cap used to make "50
     matches" and "50-plus-unknown-many matches" byte-identical output --
     corrected 28.08.2026 to append exactly one extra finding (type
     'scan-truncated') naming the real total, but only when the cap actually

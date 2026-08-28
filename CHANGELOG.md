@@ -375,6 +375,36 @@ All notable changes to this project are documented in this file. The format is b
   Docs: `Manual/system/conformance.md`.
 
 ### Fixed
+- **A failed `quality-scan.sh` run now says so, and says how long it has been failing**
+  (open findings #8 and the follow-up decision to #6; WI-0128).
+
+  The counting walk that decides whether a project has "actual code" at all — and so whether
+  the DSGVO consent finding fires — was the only one of `scan_dsgvo()`'s four `os.walk("src")`
+  call sites with no directory filter, so `node_modules` and virtualenv files counted. Measured:
+  three files, all under `src/venv/`, used to trip the gate; they no longer do.
+
+  The three extension filters were reported as inconsistent and are deliberately **not**
+  unified: a CORS header is set in server code, a PII literal can appear anywhere a developer
+  types a string including JSX, and a consent notice lives as readily in HTML or Markdown as in
+  source. Each is pinned as an argued asymmetry with its reason in the code, the treatment
+  `reviews` already gets in `PHASE_SCOPES`.
+
+  And the open question wave 1a left — what a failed run does with an existing report — is
+  decided: it is overwritten with a marker carrying `status`, the reason, and, because nothing
+  anywhere records a failed run, `consecutive_failures` and the timestamp of the first failure
+  in the streak. It has no `summary` or `scans` key, so it cannot be mistaken for a clean
+  report by a consumer that never sees the exit code. All three failing exits write it; the
+  unknown-scope exit deliberately does not, because nothing was attempted and destroying a
+  valid earlier report over a typo is loss without gain.
+
+  Two claims about bash were corrected against measurement rather than argued. A comment
+  asserting that a crashed scan always aborts the script via errexit is false in general —
+  a crash that is not the function's last command does not abort, and the guard then does see
+  it. The conclusion holds here for a script-specific reason now stated: `run_py()`'s explicit
+  `exit` is position-independent, while the two heredoc scans depend on being their function's
+  literal last command, and appending one output-less line after either would flip that
+  silently. Separately, a cleanup trap inherited by a `$(...)` subshell does not run for that
+  subshell — measured — so the marker registers its own.
 - **Three defects in `quality-scan.sh`'s report path, all in the step that produces the file
   `/p6-audit` and `/p6-pentest` read** (open findings #6, #8-adjacent).
 

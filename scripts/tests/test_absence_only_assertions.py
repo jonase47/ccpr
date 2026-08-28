@@ -901,7 +901,7 @@ class NoStaleKnownFindingsTest(unittest.TestCase):
 
 class ClassificationCountsTest(unittest.TestCase):
     def test_classification_counts(self):
-        """Regression pin on the measured baseline: 954 `test_*` methods
+        """Regression pin on the measured baseline: 969 `test_*` methods
         across the corpus call something shaped like a subprocess invocation
         and are therefore in scope for this check; 56 of those are
         absence-only-needs-exemption (all accounted for via KNOWN_FINDINGS
@@ -930,6 +930,10 @@ class ClassificationCountsTest(unittest.TestCase):
           943 / 54             WI-0126 tranche 3b (quality-scan.sh content
                                lists: PII_PATTERNS, consent terms, config
                                filenames, and the .venv skip-list binding)
+          969 / 56             open-findings wave 1b (the fourth os.walk, the
+                               argued extension-filter asymmetry, and the
+                               failure marker with its streak counter across
+                               all three failing exits)
           954 / 56             open-findings wave 1a (quality-scan.sh: the
                                apostrophe/0-byte-report fix, severity
                                normalisation, truncation markers). Flagged
@@ -947,7 +951,7 @@ class ClassificationCountsTest(unittest.TestCase):
         WI-0126 so far carries a recognised liveness assertion."""
         recs = scan_tree()
         flagged = [r for r in recs if r.disposition in NEEDS_EXEMPTION]
-        self.assertEqual(954, len(recs))
+        self.assertEqual(969, len(recs))
         self.assertEqual(56, len(flagged))
 
 
