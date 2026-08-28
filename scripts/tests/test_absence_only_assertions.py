@@ -905,10 +905,18 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
         is scripts/tests/*.py + scripts/tests/workitems/*.py minus
         __init__.py, re-evaluated on every run, so a FILE added later is
         picked up automatically -- this only pins that the glob itself
-        still reaches the files known at write time (WI-0125, 27.08.2026)."""
+        still reaches the files known at write time (WI-0125, 27.08.2026).
+
+        Bumped 40 -> 41 on 28.08.2026: WI-0126 tranche 2 added
+        test_next_steps_lists.py. Note the in-scope count above did NOT
+        move (921) -- that module's 19 tests import next_steps.py directly
+        and never invoke a subprocess, so none of them is in scope for the
+        absence-only rule. Two pins, two different questions: this one asks
+        "did the corpus change", that one asks "did the subprocess-shaped
+        population change"."""
         files = sorted(TESTS_DIR.glob("*.py")) + sorted((TESTS_DIR / "workitems").glob("*.py"))
         names = sorted(f.relative_to(TESTS_DIR).as_posix() for f in files if f.name != "__init__.py")
-        self.assertEqual(40, len(names))
+        self.assertEqual(41, len(names))
         self.assertIn("test_absence_only_assertions.py", names)
         self.assertIn("test_phase_docs_lint.py", names)
         self.assertIn("workitems/test_migrate.py", names)

@@ -22,6 +22,30 @@ All notable changes to this project are documented in this file. The format is b
   bound by a test. `reviews` is in the first two lists and deliberately not in `PHASE_SCOPES`;
   that asymmetry is pinned with the reason `anchor.sh` gives for it, rather than left silent.
 
+- **Per-entry coverage for the three enumerated lists in `next_steps.py` (WI-0126, tranche 2)**.
+  `PHASE_SEQUENCES` (9 phases, 50 commands) drives `get_allowed_commands` — its one real
+  consumer — and was missing from the audit that raised WI-0126 in the first place;
+  `scripts/command-check.py` imports the name alongside it but never references it again (a dead
+  import, recorded as a finding rather than fixed here — editing a shipped script is outside this
+  module's write boundary). `GATE_TRANSITIONS` (8 entries) is derivable from `PHASE_SEQUENCES` per
+  its own comment ("gate -> first command of next phase") and nothing tested that derivation.
+  Both now get a per-entry existence sweep (against a real `commands/<name>.md`) plus a literal
+  count pin (50, 9, 8); the removal proofs for both patch the real, already-imported dict object
+  in place (`unittest.mock.patch.dict`, restored on exit) and confirm the shipped
+  `get_allowed_commands` reacts to the mutation — the same evidence strength as tranche 1's
+  scratch-file proof, exercised on a plain Python constant instead of shell text to regex out.
+  The `GATE_TRANSITIONS`-to-`PHASE_SEQUENCES` binding (invariant B) is now a test, computed from
+  `PHASE_SEQUENCES` rather than retyped, alongside a pin for invariant A (`p0`-`p7` each end their
+  own sequence with their own gate; `p8` has none). `UTILITY_COMMANDS` (8 entries) is measured
+  dead — `grep -rn "UTILITY_COMMANDS"` across every `.py`, `.sh` and `.md` in the repo returns
+  only its own definition line — so it gets a vocabulary pin (each name has a real command doc,
+  count pinned at 8) with a docstring stating plainly that no behaviour depends on it; its removal
+  check stays an in-memory length formula, not a shipped-code-reacts proof, because there is no
+  consumer to react — a weaker, explicitly disclosed evidence strength, not the same as the two
+  patched-dict proofs above. New module `scripts/tests/test_next_steps_lists.py` (19 tests), kept
+  separate from the pre-existing `test_next_steps_placement.py`, whose scope is a single narrow
+  parser-anchor fix (WI-0024) and has nothing to do with these three lists.
+
 - **An ADR convention: a resolved open point records its resolution in place (WI-0127)**.
   ADR-0009's follow-up 4 read "undefined" for six days after an addendum in the same file had
   answered it, and a proposal contradicting that answer was made on the strength of the stale
