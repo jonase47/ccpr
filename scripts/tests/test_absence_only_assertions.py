@@ -278,21 +278,6 @@ KNOWN_FINDINGS = {
     ("test_manual_lint.py", "ReverseLinkMutationProofTest", "test_pointing_at_the_true_parent_is_silent"): "known-risk-not-yet-fixed",
     ("test_manual_lint.py", "KindVocabularyMutationProofTest", "test_real_value_is_silent"): "known-risk-not-yet-fixed",
     ("workitems/test_migrate.py", "MigrateLocalToYouTrackTest", "test_second_full_run_is_a_no_op_no_duplicates"): "in-process-call-not-a-subprocess",
-    ("test_phase_docs_lint.py", "CheckAFrontmatterPresenceTest", "test_document_with_frontmatter_is_not_warned_for_missing_frontmatter"): "known-risk-not-yet-fixed",
-    ("test_phase_docs_lint.py", "CheckBRequiredFieldsTest", "test_document_with_all_required_fields_is_not_reported"): "known-risk-not-yet-fixed",
-    ("test_phase_docs_lint.py", "CheckCPhaseEnumTest", "test_valid_phase_value_is_not_reported"): "known-risk-not-yet-fixed",
-    ("test_phase_docs_lint.py", "CheckCPhaseEnumTest", "test_every_valid_phase_value_is_accepted"): "known-risk-not-yet-fixed",
-    ("test_phase_docs_lint.py", "CheckDStatusEnumTest", "test_every_valid_status_value_is_accepted"): "known-risk-not-yet-fixed",
-    ("test_phase_docs_lint.py", "CheckELastUpdatedFormatTest", "test_plain_date_is_accepted"): "known-risk-not-yet-fixed",
-    ("test_phase_docs_lint.py", "CheckELastUpdatedFormatTest", "test_date_with_parenthesised_note_is_accepted"): "known-risk-not-yet-fixed",
-    ("test_phase_docs_lint.py", "CheckFRelatedCrossRefsTest", "test_inline_related_pointing_to_an_existing_file_is_not_reported"): "known-risk-not-yet-fixed",
-    ("test_phase_docs_lint.py", "CheckFRelatedCrossRefsTest", "test_block_related_pointing_to_an_existing_file_is_not_reported"): "known-risk-not-yet-fixed",
-    ("test_phase_docs_lint.py", "CheckGParentIndexTest", "test_parent_index_pointing_to_an_existing_file_is_not_reported"): "known-risk-not-yet-fixed",
-    ("test_phase_docs_lint.py", "WI0071RootFallbackTest", "test_related_entry_resolvable_document_relative_produces_no_info"): "known-risk-not-yet-fixed",
-    ("test_phase_docs_lint.py", "WI0071RootFallbackTest", "test_parent_index_entry_resolvable_document_relative_produces_no_info"): "known-risk-not-yet-fixed",
-    ("test_phase_docs_lint.py", "CommitAnchorFamilyTest", "test_each_anchor_field_with_valid_hex_in_a_non_git_project_produces_no_findings"): "known-risk-not-yet-fixed",
-    ("test_phase_docs_lint.py", "CommitAnchorFamilyTest", "test_anchor_resolvable_to_an_actual_commit_produces_no_findings"): "known-risk-not-yet-fixed",
-    ("test_phase_docs_lint.py", "CommitAnchorFamilyTest", "test_anchor_fields_absent_produce_no_findings"): "known-risk-not-yet-fixed",
     ("test_conformance_run.py", "CheckHasSummaryLineTranspositionTest", "test_swap_flips_which_of_the_two_gets_the_c1_contradiction_finding"): "chained-stdout-slice-not-tracked-as-output",
     ("test_conformance_run.py", "CheckSubcmdTranspositionRealScriptTest", "test_swap_turns_memory_lint_into_a_c2_finding_and_anchor_into_could_not_run"): "chained-stdout-slice-not-tracked-as-output",
 }
@@ -883,7 +868,7 @@ class ClassificationCountsTest(unittest.TestCase):
     def test_classification_counts(self):
         """Regression pin on the measured baseline: 978 `test_*` methods
         across the corpus call something shaped like a subprocess invocation
-        and are therefore in scope for this check; 38 of those are
+        and are therefore in scope for this check; 23 of those are
         absence-only-needs-exemption (all accounted for via KNOWN_FINDINGS
         above), the rest carry at least one recognised positive/liveness
         assertion. A change in either number means a test changed shape or
@@ -894,6 +879,25 @@ class ClassificationCountsTest(unittest.TestCase):
         growing paragraph:
 
           in-scope / flagged   when
+          978 / 23             WI-0128 wave 3 tranche 2 (phase_docs_lint
+                               module, 15 of the 38 remaining KNOWN_FINDINGS
+                               entries): twelve pin "**Files scanned:** N"
+                               against the exact fixture the test wrote --
+                               the same shape as tranche 1's fourteen. The
+                               remaining three (CommitAnchorFamilyTest) sit
+                               behind a SEPARATE `for anchor_key in ...`
+                               loop the outer file-count is blind to
+                               (FILES_TOTAL is fixed before the per-file
+                               loop even starts, so disabling that inner
+                               loop entirely leaves "Files scanned:"
+                               unchanged) -- each of those three instead
+                               gets a companion document in the same run
+                               carrying a deliberately malformed OTHER
+                               anchor field, so a disabled loop is caught by
+                               that field going unreported rather than by a
+                               file count. In-scope unchanged: no method was
+                               added or removed, only assertions inside
+                               existing ones. Flagged: -15.
           978 / 38             WI-0128 wave 3 tranche 1 (memory_lint
                                module, 18 of the 56 KNOWN_FINDINGS entries):
                                each fixed test gets a positive assertion
@@ -1002,7 +1006,7 @@ class ClassificationCountsTest(unittest.TestCase):
         recs = scan_tree()
         flagged = [r for r in recs if r.disposition in NEEDS_EXEMPTION]
         self.assertEqual(978, len(recs))
-        self.assertEqual(38, len(flagged))
+        self.assertEqual(23, len(flagged))
 
 
 class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):

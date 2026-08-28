@@ -253,6 +253,9 @@ class CheckAFrontmatterPresenceTest(PhaseDocsLintTestBase):
 
         warnings = self.findings(result.stdout, "Warnings")
         self.assertFalse(any("no YAML frontmatter" in w for w in warnings), warnings)
+        # WI-0128: "no warning" is also true of a run that never reached
+        # has-fm.md at all -- pin that the fixture was actually scanned.
+        self.assertEqual(self.files_scanned(result.stdout), 1)
 
 
 class CheckBRequiredFieldsTest(PhaseDocsLintTestBase):
@@ -288,6 +291,9 @@ class CheckBRequiredFieldsTest(PhaseDocsLintTestBase):
 
         errors = self.findings(result.stdout, "Errors")
         self.assertFalse(any("required field missing" in e for e in errors), errors)
+        # WI-0128: "no missing-field error" is vacuous unless complete.md was
+        # actually scanned -- pin the fixture count.
+        self.assertEqual(self.files_scanned(result.stdout), 1)
 
 
 class CheckCPhaseEnumTest(PhaseDocsLintTestBase):
@@ -308,6 +314,9 @@ class CheckCPhaseEnumTest(PhaseDocsLintTestBase):
 
         errors = self.findings(result.stdout, "Errors")
         self.assertFalse(any("is not in {P0" in e for e in errors), errors)
+        # WI-0128: "no phase error" is vacuous unless valid-phase.md was
+        # actually scanned -- pin the fixture count.
+        self.assertEqual(self.files_scanned(result.stdout), 1)
 
     def test_every_valid_phase_value_is_accepted(self):
         for phase in VALID_PHASES:
@@ -321,6 +330,9 @@ class CheckCPhaseEnumTest(PhaseDocsLintTestBase):
                 self.assertFalse(
                     any(rel in e and "is not in {P0" in e for e in errors), (phase, errors)
                 )
+                # WI-0128: "no error for this phase" is vacuous unless this
+                # iteration's own file was actually scanned.
+                self.assertEqual(self.files_scanned(result.stdout), 1, (phase, result.stdout))
                 (self.docs_dir / rel).unlink()
 
     def test_invalid_phase_value_is_reported_as_error(self):
@@ -358,6 +370,9 @@ class CheckDStatusEnumTest(PhaseDocsLintTestBase):
                 self.assertFalse(
                     any(rel in e and "is not in {" in e for e in errors), (status, errors)
                 )
+                # WI-0128: "no error for this status" is vacuous unless this
+                # iteration's own file was actually scanned.
+                self.assertEqual(self.files_scanned(result.stdout), 1, (status, result.stdout))
                 (self.docs_dir / rel).unlink()
 
     def test_invalid_status_value_is_reported_as_error(self):
@@ -383,6 +398,9 @@ class CheckELastUpdatedFormatTest(PhaseDocsLintTestBase):
 
         errors = self.findings(result.stdout, "Errors")
         self.assertFalse(any("last_updated=" in e for e in errors), errors)
+        # WI-0128: "no date error" is vacuous unless date-plain.md was
+        # actually scanned -- pin the fixture count.
+        self.assertEqual(self.files_scanned(result.stdout), 1)
 
     def test_date_with_parenthesised_note_is_accepted(self):
         self.write_doc("architecture/date-note.md", doc_text(last_updated=DATE_WITH_NOTE))
@@ -391,6 +409,8 @@ class CheckELastUpdatedFormatTest(PhaseDocsLintTestBase):
 
         errors = self.findings(result.stdout, "Errors")
         self.assertFalse(any("last_updated=" in e for e in errors), errors)
+        # WI-0128: same proof as the plain-date case above.
+        self.assertEqual(self.files_scanned(result.stdout), 1)
 
     def test_iso_date_format_is_rejected(self):
         self.write_doc("architecture/date-iso.md", doc_text(last_updated="2026-05-04"))
@@ -546,6 +566,9 @@ class CheckFRelatedCrossRefsTest(PhaseDocsLintTestBase):
         # where a root-relative hit also exists so a "check root first"
         # implementation would be forced to disagree with this assertion.
         self.assertEqual(infos, [], infos)
+        # WI-0128: "no error, no info" is also true of a run that never
+        # reached either file -- pin that both were actually scanned.
+        self.assertEqual(self.files_scanned(result.stdout), 2)
 
     def test_inline_related_pointing_to_a_missing_file_is_reported(self):
         self.write_doc(
@@ -575,6 +598,9 @@ class CheckFRelatedCrossRefsTest(PhaseDocsLintTestBase):
         infos = self.findings(result.stdout, "Info")
         self.assertFalse(any("related:" in e for e in errors), errors)
         self.assertEqual(infos, [], infos)
+        # WI-0128: "no error, no info" is also true of a run that never
+        # reached either file -- pin that both were actually scanned.
+        self.assertEqual(self.files_scanned(result.stdout), 2)
 
     def test_block_related_pointing_to_a_missing_file_is_reported(self):
         self.write_doc(
@@ -608,6 +634,9 @@ class CheckGParentIndexTest(PhaseDocsLintTestBase):
         infos = self.findings(result.stdout, "Info")
         self.assertFalse(any("parent_index=" in e for e in errors), errors)
         self.assertEqual(infos, [], infos)
+        # WI-0128: "no error, no info" is also true of a run that never
+        # reached either file -- pin that both were actually scanned.
+        self.assertEqual(self.files_scanned(result.stdout), 2)
 
     def test_parent_index_pointing_to_a_missing_file_is_reported(self):
         self.write_doc(
@@ -701,6 +730,10 @@ class WI0071RootFallbackTest(PhaseDocsLintTestBase):
         errors = self.findings(result.stdout, "Errors")
         self.assertEqual(infos, [], infos)
         self.assertFalse(any("related:" in e for e in errors), errors)
+        # WI-0128: "no info, no error" is also true of a run that never
+        # reached either docs/ file -- pin that both were actually scanned
+        # (the root-planted sidecar sits outside docs/ and is not counted).
+        self.assertEqual(self.files_scanned(result.stdout), 2)
 
     def test_parent_index_entry_resolvable_only_at_project_root_is_info_not_error(self):
         self.write_doc("architecture/ROOT_INDEX.md", doc_text())
@@ -760,6 +793,10 @@ class WI0071RootFallbackTest(PhaseDocsLintTestBase):
         errors = self.findings(result.stdout, "Errors")
         self.assertEqual(infos, [], infos)
         self.assertFalse(any("parent_index=" in e for e in errors), errors)
+        # WI-0128: "no info, no error" is also true of a run that never
+        # reached either docs/ file -- pin that both were actually scanned
+        # (the root-planted sidecar sits outside docs/ and is not counted).
+        self.assertEqual(self.files_scanned(result.stdout), 2)
 
 
 class CheckHCoversTest(PhaseDocsLintTestBase):
@@ -1289,22 +1326,61 @@ class CommitAnchorFamilyTest(PhaseDocsLintTestBase):
         into a false warning."""
         for field in self.ANCHOR_FIELDS:
             with self.subTest(field=field):
-                rel = f"architecture/anchor-nongit-{field}.md"
+                # WI-0128: a companion document in the SAME run, carrying a
+                # deliberately malformed OTHER anchor field. `field`'s own
+                # findings staying silent is also true of a loop that never
+                # ran at all (check (i) removed wholesale); requiring the
+                # companion document's malformed field to still be reported
+                # proves the `for anchor_key in ...` loop actually executed
+                # during this run. Two neutrally-named files (not
+                # containing any ANCHOR_FIELDS name) -- the original
+                # `anchor-nongit-{field}.md` filename would otherwise leak
+                # `field` as a substring into the companion's own error
+                # line and defeat the assertFalse below.
+                companion_field = self.ANCHOR_FIELDS[
+                    (self.ANCHOR_FIELDS.index(field) + 1) % len(self.ANCHOR_FIELDS)
+                ]
+                rel = "architecture/anchor-nongit-under-test.md"
+                companion_rel = "architecture/anchor-nongit-companion.md"
                 self.write_doc(rel, doc_text(extra_lines=[f"{field}: abc1234"]))  # 7 hex chars
+                self.write_doc(
+                    companion_rel,
+                    doc_text(extra_lines=[f"{companion_field}: not-a-sha"]),
+                )
 
                 result = self.run_lint()
 
                 errors = self.findings(result.stdout, "Errors")
                 warnings = self.findings(result.stdout, "Warnings")
-                self.assertFalse(any(field in e for e in errors), (field, errors))
-                self.assertFalse(any(field in w for w in warnings), (field, warnings))
+                self.assertFalse(
+                    any(field in e and "under-test.md" in e for e in errors), (field, errors)
+                )
+                self.assertFalse(
+                    any(field in w and "under-test.md" in w for w in warnings), (field, warnings)
+                )
+                self.assertTrue(
+                    any(
+                        companion_field in e and "is not a valid commit SHA" in e
+                        for e in errors
+                    ),
+                    (companion_field, errors),
+                )
                 (self.docs_dir / rel).unlink()
+                (self.docs_dir / companion_rel).unlink()
 
     def test_anchor_resolvable_to_an_actual_commit_produces_no_findings(self):
         head = self.init_git_repo()
+        # WI-0128: a second, deliberately-unresolvable anchor field in the
+        # SAME document. `base_commit` staying silent is also true of a
+        # disabled/short-circuited anchor loop -- requiring the companion
+        # field's warning proves the loop ran for this file at all.
+        fake_sha = "e" * 40
         self.write_doc(
             "architecture/anchor-resolvable.md",
-            doc_text(extra_lines=[f"base_commit: {head}"]),
+            doc_text(extra_lines=[
+                f"base_commit: {head}",
+                f"reviewed_head: {fake_sha}",
+            ]),
         )
 
         result = self.run_lint()
@@ -1313,6 +1389,13 @@ class CommitAnchorFamilyTest(PhaseDocsLintTestBase):
         warnings = self.findings(result.stdout, "Warnings")
         self.assertFalse(any("base_commit" in e for e in errors), errors)
         self.assertFalse(any("base_commit" in w for w in warnings), warnings)
+        self.assertTrue(
+            any(
+                "reviewed_head" in w and "does not resolve to a commit" in w
+                for w in warnings
+            ),
+            warnings,
+        )
 
     def test_anchor_valid_form_but_unresolvable_commit_is_a_warning_not_an_error(self):
         self.init_git_repo()
@@ -1338,14 +1421,37 @@ class CommitAnchorFamilyTest(PhaseDocsLintTestBase):
 
     def test_anchor_fields_absent_produce_no_findings(self):
         self.write_doc("architecture/no-anchors.md", doc_text())
+        # WI-0128: control fixture in the SAME run, scoped assertions below
+        # keep it independent of no-anchors.md's own claim. All three
+        # fields being silent for no-anchors.md is also true of a loop that
+        # was removed entirely (each `anchor_val` empty vs. the loop never
+        # running are indistinguishable from the assertions alone) --
+        # requiring this second document's malformed anchor field to still
+        # be reported proves the loop actually executed in this run.
+        self.write_doc(
+            "architecture/control-anchor.md",
+            doc_text(extra_lines=["base_commit: not-a-sha"]),
+        )
 
         result = self.run_lint()
 
         errors = self.findings(result.stdout, "Errors")
         warnings = self.findings(result.stdout, "Warnings")
         for field in self.ANCHOR_FIELDS:
-            self.assertFalse(any(field in e for e in errors), (field, errors))
-            self.assertFalse(any(field in w for w in warnings), (field, warnings))
+            self.assertFalse(
+                any(field in e and "no-anchors.md" in e for e in errors), (field, errors)
+            )
+            self.assertFalse(
+                any(field in w and "no-anchors.md" in w for w in warnings), (field, warnings)
+            )
+        self.assertTrue(
+            any(
+                "control-anchor.md" in e
+                and "base_commit='not-a-sha' is not a valid commit SHA" in e
+                for e in errors
+            ),
+            errors,
+        )
 
     def test_anchor_check_runs_in_the_reviews_profile_too(self):
         self.write_doc(
