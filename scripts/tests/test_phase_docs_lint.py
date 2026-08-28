@@ -48,17 +48,44 @@ def read_phase_folders(script_path=SCRIPT_PATH):
         raise AssertionError("could not find PHASE_FOLDERS=(...) in %s" % script_path)
     return tuple(m.group(1).split())
 
-# The six status values phase-docs-lint.sh's VALID_STATUS accepts today.
-# Enumerated individually in CheckDStatusEnumTest -- exactly the kind of
-# regression a later "add a 7th status" change would otherwise miss silently.
-VALID_STATUSES = ("skeleton", "draft", "active", "frozen", "archived", "living")
 
-# The nine phase values phase-docs-lint.sh's VALID_PHASES accepts today.
-# Enumerated individually in CheckCPhaseEnumTest for the same reason as
-# VALID_STATUSES above: a later change that narrows the list (e.g. dropping
-# P0 or P8 at an edge) would otherwise pass silently if only one
-# representative value ("P3") were pinned.
-VALID_PHASES = tuple(f"P{n}" for n in range(9))
+def read_enum(varname, script_path=SCRIPT_PATH):
+    """Parses NAME="a b c" (a space-separated shell-string constant) out of
+    a shipped script's own source text -- never retyped here (WI-0126
+    tranche 5). The canonical home for this parser shape: it started as a
+    private, phase-docs-lint.sh-only helper in
+    test_frontmatter_examples_match_the_lint.py (VALID_PHASES/VALID_STATUS),
+    lifted here and generalised with a script_path parameter so
+    test_manual_lint.py's VALID_KINDS (manual-lint.sh) and test_anchor.py's
+    LIVING_FILES (anchor.sh) reuse it instead of each growing a near-
+    identical sixth regex. Fails loudly if the constant's DECLARATION
+    disappears or changes shape (renamed, or turned into a bash array).
+    Measured limit, so nobody reads more into it than it does: a constant
+    emptied in place -- NAME="" -- still matches and returns () without
+    raising. Every caller pairs this with its own non-zero count pin, which
+    is what actually catches that case (WI-0126 tranche 5 review)."""
+    text = script_path.read_text(encoding="utf-8")
+    m = re.search(r'^%s="([^"]*)"' % re.escape(varname), text, re.MULTILINE)
+    if m is None:
+        raise AssertionError('could not find %s="..." in %s' % (varname, script_path))
+    return tuple(m.group(1).split())
+
+
+# The six status values phase-docs-lint.sh's VALID_STATUS accepts today,
+# parsed from source (WI-0126 tranche 5) rather than retyped -- a retyped
+# copy catches the shipped list SHRINKING (the sweep below still expects a
+# now-missing value) but not GROWING (a new value is simply never swept);
+# CheckDStatusEnumTest's own count-pin test catches the shrink side this
+# parse-from-source form cannot. Enumerated individually in
+# CheckDStatusEnumTest -- exactly the kind of regression a later "add a 7th
+# status" change would otherwise miss silently.
+VALID_STATUSES = read_enum("VALID_STATUS")
+
+# The nine phase values phase-docs-lint.sh's VALID_PHASES accepts today,
+# parsed from source (WI-0126 tranche 5) -- same shrink/grow reasoning as
+# VALID_STATUSES above. Enumerated individually in CheckCPhaseEnumTest,
+# whose own count-pin test catches a narrowing this parse alone would not.
+VALID_PHASES = read_enum("VALID_PHASES")
 
 # The exact literal the (d) error message embeds ($VALID_STATUS, space-joined).
 VALID_STATUS_LITERAL = " ".join(VALID_STATUSES)
@@ -66,10 +93,14 @@ VALID_STATUS_LITERAL = " ".join(VALID_STATUSES)
 VALID_DATE = "04.05.2026"
 DATE_WITH_NOTE = "04.05.2026 (cross-phase update)"
 
-# basename set LIVING_FILES skips unconditionally, before check (a) even runs.
-LIVING_FILE_NAMES = (
-    "HANDOVER.md", "BASELINE.md", "BACKLOG.md", "SPRINT.md", "MEMORY.md", "instincts.md",
-)
+# basename set LIVING_FILES skips unconditionally, before check (a) even
+# runs. Parsed from source (WI-0126 tranche 5), paired with
+# LivingFilesSkipTest's own count-pin test for the shrink side a parse
+# alone cannot catch. Duplicated verbatim in anchor.sh's own LIVING_FILES
+# (deliberately, per that script's own comment -- sourcing this script
+# would execute its whole scan); see test_anchor.py's
+# LivingFilesCrossScriptBindingTest for the binding between the two.
+LIVING_FILE_NAMES = read_enum("LIVING_FILES")
 
 
 def frontmatter_block(phase="P3", subskill="widget-x", status="draft",
@@ -262,6 +293,14 @@ class CheckBRequiredFieldsTest(PhaseDocsLintTestBase):
 class CheckCPhaseEnumTest(PhaseDocsLintTestBase):
     """(c) phase must be one of P0..P8."""
 
+    def test_valid_phases_count_is_pinned_at_nine(self):
+        # WI-0126 tranche 5: VALID_PHASES is now parsed from source, which
+        # alone only catches a value being ADDED (the sweep below simply
+        # gains an entry). This pin catches a value being REMOVED -- the
+        # blind spot the previous retyped copy had in the opposite
+        # direction.
+        self.assertEqual(9, len(VALID_PHASES))
+
     def test_valid_phase_value_is_not_reported(self):
         self.write_doc("architecture/valid-phase.md", doc_text(phase="P3"))
 
@@ -301,6 +340,11 @@ class CheckDStatusEnumTest(PhaseDocsLintTestBase):
     individually. This is exactly the sub-check WI-0019/WI-0020 could
     silently narrow (e.g. by editing VALID_STATUS) without a single test
     noticing if only one representative value were pinned."""
+
+    def test_valid_statuses_count_is_pinned_at_six(self):
+        # WI-0126 tranche 5: same shrink-vs-grow reasoning as
+        # CheckCPhaseEnumTest.test_valid_phases_count_is_pinned_at_nine above.
+        self.assertEqual(6, len(VALID_STATUSES))
 
     def test_every_valid_status_value_is_accepted(self):
         for status in VALID_STATUSES:
@@ -1368,6 +1412,13 @@ class LivingFilesSkipTest(PhaseDocsLintTestBase):
     """LIVING_FILES are skipped entirely, before check (a) even runs -- a
     living file with completely broken/missing frontmatter must still
     produce zero findings, for all six documented names at once."""
+
+    def test_living_file_names_count_is_pinned_at_six(self):
+        # WI-0126 tranche 5: LIVING_FILE_NAMES is now parsed from source
+        # (read_enum), which alone only catches a name being ADDED. This
+        # pin catches one being REMOVED -- the retyped copy's converse
+        # blind spot.
+        self.assertEqual(6, len(LIVING_FILE_NAMES))
 
     def test_all_six_living_filenames_are_skipped_even_with_broken_frontmatter(self):
         for name in LIVING_FILE_NAMES:

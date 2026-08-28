@@ -166,19 +166,6 @@ _none_
 **Exit:** 0 (Stage 1 — data only, never a verdict)
 """
 
-# Filenames conformance-run.sh's own CHECK_SCRIPTS table names -- kept in
-# sync by hand with that table, the same duplication the script's own
-# header comment already accepts for commands/cleanup.md:143-196 (WI-0124
-# Wave 2 briefing: "Your check table duplicates it ... note that in a
-# comment").
-CHECK_FILENAMES = (
-    "memory-lint.sh",
-    "phase-docs-lint.sh",
-    "manual-lint.sh",
-    "doc-volume-check.sh",
-    "anchor.sh",
-)
-
 
 def exit_line_value(stdout):
     """The integer following the report's own '**Exit:**' line, or None if
@@ -207,7 +194,14 @@ class ConformanceRunTestBase(unittest.TestCase):
         # reusing this same directory rather than a second one.
         self.checks_dir = self.home / "checks"
         self.checks_dir.mkdir()
-        for filename in CHECK_FILENAMES:
+        # WI-0126 tranche 5: was a hand-typed CHECK_FILENAMES tuple "kept in
+        # sync by hand" with conformance-run.sh's own CHECK_SCRIPTS array --
+        # now a direct binding against parse_full_check_table()'s own
+        # CHECK_SCRIPTS column (parsed from source, defined further down in
+        # this module; available by the time setUp() actually runs). The
+        # count/alignment pin already lives in CheckTableAlignmentTest
+        # (5 entries, 7 columns) -- no redundant pin added here.
+        for filename in parse_full_check_table()["CHECK_SCRIPTS"]:
             self.write_stub(filename, CLEAN_ANCHOR_REPORT if filename == "anchor.sh" else CLEAN_FILES_SCANNED_REPORT, 0)
 
     # --- fixture -----------------------------------------------------------

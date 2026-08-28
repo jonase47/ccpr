@@ -45,12 +45,22 @@ from pathlib import Path
 # test_memory_sync_transport_errors.py both import `leak` from
 # test_artifact_gate.py the same way. Tradeoff, stated rather than hidden:
 # this relative import requires `-t .` on `unittest discover`
-# (CONTRIBUTING.md:50-57 documents the failure mode without it) -- a third
-# import joins that known, already-documented set rather than a new hazard.
-from .test_phase_docs_lint import read_phase_folders
+# (CONTRIBUTING.md's "Run the test suite" documents the failure mode
+# without it). It joins that known, already-documented set rather than
+# opening a new hazard. Deliberately not numbered here: the count of such
+# modules changes whenever one is added, and a number in a comment ages
+# where the set membership does not (this line said "a third" until
+# tranche 5 made it five).
+from .test_phase_docs_lint import read_enum, read_phase_folders
 
 SCRIPT_PATH = Path(__file__).resolve().parents[1] / "anchor.sh"
 FRONTMATTER_LIB = Path(__file__).resolve().parents[1] / "lib" / "frontmatter.sh"
+
+# WI-0126 tranche 5: the OTHER shipped copy of LIVING_FILES (phase-docs-
+# lint.sh's own, read via read_enum() imported above). Named separately
+# from SCRIPT_PATH so LivingFilesCrossScriptBindingTest below reads both
+# sides unambiguously.
+PHASE_DOCS_LINT_SCRIPT = Path(__file__).resolve().parents[1] / "phase-docs-lint.sh"
 
 VALID_DATE = "18.08.2026"
 
@@ -2018,3 +2028,70 @@ class AckByStatusBreakdownTest(AnchorTestBase):
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertIn("2 asserted without doc change", result.stdout)
         self.assertIn("asserted by: ada@example.org (1), unattributed (1)", result.stdout)
+
+
+class LivingFilesCrossScriptBindingTest(unittest.TestCase):
+    """WI-0126 tranche 5's prize: LIVING_FILES is typed independently in two
+    scripts (phase-docs-lint.sh:62, anchor.sh:67) -- deliberately duplicated
+    rather than sourced (anchor.sh's own comment directly above its copy:
+    "that script is an entry point with its own set -euo pipefail run
+    body, not a library -- sourcing it would execute its whole scan"), but
+    nothing checks the two stay in agreement. Same shape as
+    test_conformance_run.py's PhaseFolderNamesBindingTest for
+    PHASE_FOLDERS/PHASE_FOLDER_NAMES -- both parsed from source via the
+    shared read_enum(), never retyped, never assumed equal from the two
+    lines merely looking alike. Measured 28.08.2026: byte-identical today
+    (`diff` on the two extracted literals is empty) -- unlike
+    PHASE_FOLDERS/PHASE_FOLDER_NAMES and the SKIP_DIRS family in earlier
+    tranches, both of which had already drifted by the time anyone looked."""
+
+    def test_anchor_living_files_equals_phase_docs_lint_living_files(self):
+        self.assertEqual(
+            read_enum("LIVING_FILES", PHASE_DOCS_LINT_SCRIPT),
+            read_enum("LIVING_FILES", SCRIPT_PATH),
+        )
+
+
+class LivingFilesCrossScriptBindingRedProofTest(unittest.TestCase):
+    """Mutation-based RED proof (G-107/G-109), same shape as
+    test_conformance_run.py's PhaseFolderNamesBindingRedProofTest: drops
+    ONE entry at a time from anchor.sh's LIVING_FILES in a SCRATCH copy
+    (the shipped file is never touched, never executed -- a pure text
+    parse, like the binding test above) and confirms the binding above
+    would go red for exactly that entry, one subTest per name, per G-109
+    (the mutation must change structure, not merely presence). Mutates the
+    anchor.sh side only -- the DUPLICATE per its own comment quoted above,
+    mirroring which side PhaseFolderNamesBindingRedProofTest mutates."""
+
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="wi0126-t5-redproof-living-files-"))
+        self.addCleanup(shutil.rmtree, self.tmpdir, ignore_errors=True)
+
+    def test_removing_one_entry_breaks_only_that_entrys_binding(self):
+        before = SCRIPT_PATH.read_bytes()
+        before_mode = SCRIPT_PATH.stat().st_mode
+        original = before.decode()
+        needle = 'LIVING_FILES="HANDOVER.md BASELINE.md BACKLOG.md SPRINT.md MEMORY.md instincts.md"'
+        self.assertIn(
+            needle, original,
+            "fixture assumption broken -- anchor.sh's LIVING_FILES literal changed, update this test",
+        )
+
+        living_files = read_enum("LIVING_FILES", PHASE_DOCS_LINT_SCRIPT)
+        for removed in living_files:
+            with self.subTest(name=removed):
+                narrowed = " ".join(f for f in living_files if f != removed)
+                mutated = original.replace(needle, 'LIVING_FILES="%s"' % narrowed, 1)
+                self.assertNotEqual(original, mutated)
+                scratch = self.tmpdir / ("anchor-%s.sh" % removed.replace(".", "_"))
+                scratch.write_text(mutated, encoding="utf-8")
+
+                mutated_names = read_enum("LIVING_FILES", scratch)
+                self.assertNotEqual(living_files, mutated_names, (removed, mutated_names))
+                self.assertNotIn(removed, mutated_names)
+                for neighbour in living_files:
+                    if neighbour != removed:
+                        self.assertIn(neighbour, mutated_names, (removed, neighbour))
+
+        self.assertEqual(before, SCRIPT_PATH.read_bytes(), "shipped file content changed")
+        self.assertEqual(before_mode, SCRIPT_PATH.stat().st_mode, "shipped file mode bits changed")

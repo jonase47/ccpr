@@ -30,7 +30,7 @@ phase system, the agent team, installation). The runtime references Claude reads
   track, learning, utility.
 
 > **Changing CCPR itself rather than using it?** The contributor checklist —
-> the 1593-test suite (`python3 -m unittest discover -s scripts/tests -t .`), the
+> the 1691-test suite (`python3 -m unittest discover -s scripts/tests -t .`), the
 > read-only linters and what their stable non-zero baseline means — lives in
 > [`../CONTRIBUTING.md`](../CONTRIBUTING.md).
 

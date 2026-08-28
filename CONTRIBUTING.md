@@ -50,15 +50,17 @@ python3 -m unittest discover -s scripts/tests -t .
 
 - **`-t .` is not optional**, and the failure mode is worth knowing because it is
   partly silent. It sets the top-level directory imports resolve against. Measured
-  on the current tree: **with** it, discovery collects **1593 tests, 0 import
-  errors**; **without** it, **1111 tests and 12 modules that fail to import** — the
-  three that use a relative import (`from .test_artifact_gate import …` twice,
-  `from .test_phase_docs_lint import …` once), plus the entire
-  `scripts/tests/workitems/` subpackage. The run does go red on those 12, so you
-  will notice something — but roughly **480 tests simply never execute**, and
+  on the current tree: **with** it, discovery collects **1691 tests, 0 import
+  errors**; **without** it, **1185 tests and 14 modules that fail to import** — the
+  five that use a relative import (`from .test_artifact_gate import …` twice,
+  `from .test_phase_docs_lint import …` three times), plus the entire
+  `scripts/tests/workitems/` subpackage. The run does go red on those 14, so you
+  will notice something — but roughly **510 tests simply never execute**, and
   nothing in the output says so. That number moves whenever a module gains a
-  relative import: it went 340 → 350 → 480 across three commits on 27–28.08.2026,
-  the last jump because `test_anchor.py` (134 tests) joined the set.
+  relative import: 340 → 350 → 480 → 510 across four commits on 27–28.08.2026. Each
+  jump bought something — the last three came from sharing one parser instead of
+  retyping a shipped list into four test modules (WI-0126) — but the cost lands
+  here, silently, on anyone who forgets the flag.
 - The full run takes **a couple of minutes**. If you drive it from an agent whose
   tool calls time out, start it in the background and wait for it once rather than
   polling.

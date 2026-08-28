@@ -42,21 +42,27 @@ import tempfile
 import unittest
 from pathlib import Path
 
+# WI-0126 tranche 5: reuses test_phase_docs_lint.py's read_enum rather than
+# growing a near-identical regex for this same "NAME=\"a b c\"" shell-string
+# shape (already shared by VALID_STATUS/VALID_PHASES there and LIVING_FILES
+# in test_anchor.py). Established cross-test-module pattern
+# (test_anchor.py imports read_phase_folders the same way; a fourth relative
+# import joins the already-documented set -- CONTRIBUTING.md's "Run the test suite" -- rather
+# than a new hazard). Tradeoff: this module now needs `-t .` on `unittest
+# discover` too.
+from .test_phase_docs_lint import read_enum
+
 SCRIPT_PATH = Path(__file__).resolve().parents[1] / "manual-lint.sh"
 
-# The 19 kind: values manual-lint.sh's VALID_KINDS accepts today, measured
-# 26.08.2026 across every shipped file, template and command in this
-# repository (docs/adr/*.md, Manual/**, commands/*.md, templates/*.md).
-# Enumerated individually in KindVocabularyExhaustiveTest, same reasoning as
+# The 19 kind: values manual-lint.sh's VALID_KINDS accepts today, parsed
+# from source (WI-0126 tranche 5) rather than retyped -- a retyped copy
+# catches the shipped list SHRINKING but not GROWING (a new value is simply
+# never swept); KindVocabularyExhaustiveTest's own count-pin test catches
+# the shrink side this parse-from-source form cannot. Enumerated
+# individually in KindVocabularyExhaustiveTest, same reasoning as
 # test_phase_docs_lint.py's VALID_STATUSES/VALID_PHASES: pinning only one
 # representative value would leave a later narrowing of the list undetected.
-VALID_KINDS = (
-    "adr", "api-resource-detail", "commands-doc-detail", "component-detail",
-    "constitution", "detail", "entity-detail", "epic-detail", "frame",
-    "learnings", "promotion-brief", "review", "risk-detail", "setup-detail",
-    "sprint-detail", "sub-index", "system-doc-detail", "track-decision",
-    "wireframe-detail",
-)
+VALID_KINDS = read_enum("VALID_KINDS", SCRIPT_PATH)
 
 
 def frontmatter_block(kind="detail", parent_index=None, extra_lines=()):
@@ -406,6 +412,12 @@ class KindVocabularyExhaustiveTest(ManualLintTestBase):
     pinning only one representative value would leave a later narrowing of
     the list undetected (same reasoning as test_phase_docs_lint.py's
     VALID_STATUSES/VALID_PHASES sweeps)."""
+
+    def test_valid_kinds_count_is_pinned_at_nineteen(self):
+        # WI-0126 tranche 5: VALID_KINDS is now parsed from source, which
+        # alone only catches a value being ADDED. This pin catches one
+        # being REMOVED -- the retyped copy's converse blind spot.
+        self.assertEqual(19, len(VALID_KINDS))
 
     def test_every_valid_kind_value_is_accepted(self):
         for i, kind in enumerate(VALID_KINDS):

@@ -235,6 +235,46 @@ All notable changes to this project are documented in this file. The format is b
   liveness assertion: measured directly, the mutated run's own exit code is 0 (both halves of the
   swap null out), so it now asserts that fact instead of relying on the section text alone.
 
+- **The last five retyped copies converted to parse-from-source, each paired with a count pin,
+  plus the binding this tranche was really for (WI-0126, tranche 5)**. A retyped copy and a
+  parsed one have OPPOSITE blind spots: the retyped copy catches a shipped list SHRINKING (the
+  test still expects the now-missing value) but not GROWING (a new value is simply never swept);
+  a parsed one catches growth automatically but not shrinkage, unless it ships with its own
+  count pin. `VALID_STATUSES`/`VALID_PHASES`/`LIVING_FILE_NAMES` (`test_phase_docs_lint.py`),
+  `VALID_KINDS` (`test_manual_lint.py`) and `CHECK_FILENAMES` (`test_conformance_run.py`, now a
+  direct binding against `parse_full_check_table()["CHECK_SCRIPTS"]`, whose own alignment
+  invariant already supplies the count pin) are now parsed from their shipped scripts, never
+  retyped — `test_frontmatter_examples_match_the_lint.py`'s own `_read_enum`, the first instance
+  of this parser shape, is lifted into `test_phase_docs_lint.py` as `read_enum(varname,
+  script_path)` so the other four reuse it instead of growing a fifth near-identical regex (a
+  fourth and fifth file now need `-t .` on `unittest discover` — CONTRIBUTING.md's own documented
+  set, up from three). Confirmed on a scratch copy for all four string-shaped targets: removing
+  an entry breaks its count pin, adding one is picked up by the sweep with no test-file edit.
+
+  The prize: `LIVING_FILES` is duplicated verbatim across two shipped scripts
+  (`phase-docs-lint.sh:62`, `anchor.sh:67`) — deliberately, per `anchor.sh`'s own comment
+  (sourcing the other script would execute its whole scan), but nothing checked the two stayed in
+  agreement. Measured, not assumed from the two lines looking alike: byte-identical today.
+  `LivingFilesCrossScriptBindingTest` binds both, parsed from source on both sides; a scratch
+  mutation proof narrows `anchor.sh`'s copy — one subTest per name — and confirms the binding
+  fires. The assertion is symmetric, so narrowing the other copy would fail it too, but the
+  suite does not exercise that direction and this entry does not claim it does.
+  `VALID_PHASES`'s own derivation (`range(9)`) was checked against the shipped
+  `VALID_PHASES="P0 P1 P2 P3 P4 P5 P6 P7 P8"` directly — still exactly `P0`…`P8` contiguous, no
+  gap hiding behind the derivation.
+
+  Enumerated (deliverable 5), two more retyped copies this item's own audit did not name: (b)'s
+  required-field list at `test_phase_docs_lint.py:260` (`["phase", "subskill", "status",
+  "last_updated"]`, a local swept list mirroring `phase-docs-lint.sh:250`'s
+  `"phase,subskill,status,last_updated"`) and `REVIEW_REQUIRED_FIELDS` (`:1679`, mirroring the
+  same script's `:275`/`:296` `kind: review` required-field checks). Both share the same
+  shrink-only blind spot as the five converted here; neither converted in this tranche (outside
+  the write boundary named for it). A related but distinct gap surfaced alongside them:
+  `memory-lint.sh:206`'s own required-field string (`"name,description,type,last_updated"`) has
+  no per-entry sweep test at all in `test_memory_lint.py` — one test covers one of its four
+  fields, not a retyped copy with a blind spot but a bare absence of the coverage this whole item
+  exists to close.
+
 - **An ADR convention: a resolved open point records its resolution in place (WI-0127)**.
   ADR-0009's follow-up 4 read "undefined" for six days after an addendum in the same file had
   answered it, and a proposal contradicting that answer was made on the strength of the stale

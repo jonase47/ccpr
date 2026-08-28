@@ -77,6 +77,18 @@ import re
 import unittest
 from pathlib import Path
 
+# WI-0126 tranche 5: this module's own _read_enum was the FIRST instance of
+# this parser shape (space-separated NAME="a b c" shell-string constants) --
+# lifted into test_phase_docs_lint.py as read_enum(varname, script_path) so
+# test_manual_lint.py's VALID_KINDS and test_anchor.py's LIVING_FILES reuse
+# it instead of each growing a near-identical regex. Established cross-
+# test-module pattern (test_anchor.py imports read_phase_folders the same
+# way). Tradeoff: this module now needs `-t .` on `unittest discover` too
+# (CONTRIBUTING.md's "Run the test suite"). It joins that already-documented
+# set; the running count lives in CONTRIBUTING, not here, so it cannot go
+# stale in a comment nobody re-reads.
+from .test_phase_docs_lint import read_enum as _read_enum
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 LINT_SCRIPT = REPO_ROOT / "scripts" / "phase-docs-lint.sh"
 
@@ -102,19 +114,6 @@ EXCLUDED_DIR = REPO_ROOT / "docs" / "workitems"
 YAML_FENCE_RE = re.compile(r"```yaml\n(.*?\n)```", re.DOTALL)
 FIELD_LINE_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*):[ \t]*(.*?)[ \t]*$")
 CANDIDATE_TOKEN_RE = re.compile(r"([A-Za-z0-9][A-Za-z0-9_-]*)")
-
-
-def _read_enum(varname):
-    """Reads VALID_PHASES / VALID_STATUS out of phase-docs-lint.sh's own
-    source text -- never re-typed here. Fails loudly (not silently returns
-    an empty set) if the script's shape changes underneath this test."""
-    text = LINT_SCRIPT.read_text(encoding="utf-8")
-    m = re.search(r'^{}="([^"]*)"'.format(re.escape(varname)), text, re.MULTILINE)
-    if not m:
-        raise AssertionError(
-            "could not find {}=\"...\" in {}".format(varname, LINT_SCRIPT)
-        )
-    return set(m.group(1).split())
 
 
 def _iter_target_files():
@@ -201,7 +200,7 @@ class PhaseValueTest(unittest.TestCase):
     accepted by phase-docs-lint.sh's own VALID_PHASES."""
 
     def test_every_phase_value_in_examples_is_valid(self):
-        valid_phases = _read_enum("VALID_PHASES")
+        valid_phases = _read_enum("VALID_PHASES", LINT_SCRIPT)
         violations = []
         for path, fields in _iter_frontmatter_blocks():
             for raw_value, line_no in fields["phase"]:
@@ -226,7 +225,7 @@ class StatusValueTest(unittest.TestCase):
     RiskDetailHasNoStatusExemptionTest and the module docstring."""
 
     def test_every_status_value_in_examples_is_valid(self):
-        valid_status = _read_enum("VALID_STATUS")
+        valid_status = _read_enum("VALID_STATUS", LINT_SCRIPT)
         blocks = (
             (path.relative_to(REPO_ROOT), fields)
             for path, fields in _iter_frontmatter_blocks()
@@ -249,7 +248,7 @@ class RiskDetailHasNoStatusExemptionTest(unittest.TestCase):
     case creeps back into `_status_violations`/StatusValueTest."""
 
     def test_an_out_of_enum_status_in_a_risk_detail_block_is_reported(self):
-        valid_status = _read_enum("VALID_STATUS")
+        valid_status = _read_enum("VALID_STATUS", LINT_SCRIPT)
         synthetic_blocks = [
             (
                 "synthetic/RISK-01.md",
