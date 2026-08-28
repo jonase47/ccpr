@@ -124,6 +124,49 @@ All notable changes to this project are documented in this file. The format is b
   equal as sets — the point of the whole item: the next divergence between the fourth skip list
   and the other three is caught here, not discovered by a sixth tranche.
 
+- **Per-entry coverage for the SAST pattern rules in `quality_scan_sast_patterns.py` (WI-0126,
+  tranche 3c)**. `PATTERNS` (5 rules — `eval/exec`, `innerHTML`, `SQL-String`, `hardcoded-secret`,
+  `console-log`) — four of the five (`innerHTML`, `SQL-String`, `hardcoded-secret`,
+  `console-log`) had zero references by name in the test suite before this tranche. `eval/exec`
+  is the exception, corrected here after an earlier claim (in this same entry) said otherwise:
+  `pattern-eval/exec` was already asserted against the real pipeline in three places in
+  `test_quality_scan.py`, but only for one extension and only on its rendered type string, never
+  on severity, message, or its other two extensions. The earlier claim came from grepping the raw
+  dict key `eval/exec`, which finds the key but not what the code emits — tests assert on the
+  rendered value `"pattern-" + name`, not the key. Each rule now fires through the real `main()`
+  on a fixture whose content is proven, by running every
+  rule's regex against every fixture, to match only that rule — the module's own extension gate
+  means only same-extension rules could ever collide, and the fixtures are built so none do. The
+  sharpest gap named in the audit, per-rule `extensions` (19 entries across 3/4/1/7/4), is now
+  covered both ways: a positive fixture per (rule, extension) pair, and the discriminating
+  negative half — a rule's own matching content under an extension it does not claim (a real
+  extension another rule DOES use, not an arbitrary unknown one) produces no finding for that
+  rule, e.g. `SQL-String` claims only `.py`, so an f-string `SELECT` under `.js` stays silent for
+  it. The removal proof mutates one extension entry out of a rule's real list via
+  `unittest.mock.patch.dict` (never a full-list swap) and fires the real `main()`.
+
+  The module's own docstring claim about a missing rule key — "no `.get`, so a rule missing one
+  is an unhandled KeyError" — does not survive a run: `main()`'s own per-file `try/except
+  Exception: pass` catches it. Measured precisely: since `PATTERNS.items()` iterates in a fixed
+  insertion order on every line of every file, breaking the FIRST rule in that order
+  (`eval/exec`) silently zeroes an entire file's findings, including that rule's own genuine
+  matches; breaking the LAST rule (`console-log`) only loses findings from the point in each
+  line's rule iteration where the break is hit onward, so an earlier rule's match on the same
+  line survives. Either way `main()` exits 0 with a plausible, non-empty report — the caller never
+  sees an error. Corrected and pinned as measured, not left as the briefing's original framing.
+
+  Verified, not fixed: `quality-scan.sh`'s summary combiner explicitly buckets only `critical`,
+  `high` and `warning` by name and assigns everything else to `info` by subtraction, while the
+  separate npm-side `SEVERITIES` vocabulary in the same script legitimises `low` and `moderate`
+  too — extracting the combiner's exact source (never retyped) and running it as a real subprocess
+  confirms both would silently land in `info`. Today's three rule severities (`high`, `critical`,
+  `info`) are all safe; PATTERNS uses neither `low` nor `moderate`. Also pinned, not closed: the
+  documented "up to 50" findings cap (`findings[:50]`) — a run with exactly 50 matches and a run
+  with 60 produce structurally identical output (a bare 50-item list, no per-item or top-level
+  marker), so a consumer of this stdout cannot tell "exactly 50" from "at least 51 more". A full
+  re-read of the ~90-line module found no other enumerated list beyond `PATTERNS` and the `:66`
+  skip tuple tranche 3b already bound.
+
 - **An ADR convention: a resolved open point records its resolution in place (WI-0127)**.
   ADR-0009's follow-up 4 read "undefined" for six days after an addendum in the same file had
   answered it, and a proposal contradicting that answer was made on the strength of the stale

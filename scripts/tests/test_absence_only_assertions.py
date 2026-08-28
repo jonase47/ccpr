@@ -70,6 +70,21 @@ naming shape actually used across the corpus at write time: `run_lint`,
 entirely -- it cannot exhibit this defect shape because there is nothing
 external whose liveness could go unobserved.
 
+**Measured blind spot (28.08.2026, against test_quality_scan_sast_patterns.py,
+WI-0126 tranche 3c):** `_calls_a_subprocess` only matches an `ast.Call` whose
+`func` is an `ast.Attribute` -- `self.<name>(...)` or `subprocess.run(...)`.
+A bare module-level helper function, e.g. `_run_main_against(files)`, parses
+as `ast.Call(func=ast.Name(...))` and is invisible to this gate in either
+direction: a test method built on such a helper is never recognised as
+"subprocess invoked" at all, so none of its assertions -- positive or
+negative-shaped -- are ever inspected. This is why tranche 3c's 22 tests
+(all built on a module-level `_run_main_against`, not a `self.<name>` method)
+did not move this scanner's in-scope count. Distinct from the three
+false-positive categories already registered in `EXEMPTION_REASONS` above:
+those are cases this scanner sees and mis-scores; this is a case it never
+sees. Not closed here -- widening the gate would move this scanner's own
+pinned counts, a decision outside this tranche's write boundary.
+
 ## What counts as a positive ("liveness") assertion -- recognised in more
 ## than one shape, per the work item's own calibration requirement
 
@@ -915,8 +930,9 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
         picked up automatically -- this only pins that the glob itself
         still reaches the files known at write time (WI-0125, 27.08.2026).
 
-        Bumped 40 -> 41 on 28.08.2026: WI-0126 tranche 2 added
-        test_next_steps_lists.py. Note the in-scope count above did NOT
+        Bumped 40 -> 41 -> 42 on 28.08.2026: WI-0126 tranche 2 added
+        test_next_steps_lists.py, tranche 3c added
+        test_quality_scan_sast_patterns.py. Note the in-scope count above did NOT
         move (921) -- that module's 19 tests import next_steps.py directly
         and never invoke a subprocess, so none of them is in scope for the
         absence-only rule. Two pins, two different questions: this one asks
@@ -924,7 +940,7 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
         population change"."""
         files = sorted(TESTS_DIR.glob("*.py")) + sorted((TESTS_DIR / "workitems").glob("*.py"))
         names = sorted(f.relative_to(TESTS_DIR).as_posix() for f in files if f.name != "__init__.py")
-        self.assertEqual(41, len(names))
+        self.assertEqual(42, len(names))
         self.assertIn("test_absence_only_assertions.py", names)
         self.assertIn("test_phase_docs_lint.py", names)
         self.assertIn("workitems/test_migrate.py", names)
