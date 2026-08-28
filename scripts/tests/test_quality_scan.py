@@ -1008,7 +1008,9 @@ class SkipDirsDefinitionsStayEqualTest(unittest.TestCase):
     each other, which would only prove two humans could type the same
     tuple twice. The length pin catches the failure mode the equality
     check alone would miss: both definitions shrinking in lockstep (e.g.
-    both losing "venv" again) stays equal to itself the whole time."""
+    both losing "venv" again) stays equal to itself the whole time. Pinned
+    at 5, not 4, since tranche 3b (WI-0126) added ".venv" to both -- see
+    DotVenvSkipBehaviourChangeTest below for the behaviour proof."""
 
     def test_both_skip_dirs_definitions_are_identical(self):
         content = SCRIPT.read_text(encoding="utf-8")
@@ -1020,7 +1022,7 @@ class SkipDirsDefinitionsStayEqualTest(unittest.TestCase):
         )
         first, second = tuples
         self.assertEqual(first, second, "the two SKIP_DIRS definitions have diverged")
-        self.assertEqual(4, len(first), first)
+        self.assertEqual(5, len(first), first)
 
 
 class SkipDirsDefinitionsGuardFiresOnDivergenceTest(unittest.TestCase):
@@ -1030,7 +1032,7 @@ class SkipDirsDefinitionsGuardFiresOnDivergenceTest(unittest.TestCase):
     let alone the shipped file itself -- so there is nothing here for
     `git stash` or any other abortable step to lose."""
 
-    NEEDLE = 'SKIP_DIRS = ("node_modules", ".git", "__pycache__", "venv")'
+    NEEDLE = 'SKIP_DIRS = ("node_modules", ".git", "__pycache__", "venv", ".venv")'
 
     def setUp(self):
         self.content = SCRIPT.read_text(encoding="utf-8")
@@ -1042,7 +1044,7 @@ class SkipDirsDefinitionsGuardFiresOnDivergenceTest(unittest.TestCase):
     def test_a_pair_that_diverges_in_one_definition_is_caught_by_equality(self):
         mutated = self.content.replace(
             self.NEEDLE,
-            'SKIP_DIRS = ("node_modules", ".git", "__pycache__")',
+            'SKIP_DIRS = ("node_modules", ".git", "__pycache__", "venv")',
             1,  # only the FIRST occurrence -- the second stays on the superset
         )
         first, second = extract_skip_dirs_tuples(mutated)
@@ -1054,7 +1056,7 @@ class SkipDirsDefinitionsGuardFiresOnDivergenceTest(unittest.TestCase):
     def test_a_pair_that_shrinks_in_lockstep_stays_equal_and_needs_the_length_pin(self):
         mutated = self.content.replace(
             self.NEEDLE,
-            'SKIP_DIRS = ("node_modules", ".git", "__pycache__")',
+            'SKIP_DIRS = ("node_modules", ".git", "__pycache__", "venv")',
             2,  # BOTH occurrences -- equality alone would not catch this
         )
         first, second = extract_skip_dirs_tuples(mutated)
@@ -1063,9 +1065,573 @@ class SkipDirsDefinitionsGuardFiresOnDivergenceTest(unittest.TestCase):
             "fixture assumption: a lockstep shrink is still equal to itself",
         )
         self.assertNotEqual(
-            4, len(first),
+            5, len(first),
             "mutation did not actually shrink the tuple -- guard proof is meaningless",
         )
+
+
+# =============================================================================
+# WI-0126 tranche 3b, deliverable 4 continued: a FIFTH skip list surfaced
+# while auditing this one -- scripts/lib/quality_scan_sast_patterns.py:66
+# carries its own os.walk("src") skip tuple, inline in the loop rather than
+# a named constant, and it already carried ".venv" alongside "venv" before
+# this tranche touched anything. The PO decision behind tranche 3a's
+# SKIP_DIRS unification was taken over three lists; the true superset
+# across all four is FIVE entries, not four. ".venv" is added to both
+# SKIP_DIRS definitions in scripts/quality-scan.sh -- the only shipped-
+# script edit this tranche is authorised to make. quality_scan_sast_
+# patterns.py's own tuple is untouched: it was already the superset.
+# =============================================================================
+
+
+class DotVenvSkipBehaviourChangeTest(QualityScanTestBase):
+    """The required proof, the same shape as SkipDirsVenvBehaviourChangeTest
+    above but for ".venv": before adding it to both SKIP_DIRS definitions,
+    a src/.venv/ fixture behaved exactly like the pre-fix src/venv/
+    fixture did in tranche 3a -- the CORS walk descended into it, and the
+    consent walk read its noise as the project's own consent handling.
+    After, ".venv" is skipped the same way "venv" already was.
+
+    Unlike SkipDirsVenvBehaviourChangeTest's per-walk-loop-line mutation
+    (needed there because tranche 3a introduced the named SKIP_DIRS
+    constant AS PART OF the fix being proven, so the constant itself had
+    to stay in place while individual walks were reverted), both SKIP_DIRS
+    DEFINITIONS already exist post-3a here -- reverting them directly to
+    their pre-".venv" 4-entry shape is itself a structural removal
+    (G-109), not a smaller step than what this test proves."""
+
+    POST_FIX = 'SKIP_DIRS = ("node_modules", ".git", "__pycache__", "venv", ".venv")'
+    PRE_FIX = 'SKIP_DIRS = ("node_modules", ".git", "__pycache__", "venv")'
+
+    def build_pre_dotvenv_fix_mutant(self, tmp):
+        mutant = Path(tmp) / "quality-scan.sh"
+        content = SCRIPT.read_text(encoding="utf-8")
+        self.assertEqual(
+            2, content.count(self.POST_FIX),
+            "fixture assumption: exactly two SKIP_DIRS definitions carry .venv",
+        )
+        content = content.replace(self.POST_FIX, self.PRE_FIX)
+        mutant.write_text(content, encoding="utf-8")
+        return mutant
+
+    def plant_cors_dotvenv_fixture(self):
+        f = self.project / "src" / ".venv" / "lib" / "sitecustomize.py"
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text("ALLOW_ORIGIN = 'Access-Control-Allow-Origin: *'\n", encoding="utf-8")
+
+    def plant_consent_dotvenv_fixture(self):
+        f = self.project / "src" / ".venv" / "consent_stub.py"
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text("# consent management stub\n", encoding="utf-8")
+        for name in ("a.py", "b.py", "c.py"):
+            (self.project / "src" / name).write_text("x = 1\n", encoding="utf-8")
+
+    def test_before_the_fix_the_cors_walk_descends_into_dotvenv_and_finds_it(self):
+        self.plant_cors_dotvenv_fixture()
+        with tempfile.TemporaryDirectory(prefix="ccpr-wi0126-dotvenv-") as tmp:
+            mutant = self.build_pre_dotvenv_fix_mutant(tmp)
+            r = subprocess.run(
+                ["bash", str(mutant), "config", str(self.project)],
+                capture_output=True, text=True, env=self.env(),
+            )
+            self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+            report = json.loads(self.report_path().read_text(encoding="utf-8"))
+            findings = report["scans"][0]["findings"]
+            self.assertEqual(1, len(findings), findings)
+            self.assertIn(".venv", findings[0]["file"])
+
+    def test_after_the_fix_the_cors_walk_does_not_descend_into_dotvenv(self):
+        self.plant_cors_dotvenv_fixture()
+        r = self.run_scan("config")
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        report = json.loads(self.report_path().read_text(encoding="utf-8"))
+        self.assertEqual([], report["scans"][0]["findings"])
+
+    def test_before_the_fix_dotvenv_noise_suppresses_the_missing_consent_finding(self):
+        self.plant_consent_dotvenv_fixture()
+        with tempfile.TemporaryDirectory(prefix="ccpr-wi0126-dotvenv-") as tmp:
+            mutant = self.build_pre_dotvenv_fix_mutant(tmp)
+            r = subprocess.run(
+                ["bash", str(mutant), "dsgvo", str(self.project)],
+                capture_output=True, text=True, env=self.env(),
+            )
+            self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+            report = json.loads(self.report_path().read_text(encoding="utf-8"))
+            types = [f["type"] for f in report["scans"][0]["findings"]]
+            self.assertNotIn(
+                "dsgvo-consent", types,
+                "fixture assumption: pre-fix walk still picks up .venv noise",
+            )
+
+    def test_after_the_fix_the_missing_consent_finding_fires_correctly(self):
+        self.plant_consent_dotvenv_fixture()
+        r = self.run_scan("dsgvo")
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        report = json.loads(self.report_path().read_text(encoding="utf-8"))
+        types = [f["type"] for f in report["scans"][0]["findings"]]
+        self.assertIn("dsgvo-consent", types)
+
+    def test_the_shipped_script_is_untouched_by_the_dotvenv_mutation_probe(self):
+        before = SCRIPT.read_bytes()
+        before_mode = stat.S_IMODE(SCRIPT.stat().st_mode)
+        with tempfile.TemporaryDirectory(prefix="ccpr-wi0126-dotvenv-") as tmp:
+            self.build_pre_dotvenv_fix_mutant(tmp)
+        self.assertEqual(before, SCRIPT.read_bytes())
+        self.assertEqual(before_mode, stat.S_IMODE(SCRIPT.stat().st_mode))
+
+
+SAST_SKIP_DIRS_RE = re.compile(
+    r'dirs\[:\] = \[d for d in dirs if d not in \(([^)]*)\)\]'
+)
+
+
+def sast_module_skip_dirs():
+    """The fourth, previously unnoticed skip list -- extracted verbatim
+    from scripts/lib/quality_scan_sast_patterns.py, which this tranche's
+    write boundary explicitly does not touch (it was already the
+    superset). Returns None if the tuple's shape moved, rather than
+    raising, so the caller controls the failure message."""
+    content = (REPO_ROOT / "scripts" / "lib" / "quality_scan_sast_patterns.py").read_text(
+        encoding="utf-8"
+    )
+    m = SAST_SKIP_DIRS_RE.search(content)
+    return None if m is None else ast.literal_eval("(" + m.group(1) + ")")
+
+
+class SkipDirsMatchesSastModuleTest(unittest.TestCase):
+    """The point of the whole item, in the briefing's own words: the SAST
+    module's skip tuple and quality-scan.sh's two SKIP_DIRS definitions
+    must now be equal, so the next divergence between the fourth skip
+    list and the first three is caught here instead of surfacing as a
+    fifth tranche. Compared as SETS -- the SAST tuple's own element order
+    is its own concern, not something this binding should pin."""
+
+    def test_sast_module_skip_dirs_equals_both_quality_scan_sh_definitions(self):
+        sast_dirs = sast_module_skip_dirs()
+        self.assertIsNotNone(sast_dirs, "fixture assumption: SAST module's skip tuple moved")
+        sast_dirs = set(sast_dirs)
+        script_dirs = extract_skip_dirs_tuples(SCRIPT.read_text(encoding="utf-8"))
+        self.assertEqual(2, len(script_dirs))
+        for dirs in script_dirs:
+            self.assertEqual(sast_dirs, set(dirs))
+
+    def test_the_binding_fires_on_a_scratch_divergence(self):
+        """G-141: proof the equality check above is not vacuously true.
+        Removes one entry from an in-memory COPY of the SAST tuple -- the
+        real file on disk is never touched -- and confirms the sets
+        diverge."""
+        sast_dirs = sast_module_skip_dirs()
+        self.assertIsNotNone(sast_dirs, "fixture assumption: SAST module's skip tuple moved")
+        sast_dirs = set(sast_dirs)
+        mutated = sast_dirs - {"venv"}
+        self.assertNotEqual(
+            sast_dirs, mutated,
+            "mutation did not shrink the set -- guard proof is meaningless",
+        )
+
+
+# =============================================================================
+# WI-0126 tranche 3b, deliverable 1: PII_PATTERNS (scripts/quality-scan.sh,
+# scan_dsgvo() heredoc) -- 4 entries, zero references by name anywhere in
+# this module before this tranche. Each entry's regex is checked against a
+# fixture built to trip ONLY that one entry: phone-de and iban are
+# permissive enough that a careless fixture satisfies both at once (an
+# IBAN-shaped digit run containing a literal "0" also reads as a phone
+# number under phone-de's very permissive tail), which would collapse the
+# per-entry claim -- each fixture line below is hand-checked against all
+# four regexes to confirm it matches only its own.
+# =============================================================================
+
+PII_PATTERN_NAMES = ("email", "phone-de", "iban", "geburtsdatum")
+
+PII_FIXTURE_LINES = {
+    # No digits at all -- clear of phone-de (needs "0"/"+49") and iban
+    # (needs two letters directly followed by two digits).
+    "email": 'logger.info("user@example.com")\n',
+    # No "@", no two letters directly followed by two digits -- clear of
+    # email and iban.
+    "phone-de": 'logger.info("0151 23456789")\n',
+    # No "@", and no literal "0" digit anywhere in the line -- clear of
+    # email and phone-de (whose very permissive tail would otherwise
+    # swallow most of an IBAN's digit run).
+    "iban": 'logger.info("AT12 3456 7891 2345 6789 12")\n',
+    # No digits, no "@" -- clear of all three other patterns.
+    "geburtsdatum": 'logger.info("geburtsdatum")\n',
+}
+
+
+def dict_entry_line(source, key):
+    """Returns every source line defining a `    "key": ...` dict entry,
+    verbatim -- located by a plain prefix search, never retyped."""
+    prefix = '    "%s":' % key
+    return [l for l in source.splitlines(keepends=True) if l.startswith(prefix)]
+
+
+PII_KEY_LINE_RE = re.compile(r'^    "([\w-]+)": r\'', re.MULTILINE)
+
+
+def pii_pattern_names_from_source(source=None):
+    source = source if source is not None else SCRIPT.read_text(encoding="utf-8")
+    start = source.index("PII_PATTERNS = {")
+    end = source.index("\n}\n", start)
+    return PII_KEY_LINE_RE.findall(source[start:end])
+
+
+class PiiPatternsShapeTest(unittest.TestCase):
+    """Count pin at 4 -- the key list is extracted from the source block
+    with its own regex, not compared against a retyped copy of itself."""
+
+    def test_pii_patterns_are_pinned_at_4_entries(self):
+        names = pii_pattern_names_from_source()
+        self.assertEqual(list(PII_PATTERN_NAMES), names)
+        self.assertEqual(4, len(names))
+
+
+class PiiPatternsPerEntryTest(QualityScanTestBase):
+    """Deliverable 1: each of the four PII_PATTERNS regexes finds its own
+    shape and names it in the finding's type (dsgvo-pii-<name>). One probe
+    file per entry, planted together in a single project and scanned
+    once -- each file's content is hand-checked (see PII_FIXTURE_LINES
+    above) to trigger only its own regex, so accumulating all four in one
+    run does not collapse the per-entry claim.
+
+    This class carries no count assertion of its own: an emptied
+    PII_PATTERN_NAMES would make the loop below vacuous, and the guard
+    against that is PiiPatternsShapeTest above, which pins the count at 4
+    AND compares the tuple against the names extracted from the shipped
+    source. Noted so a later edit to that sibling does not silently remove
+    this class's degenerate-input guard along with it."""
+
+    def test_each_pii_pattern_finds_its_own_shape(self):
+        src = self.project / "src"
+        src.mkdir(parents=True, exist_ok=True)
+        for name in PII_PATTERN_NAMES:
+            probe_name = "probe_%s.py" % name.replace("-", "_")
+            (src / probe_name).write_text(PII_FIXTURE_LINES[name], encoding="utf-8")
+
+        r = self.run_scan("dsgvo")
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        report = json.loads(self.report_path().read_text(encoding="utf-8"))
+        types = [f["type"] for f in report["scans"][0]["findings"]]
+        for name in PII_PATTERN_NAMES:
+            with self.subTest(name=name):
+                self.assertIn("dsgvo-pii-%s" % name, types, types)
+
+
+class PiiPatternsRemovalRedProofTest(QualityScanTestBase):
+    """Removal proof through the real subprocess (G-107/G-109), not an
+    in-memory dict rebuild: PII_PATTERNS is a bash-heredoc-local dict, so
+    the mutation is the same scratch-copy shape as
+    SkipDirsVenvBehaviourChangeTest -- one dict-entry LINE removed from a
+    copy of the shipped script, run against that entry's own fixture. The
+    unmutated "before" run is measured first, so a failure here can never
+    be blamed on a broken fixture (CompletedHandlersRemovalRedProofTest's
+    own rule)."""
+
+    def test_removing_a_pii_pattern_entry_makes_its_own_finding_disappear(self):
+        source = SCRIPT.read_text(encoding="utf-8")
+        for name in PII_PATTERN_NAMES:
+            with self.subTest(name=name):
+                lines = dict_entry_line(source, name)
+                self.assertEqual(
+                    1, len(lines),
+                    "fixture assumption: PII_PATTERNS[%r] entry moved" % name,
+                )
+                needle = lines[0]
+
+                probe = self.project / "src" / "probe.py"
+                probe.parent.mkdir(parents=True, exist_ok=True)
+                probe.write_text(PII_FIXTURE_LINES[name], encoding="utf-8")
+
+                before = self.run_scan("dsgvo")
+                self.assertEqual(0, before.returncode, before.stdout + before.stderr)
+                before_report = json.loads(self.report_path().read_text(encoding="utf-8"))
+                before_types = [f["type"] for f in before_report["scans"][0]["findings"]]
+                self.assertIn(
+                    "dsgvo-pii-%s" % name, before_types,
+                    "fixture assumption: entry's own probe produces no finding before removal",
+                )
+
+                mutated_source = source.replace(needle, "", 1)
+                self.assertNotEqual(source, mutated_source)
+
+                with tempfile.TemporaryDirectory(prefix="ccpr-wi0126-pii-") as tmp:
+                    mutant = Path(tmp) / "quality-scan.sh"
+                    mutant.write_text(mutated_source, encoding="utf-8")
+                    after = subprocess.run(
+                        ["bash", str(mutant), "dsgvo", str(self.project)],
+                        capture_output=True, text=True, env=self.env(),
+                    )
+                self.assertEqual(0, after.returncode, after.stdout + after.stderr)
+                after_report = json.loads(self.report_path().read_text(encoding="utf-8"))
+                after_types = [f["type"] for f in after_report["scans"][0]["findings"]]
+                self.assertNotIn(
+                    "dsgvo-pii-%s" % name, after_types,
+                    "removing %r from PII_PATTERNS did not make its finding disappear" % name,
+                )
+
+
+# =============================================================================
+# WI-0126 tranche 3b, deliverables 2 and 3: the consent-terms and config-
+# filenames lists are INLINE literals, not named constants -- the briefing
+# explicitly forbids renaming them into constants (a shipped-script edit
+# this tranche has no approval for). Both are tested behaviourally, and
+# both share the same extraction/rebuild helpers below.
+# =============================================================================
+
+
+def extract_bracket_literal(line):
+    """Extracts a `[...]` list literal substring from a source line,
+    verbatim -- never retyped."""
+    start = line.index("[")
+    end = line.index("]", start) + 1
+    return line[start:end]
+
+
+def rebuild_list_literal(entries):
+    """Serialises a list of plain strings back into the same double-quoted
+    literal style the shipped lists use -- used only to build a MUTATED
+    in-memory literal for a removal proof, never to reconstruct the
+    original (which is always extracted verbatim instead)."""
+    return "[" + ", ".join('"%s"' % e for e in entries) + "]"
+
+
+CONSENT_TERMS = ("consent", "cookie-banner", "datenschutz", "privacy-policy")
+
+CONSENT_LOOP_NEEDLE = (
+    '            if any(term in content for term in '
+    '["consent", "cookie-banner", "datenschutz", "privacy-policy"]):\n'
+)
+
+
+class ConsentTermsShapeTest(unittest.TestCase):
+    def test_consent_terms_list_is_pinned_at_4_entries(self):
+        source = SCRIPT.read_text(encoding="utf-8")
+        self.assertEqual(
+            1, source.count(CONSENT_LOOP_NEEDLE),
+            "fixture assumption: consent terms list moved",
+        )
+        terms = ast.literal_eval(extract_bracket_literal(CONSENT_LOOP_NEEDLE))
+        self.assertEqual(list(CONSENT_TERMS), terms)
+        self.assertEqual(4, len(terms))
+
+
+class ConsentTermsPerEntryTest(QualityScanTestBase):
+    """Deliverable 2: each of the four consent terms, alone in a src/
+    file, suppresses the "No consent mechanism found" finding. Two
+    gotchas from the briefing, both measured here rather than assumed:
+    the finding is gated on `src_files > 2` (see the SKIP_DIRS comment
+    block above scan_config() for the unfiltered counting walk this
+    refers to), so every fixture plants two filler files alongside the
+    probe; and the content is lowercased before the match, so one entry
+    is probed in mixed case deliberately."""
+
+    def plant_filler_files(self, src):
+        for i in range(2):
+            (src / ("filler_%d.py" % i)).write_text("x = 1\n", encoding="utf-8")
+
+    def fresh_src(self):
+        src = self.project / "src"
+        if src.exists():
+            shutil.rmtree(src)
+        src.mkdir(parents=True)
+        return src
+
+    def test_each_consent_term_alone_suppresses_the_missing_consent_finding(self):
+        for term in CONSENT_TERMS:
+            with self.subTest(term=term):
+                src = self.fresh_src()
+                self.plant_filler_files(src)
+                (src / "consent_probe.py").write_text("# %s\n" % term, encoding="utf-8")
+
+                r = self.run_scan("dsgvo")
+                self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+                report = json.loads(self.report_path().read_text(encoding="utf-8"))
+                types = [f["type"] for f in report["scans"][0]["findings"]]
+                self.assertNotIn("dsgvo-consent", types, types)
+
+    def test_a_mixed_case_consent_term_still_suppresses_the_finding(self):
+        src = self.fresh_src()
+        self.plant_filler_files(src)
+        (src / "consent_probe.py").write_text("# COOKIE-Banner Notice\n", encoding="utf-8")
+
+        r = self.run_scan("dsgvo")
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        report = json.loads(self.report_path().read_text(encoding="utf-8"))
+        types = [f["type"] for f in report["scans"][0]["findings"]]
+        self.assertNotIn("dsgvo-consent", types, types)
+
+    def test_none_of_the_terms_present_fires_the_finding(self):
+        src = self.fresh_src()
+        self.plant_filler_files(src)
+        (src / "no_consent.py").write_text("x = 1\n", encoding="utf-8")
+
+        r = self.run_scan("dsgvo")
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        report = json.loads(self.report_path().read_text(encoding="utf-8"))
+        types = [f["type"] for f in report["scans"][0]["findings"]]
+        self.assertIn("dsgvo-consent", types)
+
+
+class ConsentTermsRemovalRedProofTest(QualityScanTestBase):
+    """Removal proof: removes one term from the inline consent-terms list
+    in a scratch copy of the shipped script and confirms the "No consent
+    mechanism found" finding -- suppressed by that term alone before the
+    removal -- fires again after. The inverse framing of
+    SkipDirsVenvBehaviourChangeTest's consent proof: there, an ADDED skip
+    entry suppresses noise that used to leak in; here, a REMOVED
+    recognised term stops suppressing a real signal it used to catch."""
+
+    def test_removing_a_consent_term_makes_the_finding_fire_again(self):
+        source = SCRIPT.read_text(encoding="utf-8")
+        self.assertEqual(
+            1, source.count(CONSENT_LOOP_NEEDLE),
+            "fixture assumption: consent terms list moved",
+        )
+        for term in CONSENT_TERMS:
+            with self.subTest(term=term):
+                src = self.project / "src"
+                if src.exists():
+                    shutil.rmtree(src)
+                src.mkdir(parents=True)
+                for i in range(2):
+                    (src / ("filler_%d.py" % i)).write_text("x = 1\n", encoding="utf-8")
+                (src / "consent_probe.py").write_text("# %s\n" % term, encoding="utf-8")
+
+                before = self.run_scan("dsgvo")
+                self.assertEqual(0, before.returncode, before.stdout + before.stderr)
+                before_report = json.loads(self.report_path().read_text(encoding="utf-8"))
+                before_types = [f["type"] for f in before_report["scans"][0]["findings"]]
+                self.assertNotIn(
+                    "dsgvo-consent", before_types,
+                    "fixture assumption: term suppresses the finding before removal",
+                )
+
+                remaining = [t for t in CONSENT_TERMS if t != term]
+                mutated_needle = CONSENT_LOOP_NEEDLE.replace(
+                    extract_bracket_literal(CONSENT_LOOP_NEEDLE),
+                    rebuild_list_literal(remaining),
+                )
+                self.assertNotEqual(CONSENT_LOOP_NEEDLE, mutated_needle)
+                mutated_source = source.replace(CONSENT_LOOP_NEEDLE, mutated_needle, 1)
+
+                with tempfile.TemporaryDirectory(prefix="ccpr-wi0126-consent-") as tmp:
+                    mutant = Path(tmp) / "quality-scan.sh"
+                    mutant.write_text(mutated_source, encoding="utf-8")
+                    after = subprocess.run(
+                        ["bash", str(mutant), "dsgvo", str(self.project)],
+                        capture_output=True, text=True, env=self.env(),
+                    )
+                self.assertEqual(0, after.returncode, after.stdout + after.stderr)
+                after_report = json.loads(self.report_path().read_text(encoding="utf-8"))
+                after_types = [f["type"] for f in after_report["scans"][0]["findings"]]
+                self.assertIn(
+                    "dsgvo-consent", after_types,
+                    "removing %r from the consent terms list did not make the finding fire again" % term,
+                )
+
+
+CONFIG_FILENAMES = (
+    "config.json", "config.yaml", "config.yml",
+    "settings.py", "app.config.ts", "app.config.js",
+)
+
+CONFIG_LOOP_NEEDLE = (
+    'for cfg_file in ["config.json", "config.yaml", "config.yml", '
+    '"settings.py", "app.config.ts", "app.config.js"]:\n'
+)
+
+
+class ConfigFilenamesShapeTest(unittest.TestCase):
+    def test_config_filenames_list_is_pinned_at_6_entries(self):
+        source = SCRIPT.read_text(encoding="utf-8")
+        self.assertEqual(
+            1, source.count(CONFIG_LOOP_NEEDLE),
+            "fixture assumption: config filenames list moved",
+        )
+        names = ast.literal_eval(extract_bracket_literal(CONFIG_LOOP_NEEDLE))
+        self.assertEqual(list(CONFIG_FILENAMES), names)
+        self.assertEqual(6, len(names))
+
+
+class ConfigFilenamesPerEntryTest(QualityScanTestBase):
+    """Deliverable 3: for each of the six config filenames, a file of
+    that name with a debug-true setting produces the "Debug mode possibly
+    active" finding naming that file. The debug condition (`"debug" in
+    content and ("true" in content or "= true" in content)`) is looser
+    than it looks -- `debug = true\\n` satisfies it for the right reason
+    (both literal substrings actually present), not by accident."""
+
+    def test_each_config_filename_produces_its_own_debug_finding(self):
+        for name in CONFIG_FILENAMES:
+            (self.project / name).write_text("debug = true\n", encoding="utf-8")
+
+        r = self.run_scan("config")
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        report = json.loads(self.report_path().read_text(encoding="utf-8"))
+        debug_files = [
+            f["file"] for f in report["scans"][0]["findings"]
+            if f["message"].startswith("Debug mode possibly active")
+        ]
+        self.assertEqual(6, len(debug_files), debug_files)
+        for name in CONFIG_FILENAMES:
+            with self.subTest(name=name):
+                self.assertIn(name, debug_files)
+
+
+class ConfigFilenamesRemovalRedProofTest(QualityScanTestBase):
+    """Removal proof: removes one filename from the inline config-
+    filenames list in a scratch copy of the shipped script and confirms
+    that filename's debug finding -- present before the removal --
+    disappears after. The unmutated "before" run is measured first."""
+
+    def test_removing_a_config_filename_makes_its_own_finding_disappear(self):
+        source = SCRIPT.read_text(encoding="utf-8")
+        self.assertEqual(
+            1, source.count(CONFIG_LOOP_NEEDLE),
+            "fixture assumption: config filenames list moved",
+        )
+        for name in CONFIG_FILENAMES:
+            with self.subTest(name=name):
+                (self.project / name).write_text("debug = true\n", encoding="utf-8")
+
+                before = self.run_scan("config")
+                self.assertEqual(0, before.returncode, before.stdout + before.stderr)
+                before_report = json.loads(self.report_path().read_text(encoding="utf-8"))
+                before_files = [
+                    f["file"] for f in before_report["scans"][0]["findings"]
+                    if f["message"].startswith("Debug mode possibly active")
+                ]
+                self.assertIn(
+                    name, before_files,
+                    "fixture assumption: this filename's own probe produces no finding before removal",
+                )
+
+                remaining = [n for n in CONFIG_FILENAMES if n != name]
+                mutated_needle = CONFIG_LOOP_NEEDLE.replace(
+                    extract_bracket_literal(CONFIG_LOOP_NEEDLE),
+                    rebuild_list_literal(remaining),
+                )
+                self.assertNotEqual(CONFIG_LOOP_NEEDLE, mutated_needle)
+                mutated_source = source.replace(CONFIG_LOOP_NEEDLE, mutated_needle, 1)
+
+                with tempfile.TemporaryDirectory(prefix="ccpr-wi0126-config-") as tmp:
+                    mutant = Path(tmp) / "quality-scan.sh"
+                    mutant.write_text(mutated_source, encoding="utf-8")
+                    after = subprocess.run(
+                        ["bash", str(mutant), "config", str(self.project)],
+                        capture_output=True, text=True, env=self.env(),
+                    )
+                self.assertEqual(0, after.returncode, after.stdout + after.stderr)
+                after_report = json.loads(self.report_path().read_text(encoding="utf-8"))
+                after_files = [
+                    f["file"] for f in after_report["scans"][0]["findings"]
+                    if f["message"].startswith("Debug mode possibly active")
+                ]
+                self.assertNotIn(
+                    name, after_files,
+                    "removing %r from the config filenames list did not make its finding disappear" % name,
+                )
 
 
 # -----------------------------------------------------------------------------

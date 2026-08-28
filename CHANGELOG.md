@@ -94,6 +94,36 @@ All notable changes to this project are documented in this file. The format is b
   this tranche, and not the same PO decision — filtering that walk would change when the finding
   fires, not just what noise a filtered walk skips.
 
+- **Per-entry coverage for `quality-scan.sh`'s three content lists, plus a fifth skip list
+  surfaced along the way (WI-0126, tranche 3b)**. `PII_PATTERNS` (`email`, `phone-de`, `iban`,
+  `geburtsdatum`) and the DSGVO consent terms (`consent`, `cookie-banner`, `datenschutz`,
+  `privacy-policy`) had **zero** references by name anywhere in the test suite; of the six config
+  filenames (`config.json`, `config.yaml`, `config.yml`, `settings.py`, `app.config.ts`,
+  `app.config.js`), only `config.json` was ever exercised. All three are now covered per entry:
+  each PII regex is proven against a fixture built to trip only its own shape — `phone-de` and
+  `iban` are permissive enough that a careless IBAN fixture containing a literal `"0"` digit also
+  reads as a phone number, which would have collapsed the per-entry claim; each consent term is
+  proven to suppress the "no consent mechanism found" finding alone, in mixed case, with the
+  `src_files > 2` gate satisfied (a fixture with two files measures nothing — the exact way an
+  earlier probe in this work item measured nothing); each config filename is proven to produce its
+  own "debug mode possibly active" finding. All three get a real-subprocess removal proof (never
+  an in-memory list rebuild) and a literal count pin (4, 4, 6).
+
+  Auditing PII_PATTERNS's own skip-list comment surfaced a **fifth** skip list this item had not
+  named: `scripts/lib/quality_scan_sast_patterns.py:66` carries its own inline `os.walk("src")`
+  skip tuple, already `("node_modules", ".git", "__pycache__", "venv", ".venv")` — five entries,
+  including `.venv`, before this tranche touched anything. Tranche 3a's PO decision to unify on
+  "the superset" was taken over three lists; the true superset across all four is five entries, not
+  four. `.venv` is added to both `SKIP_DIRS` definitions in `scripts/quality-scan.sh` — the only
+  shipped-script edit this tranche is authorised to make; `quality_scan_sast_patterns.py`'s own
+  tuple is untouched, since it was already the superset. Measured the same way tranche 3a measured
+  `venv`: before, a `src/.venv/` fixture produces a CORS finding and suppresses the "no consent"
+  finding by reading `.venv` noise as the project's own consent handling; after, neither happens.
+  `SkipDirsDefinitionsStayEqualTest`'s length pin moves from 4 to 5, and a new binding test
+  asserts the SAST module's skip tuple and `quality-scan.sh`'s two `SKIP_DIRS` definitions are now
+  equal as sets — the point of the whole item: the next divergence between the fourth skip list
+  and the other three is caught here, not discovered by a sixth tranche.
+
 - **An ADR convention: a resolved open point records its resolution in place (WI-0127)**.
   ADR-0009's follow-up 4 read "undefined" for six days after an addendum in the same file had
   answered it, and a proposal contradicting that answer was made on the strength of the stale

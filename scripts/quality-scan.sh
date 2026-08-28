@@ -389,9 +389,14 @@ import os, json, re
 # Directories that add noise, not signal, when scanning application source
 # for CORS wildcards or a DSGVO consent mechanism (see scan_dsgvo() below for
 # the second use). PO decision (WI-0126, 28.08.2026): unify this skip *list*
-# on this superset, "venv" included, everywhere it is used -- walking a
-# virtualenv looking for either signal yields third-party noise, never a
-# real finding about THIS project's own code.
+# on this superset, "venv" and ".venv" included, everywhere it is used --
+# walking a virtualenv looking for either signal yields third-party noise,
+# never a real finding about THIS project's own code. ".venv" (tranche 3b,
+# 28.08.2026) was not part of the original three-way comparison the PO
+# decision above was based on -- it surfaced from a FOURTH, previously
+# unnoticed skip list in scripts/lib/quality_scan_sast_patterns.py, which
+# already carried both spellings. The true superset across all four lists
+# is five entries, not four.
 #
 # There are FOUR os.walk("src") call sites in this file, not three: the CORS
 # walk below, the PII walk and the consent walk in scan_dsgvo(), and a fourth,
@@ -413,10 +418,10 @@ import os, json, re
 # let the shell expand "$"-prefixed tokens inside the Python body it is meant
 # to protect. A third option -- one `export`ed shell variable read via
 # `os.environ` in both heredocs, sidestepping heredoc quoting entirely -- was
-# considered and declined: duplicating a four-tuple is simpler and more
+# considered and declined: duplicating a five-tuple is simpler and more
 # YAGNI-compliant than introducing an env-var passing convention for one pair
 # of literals.
-SKIP_DIRS = ("node_modules", ".git", "__pycache__", "venv")
+SKIP_DIRS = ("node_modules", ".git", "__pycache__", "venv", ".venv")
 
 findings = []
 
@@ -486,7 +491,7 @@ PII_PATTERNS = {
 
 # See scan_config()'s SKIP_DIRS comment above for why this heredoc needs its
 # own separate definition of the same superset (WI-0126, 28.08.2026).
-SKIP_DIRS = ("node_modules", ".git", "__pycache__", "venv")
+SKIP_DIRS = ("node_modules", ".git", "__pycache__", "venv", ".venv")
 
 findings = []
 

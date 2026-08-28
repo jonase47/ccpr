@@ -869,7 +869,7 @@ class NoStaleKnownFindingsTest(unittest.TestCase):
 
 class ClassificationCountsTest(unittest.TestCase):
     def test_classification_counts(self):
-        """Regression pin on the measured baseline: 931 `test_*` methods
+        """Regression pin on the measured baseline: 943 `test_*` methods
         across the corpus call something shaped like a subprocess invocation
         and are therefore in scope for this check; 54 of those are
         absence-only-needs-exemption (all accounted for via KNOWN_FINDINGS
@@ -895,12 +895,15 @@ class ClassificationCountsTest(unittest.TestCase):
                                moved instead, 40 -> 41)
           931 / 54             WI-0126 tranche 3a (quality-scan.sh contract
                                and skip-list coverage)
+          943 / 54             WI-0126 tranche 3b (quality-scan.sh content
+                               lists: PII_PATTERNS, consent terms, config
+                               filenames, and the .venv skip-list binding)
 
         The flagged count has not moved since round 2: every test added by
         WI-0126 so far carries a recognised liveness assertion."""
         recs = scan_tree()
         flagged = [r for r in recs if r.disposition in NEEDS_EXEMPTION]
-        self.assertEqual(931, len(recs))
+        self.assertEqual(943, len(recs))
         self.assertEqual(54, len(flagged))
 
 
