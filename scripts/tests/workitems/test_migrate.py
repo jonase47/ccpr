@@ -93,6 +93,15 @@ class MigrateLocalToYouTrackTest(unittest.TestCase):
 
     def test_second_full_run_is_a_no_op_no_duplicates(self):
         self.run_migrate()
+        # Liveness (WI-0128 finding #1): the first run actually migrated
+        # both fixture items -- classifier-visible companion to the two
+        # count/no-op comparisons below, which are already sound on their
+        # own (`run_migrate` is a plain in-process call: a real regression
+        # here raises and errors the test outright rather than silently
+        # returning an empty report the way a crashed subprocess's stdout
+        # would collapse to ""). The literal `len(...)` call must be
+        # inline for the classifier's nonzero-length-pair shape to see it.
+        self.assertEqual(2, len(self.target_backend.list()))
         first_target_count = len(self.target_backend.list())
 
         second_report = self.run_migrate()

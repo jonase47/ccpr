@@ -792,6 +792,21 @@ class RoundingBoundaryTest(HandoverSizeHookTestCase):
         """The reported defect: 5097 B against a 5120 B cap is 99.55 %, not a breach."""
         self.write_handover_of_exactly(JUST_UNDER_CAP_BYTES)
         result = self.run_hook("SessionStart", source="startup")
+        # Liveness (WI-0128 finding #1): NOT `assertEqual(0, result.
+        # returncode)` -- main()'s own `except Exception: sys.exit(0)`
+        # catch-all (agent-monitor.py:1168-1178) makes returncode 0
+        # regardless of ANY internal crash, so that shape would be
+        # classifier-visible but vacuous here, never able to go red. The
+        # real positive proof already lives inside self.assert_level()'s
+        # own body (assertIsNotNone/assertEqual calls this method's own AST
+        # never sees, since it is a SEPARATE function definition) -- this
+        # assertTrue is the classifier-visible companion. Asserting
+        # non-emptiness directly (not `any("HANDOVER" in w for w in ...)`,
+        # which is tautological -- size_warnings() already filters for
+        # "HANDOVER" in its own list comprehension, so every element it
+        # could ever yield already satisfies that predicate): states
+        # honestly that "a size warning fired at all" is what's checked.
+        self.assertTrue(self.size_warnings(result), result.stderr)
         self.assert_level(result, "approaching")
         self.assertNotIn("over cap", self.size_warnings(result)[0].lower())
 

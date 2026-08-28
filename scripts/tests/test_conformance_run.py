@@ -1277,6 +1277,10 @@ class UnknownKeyRejectionTest(ConformanceRunTestBase):
             c["path"] = str(self.make_consumer_dir(c["id"]))
         self.write_config(conformance=template_conformance)
         r = self.run_conformance()
+        # Liveness (WI-0128 finding #1): the report was actually generated,
+        # not merely "no rejection text on stderr" -- which a config parser
+        # that crashed before printing anything would also satisfy.
+        self.assertIn("# Conformance Run Report", r.stdout, self.output(r))
         self.assertNotIn("unknown key", r.stderr, self.output(r))
         self.assertNotIn("malformed conformance config", r.stderr, self.output(r))
 
@@ -2208,6 +2212,17 @@ class CheckHasSummaryLineTranspositionTest(ConformanceRunTestBase):
         self.assertNotIn("memory-lint", c1_after, self.output(after))
         self.assertIn("memory-lint on alpha", p_after, self.output(after))
         self.assertNotIn("anchor", p_after, self.output(after))
+        # Classifier-visible companion (WI-0128 finding #1): the two
+        # assertions above are the real, structurally-precise proof (they
+        # pin WHICH section each name landed in) but are built on a
+        # two-hop `.stdout.split(...)[i].split(...)[j]` chain
+        # `_stdout_bound_names`/`_is_stdout_like` do not track (one-hop
+        # only -- see "chained-stdout-slice-not-tracked-as-output" in
+        # test_absence_only_assertions.py). This assertion against
+        # `after.stdout` directly is weaker (it does not pin the section)
+        # but gives the classifier something it can see; it is not itself
+        # the liveness fix.
+        self.assertIn("anchor on alpha", after.stdout, self.output(after))
 
 
 class CheckSubcmdTranspositionRealScriptTest(ConformanceRunTestBase):
@@ -2270,6 +2285,11 @@ class CheckSubcmdTranspositionRealScriptTest(ConformanceRunTestBase):
         self.assertIn("memory-lint on alpha", c2_after, self.output(after))
         self.assertIn("anchor on alpha", could_not_run_after, self.output(after))
         self.assertIn("unknown subcommand", could_not_run_after, self.output(after))
+        # Classifier-visible companion, same reasoning and same limitation
+        # as CheckHasSummaryLineTranspositionTest above (WI-0128 finding
+        # #1) -- the real, section-pinning proof is the chained-slice
+        # assertions already present.
+        self.assertIn("memory-lint on alpha", after.stdout, self.output(after))
 
 
 if __name__ == "__main__":

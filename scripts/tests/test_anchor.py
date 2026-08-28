@@ -615,9 +615,17 @@ class OperationalErrorsTest(AnchorTestBase):
         until the 21.08.2026 review (Punkt 4) it only ever drove `status`,
         so the `check` half of the contract had zero coverage."""
         status_result = self.run_anchor("status", str(self.project_dir))
+        # Liveness (WI-0128 finding #1): the operational-error path itself
+        # actually fired -- same shape as OperationalErrorsTest's other
+        # siblings above -- rather than "no Stage-1 heading" being true
+        # merely because the tool crashed before printing anything at all.
+        self.assertEqual(status_result.returncode, 2)
+        self.assertIn("not a git repository", status_result.stderr)
         self.assertNotIn("# Anchor", status_result.stdout)
 
         check_result = self.run_anchor("check", str(self.project_dir))
+        self.assertEqual(check_result.returncode, 2)
+        self.assertIn("not a git repository", check_result.stderr)
         self.assertNotIn("# Anchor", check_result.stdout)
 
 
@@ -1377,7 +1385,13 @@ class GitEdgeCaseTest(AnchorTestBase):
         self.assertIn("uncommitted changes", result.stdout)
 
     def test_clean_working_tree_prints_no_dirty_note(self):
+        # Liveness (WI-0128 finding #1): the report actually ran to
+        # completion -- same shape as the sibling
+        # test_dirty_working_tree_is_noted above -- rather than "no dirty
+        # note" being true merely because status crashed with empty stdout.
         result = self.run_anchor("status", str(self.project_dir))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("# Anchor Status Report", result.stdout)
         self.assertNotIn("uncommitted changes", result.stdout)
 
     def test_worktree_git_file_is_still_recognised_as_a_repository(self):

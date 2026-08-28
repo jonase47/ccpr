@@ -256,22 +256,7 @@ NEEDS_EXEMPTION = {"absence-only-needs-exemption"}
 # work item's own triage table for the per-site reasoning -- every entry's
 # category must be a registered key in EXEMPTION_REASONS above (enforced by
 # ExemptionMarkersAreWellFormedTest).
-KNOWN_FINDINGS = {
-    ("test_anchor.py", "OperationalErrorsTest", "test_check_operational_errors_never_print_a_stage1_report"): "known-risk-not-yet-fixed",
-    ("test_anchor.py", "GitEdgeCaseTest", "test_clean_working_tree_prints_no_dirty_note"): "known-risk-not-yet-fixed",
-    ("test_conformance_run.py", "UnknownKeyRejectionTest", "test_shipped_example_template_produces_no_unknown_key_error"): "known-risk-not-yet-fixed",
-    ("test_handover_size_hook.py", "RoundingBoundaryTest", "test_a_file_just_under_the_cap_that_rounds_to_100_is_approaching"): "custom-assert-wrapper-liveness-invisible-to-this-scanner",
-    ("test_install_docs_boundary.py", "FreshInstallCopiesAllowlistedDocsTest", "test_a_clean_source_reports_no_skip"): "known-risk-not-yet-fixed",
-    ("test_log_cleanup_behavior.py", "RedProofTest", "test_reverting_the_status_check_breaks_the_error_visibility_test"): "known-risk-not-yet-fixed",
-    ("test_manual_lint.py", "CheckAParentIndexResolutionTest", "test_document_relative_resolution_is_silent"): "known-risk-not-yet-fixed",
-    ("test_manual_lint.py", "CheckBReverseLinkTest", "test_index_that_links_back_produces_no_warning"): "known-risk-not-yet-fixed",
-    ("test_manual_lint.py", "CheckBReverseLinkTest", "test_link_with_extra_text_around_it_is_still_recognised"): "known-risk-not-yet-fixed",
-    ("test_manual_lint.py", "ReverseLinkMutationProofTest", "test_pointing_at_the_true_parent_is_silent"): "known-risk-not-yet-fixed",
-    ("test_manual_lint.py", "KindVocabularyMutationProofTest", "test_real_value_is_silent"): "known-risk-not-yet-fixed",
-    ("workitems/test_migrate.py", "MigrateLocalToYouTrackTest", "test_second_full_run_is_a_no_op_no_duplicates"): "in-process-call-not-a-subprocess",
-    ("test_conformance_run.py", "CheckHasSummaryLineTranspositionTest", "test_swap_flips_which_of_the_two_gets_the_c1_contradiction_finding"): "chained-stdout-slice-not-tracked-as-output",
-    ("test_conformance_run.py", "CheckSubcmdTranspositionRealScriptTest", "test_swap_turns_memory_lint_into_a_c2_finding_and_anchor_into_could_not_run"): "chained-stdout-slice-not-tracked-as-output",
-}
+KNOWN_FINDINGS = {}
 
 
 class TestMethodRecord:
@@ -845,6 +830,21 @@ class NoStaleKnownFindingsTest(unittest.TestCase):
             for rec in scan_tree()
             if rec.disposition in NEEDS_EXEMPTION
         }
+        # With KNOWN_FINDINGS empty (WI-0128 finding #1 closed the last
+        # entry in wave 3 tranche 4), the comparison below iterates nothing
+        # and `stale` is unconditionally [] -- the assertion would pass even
+        # if scan_tree() returned garbage or nothing at all. A bookkeeping
+        # test that cannot fail is the exact defect this module exists to
+        # find, so the scan itself is pinned as live here: the corpus is
+        # known non-empty, and a scanner that stops enumerating fails this
+        # test rather than reporting a clean baseline.
+        self.assertGreater(
+            len(currently_flagged) + len(scan_tree()),
+            0,
+            "scan_tree() enumerated nothing -- the stale-entry comparison "
+            "below would pass vacuously against an empty corpus",
+        )
+
         stale = sorted(key for key in KNOWN_FINDINGS if key not in currently_flagged)
         self.assertEqual(
             [],
@@ -859,17 +859,95 @@ class ClassificationCountsTest(unittest.TestCase):
     def test_classification_counts(self):
         """Regression pin on the measured baseline: 978 `test_*` methods
         across the corpus call something shaped like a subprocess invocation
-        and are therefore in scope for this check; 14 of those are
-        absence-only-needs-exemption (all accounted for via KNOWN_FINDINGS
-        above), the rest carry at least one recognised positive/liveness
-        assertion. A change in either number means a test changed shape or
-        this scanner's own logic changed -- a deliberate look either way,
-        never a silent drift.
+        and are therefore in scope for this check; 0 of those are currently
+        absence-only-needs-exemption -- `KNOWN_FINDINGS` above is empty for
+        the first time since WI-0125 opened it -- every method carries at
+        least one recognised positive/liveness assertion. A change in
+        either number means a test changed shape or this scanner's own
+        logic changed -- a deliberate look either way, never a silent
+        drift.
 
         Trajectory, so the history is one line per event rather than a
         growing paragraph:
 
           in-scope / flagged   when
+          978 / 0              WI-0128 wave 3 tranche 4 (the last 14
+                               KNOWN_FINDINGS entries, spread over 7 files
+                               and 7 different tools): manual-lint.sh (5
+                               tests) needed a COMPANION fixture per check,
+                               not a files-scanned pin -- check (a)'s
+                               resolution and check (b)'s reverse-link pass
+                               both run inside/after the same per-file loop
+                               that computes FILES_TOTAL, so disabling
+                               either silently (not crashing) leaves "Files
+                               scanned:" unchanged, the identical trap
+                               tranche 2 already found in phase-docs-lint.sh's
+                               commit-anchor loop; each test's own resolved-
+                               but-unlinked or invalid-kind companion is what
+                               proves the specific check ran. anchor.sh (2
+                               tests, OperationalErrorsTest and
+                               GitEdgeCaseTest) and install.sh (1 test) took
+                               a plain returncode+stderr/stdout liveness
+                               pair, matching every sibling test already in
+                               their own files. log-cleanup.sh's
+                               RedProofTest genuinely WAS blind -- unlike
+                               the two test_conformance_run.py transposition
+                               tests below, its existing
+                               `assertEqual("", r.stderr)`/`assertNotIn(...)`
+                               pair has no chained-slice/indexing structure
+                               that would already raise on a total crash,
+                               so `assertNotEqual(0, r.returncode, ...)` is
+                               a real liveness fix here, not a companion.
+                               The two test_conformance_run.py transposition
+                               tests (CheckHasSummaryLineTranspositionTest,
+                               CheckSubcmdTranspositionRealScriptTest) were
+                               NOT blind -- their existing chained-
+                               `.stdout.split(...)` assertions already fail
+                               under a real crash (confirmed: both the
+                               pre-change and the post-change file go RED,
+                               as ERROR, under the same induced-crash
+                               mutant), just built on the one-hop
+                               `_is_stdout_like` gap already named in
+                               `chained-stdout-slice-not-tracked-as-output`
+                               -- each got a classifier-visible companion
+                               assertion documented as exactly that, not as
+                               a liveness fix. The THIRD conformance_run
+                               fix this tranche, UnknownKeyRejectionTest's
+                               `test_shipped_example_template_produces_no_
+                               unknown_key_error`, WAS a genuine gap
+                               (`known-risk-not-yet-fixed`) and got a plain
+                               `assertIn("# Conformance Run Report", r.
+                               stdout, ...)` liveness pin, confirmed via the
+                               same induced-crash mutant (config validated,
+                               then crashes before the report -- new file
+                               RED, old file GREEN). test_handover_size_
+                               hook.py's RoundingBoundaryTest is the OTHER
+                               already-documented false-positive shape
+                               (`custom-assert-wrapper-liveness-invisible-
+                               to-this-scanner`) -- its hook's own `main()`
+                               catches every exception and always exits 0
+                               (agent-monitor.py:1168-1178), so a
+                               `.returncode` assertion would have been
+                               classifier-visible but permanently vacuous
+                               for THIS hook; used a `self.size_warnings()`
+                               non-emptiness `assertTrue` instead.
+                               workitems/test_migrate.py's in-process
+                               `run_migrate()` call got an inline
+                               `assertEqual(2, len(...))` proving the setup
+                               half actually migrated both fixture items
+                               (must be the literal `len(...)` call at the
+                               assertion site, not a variable already
+                               holding the count -- `_is_len_nonzero_pair`
+                               inspects the two argument AST nodes
+                               directly). KNOWN_FINDINGS is now EMPTY.
+                               Flagged: -14.
+                               Emptying KNOWN_FINDINGS made
+                               NoStaleKnownFindingsTest structurally unable
+                               to fail -- `stale` filters an empty list, so
+                               assertEqual([], []) held regardless of what
+                               the scanner returned. Fixed in the same
+                               commit by pinning the scan itself as live;
+                               red-proven with scan_tree() -> [].
           978 / 14             WI-0128 wave 3 tranche 3 (artifact_gate
                                module, 9 of the 23 remaining KNOWN_FINDINGS
                                entries): each fixed test gets a liveness
@@ -1027,7 +1105,7 @@ class ClassificationCountsTest(unittest.TestCase):
         recs = scan_tree()
         flagged = [r for r in recs if r.disposition in NEEDS_EXEMPTION]
         self.assertEqual(978, len(recs))
-        self.assertEqual(14, len(flagged))
+        self.assertEqual(0, len(flagged))
 
 
 class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):

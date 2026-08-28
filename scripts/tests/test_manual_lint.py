@@ -145,6 +145,15 @@ class CheckAParentIndexResolutionTest(ManualLintTestBase):
     script's PROJECT_DIR."""
 
     def test_document_relative_resolution_is_silent(self):
+        # INDEX.md deliberately does NOT link child.md back -- this test is
+        # about check (a) alone, and check (b)'s warning about the missing
+        # reverse link is the liveness proof: it can only fire if check (a)'s
+        # document-relative resolution actually succeeded and fed the
+        # resolved pair into check (b)'s input (WI-0128 finding #1 -- a
+        # files-scanned pin would NOT discriminate here, since PARENT_LINKS
+        # is populated inside the SAME per-file loop check (a) itself
+        # already stayed silent in; only a downstream, check(a)-caused
+        # effect proves check (a) ran its resolution logic at all).
         self.write_doc("INDEX.md", "# Index\n")
         self.write_doc(
             "system/child.md",
@@ -155,8 +164,13 @@ class CheckAParentIndexResolutionTest(ManualLintTestBase):
 
         errors = self.findings(result.stdout, "Errors")
         infos = self.findings(result.stdout, "Info")
+        warnings = self.findings(result.stdout, "Warnings")
         self.assertFalse(any("parent_index=" in e for e in errors), errors)
         self.assertEqual(infos, [], infos)
+        self.assertTrue(
+            any("does not link back to system/child.md" in w for w in warnings),
+            warnings,
+        )
 
     def test_root_fallback_resolution_is_info_not_error(self):
         self.write_doc("INDEX.md", "# Index\n")
@@ -205,12 +219,27 @@ class CheckBReverseLinkTest(ManualLintTestBase):
     directory to the child), or the pair is reported as a warning."""
 
     def test_index_that_links_back_produces_no_warning(self):
+        # A companion pair that does NOT link back is the liveness proof
+        # (WI-0128 finding #1): check (b) runs in its own pass AFTER the
+        # per-file loop, entirely decoupled from files_scanned -- a
+        # files-scanned pin stays correct even with this whole pass
+        # deleted, exactly the "commit anchor family" trap already
+        # recorded for phase-docs-lint.sh (docs/memory/senior-developer).
+        # The companion's warning firing is what proves the pass executed
+        # at all; the absence assertion for the real pair is preserved
+        # unchanged below it.
         self.write_doc("INDEX.md", "# Index\n\nSee [system/child.md](system/child.md).\n")
         self.write_doc("system/child.md", doc_text(parent_index="../INDEX.md"))
+        self.write_doc("system/unlinked.md", doc_text(parent_index="../INDEX.md"))
 
         result = self.run_lint()
 
-        self.assertEqual(self.findings(result.stdout, "Warnings"), [], result.stdout)
+        warnings = self.findings(result.stdout, "Warnings")
+        self.assertFalse(any("system/child.md" in w for w in warnings), warnings)
+        self.assertTrue(
+            any("does not link back to system/unlinked.md" in w for w in warnings),
+            warnings,
+        )
 
     def test_index_that_does_not_link_back_is_reported_as_warning(self):
         self.write_doc("INDEX.md", "# Index\n\nNo links to any chapter here.\n")
@@ -235,6 +264,11 @@ class CheckBReverseLinkTest(ManualLintTestBase):
         Manual/SYSTEM_OVERVIEW.md's real links read like
         `Details: [system/discipline-gate.md](system/discipline-gate.md)`,
         never a bare link on its own line."""
+        # Same companion-pair liveness proof as
+        # CheckBReverseLinkTest.test_index_that_links_back_produces_no_warning
+        # above (WI-0128 finding #1) -- check (b)'s own pass is decoupled
+        # from files_scanned, so only a companion that DOES fire proves the
+        # pass ran at all.
         self.write_doc(
             "INDEX.md",
             "# Index\n\n"
@@ -242,10 +276,16 @@ class CheckBReverseLinkTest(ManualLintTestBase):
             "| `x.sh` | See [system/child.md](system/child.md) for more. |\n",
         )
         self.write_doc("system/child.md", doc_text(parent_index="../INDEX.md"))
+        self.write_doc("system/unlinked.md", doc_text(parent_index="../INDEX.md"))
 
         result = self.run_lint()
 
-        self.assertEqual(self.findings(result.stdout, "Warnings"), [], result.stdout)
+        warnings = self.findings(result.stdout, "Warnings")
+        self.assertFalse(any("system/child.md" in w for w in warnings), warnings)
+        self.assertTrue(
+            any("does not link back to system/unlinked.md" in w for w in warnings),
+            warnings,
+        )
 
 
 class ReverseLinkRaceStabilityTest(ManualLintTestBase):
@@ -328,10 +368,19 @@ class ReverseLinkMutationProofTest(ManualLintTestBase):
         )
 
     def test_pointing_at_the_true_parent_is_silent(self):
+        # Companion liveness proof (WI-0128 finding #1), same reasoning as
+        # CheckBReverseLinkTest above: a file scoped to THIS test only (not
+        # setUp, so the sibling swap test below is unaffected) whose
+        # parent_index resolves but is never linked back -- its warning
+        # firing proves check (b)'s pass ran at all.
+        self.write_doc("system/broken-child.md", doc_text(parent_index="../INDEX.md"))
+
         result = self.run_lint()
 
         self.assertEqual(self.findings(result.stdout, "Errors"), [], result.stdout)
-        self.assertEqual(self.findings(result.stdout, "Warnings"), [], result.stdout)
+        warnings = self.findings(result.stdout, "Warnings")
+        self.assertFalse(any("real-child.md" in w for w in warnings), warnings)
+        self.assertTrue(any("broken-child.md" in w for w in warnings), warnings)
 
     def test_swapping_to_an_existing_non_parent_file_fires_check_b_but_not_check_a(self):
         self.child_path.write_text(
@@ -442,10 +491,19 @@ class KindVocabularyMutationProofTest(ManualLintTestBase):
         self.doc_path = self.write_doc("adjacent.md", doc_text(kind="sub-index"))
 
     def test_real_value_is_silent(self):
+        # Companion liveness proof (WI-0128 finding #1): a valid kind is
+        # indistinguishable, from the OUTSIDE, between "check (c) ran and
+        # correctly stayed silent" and "check (c) never ran at all" --
+        # both produce zero warnings. An obviously-invalid companion that
+        # DOES fire is what proves the vocabulary check executed.
+        self.write_doc("companion.md", doc_text(kind="bogus-kind-for-liveness"))
+
         result = self.run_lint()
 
         self.assertEqual(self.findings(result.stdout, "Errors"), [], result.stdout)
-        self.assertEqual(self.findings(result.stdout, "Warnings"), [], result.stdout)
+        warnings = self.findings(result.stdout, "Warnings")
+        self.assertFalse(any("adjacent.md" in w for w in warnings), warnings)
+        self.assertTrue(any("companion.md" in w for w in warnings), warnings)
 
     def test_adjacent_typo_fires_and_reverting_silences_it_again(self):
         self.doc_path.write_text(doc_text(kind="sub-indexes"), encoding="utf-8")

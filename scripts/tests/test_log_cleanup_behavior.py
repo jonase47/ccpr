@@ -264,6 +264,13 @@ done
         # The pre-fix shape's own measured symptom: stderr is empty.
         self.assertEqual("", r.stderr)
         self.assertNotIn("=== Result ===", r.stdout)
+        # Liveness (WI-0128 finding #1): the mutant's python3 call itself
+        # failed under `set -e` (matching the module docstring's own
+        # "exit 1 and empty stderr" measurement) -- not merely "no Result
+        # heading" for some unrelated reason, e.g. a broken splice that
+        # crashed bash before this point at all (which would print its own,
+        # non-empty stderr and already fail the assertion above).
+        self.assertNotEqual(0, r.returncode, r.stdout + r.stderr)
 
 
 if __name__ == "__main__":

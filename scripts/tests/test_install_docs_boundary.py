@@ -124,7 +124,12 @@ class FreshInstallCopiesAllowlistedDocsTest(InstallTestBase):
         self.assertTrue((self.dest / "docs" / "PROJECT_PHASES.md").exists())
 
     def test_a_clean_source_reports_no_skip(self):
+        # Liveness (WI-0128 finding #1): install.sh actually completed --
+        # same shape as every sibling test in this file -- rather than "no
+        # skip" being true merely because the run crashed before printing
+        # anything.
         r = self.run_install("--yes")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertNotIn("skipped", r.stdout.lower())
 
 
