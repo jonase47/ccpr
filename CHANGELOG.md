@@ -7,6 +7,32 @@ All notable changes to this project are documented in this file. The format is b
 ## [Unreleased]
 
 ### Added
+- **Rule 3 of the conformance run had never been seen red** (open finding #10; WI-0128). It
+  checks five mandatory report-skeleton lines across two branches — `**Anchors:**` and
+  `**Last production-code commit:**` for `anchor`, and `**Files scanned:**`, `**Summary:**`,
+  `**Exit:**` for everyone else — and since WI-0124 nothing had ever shown it reacts to a
+  missing one. The guard could have been inert the whole time without a symptom.
+
+  Each of the five now has its own proof: a stub omitting exactly that line, asserting the C1
+  finding names it and only it, plus the other direction — a complete stub must produce no C1
+  finding, or the rule would be firing always rather than discriminating. The two branches are
+  proven separately, since anchor's two lines are not the generic three. The line list itself
+  is parsed from the script rather than retyped, and pinned at 2 and 3, so a sixth line cannot
+  arrive unproven.
+
+  The proofs were then checked against a neutralised copy of the rule: with Rule 3 disabled all
+  five fail, while the complete-stub test alone stays green — which is what makes the per-line
+  proofs, not the reverse direction, the part that could detect an inert guard.
+
+- **The absence-only scanner's two measured blind spots are described once, where its numbers
+  are** (open findings #7 and #11; WI-0128). `_calls_a_subprocess` recognises `self.<name>(...)`
+  but not a bare module-level helper, and `_is_stdout_like` follows only one hop from `.stdout`,
+  so an assertion whose subject comes through a chained `split(...)` is invisible. Both were
+  already recorded, in two different places; they share one root cause — each function knows
+  exactly one syntactic shape — and the consequence belongs beside the pinned counts: they
+  certify what the scanner can see, not what exists. The scanner itself is deliberately not
+  widened; its recognition rules are pinned by those very numbers, and changing them is a
+  separate decision.
 - **Per-entry coverage for the three phase-folder lists (WI-0126, tranche 1)**. An entry in an
   enumerated list with no test of its own is an unverified claim wearing the credibility of its
   neighbours: `PLACEHOLDER_NAMES` shipped with tests for two of its three names, and a typo in

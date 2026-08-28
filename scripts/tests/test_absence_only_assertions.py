@@ -76,15 +76,13 @@ WI-0126 tranche 3c):** `_calls_a_subprocess` only matches an `ast.Call` whose
 `func` is an `ast.Attribute` -- `self.<name>(...)` or `subprocess.run(...)`.
 A bare module-level helper function, e.g. `_run_main_against(files)`, parses
 as `ast.Call(func=ast.Name(...))` and is invisible to this gate in either
-direction: a test method built on such a helper is never recognised as
-"subprocess invoked" at all, so none of its assertions -- positive or
-negative-shaped -- are ever inspected. This is why tranche 3c's 22 tests
-(all built on a module-level `_run_main_against`, not a `self.<name>` method)
-did not move this scanner's in-scope count. Distinct from the three
-false-positive categories already registered in `EXEMPTION_REASONS` above:
-those are cases this scanner sees and mis-scores; this is a case it never
-sees. Not closed here -- widening the gate would move this scanner's own
-pinned counts, a decision outside this tranche's write boundary.
+direction. This is why tranche 3c's 22 tests (all built on a module-level
+`_run_main_against`, not a `self.<name>` method) did not move this
+scanner's in-scope count. This is one of two measured blind spots sharing
+one root cause -- see `ClassificationCountsTest`'s docstring ("The
+boundary these numbers describe", WI-0128 wave 2a) for the combined
+picture, the sibling gap in `_is_stdout_like`, and what it means for the
+970/56 pins above; not repeated here.
 
 ## What counts as a positive ("liveness") assertion -- recognised in more
 ## than one shape, per the work item's own calibration requirement
@@ -901,7 +899,7 @@ class NoStaleKnownFindingsTest(unittest.TestCase):
 
 class ClassificationCountsTest(unittest.TestCase):
     def test_classification_counts(self):
-        """Regression pin on the measured baseline: 970 `test_*` methods
+        """Regression pin on the measured baseline: 973 `test_*` methods
         across the corpus call something shaped like a subprocess invocation
         and are therefore in scope for this check; 56 of those are
         absence-only-needs-exemption (all accounted for via KNOWN_FINDINGS
@@ -930,6 +928,10 @@ class ClassificationCountsTest(unittest.TestCase):
           943 / 54             WI-0126 tranche 3b (quality-scan.sh content
                                lists: PII_PATTERNS, consent terms, config
                                filenames, and the .venv skip-list binding)
+          973 / 56             WI-0128 wave 2a: three Rule-3 red proofs in
+                               test_conformance_run.py drive the real script,
+                               so they are in scope. Flagged unchanged -- all
+                               three assert on the returncode.
           970 / 56             WI-0128 wave 1c (the ADR prompt's status
                                vocabulary bound to the lint that rejects it)
           969 / 56             open-findings wave 1b (the fourth os.walk, the
@@ -950,10 +952,43 @@ class ClassificationCountsTest(unittest.TestCase):
                                registered as a new false-positive category
 
         The flagged count has not moved since round 2: every test added by
-        WI-0126 so far carries a recognised liveness assertion."""
+        WI-0126 so far carries a recognised liveness assertion.
+
+        ## The boundary these numbers describe (WI-0128 wave 2a)
+
+        970 and 56 are bounded by what this scanner's AST walk actually
+        recognises, not by what exists in the corpus. Two measured blind
+        spots -- today documented separately, in the module docstring's
+        "Measured blind spot" note and in `EXEMPTION_REASONS["chained-
+        stdout-slice-not-tracked-as-output"]` above -- share one root
+        cause: `_calls_a_subprocess` and `_is_stdout_like` each recognise
+        exactly one syntactic shape and nothing else.
+
+          * `_calls_a_subprocess` only matches `ast.Call(func=
+            ast.Attribute)` -- `self.<name>(...)` or `subprocess.run(...)`.
+            A module-level helper called directly (`_run_main_against
+            (files)`, `ast.Call(func=ast.Name(...))`) is invisible to it
+            in either direction: a whole test method built on such a
+            helper never enters the 970, whichever way its assertions are
+            shaped.
+          * `_is_stdout_like` only tracks a name bound in ONE hop directly
+            off a `<expr>.stdout` attribute access. A name assigned from a
+            further chain off that attribute (`result.stdout.split(...)
+            [1].split(...)[0]`) is invisible to it -- the method's
+            assertions against that chained name are genuine positive
+            liveness checks this scanner cannot see as such.
+
+        Neither gap is closed here -- widening either function's
+        recognised shapes would move 970 and/or 56, a decision this
+        tranche's write boundary does not cover. What the two pins above
+        certify is narrower than "56 absence-only tests exist, out of 970
+        in scope": it is "this is what this scanner's two syntax-matchers
+        can see" -- a whole module built on the first shape, or an
+        assertion chained through the second, would never move either
+        count."""
         recs = scan_tree()
         flagged = [r for r in recs if r.disposition in NEEDS_EXEMPTION]
-        self.assertEqual(970, len(recs))
+        self.assertEqual(973, len(recs))
         self.assertEqual(56, len(flagged))
 
 

@@ -1541,6 +1541,145 @@ class RealCheckSkeletonTest(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# WI-0128 wave 2a (finding #10) -- Rule 3 (:575-596) checks five mandatory
+# report lines across two branches and, before this section, not one of the
+# five had ever been seen red. RealCheckSkeletonTest above only proves the
+# lines are PRESENT in a real check's output; it never removes one to see
+# whether the classifier reacts. There was no evidence Rule 3 does anything
+# at all -- it could have been inert since WI-0124 and nothing would show it.
+# ---------------------------------------------------------------------------
+
+RULE3_REQUIRED_LINES_RE = re.compile(r"for required in ((?:'[^']*'\s*)+); do")
+
+
+def parse_rule3_required_lines(script_path=SCRIPT_PATH):
+    """The two `for required in '...' '...'; do` loops Rule 3 actually
+    iterates, read from source between the `# Rule 3 —` comment and the
+    `if [ -n "$missing" ]` that closes both branches -- never hardcoded,
+    so a line added to either loop later moves this parse (and the count
+    pin below) rather than sitting unchecked. Order matches source order:
+    the `if [ "$name" = "anchor" ]` branch first, the `else` (generic)
+    branch second (:578, :585)."""
+    text = script_path.read_text(encoding="utf-8")
+    start = text.index("# Rule 3 —")
+    end = text.index('if [ -n "$missing" ]', start)
+    section = text[start:end]
+    loops = RULE3_REQUIRED_LINES_RE.findall(section)
+    assert len(loops) == 2, "expected exactly two 'for required in' loops in Rule 3, found %d" % len(loops)
+    anchor_loop, generic_loop = loops
+    quoted = re.compile(r"'([^']*)'")
+    return {"anchor": tuple(quoted.findall(anchor_loop)), "generic": tuple(quoted.findall(generic_loop))}
+
+
+class RequiredSkeletonLineCountPinTest(unittest.TestCase):
+    """Regression pin on Rule 3's own required-line count per branch,
+    parsed from source (parse_rule3_required_lines, house pattern:
+    parse_full_check_table / _parse_paren_array above) rather than
+    hardcoded as a bare 2/3 -- a line added to either branch later moves
+    this pin and forces a deliberate look, the same standard
+    CheckTableAlignmentTest already holds the seven CHECK_* columns to."""
+
+    def test_anchor_branch_requires_two_lines(self):
+        self.assertEqual(2, len(parse_rule3_required_lines()["anchor"]))
+
+    def test_generic_branch_requires_three_lines(self):
+        self.assertEqual(3, len(parse_rule3_required_lines()["generic"]))
+
+    def test_the_required_lines_are_the_documented_ones(self):
+        self.assertEqual(
+            {
+                "anchor": ("**Anchors:**", "**Last production-code commit:**"),
+                "generic": ("**Files scanned:**", "**Summary:**", "**Exit:**"),
+            },
+            parse_rule3_required_lines(),
+        )
+
+
+def _line_starting_with(text, prefix):
+    """The one full line in `text` that starts with `prefix`, including its
+    own trailing newline -- fails loudly if the fixture no longer carries
+    it, rather than silently removing zero bytes (G-141: assert the exact
+    text is present before mutating it away)."""
+    for line in text.splitlines(keepends=True):
+        if line.startswith(prefix):
+            return line
+    raise AssertionError("fixture assumption broken -- no line starts with %r in %r" % (prefix, text))
+
+
+class RequiredSkeletonLineRedProofTest(ConformanceRunTestBase):
+    """Mutation-based RED proof (G-107): one stub per required line,
+    omitting exactly that ONE line and no other -- a stub with all three
+    generic lines dropped would only prove SOMETHING is missing, not which
+    line the classifier named (briefing :64-65). The anchor branch is the
+    discriminating case for the OTHER half: its own two required lines are
+    different from the generic three, so a proof covering only the generic
+    branch says nothing about it (briefing :66-67). The reverse direction
+    closes the loop: a stub with every mandatory line present -- exactly
+    the CLEAN_* fixtures every other test in this module already gets from
+    ConformanceRunTestBase.setUp -- must produce no C1 finding at all, or
+    Rule 3 cannot be said to discriminate rather than always fire
+    (briefing :68-70)."""
+
+    def setUp(self):
+        super().setUp()
+        self.consumer = self.make_consumer_dir("alpha")
+        self.write_config(conformance={"consumers": [{"id": "alpha", "path": str(self.consumer)}]})
+
+    def c1_section(self, stdout):
+        return stdout.split("### Contract violations (C1)", 1)[1].split("### Zero scope (C2)", 1)[0]
+
+    def test_a_clean_stub_with_every_mandatory_line_produces_no_c1_finding(self):
+        # The reverse direction: setUp() above already wrote every check's
+        # CLEAN_* stub untouched -- this run mutates nothing.
+        r = self.run_conformance()
+        self.assertEqual(0, r.returncode, self.output(r))
+        self.assertNotIn("missing mandatory line(s)", self.c1_section(r.stdout), self.output(r))
+
+    def test_anchor_missing_one_required_line_is_a_named_c1_finding(self):
+        required = parse_rule3_required_lines()["anchor"]
+        for prefix in required:
+            with self.subTest(prefix=prefix):
+                line = _line_starting_with(CLEAN_ANCHOR_REPORT, prefix)
+                mutated = CLEAN_ANCHOR_REPORT.replace(line, "", 1)
+                self.assertNotEqual(CLEAN_ANCHOR_REPORT, mutated)
+                self.write_stub("anchor.sh", mutated, 0)
+                r = self.run_conformance()
+                self.assertEqual(1, r.returncode, self.output(r))
+                c1 = self.c1_section(r.stdout)
+                self.assertIn(
+                    "anchor on alpha: report is missing mandatory line(s): %s\n" % prefix,
+                    c1, self.output(r),
+                )
+                # Specificity: the OTHER anchor line is still present in this
+                # stub, so it must not also show up as missing.
+                other = [p for p in required if p != prefix][0]
+                missing_list = c1.split("missing mandatory line(s):", 1)[1].splitlines()[0]
+                self.assertNotIn(other, missing_list, self.output(r))
+                self.write_stub("anchor.sh", CLEAN_ANCHOR_REPORT, 0)
+
+    def test_generic_missing_one_required_line_is_a_named_c1_finding(self):
+        required = parse_rule3_required_lines()["generic"]
+        for prefix in required:
+            with self.subTest(prefix=prefix):
+                line = _line_starting_with(CLEAN_FILES_SCANNED_REPORT, prefix)
+                mutated = CLEAN_FILES_SCANNED_REPORT.replace(line, "", 1)
+                self.assertNotEqual(CLEAN_FILES_SCANNED_REPORT, mutated)
+                self.write_stub("memory-lint.sh", mutated, 0)
+                r = self.run_conformance()
+                self.assertEqual(1, r.returncode, self.output(r))
+                c1 = self.c1_section(r.stdout)
+                self.assertIn(
+                    "memory-lint on alpha: report is missing mandatory line(s): %s\n" % prefix,
+                    c1, self.output(r),
+                )
+                others = [p for p in required if p != prefix]
+                missing_list = c1.split("missing mandatory line(s):", 1)[1].splitlines()[0]
+                for other in others:
+                    self.assertNotIn(other, missing_list, self.output(r))
+                self.write_stub("memory-lint.sh", CLEAN_FILES_SCANNED_REPORT, 0)
+
+
+# ---------------------------------------------------------------------------
 # Group F (WI-0124 Wave 3) -- the always-on configuration test: reads the
 # REAL gate_config_path() (neither HOME nor MEMORY_SYNC_CONFIG is
 # sandboxed here, unlike every other test in this module), and never
