@@ -1,7 +1,8 @@
 ---
 kind: adr
 adr_id: ADR-0007
-status: partially-implemented
+adr_status: partially-implemented
+status: active
 last_updated: 10.07.2026
 related:
   - ADR-0006-layered-learnings-scope-model.md

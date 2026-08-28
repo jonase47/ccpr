@@ -1,7 +1,8 @@
 ---
 kind: adr
 adr_id: ADR-0008
-status: proposed
+adr_status: proposed
+status: draft
 last_updated: 09.07.2026
 related:
   - ADR-0002-workitem-backend-contract.md

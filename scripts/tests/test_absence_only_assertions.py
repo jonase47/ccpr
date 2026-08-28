@@ -901,7 +901,7 @@ class NoStaleKnownFindingsTest(unittest.TestCase):
 
 class ClassificationCountsTest(unittest.TestCase):
     def test_classification_counts(self):
-        """Regression pin on the measured baseline: 969 `test_*` methods
+        """Regression pin on the measured baseline: 970 `test_*` methods
         across the corpus call something shaped like a subprocess invocation
         and are therefore in scope for this check; 56 of those are
         absence-only-needs-exemption (all accounted for via KNOWN_FINDINGS
@@ -930,6 +930,8 @@ class ClassificationCountsTest(unittest.TestCase):
           943 / 54             WI-0126 tranche 3b (quality-scan.sh content
                                lists: PII_PATTERNS, consent terms, config
                                filenames, and the .venv skip-list binding)
+          970 / 56             WI-0128 wave 1c (the ADR prompt's status
+                               vocabulary bound to the lint that rejects it)
           969 / 56             open-findings wave 1b (the fourth os.walk, the
                                argued extension-filter asymmetry, and the
                                failure marker with its streak counter across
@@ -951,7 +953,7 @@ class ClassificationCountsTest(unittest.TestCase):
         WI-0126 so far carries a recognised liveness assertion."""
         recs = scan_tree()
         flagged = [r for r in recs if r.disposition in NEEDS_EXEMPTION]
-        self.assertEqual(969, len(recs))
+        self.assertEqual(970, len(recs))
         self.assertEqual(56, len(flagged))
 
 
@@ -963,9 +965,10 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
         picked up automatically -- this only pins that the glob itself
         still reaches the files known at write time (WI-0125, 27.08.2026).
 
-        Bumped 40 -> 41 -> 42 on 28.08.2026: WI-0126 tranche 2 added
+        Bumped 40 -> 43 across 28.08.2026: WI-0126 tranche 2 added
         test_next_steps_lists.py, tranche 3c added
-        test_quality_scan_sast_patterns.py. Note the in-scope count above did NOT
+        test_quality_scan_sast_patterns.py, WI-0128 wave 1c added
+        test_adr_status_mapping.py. Note the in-scope count above did NOT
         move (921) -- that module's 19 tests import next_steps.py directly
         and never invoke a subprocess, so none of them is in scope for the
         absence-only rule. Two pins, two different questions: this one asks
@@ -973,7 +976,7 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
         population change"."""
         files = sorted(TESTS_DIR.glob("*.py")) + sorted((TESTS_DIR / "workitems").glob("*.py"))
         names = sorted(f.relative_to(TESTS_DIR).as_posix() for f in files if f.name != "__init__.py")
-        self.assertEqual(42, len(names))
+        self.assertEqual(43, len(names))
         self.assertIn("test_absence_only_assertions.py", names)
         self.assertIn("test_phase_docs_lint.py", names)
         self.assertIn("workitems/test_migrate.py", names)

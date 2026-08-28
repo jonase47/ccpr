@@ -63,14 +63,14 @@ Every NFR ID in NFR.md has a test approach in TESTSTRATEGY.md (or a P6 quality f
 **Check:** Extract NFR IDs from NFR.md; search TESTSTRATEGY/FUNCTIONAL files for references. Report NFRs with no test reference.
 
 ### R5: ADR status ↔ component references
-Rejected ADRs (`status: rejected` or `status: superseded`) must not be actively referenced in components or code.
+Rejected ADRs (`adr_status: rejected` or `adr_status: superseded`) must not be actively referenced in components or code.
 
 **Sources:**
 - `docs/architecture/ADR/*.md` (all ADRs)
 - `docs/architecture/COMPONENTS.md`, `ARCHITECTURE.md`
 - Code (`src/`) — optional, header comments only
 
-**Check:** Filter ADRs with `status: rejected|superseded`; grep COMPONENTS/ARCHITECTURE for ADR IDs. Report active references to rejected ADRs.
+**Check:** Filter ADRs with `adr_status: rejected|superseded` — not `status`, which is the document lifecycle (`skeleton | draft | active | frozen | archived | living`), a different field since WI-0128; grep COMPONENTS/ARCHITECTURE for ADR IDs. Report active references to rejected ADRs.
 
 ### R6: CONSTITUTION.md (Inviolable) ↔ ADRs — decisions only, not code
 

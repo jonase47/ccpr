@@ -1,7 +1,8 @@
 ---
 kind: adr
 adr_id: ADR-0001
-status: accepted
+adr_status: accepted
+status: active
 last_updated: 15.05.2026
 related:
   - ../CONSTITUTION.md

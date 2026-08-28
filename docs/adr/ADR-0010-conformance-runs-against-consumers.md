@@ -1,7 +1,8 @@
 ---
 kind: adr
 adr_id: ADR-0010
-status: accepted
+adr_status: accepted
+status: active
 last_updated: 27.08.2026
 related:
   - ADR-0009-anchored-state-verification.md

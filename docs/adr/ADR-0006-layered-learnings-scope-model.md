@@ -1,7 +1,8 @@
 ---
 kind: adr
 adr_id: ADR-0006
-status: accepted
+adr_status: accepted
+status: active
 last_updated: 10.07.2026
 related:
   - ADR-0007-shared-vault-storage.md

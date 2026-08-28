@@ -375,6 +375,39 @@ All notable changes to this project are documented in this file. The format is b
   Docs: `Manual/system/conformance.md`.
 
 ### Fixed
+- **The shipped ADR prompt told adopters to write ADRs this project's own linter rejects**
+  (open finding #9; WI-0128). `commands/` ships to every adopter. An ADR written exactly as
+  `commands/p3-arch-adr.md` prescribed, placed where `commands/cross-check.md` looks for it,
+  failed `phase-docs-lint`: exit 1 with no frontmatter, and **exit 2 with `status: accepted`**
+  — the very value the prompt named. `rejected` and `superseded` fail the same way, and rule
+  R5 needs exactly those two, so R5 could not work for an adopter at all.
+
+  Two lifecycles had collided on one field: the document status
+  (`skeleton|draft|active|frozen|archived|living`) and the decision status. CCPR's own ADRs
+  escaped it only because `docs/adr/` is not a phase folder, so the linter never sees them —
+  which is the finding, not an excuse. Resolved the way `13a0dae` resolved the identical
+  collision for risks two days earlier: the decision lifecycle moves to its own namespaced
+  field, `adr_status`, and `status` takes a value from the document enum.
+  `archived` is the schema's own word for "superseded", so the mapping nearly writes itself.
+
+  The vocabulary is deliberately **open** rather than a closed set of four. Pinning
+  `partially-implemented` — this repo's own ADR-0007 — as a fifth prescribed value would
+  recreate the same defect for the next project's own term; the rule is instead that any
+  `adr_status` is fine provided its mapped `status` is valid, with ADR-0007 as the worked
+  example. A first draft of the fix prescribed three values while this repository used five,
+  reproducing the finding one level up before it was caught.
+
+  Also corrected: the "Max. 6 ADRs" cap (this repo has ten), three-digit numbering (it uses
+  four), and an under-specified output path. The follow-up and addendum conventions from
+  WI-0127 are now prescribed for adopters too, which `CONTRIBUTING.md` had explicitly left
+  open. `cross-check.md`'s R5 reads `adr_status`, and all ten of this repository's ADRs carry
+  the new shape — the point of the finding was that CCPR prescribed what it did not do.
+
+  `scripts/tests/test_adr_status_mapping.py` binds the prompt's table to the linter by running
+  it, not by comparing enums: every core row is written to a real ADR and scanned, and the real
+  `docs/adr/` corpus is checked against the table. Its first version had a dead branch — a
+  character class missing an underscore made the header-row filter unreachable, so the output
+  was right for the wrong reason.
 - **A failed `quality-scan.sh` run now says so, and says how long it has been failing**
   (open findings #8 and the follow-up decision to #6; WI-0128).
 
