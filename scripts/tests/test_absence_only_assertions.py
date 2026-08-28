@@ -881,7 +881,11 @@ class ClassificationCountsTest(unittest.TestCase):
         lost its unconditional positive and is now
         absence-only-needs-exemption, baselined under
         `helper-bound-list-not-recognised-as-findings`; total in-scope count
-        unchanged, only a reclassification): 916 `test_*` methods across the
+        unchanged, only a reclassification; bumped again 28.08.2026 by
+        WI-0126 tranche 1, which added five subprocess-invoking methods
+        sweeping PHASE_FOLDERS/PHASE_SCOPES/PHASE_FOLDER_NAMES -- in-scope
+        916 -> 921, flagged unchanged at 54, i.e. all five carry a
+        recognised liveness assertion): 921 `test_*` methods across the
         corpus call something shaped like a subprocess invocation and are
         therefore in scope for this check; 54 of those are
         absence-only-needs-exemption (all accounted for via KNOWN_FINDINGS
@@ -891,7 +895,7 @@ class ClassificationCountsTest(unittest.TestCase):
         look either way, not a silent drift."""
         recs = scan_tree()
         flagged = [r for r in recs if r.disposition in NEEDS_EXEMPTION]
-        self.assertEqual(916, len(recs))
+        self.assertEqual(921, len(recs))
         self.assertEqual(54, len(flagged))
 
 

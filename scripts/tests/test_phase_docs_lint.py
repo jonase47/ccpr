@@ -26,6 +26,7 @@ summary, not encoded here.
 """
 
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -33,6 +34,19 @@ import unittest
 from pathlib import Path
 
 SCRIPT_PATH = Path(__file__).resolve().parents[1] / "phase-docs-lint.sh"
+FRONTMATTER_LIB = Path(__file__).resolve().parents[1] / "lib" / "frontmatter.sh"
+
+
+def read_phase_folders(script_path=SCRIPT_PATH):
+    """Parses PHASE_FOLDERS=(bare word1 word2 ...) out of phase-docs-lint.sh's
+    own source text -- never retyped here (WI-0126). A single-line,
+    unquoted bash array (bash 3.2 floor: plain positional arrays only).
+    Fails loudly if the shape changes underneath this test."""
+    text = script_path.read_text(encoding="utf-8")
+    m = re.search(r"^PHASE_FOLDERS=\(([^)]*)\)", text, re.MULTILINE)
+    if m is None:
+        raise AssertionError("could not find PHASE_FOLDERS=(...) in %s" % script_path)
+    return tuple(m.group(1).split())
 
 # The six status values phase-docs-lint.sh's VALID_STATUS accepts today.
 # Enumerated individually in CheckDStatusEnumTest -- exactly the kind of
@@ -1487,6 +1501,40 @@ class DefaultScopeIsLimitedToPhaseFoldersTest(PhaseDocsLintTestBase):
         )
         self.assertEqual(self.files_scanned(result.stdout), 1)
         self.assertEqual(result.returncode, 2, result.stdout)
+
+
+class PhaseFoldersSweepTest(PhaseDocsLintTestBase):
+    """WI-0126: PHASE_FOLDERS (phase-docs-lint.sh:61) names nine folders,
+    but before this test only architecture/reviews/quality/operations were
+    ever exercised as docs/<folder> anywhere in this suite -- discovery,
+    concept, validation, planning and launch had zero coverage as folders
+    (the literal string "launch" did not occur anywhere in the test suite
+    at all). A folder PHASE_FOLDERS stops naming becomes invisible to a
+    scopeless run (DefaultScopeIsLimitedToPhaseFoldersTest above pins that
+    exact mechanism for docs/api/), so an invalid `status:` value is the
+    right per-entry probe here: check (d) fires in BOTH the "full" and the
+    "reviews" profile (doc_profile_for's own docstring: "reviews -- check
+    (d) ... plus check (j)"), so one fixture shape proves every entry is
+    genuinely REACHED by the default scan without needing a second,
+    profile-specific fixture per folder."""
+
+    def test_every_phase_folder_is_reached_by_the_default_scan(self):
+        folders = read_phase_folders()
+        self.assertEqual(len(folders), 9, folders)  # the count this WI measured
+        for folder in folders:
+            with self.subTest(folder=folder):
+                rel = f"{folder}/bad-status.md"
+                self.write_doc(rel, doc_text(status="obsolete"))
+
+                result = self.run_lint()
+
+                errors = self.findings(result.stdout, "Errors")
+                expected = f"status='obsolete' is not in {{{VALID_STATUS_LITERAL}}}"
+                self.assertTrue(
+                    any(rel in e and expected in e for e in errors),
+                    (folder, expected, errors),
+                )
+                (self.docs_dir / rel).unlink()
 
 
 class ReviewsFolderProfileTest(PhaseDocsLintTestBase):

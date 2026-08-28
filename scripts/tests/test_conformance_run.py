@@ -1396,6 +1396,90 @@ class ContractTableExitCodeBindingRedProofTest(unittest.TestCase):
         self.assertEqual(before_mode, SCRIPT_PATH.stat().st_mode, "shipped file mode bits changed")
 
 
+# WI-0126: PHASE_FOLDER_NAMES (this script, :206) is a verbatim duplicate of
+# phase-docs-lint.sh's own PHASE_FOLDERS (scripts/phase-docs-lint.sh:61) --
+# deliberately NOT sourced (see this script's own comment directly above
+# PHASE_FOLDER_NAMES: the C2 probe must stay independent of the check it is
+# probing, ADR-0010 decision 2). Nothing today notices if the two drift
+# apart. Parsed from source on both sides, never retyped, following
+# test_frontmatter_examples_match_the_lint.py's _read_enum precedent.
+PHASE_DOCS_LINT_SCRIPT = REPO_ROOT / "scripts" / "phase-docs-lint.sh"
+
+
+def _read_bare_array(text, varname):
+    """Parses NAME=(bare word1 word2 ...) out of shell source text -- a
+    single-line, unquoted bash array (bash 3.2 floor: plain positional
+    arrays only, no associative arrays). Fails loudly if the shape changes
+    underneath this test rather than silently returning an empty tuple."""
+    m = re.search(r"^%s=\(([^)]*)\)" % re.escape(varname), text, re.MULTILINE)
+    if m is None:
+        raise AssertionError("could not find %s=(...) in source" % varname)
+    return tuple(m.group(1).split())
+
+
+def parse_phase_folders(script_path=PHASE_DOCS_LINT_SCRIPT):
+    return _read_bare_array(script_path.read_text(encoding="utf-8"), "PHASE_FOLDERS")
+
+
+def parse_phase_folder_names(script_path=SCRIPT_PATH):
+    return _read_bare_array(script_path.read_text(encoding="utf-8"), "PHASE_FOLDER_NAMES")
+
+
+class PhaseFolderNamesBindingTest(unittest.TestCase):
+    """The highest-value test in WI-0126's tranche 1: the two folder lists
+    are typed independently in two different scripts and nothing checks
+    they still agree. This is that check."""
+
+    def test_phase_folder_names_equals_phase_folders(self):
+        self.assertEqual(parse_phase_folders(), parse_phase_folder_names())
+
+
+class PhaseFolderNamesBindingRedProofTest(unittest.TestCase):
+    """Mutation-based RED proof (WI-0037/WI-0044 precedent), same shape as
+    ContractTableExitCodeBindingRedProofTest above: drops ONE entry at a
+    time from PHASE_FOLDER_NAMES in a SCRATCH copy of conformance-run.sh
+    (the shipped file is never touched, never executed -- this is a pure
+    text parse, like the class above) and confirms the binding above would
+    go red for exactly that entry, while every other of the nine folders
+    is untouched -- one subTest per entry, per G-109 (the mutation must
+    change structure, not merely presence)."""
+
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="wi0126-redproof-folder-names-"))
+        self.addCleanup(shutil.rmtree, self.tmpdir, ignore_errors=True)
+
+    def test_removing_one_entry_breaks_only_that_entrys_binding(self):
+        before = SCRIPT_PATH.read_bytes()
+        before_mode = SCRIPT_PATH.stat().st_mode
+        original = before.decode()
+        needle = "PHASE_FOLDER_NAMES=(discovery concept validation architecture planning quality launch operations reviews)"
+        self.assertIn(
+            needle, original,
+            "fixture assumption broken -- PHASE_FOLDER_NAMES's own literal line changed, update this test",
+        )
+
+        folders = parse_phase_folders()
+        for removed in folders:
+            with self.subTest(folder=removed):
+                narrowed = " ".join(f for f in folders if f != removed)
+                mutated = original.replace(
+                    needle, "PHASE_FOLDER_NAMES=(%s)" % narrowed, 1,
+                )
+                self.assertNotEqual(original, mutated)
+                scratch = self.tmpdir / ("conformance-run-%s.sh" % removed)
+                scratch.write_text(mutated, encoding="utf-8")
+
+                mutated_names = parse_phase_folder_names(scratch)
+                self.assertNotEqual(folders, mutated_names, (removed, mutated_names))
+                self.assertNotIn(removed, mutated_names)
+                for neighbour in folders:
+                    if neighbour != removed:
+                        self.assertIn(neighbour, mutated_names, (removed, neighbour))
+
+        self.assertEqual(before, SCRIPT_PATH.read_bytes(), "shipped file content changed")
+        self.assertEqual(before_mode, SCRIPT_PATH.stat().st_mode, "shipped file mode bits changed")
+
+
 class RealCheckSkeletonTest(unittest.TestCase):
     """Companion to the header-binding test above: pins the PARSING
     contract the classifier depends on by running each REAL (non-stub)

@@ -35,10 +35,43 @@ import tempfile
 import unittest
 from pathlib import Path
 
+# WI-0126 review round 2 (fix B): PHASE_FOLDERS lives in phase-docs-lint.sh,
+# not anchor.sh -- import the parser test_phase_docs_lint.py already ships
+# rather than hand-typing the same regex a third time (a copy also lives in
+# test_conformance_run.py's _read_bare_array, kept separate on purpose --
+# see that module's own comment on ADR-0010 decision 2, the C2 probe must
+# stay independent of the check it is probing). Established cross-test-
+# module pattern: test_baseline_archive_directory.py and
+# test_memory_sync_transport_errors.py both import `leak` from
+# test_artifact_gate.py the same way. Tradeoff, stated rather than hidden:
+# this relative import requires `-t .` on `unittest discover`
+# (CONTRIBUTING.md:50-57 documents the failure mode without it) -- a third
+# import joins that known, already-documented set rather than a new hazard.
+from .test_phase_docs_lint import read_phase_folders
+
 SCRIPT_PATH = Path(__file__).resolve().parents[1] / "anchor.sh"
 FRONTMATTER_LIB = Path(__file__).resolve().parents[1] / "lib" / "frontmatter.sh"
 
 VALID_DATE = "18.08.2026"
+
+
+def read_phase_scopes(script_path=SCRIPT_PATH):
+    """Parses PHASE_SCOPES's "folder:index" pairs out of anchor.sh's own
+    source text -- never retyped here (WI-0126). Unlike PHASE_FOLDERS /
+    PHASE_FOLDER_NAMES's single-line bare-word arrays (phase-docs-lint.sh /
+    conformance-run.sh), this one spans multiple lines with quoted
+    elements -- capture everything between the opening '(' and the line
+    that is exactly ')', then pull out the quoted strings. Fails loudly if
+    the shape changes underneath this test."""
+    text = script_path.read_text(encoding="utf-8")
+    m = re.search(r"^PHASE_SCOPES=\((.*?)^\)", text, re.MULTILINE | re.DOTALL)
+    if m is None:
+        raise AssertionError("could not find PHASE_SCOPES=(...) in %s" % script_path)
+    pairs = []
+    for entry in re.findall(r'"([^"]+)"', m.group(1)):
+        folder, index_name = entry.split(":", 1)
+        pairs.append((folder, index_name))
+    return tuple(pairs)
 
 
 def frontmatter_block(phase="P3", subskill="arch-index", status="living",
@@ -1524,6 +1557,133 @@ class SetCommandTest(AnchorTestBase):
         result = self.run_anchor("set", str(self.project_dir), "--scope", "architecture")
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertIn(self.prod_sha, result.stdout)
+
+
+class PhaseScopesSweepTest(AnchorTestBase):
+    """WI-0126: PHASE_SCOPES (anchor.sh:53-62) lists eight folder:index
+    pairs. Before this test, discovery/validation/planning/launch (and
+    their DISCOVERY.md/VALIDATION.md/PROJECT_PLAN.md/LAUNCH.md indices)
+    had zero coverage anywhere in this module -- only architecture,
+    concept, quality and operations were ever exercised. Both halves of
+    each pair are load-bearing and get their own probe here:
+
+    - the FOLDER half drives `status`'s "N of 8" scope count
+      (ScopesFoundHeaderTest above pins the mechanism itself; this sweep
+      exercises all eight folders, not a representative few).
+    - the INDEX half drives `set --scope <folder>` via
+      resolve_scope_index(): it dies naming the expected filename when
+      that file is absent (SetCommandTest's own "quality" case pins the
+      failure edge for one folder) and only succeeds once the CORRECT
+      filename exists -- this sweep pins the success edge for all eight,
+      so a wrong index name for any one entry would surface as that
+      folder's own `set` call dying with "no phase index found".
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.init_repo()
+        (self.project_dir / "src").mkdir()
+        self.write("src/a.go", "package a\n")
+        self.prod_sha = self.commit("seed code")
+
+    def test_every_scope_folder_is_counted_by_status(self):
+        # The cleanup MUST run even when the assertions above it raise --
+        # otherwise a real failure on one folder leaks its directory, every
+        # later folder in this loop then counts two directories instead of
+        # one, and each fails with the same misleading "1 of 8" message.
+        # One defect would read as a cascade with the true culprit
+        # unidentifiable (WI-0126 review round 2, fix A).
+        for folder, _index_name in read_phase_scopes():
+            with self.subTest(folder=folder):
+                scope_dir = self.docs_dir / folder
+                scope_dir.mkdir(parents=True)
+                try:
+                    result = self.run_anchor("status", str(self.project_dir))
+
+                    self.assertEqual(0, result.returncode, result.stderr)
+                    self.assertIn("1 of 8", result.stdout, (folder, result.stdout))
+                finally:
+                    shutil.rmtree(scope_dir)
+
+    def test_every_scope_index_is_the_one_set_writes_to(self):
+        # Honesty note (WI-0126 review round 2, fix D1): this loop has no
+        # removal-protection of its own -- there is no count assertion
+        # outside the loop, so a shrunk PHASE_SCOPES simply iterates fewer
+        # times and this test still passes. Removal-sensitivity here rides
+        # entirely on the sibling test above
+        # (test_every_scope_folder_is_counted_by_status's literal "1 of 8").
+        # An edit that touches that sibling without touching this one can
+        # silently drop the protection for the whole class.
+        for folder, index_name in read_phase_scopes():
+            with self.subTest(folder=folder, index=index_name):
+                self.write_index(folder, index_name)
+
+                result = self.run_anchor("set", str(self.project_dir), "--scope", folder)
+
+                self.assertEqual(0, result.returncode, (folder, index_name, result.stderr))
+                written = (self.project_dir / "docs" / folder / index_name).read_text()
+                self.assertIn(self.prod_sha, written, (folder, index_name, written))
+
+                shutil.rmtree(self.docs_dir / folder)
+
+
+class ReviewsScopeDeliberatelyAbsentTest(AnchorTestBase):
+    """WI-0126 deliverable 4: `reviews` is one of phase-docs-lint.sh's nine
+    PHASE_FOLDERS but is NOT one of anchor.sh's eight PHASE_SCOPES pairs.
+    Read against anchor.sh's own comment directly above PHASE_SCOPES
+    ("No `reviews` entry: review reports have no phase index and are out
+    of scope for this mechanism entirely, unlike phase-docs-lint.sh's
+    PHASE_FOLDERS ..."), this is a DELIBERATE asymmetry, not a gap. Pinned
+    here with the argued reason, not silently: `reviews` is absent from
+    PHASE_SCOPES on purpose, and both places that consume PHASE_SCOPES
+    treat it exactly like any other folder outside the eight -- `set
+    --scope reviews` refuses (resolve_scope_index has no entry to resolve)
+    and a document under docs/reviews/ is invisible to `status`'s "N of 8"
+    count and to `ack`'s scope check (is_in_anchor_scope only walks
+    PHASE_SCOPES's folder halves).
+
+    Review round 2 (fix C): an earlier draft of this docstring additionally
+    claimed review reports "predate ADR-0009's anchor mechanism and were
+    never meant to carry a phase-index anchor". Dropped -- anchor.sh's
+    comment supports only the scope-exclusion half quoted above, not a
+    historical predates-it claim, and the claim does not hold as stated:
+    the reviews lint profile (WI-0019) and anchor.sh stage 1 (WI-0021)
+    landed on the same day.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.init_repo()
+        (self.project_dir / "src").mkdir()
+        self.write("src/a.go", "package a\n")
+        self.prod_sha = self.commit("seed code")
+
+    def test_reviews_is_in_phase_folders_but_not_in_phase_scopes(self):
+        # Cross-script check: PHASE_FOLDERS lives in phase-docs-lint.sh, not
+        # anchor.sh -- read via the imported read_phase_folders() (see the
+        # module-level comment above the import), so this pin cannot
+        # silently drift from that source array.
+        phase_folders = read_phase_folders()
+
+        self.assertIn("reviews", phase_folders)
+        self.assertNotIn("reviews", [folder for folder, _index in read_phase_scopes()])
+
+    def test_set_with_scope_reviews_is_refused_as_unknown(self):
+        self.write("docs/reviews/x.md", doc_text())
+
+        result = self.run_anchor("set", str(self.project_dir), "--scope", "reviews")
+
+        self.assertEqual(2, result.returncode)
+        self.assertIn("unknown scope", result.stderr)
+
+    def test_reviews_folder_is_invisible_to_status_scope_count(self):
+        (self.docs_dir / "reviews").mkdir(parents=True)
+        (self.docs_dir / "reviews" / "x.md").write_text(doc_text(), encoding="utf-8")
+
+        result = self.run_anchor("status", str(self.project_dir))
+
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("0 of 8", result.stdout, result.stdout)
 
 
 class AckCommandTest(AnchorTestBase):

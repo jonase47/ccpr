@@ -7,6 +7,21 @@ All notable changes to this project are documented in this file. The format is b
 ## [Unreleased]
 
 ### Added
+- **Per-entry coverage for the three phase-folder lists (WI-0126, tranche 1)**. An entry in an
+  enumerated list with no test of its own is an unverified claim wearing the credibility of its
+  neighbours: `PLACEHOLDER_NAMES` shipped with tests for two of its three names, and a typo in
+  the third would have passed the entire suite. Measured before this change, the string `launch`
+  appeared **zero** times in the whole test suite, five of the nine phase folders were never used
+  as `docs/<folder>` anywhere, and nothing swept `PHASE_FOLDERS` (`phase-docs-lint.sh`),
+  `PHASE_FOLDER_NAMES` (`conformance-run.sh`) or `PHASE_SCOPES` (`anchor.sh`) at all. All three
+  lists are now parsed **out of the shell source** and swept per entry, so a new entry joins the
+  sweep by itself, with a count pin in each so a removed one turns the sweep red instead of
+  letting it quietly shrink. `PHASE_FOLDER_NAMES` additionally gets an automated per-entry
+  mutation proof against a scratch copy. The duplication between `PHASE_FOLDERS` and
+  `PHASE_FOLDER_NAMES` — verbatim, in two files, with nothing noticing a divergence — is now
+  bound by a test. `reviews` is in the first two lists and deliberately not in `PHASE_SCOPES`;
+  that asymmetry is pinned with the reason `anchor.sh` gives for it, rather than left silent.
+
 - **An ADR convention: a resolved open point records its resolution in place (WI-0127)**.
   ADR-0009's follow-up 4 read "undefined" for six days after an addendum in the same file had
   answered it, and a proposal contradicting that answer was made on the strength of the stale
