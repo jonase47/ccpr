@@ -259,15 +259,6 @@ NEEDS_EXEMPTION = {"absence-only-needs-exemption"}
 KNOWN_FINDINGS = {
     ("test_anchor.py", "OperationalErrorsTest", "test_check_operational_errors_never_print_a_stage1_report"): "known-risk-not-yet-fixed",
     ("test_anchor.py", "GitEdgeCaseTest", "test_clean_working_tree_prints_no_dirty_note"): "known-risk-not-yet-fixed",
-    ("test_artifact_gate.py", "DenyListTest", "test_a_configured_name_is_never_echoed_into_the_output"): "known-risk-not-yet-fixed",
-    ("test_artifact_gate.py", "DenyListTest", "test_the_rejection_does_not_echo_the_offending_name"): "known-risk-not-yet-fixed",
-    ("test_artifact_gate.py", "DenyListTest", "test_an_unusable_entry_is_refused_before_any_scanning_happens"): "known-risk-not-yet-fixed",
-    ("test_artifact_gate.py", "DenyListScopeIsVisibleInTheReportTest", "test_the_summary_never_echoes_a_configured_name"): "known-risk-not-yet-fixed",
-    ("test_artifact_gate.py", "ContentDenyEscalationTest", "test_a_healthy_no_match_stays_silent_about_the_matcher"): "known-risk-not-yet-fixed",
-    ("test_artifact_gate.py", "SweepTest", "test_a_sweep_with_no_binaries_does_not_mention_skipping"): "known-risk-not-yet-fixed",
-    ("test_artifact_gate.py", "ForeignRepoIsNeverFlaggedTest", "test_a_foreign_projects_docs_readme_and_workitems_produce_no_docs_boundary_finding"): "known-risk-not-yet-fixed",
-    ("test_artifact_gate.py", "EveryEmittedLineIsRedactedTest", "test_the_exemption_audit_line_does_not_leak_a_configured_name"): "known-risk-not-yet-fixed",
-    ("test_artifact_gate.py", "PromotePathConfigDefectTest", "test_the_promote_side_rejection_names_the_entry_by_index_only"): "known-risk-not-yet-fixed",
     ("test_conformance_run.py", "UnknownKeyRejectionTest", "test_shipped_example_template_produces_no_unknown_key_error"): "known-risk-not-yet-fixed",
     ("test_handover_size_hook.py", "RoundingBoundaryTest", "test_a_file_just_under_the_cap_that_rounds_to_100_is_approaching"): "custom-assert-wrapper-liveness-invisible-to-this-scanner",
     ("test_install_docs_boundary.py", "FreshInstallCopiesAllowlistedDocsTest", "test_a_clean_source_reports_no_skip"): "known-risk-not-yet-fixed",
@@ -868,7 +859,7 @@ class ClassificationCountsTest(unittest.TestCase):
     def test_classification_counts(self):
         """Regression pin on the measured baseline: 978 `test_*` methods
         across the corpus call something shaped like a subprocess invocation
-        and are therefore in scope for this check; 23 of those are
+        and are therefore in scope for this check; 14 of those are
         absence-only-needs-exemption (all accounted for via KNOWN_FINDINGS
         above), the rest carry at least one recognised positive/liveness
         assertion. A change in either number means a test changed shape or
@@ -879,6 +870,36 @@ class ClassificationCountsTest(unittest.TestCase):
         growing paragraph:
 
           in-scope / flagged   when
+          978 / 14             WI-0128 wave 3 tranche 3 (artifact_gate
+                               module, 9 of the 23 remaining KNOWN_FINDINGS
+                               entries): each fixed test gets a liveness
+                               assertion the classifier can actually see --
+                               mostly `assertEqual(r.returncode, N, ...)`,
+                               which the classifier recognises unconditionally
+                               via its `.returncode`-attribute check
+                               regardless of assertion method. Two of the
+                               nine (DenyListTest's refusal-before-scanning
+                               test, PromotePathConfigDefectTest's index-only
+                               test) sit on a path a scan-summary pin cannot
+                               reach at all -- the exit code IS the only
+                               liveness proof available there. One
+                               (PromotePathConfigDefectTest's index-only
+                               test) already carried a real positive
+                               assertion (`assertIn("#2", r.stdout +
+                               r.stderr)`) the classifier could not see,
+                               because `_classify_assert_call`'s `assertIn`
+                               branch only recognises `args[1]` when it is
+                               DIRECTLY `.stdout` or a name bound to it --
+                               `r.stdout + r.stderr` is a `BinOp` and does
+                               not qualify, even though `_references_the_
+                               result` (used everywhere else in the same
+                               function) walks the whole call and would have
+                               found it. Not fixed here (out of this
+                               tranche's write boundary, the classifier
+                               itself); documented instead. In-scope
+                               unchanged: no method was added or removed,
+                               only assertions inside existing ones.
+                               Flagged: -9.
           978 / 23             WI-0128 wave 3 tranche 2 (phase_docs_lint
                                module, 15 of the 38 remaining KNOWN_FINDINGS
                                entries): twelve pin "**Files scanned:** N"
@@ -1006,7 +1027,7 @@ class ClassificationCountsTest(unittest.TestCase):
         recs = scan_tree()
         flagged = [r for r in recs if r.disposition in NEEDS_EXEMPTION]
         self.assertEqual(978, len(recs))
-        self.assertEqual(23, len(flagged))
+        self.assertEqual(14, len(flagged))
 
 
 class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):

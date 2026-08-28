@@ -621,6 +621,11 @@ class DenyListTest(GateTestBase):
         self.write_config(denyNames=["Zorblatt"])
         p = self.write("sample.md", "The Zorblatt rollout.\n")
         r = self.run_gate(p)
+        # Liveness: the deny matcher actually fired (a matcher that never ran
+        # would also never echo the name, which is exactly the blind spot
+        # this pair of assertions closes -- see WI-0128 finding #1).
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("(name redacted)", r.stdout)
         self.assertNotIn("Zorblatt", r.stdout + r.stderr)
         self.assertNotIn("zorblatt", (r.stdout + r.stderr).lower())
 
@@ -778,6 +783,10 @@ class DenyListTest(GateTestBase):
         self.write_config(denyNames=["Quuxcorp", "Zorb\nlatt"])
         p = self.write("sample.md", CLEAN_TEXT)
         r = self.run_gate(p)
+        # Liveness: the refusal itself happened (exit 2), so "no leak" is a
+        # statement about the rejection path, not about a run that quietly
+        # skipped it and found nothing to say either way.
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
         self.assertNotIn("zorb", (r.stdout + r.stderr).lower())
 
     def test_an_unusable_entry_is_refused_before_any_scanning_happens(self):
@@ -786,6 +795,11 @@ class DenyListTest(GateTestBase):
         self.write_config(denyNames=["Zorb\nlatt"])
         p = self.write("sample.md", CLEAN_TEXT)
         r = self.run_gate(p)
+        # A scan-summary pin cannot reach this path (that IS the point: no
+        # scan ever runs), so the liveness proof is the specific refusal exit
+        # code instead -- distinguishes "die() refused" from any other reason
+        # "scanned" happens to be absent (a crash, say).
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
         self.assertNotIn("scanned", r.stdout)
 
     def test_a_blank_deny_name_entry_is_rejected_loudly(self):
@@ -857,6 +871,12 @@ class DenyListScopeIsVisibleInTheReportTest(GateTestBase):
         self.write_config(denyNames=["Zorblatt", "Quuxcorp"])
         p = self.write("sample.md", CLEAN_TEXT)
         r = self.run_gate(p)
+        # Liveness: the summary carries the CORRECT count computed off the
+        # loaded list, not merely the absence of the two configured names --
+        # a summary that dropped the count silently (or always printed 0)
+        # would still pass the two assertions below.
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("2 name(s)", self.summary(r))
         self.assertNotIn("zorblatt", self.summary(r).lower())
         self.assertNotIn("quuxcorp", self.summary(r).lower())
 
@@ -1397,6 +1417,11 @@ class ContentDenyEscalationTest(GateTestBase):
         # fallback warning on every clean file with a non-ASCII deny name.
         p = self.write("sample.md", "grün prose, unrelated content\n")
         r = self.run_gate(p, CCPR_GATE_DENY_NAMES=self.NAME)
+        # Liveness: the file was actually scanned to completion (not skipped,
+        # not crashed before reaching the escalation) -- the silence below
+        # means "ran and found nothing", not "never got there".
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("scanned 1 files", r.stdout)
         self.assertNotIn("unicode content matcher failed", r.stdout + r.stderr)
 
 
@@ -1708,6 +1733,11 @@ class SweepTest(GateTestBase):
         (repo / "a.md").write_text(CLEAN_TEXT, encoding="utf-8")
         self.commit_all(repo)
         r = self.run_gate("--repo", repo)
+        # Liveness: the file was actually scanned -- "no binary line" must
+        # mean "the count is zero", not "the run never got far enough to
+        # print anything".
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("scanned 1 files", r.stdout)
         self.assertNotIn("binary", r.stdout)
 
     def test_a_missing_file_argument_is_a_hard_error(self):
@@ -1901,6 +1931,11 @@ class ForeignRepoIsNeverFlaggedTest(GateTestBase):
     def test_a_foreign_projects_docs_readme_and_workitems_produce_no_docs_boundary_finding(self):
         repo = self.make_foreign_repo()
         r = self.run_gate("--repo", repo)
+        # Liveness: both fixture files under docs/ were actually scanned --
+        # the two files that WOULD trip the boundary rule if self-detection
+        # ever misfired, not files the run happened to skip past.
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("2 files", r.stdout)
         self.assertNotIn("docs-boundary", r.stdout + r.stderr)
 
     def test_a_foreign_repo_sweep_exits_clean(self):
@@ -2033,6 +2068,12 @@ class EveryEmittedLineIsRedactedTest(GateTestBase):
         # line spells it out twice -- the run contradicting itself.
         self.write_config(denyNames=["discipline"])
         r = self.run_gate(LIB)
+        # Liveness: the CONTENT-side matcher (not only the path-side one)
+        # actually fired -- LIB's own header line names "discipline" in
+        # prose, so a content-deny check that silently stopped running would
+        # still pass on path-matching alone.
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("occurs here (name redacted)", r.stdout)
         self.assertNotIn(
             "discipline", (r.stdout + r.stderr).lower(),
             "a configured name reached the output:\n" + r.stdout + r.stderr,
@@ -2081,6 +2122,10 @@ class PromotePathConfigDefectTest(GateTestBase):
         self.write_config(denyNames=["Quuxcorp", "Zorb\nlatt"])
         p = self.write("m.md", MEMORY_CLEAN_TEXT)
         r = self.run_memory_gate(p)
+        # Liveness: the promote-side refusal itself happened (exit 2) -- the
+        # index-only naming is a claim about WHAT the refusal says, which
+        # presupposes the refusal fired at all.
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
         self.assertIn("#2", r.stdout + r.stderr)
         self.assertNotIn("zorb", (r.stdout + r.stderr).lower())
 
