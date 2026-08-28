@@ -46,6 +46,54 @@ All notable changes to this project are documented in this file. The format is b
   separate from the pre-existing `test_next_steps_placement.py`, whose scope is a single narrow
   parser-anchor fix (WI-0024) and has nothing to do with these three lists.
 
+- **`quality-scan.sh`'s three disagreeing SKIP_DIRS tuples unified, and per-entry coverage for its
+  producer contract (WI-0126, tranche 3a)**. `scripts/quality-scan.sh` has **four**
+  `os.walk("src")` call sites, not three: the CORS wildcard scan, the PII-in-logging scan, the
+  DSGVO consent-mechanism scan, and a fourth, unfiltered counting walk
+  (`src_files = sum(1 for r, d, f in os.walk("src") for _ in f)`) that gates whether the consent
+  finding fires at all. Only the first three carried an inline skip tuple, and two of the three
+  lacked `venv` — including two loops in the SAME Python heredoc that still disagreed with each
+  other. PO decision (28.08.2026): unify those three skip *lists* on the superset including
+  `venv` — walking a virtualenv for either signal is third-party noise, never a real finding about
+  the project's own code. The fourth walk has no directory filter at all and was deliberately left
+  alone; filtering it would change *when* the consent finding fires, a second, unapproved
+  behaviour change (see the "report, not fixed" paragraph below). Each of `quality-scan.sh`'s two
+  heredocs now defines its own `SKIP_DIRS` constant (they cannot share one definition — both are
+  independently quoted heredocs, and unquoting either to share a name would let the shell expand
+  `$`-prefixed tokens inside the Python body; a third option, one `export`ed shell variable read
+  via `os.environ` in both heredocs, was considered and declined as more machinery than
+  duplicating a four-tuple warrants). Measured before/after with a scratch-copy mutation that
+  reverts only the CORS and consent walks to their pre-fix tuples: before, a `src/venv/` fixture
+  produces a CORS finding and, more subtly, SUPPRESSES the "no consent mechanism found" finding by
+  reading venv noise as the project's own consent handling; after, neither happens.
+
+  Separately, `SEVERITIES`, `COMPLETED` and `HANDLERS` — three constants inside the
+  `TOOL_REPORT_PY` heredoc that WI-0055/WI-0102 already hardened — had never been referenced by
+  name in `test_quality_scan.py`. `COMPLETED` (4 entries) and `HANDLERS` (4 entries) must share
+  the same key set: `read_tool()` checks `kind not in HANDLERS` before it ever touches
+  `COMPLETED[kind]`, so a producer present in one dict and missing from the other reaches an
+  **unhandled KeyError**, not a `scan_error`, a mutation now measured directly (removed the entry
+  from a scratch copy of the extracted heredoc source, confirmed the traceback). `pattern-scan`'s
+  `COMPLETED` tuple is `("0",)` only, unlike the other three's `("0", "1")` — status `"1"` is
+  legitimate for npm-audit/pip-audit/semgrep and an error for pattern-scan, the discriminating
+  case a status-"0"-only sweep would never exercise. `SEVERITIES` (5 entries) feeds
+  `findings_npm()`'s `buckets = [k for k in SEVERITIES if k in meta]`; a missing name is dropped
+  from the total **silently** — the report still parses, the scan still exits 0, the count is just
+  wrong — measured per entry against a report carrying all 5 buckets with only the target one
+  non-zero. All three constants are extracted verbatim out of the shipped heredoc for every test
+  (never retyped), run either as a real subprocess (the same argv contract `run_py()` uses) or
+  exec'd into an in-memory namespace when only the data shape is needed.
+
+  Report, not fixed (outside this tranche's PO decision and write boundary): the same three walks
+  also filter FILES differently — the CORS walk accepts `.py/.js/.ts`, the PII walk accepts those
+  plus `.jsx/.tsx`, and the consent walk filters by nothing at all and opens every file in `src/`.
+  Separately, the fourth walk — the unfiltered counting walk that gates whether the consent
+  finding fires (`if src_files > 2`) — has no directory filter either, so files under
+  `node_modules`, `venv` and `.git` count toward "is there actual code": a project whose only
+  files live in a virtualenv can trip the consent finding on venv noise alone. Also not fixed in
+  this tranche, and not the same PO decision — filtering that walk would change when the finding
+  fires, not just what noise a filtered walk skips.
+
 - **An ADR convention: a resolved open point records its resolution in place (WI-0127)**.
   ADR-0009's follow-up 4 read "undefined" for six days after an addendum in the same file had
   answered it, and a proposal contradicting that answer was made on the strength of the stale

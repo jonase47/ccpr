@@ -869,33 +869,38 @@ class NoStaleKnownFindingsTest(unittest.TestCase):
 
 class ClassificationCountsTest(unittest.TestCase):
     def test_classification_counts(self):
-        """Regression pin on the measured baseline (WI-0125, 27.08.2026;
-        updated the same day when the test_doc_volume_check.py liveness fix
-        added BaselineLivenessRedProofTest, one more in-scope method with
-        both a negative assertion (bullets==[]) and two positive ones
-        (returncode, files_scanned) -- net +1 total, disposition counts
-        for the flagged bucket unchanged; updated again the same day (round
-        2, finding B) when the `assertTrue` branch was gated behind
-        `_references_the_result` -- one previously-`not-flagged` method
-        (test_memory_lint.py's test_a_cr_terminated_fence_closes_the_fence)
-        lost its unconditional positive and is now
-        absence-only-needs-exemption, baselined under
-        `helper-bound-list-not-recognised-as-findings`; total in-scope count
-        unchanged, only a reclassification; bumped again 28.08.2026 by
-        WI-0126 tranche 1, which added five subprocess-invoking methods
-        sweeping PHASE_FOLDERS/PHASE_SCOPES/PHASE_FOLDER_NAMES -- in-scope
-        916 -> 921, flagged unchanged at 54, i.e. all five carry a
-        recognised liveness assertion): 921 `test_*` methods across the
-        corpus call something shaped like a subprocess invocation and are
-        therefore in scope for this check; 54 of those are
+        """Regression pin on the measured baseline: 931 `test_*` methods
+        across the corpus call something shaped like a subprocess invocation
+        and are therefore in scope for this check; 54 of those are
         absence-only-needs-exemption (all accounted for via KNOWN_FINDINGS
         above), the rest carry at least one recognised positive/liveness
-        assertion. A change in either number means either a test changed
-        shape or this scanner's own logic changed -- worth a deliberate
-        look either way, not a silent drift."""
+        assertion. A change in either number means a test changed shape or
+        this scanner's own logic changed -- a deliberate look either way,
+        never a silent drift.
+
+        Trajectory, so the history is one line per event rather than a
+        growing paragraph:
+
+          in-scope / flagged   when
+          915 / 53             WI-0125, 27.08.2026, first measurement
+          916 / 53             + test_doc_volume_check's liveness red proof
+          916 / 54             round 2 finding B: the `assertTrue` branch
+                               gated behind `_references_the_result`; one
+                               method reclassified, no scope change
+          921 / 54             WI-0126 tranche 1 (PHASE_FOLDERS,
+                               PHASE_SCOPES, PHASE_FOLDER_NAMES sweeps)
+          921 / 54             tranche 2 added no in-scope methods -- its 19
+                               tests import next_steps directly and never
+                               invoke a subprocess (the FILE-count pin below
+                               moved instead, 40 -> 41)
+          931 / 54             WI-0126 tranche 3a (quality-scan.sh contract
+                               and skip-list coverage)
+
+        The flagged count has not moved since round 2: every test added by
+        WI-0126 so far carries a recognised liveness assertion."""
         recs = scan_tree()
         flagged = [r for r in recs if r.disposition in NEEDS_EXEMPTION]
-        self.assertEqual(921, len(recs))
+        self.assertEqual(931, len(recs))
         self.assertEqual(54, len(flagged))
 
 

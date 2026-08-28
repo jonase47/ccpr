@@ -39,8 +39,10 @@ one behaviour that matters: prints a report AND exits non-zero. The real
 tools were measured separately as a probe, outside this suite.
 """
 
+import ast
 import json
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -833,6 +835,574 @@ class SetEDoesNotReachIntoCommandSubstitutionTest(QualityScanTestBase):
             shutil.copy2(SCRIPT, Path(tmp) / "quality-scan.sh")
         self.assertEqual(before, SCRIPT.read_bytes())
         self.assertEqual(before_mode, stat.S_IMODE(SCRIPT.stat().st_mode))
+
+
+# =============================================================================
+# WI-0126 tranche 3a -- three disagreeing SKIP_DIRS tuples unified (Deliverable
+# 1), and per-entry coverage for the TOOL_REPORT_PY producer contract
+# (COMPLETED/HANDLERS, Deliverable 2) and SEVERITIES (Deliverable 3).
+#
+# scan_config()'s CORS walk and scan_dsgvo()'s consent walk used to skip
+# ("node_modules", ".git", "__pycache__") only -- no "venv" -- while
+# scan_dsgvo()'s PII walk (the same heredoc, two loops down) already carried
+# "venv". PO decision (28.08.2026): unify on the superset. That edit lands in
+# scripts/quality-scan.sh alone in this tranche; the classes below prove it.
+# =============================================================================
+
+
+class SkipDirsVenvBehaviourChangeTest(QualityScanTestBase):
+    """Deliverable 1's required proof: before unifying the CORS and consent
+    walks' skip lists on the superset including "venv", both walks
+    descended into a src/venv/ fixture; after, neither does. This is a
+    scratch-copy MUTATION proof of the shipped script itself -- the same
+    shape as QualityScanQuotingMutationTest/DepsScanRedProofTest above --
+    not a stubbed-tool test: the mutant reverts ONLY the two walks' skip
+    tuples to their measured pre-fix shape (`("node_modules", ".git",
+    "__pycache__")`, no "venv"), leaving the PII walk (which already
+    carried "venv" before this tranche -- see the briefing's own table)
+    and the SKIP_DIRS constant definitions themselves untouched.
+
+    The two walks' own semantics make "produces a finding from it" look
+    different for each. The CORS walk emits a POSITIVE per-file finding
+    when it opens a matching file, so "descends into venv" shows up
+    directly as a CORS finding whose "file" is under src/venv/. The
+    consent walk has no per-file finding at all -- it sets a boolean that
+    SUPPRESSES the "no consent mechanism found" finding the moment any
+    file anywhere contains a consent-ish term. Descending into venv there
+    means the walk reads venv noise as if it were the project's own
+    consent handling, which SUPPRESSES a finding that should have fired --
+    the observable effect is the finding's ABSENCE before the fix and its
+    PRESENCE after, the inverse of the CORS case but the same root cause."""
+
+    CORS_NEEDLE = (
+        '# CORS wildcard check\n'
+        'for root, dirs, files in os.walk("src"):\n'
+        '    dirs[:] = [d for d in dirs if d not in SKIP_DIRS]\n'
+        '    for fname in files:\n'
+    )
+    CORS_PRE_FIX = CORS_NEEDLE.replace(
+        "d not in SKIP_DIRS", 'd not in ("node_modules", ".git", "__pycache__")'
+    )
+
+    CONSENT_NEEDLE = (
+        '# Check for consent mechanism\n'
+        'consent_found = False\n'
+        'for root, dirs, files in os.walk("src"):\n'
+        '    dirs[:] = [d for d in dirs if d not in SKIP_DIRS]\n'
+        '    for fname in files:\n'
+    )
+    CONSENT_PRE_FIX = CONSENT_NEEDLE.replace(
+        "d not in SKIP_DIRS", 'd not in ("node_modules", ".git", "__pycache__")'
+    )
+
+    def build_pre_venv_fix_mutant(self, tmp):
+        mutant = Path(tmp) / "quality-scan.sh"
+        shutil.copy2(SCRIPT, mutant)
+        content = mutant.read_text(encoding="utf-8")
+        for needle in (self.CORS_NEEDLE, self.CONSENT_NEEDLE):
+            self.assertEqual(
+                1, content.count(needle),
+                "fixture assumption: walk moved -- %r" % needle,
+            )
+        content = content.replace(self.CORS_NEEDLE, self.CORS_PRE_FIX)
+        content = content.replace(self.CONSENT_NEEDLE, self.CONSENT_PRE_FIX)
+        mutant.write_text(content, encoding="utf-8")
+        return mutant
+
+    def plant_cors_venv_fixture(self):
+        venv_file = self.project / "src" / "venv" / "lib" / "sitecustomize.py"
+        venv_file.parent.mkdir(parents=True, exist_ok=True)
+        venv_file.write_text(
+            "ALLOW_ORIGIN = 'Access-Control-Allow-Origin: *'\n", encoding="utf-8"
+        )
+
+    def plant_consent_venv_fixture(self):
+        venv_file = self.project / "src" / "venv" / "consent_stub.py"
+        venv_file.parent.mkdir(parents=True, exist_ok=True)
+        venv_file.write_text("# consent management stub\n", encoding="utf-8")
+        # Enough real project files outside venv for the "no consent" check
+        # to fire at all (it requires more than 2 files total) -- none of
+        # them contain a consent-ish term, so the ONLY source of that term
+        # anywhere in the tree is the venv fixture above.
+        for name in ("a.py", "b.py", "c.py"):
+            (self.project / "src" / name).write_text("x = 1\n", encoding="utf-8")
+
+    def test_before_the_fix_the_cors_walk_descends_into_venv_and_finds_it(self):
+        self.plant_cors_venv_fixture()
+        with tempfile.TemporaryDirectory(prefix="ccpr-wi0126-skipdirs-") as tmp:
+            mutant = self.build_pre_venv_fix_mutant(tmp)
+            r = subprocess.run(
+                ["bash", str(mutant), "config", str(self.project)],
+                capture_output=True, text=True, env=self.env(),
+            )
+            self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+            report = json.loads(self.report_path().read_text(encoding="utf-8"))
+            findings = report["scans"][0]["findings"]
+            self.assertEqual(1, len(findings), findings)
+            self.assertIn("venv", findings[0]["file"])
+
+    def test_after_the_fix_the_cors_walk_does_not_descend_into_venv(self):
+        self.plant_cors_venv_fixture()
+        r = self.run_scan("config")
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        report = json.loads(self.report_path().read_text(encoding="utf-8"))
+        self.assertEqual([], report["scans"][0]["findings"])
+
+    def test_before_the_fix_venv_noise_suppresses_the_missing_consent_finding(self):
+        self.plant_consent_venv_fixture()
+        with tempfile.TemporaryDirectory(prefix="ccpr-wi0126-skipdirs-") as tmp:
+            mutant = self.build_pre_venv_fix_mutant(tmp)
+            r = subprocess.run(
+                ["bash", str(mutant), "dsgvo", str(self.project)],
+                capture_output=True, text=True, env=self.env(),
+            )
+            self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+            report = json.loads(self.report_path().read_text(encoding="utf-8"))
+            types = [f["type"] for f in report["scans"][0]["findings"]]
+            self.assertNotIn(
+                "dsgvo-consent", types,
+                "fixture assumption: pre-fix walk no longer picks up venv noise",
+            )
+
+    def test_after_the_fix_the_missing_consent_finding_fires_correctly(self):
+        self.plant_consent_venv_fixture()
+        r = self.run_scan("dsgvo")
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        report = json.loads(self.report_path().read_text(encoding="utf-8"))
+        types = [f["type"] for f in report["scans"][0]["findings"]]
+        self.assertIn("dsgvo-consent", types)
+
+    def test_the_shipped_script_is_untouched_by_the_venv_mutation_probe(self):
+        before = SCRIPT.read_bytes()
+        before_mode = stat.S_IMODE(SCRIPT.stat().st_mode)
+        with tempfile.TemporaryDirectory(prefix="ccpr-wi0126-skipdirs-") as tmp:
+            self.build_pre_venv_fix_mutant(tmp)
+        self.assertEqual(before, SCRIPT.read_bytes())
+        self.assertEqual(before_mode, stat.S_IMODE(SCRIPT.stat().st_mode))
+
+
+# -----------------------------------------------------------------------------
+# WI-0126 tranche 3a round 2, item B: nothing previously kept the TWO
+# SKIP_DIRS = (...) definitions above (scan_config() and scan_dsgvo(), see
+# the module-docstring-style comment beside the first one for why there are
+# two heredoc-local copies rather than one shared constant) in sync with
+# each other. A future edit that adds e.g. "dist" to one and not the other
+# would pass every test above -- both walks would still run, just filter
+# different things -- which is the same "two walks in the same file quietly
+# disagree" bug class the PO decision closed one level up, one file below.
+# -----------------------------------------------------------------------------
+
+SKIP_DIRS_LITERAL_RE = re.compile(r'SKIP_DIRS = \(([^)]*)\)')
+
+
+def extract_skip_dirs_tuples(content):
+    """Returns every `SKIP_DIRS = (...)` literal found in `content`, each
+    ast.literal_eval'd into a real tuple (never re-typed by hand), in the
+    order they appear in the source."""
+    return [ast.literal_eval("(" + m + ")") for m in SKIP_DIRS_LITERAL_RE.findall(content)]
+
+
+class SkipDirsDefinitionsStayEqualTest(unittest.TestCase):
+    """Both SKIP_DIRS literals are string-extracted verbatim from the
+    shipped script and compared directly -- not retyped copies compared to
+    each other, which would only prove two humans could type the same
+    tuple twice. The length pin catches the failure mode the equality
+    check alone would miss: both definitions shrinking in lockstep (e.g.
+    both losing "venv" again) stays equal to itself the whole time."""
+
+    def test_both_skip_dirs_definitions_are_identical(self):
+        content = SCRIPT.read_text(encoding="utf-8")
+        tuples = extract_skip_dirs_tuples(content)
+        self.assertEqual(
+            2, len(tuples),
+            "fixture assumption: exactly two SKIP_DIRS definitions expected, "
+            "found %d -- did a definition move or get renamed?" % len(tuples),
+        )
+        first, second = tuples
+        self.assertEqual(first, second, "the two SKIP_DIRS definitions have diverged")
+        self.assertEqual(4, len(first), first)
+
+
+class SkipDirsDefinitionsGuardFiresOnDivergenceTest(unittest.TestCase):
+    """Proof the guard above is not vacuously true (G-141: a mutation that
+    does not grip still reports "passed"). Both mutations below work on a
+    SCRATCH STRING held only in memory -- never a copy written to disk,
+    let alone the shipped file itself -- so there is nothing here for
+    `git stash` or any other abortable step to lose."""
+
+    NEEDLE = 'SKIP_DIRS = ("node_modules", ".git", "__pycache__", "venv")'
+
+    def setUp(self):
+        self.content = SCRIPT.read_text(encoding="utf-8")
+        self.assertEqual(
+            2, self.content.count(self.NEEDLE),
+            "fixture assumption: both definitions still share this literal text",
+        )
+
+    def test_a_pair_that_diverges_in_one_definition_is_caught_by_equality(self):
+        mutated = self.content.replace(
+            self.NEEDLE,
+            'SKIP_DIRS = ("node_modules", ".git", "__pycache__")',
+            1,  # only the FIRST occurrence -- the second stays on the superset
+        )
+        first, second = extract_skip_dirs_tuples(mutated)
+        self.assertNotEqual(
+            first, second,
+            "mutation did not create a divergent pair -- guard proof is meaningless",
+        )
+
+    def test_a_pair_that_shrinks_in_lockstep_stays_equal_and_needs_the_length_pin(self):
+        mutated = self.content.replace(
+            self.NEEDLE,
+            'SKIP_DIRS = ("node_modules", ".git", "__pycache__")',
+            2,  # BOTH occurrences -- equality alone would not catch this
+        )
+        first, second = extract_skip_dirs_tuples(mutated)
+        self.assertEqual(
+            first, second,
+            "fixture assumption: a lockstep shrink is still equal to itself",
+        )
+        self.assertNotEqual(
+            4, len(first),
+            "mutation did not actually shrink the tuple -- guard proof is meaningless",
+        )
+
+
+# -----------------------------------------------------------------------------
+# Deliverables 2 and 3: TOOL_REPORT_PY's SEVERITIES / COMPLETED / HANDLERS.
+#
+# These three constants live inside the TOOL_REPORT_PY heredoc (scripts/
+# quality-scan.sh:73-292) -- a generated temp script quality-scan.sh writes
+# out at runtime, never an importable module. test_quality_scan.py never
+# referenced any of the three by name before this tranche.
+#
+# Mechanism: extract the heredoc body VERBATIM out of the shipped script
+# (never retyped -- the same rule test_next_steps_lists.py's module
+# docstring states for next_steps.py's constants) and either (a) run it as a
+# real subprocess with the exact argv shape quality-scan.sh's own run_py()
+# uses, to exercise read_tool()'s CLI contract end to end including its exit
+# code and traceback on an unhandled error, or (b) exec() it into an
+# in-memory namespace when only the constants themselves are needed with no
+# process boundary. Both read the SAME extracted text; (a) proves the
+# behaviour production code sees, (b) proves the data shape. A mutation
+# proof for either constant is built by string-replacing the ONE line that
+# defines it in the extracted text -- never a rebuilt/retyped copy -- and
+# feeding the mutated text back through the same two paths.
+# -----------------------------------------------------------------------------
+
+TOOL_REPORT_HEREDOC_START = "cat > \"${TOOL_REPORT_PY}\" <<'TOOLREPORTEOF'\n"
+TOOL_REPORT_HEREDOC_END = "\nTOOLREPORTEOF\n"
+
+
+def tool_report_source():
+    """The exact text quality-scan.sh writes to TOOL_REPORT_PY at runtime,
+    extracted verbatim between its heredoc markers."""
+    content = SCRIPT.read_text(encoding="utf-8")
+    start = content.index(TOOL_REPORT_HEREDOC_START) + len(TOOL_REPORT_HEREDOC_START)
+    end = content.index(TOOL_REPORT_HEREDOC_END, start)
+    return content[start:end]
+
+
+def load_tool_report_module(source=None):
+    """exec()s the extracted source into a fresh namespace and returns it.
+    __name__ is deliberately not "__main__" so the module's own `if
+    __name__ == "__main__": sys.exit(main(sys.argv))` guard does not fire
+    against this process's real argv."""
+    ns = {"__name__": "quality_scan_tool_report_under_test"}
+    exec(
+        compile(source if source is not None else tool_report_source(),
+                "<quality_scan_tool_report.py>", "exec"),
+        ns,
+    )
+    return ns
+
+
+class ToolReportPyTestBase(unittest.TestCase):
+    """Writes the extracted TOOL_REPORT_PY source (optionally mutated) to a
+    real scratch .py file and runs it exactly the way quality-scan.sh's
+    run_py()/run_tool_report() do: `python3 <script> <kind> <report>
+    <status>`, reading argv, stdout, stderr and the exit code directly --
+    never through a pipe."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="ccpr-tool-report-py-"))
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.report_dir = self.tmp / "reports"
+        self.report_dir.mkdir()
+        self._script_seq = 0
+
+    def write_script(self, source=None):
+        self._script_seq += 1
+        script = self.tmp / ("quality_scan_tool_report_%d.py" % self._script_seq)
+        script.write_text(source if source is not None else tool_report_source(), encoding="utf-8")
+        return script
+
+    def write_report(self, name, doc):
+        path = self.report_dir / name
+        path.write_text(json.dumps(doc), encoding="utf-8")
+        return path
+
+    def run_tool_report(self, script, *args):
+        return subprocess.run(
+            ["python3", str(script)] + list(args), capture_output=True, text=True,
+        )
+
+
+# A minimal report doc per producer that findings_X() parses WITHOUT raising
+# ReportError -- used to isolate the COMPLETED-status branch (:254) from the
+# separate error paths a malformed report would also produce.
+VALID_REPORT_DOC = {
+    "npm-audit": {"metadata": {"vulnerabilities": {"info": 0}}},
+    "pip-audit": {"dependencies": []},
+    "semgrep": {"results": []},
+    "pattern-scan": [],
+}
+
+# Exactly the shipped COMPLETED tuples (scripts/quality-scan.sh:98-103),
+# copied here ONLY to drive the sweep below -- every value asserted against
+# in this module is checked against the extracted SOURCE (tool_report_source
+# / load_tool_report_module), never against this copy alone, so a drift
+# between this literal and the shipped one would surface as a test failure
+# rather than silently validating itself.
+COMPLETED_SHAPE = {
+    "npm-audit": ("0", "1"),
+    "pip-audit": ("0", "1"),
+    "semgrep": ("0", "1"),
+    "pattern-scan": ("0",),
+}
+
+
+class ToolReportCompletedShapeMatchesSourceTest(ToolReportPyTestBase):
+    """Guards COMPLETED_SHAPE above against silently drifting from the
+    shipped COMPLETED dict -- if this ever goes red, every other class in
+    this section is testing a copy, not the real thing."""
+
+    def test_completed_shape_equals_the_extracted_source(self):
+        ns = load_tool_report_module()
+        self.assertEqual(COMPLETED_SHAPE, ns["COMPLETED"])
+
+
+class ToolReportCompletedStatusTest(ToolReportPyTestBase):
+    """Deliverable 2, part 1: for each of the four producers, a status
+    INSIDE its COMPLETED tuple parses (real findings, never "did not run to
+    completion"), and a status OUTSIDE it does not -- regardless of whether
+    the report itself is otherwise well-formed. pattern-scan's tuple is
+    ("0",) only, unlike the other three's ("0", "1"): status "1" is
+    legitimate for npm-audit/pip-audit/semgrep and an error for
+    pattern-scan. A sweep that only ever tries "0" (the briefing's own
+    warning) would never exercise that asymmetry, so it gets its own named
+    test below in addition to the generic sweep."""
+
+    def test_a_status_inside_completed_parses_without_a_completion_error(self):
+        script = self.write_script()
+        for kind, statuses in COMPLETED_SHAPE.items():
+            for status in statuses:
+                with self.subTest(kind=kind, status=status):
+                    report = self.write_report(
+                        "%s-%s-in.json" % (kind, status), VALID_REPORT_DOC[kind]
+                    )
+                    r = self.run_tool_report(script, kind, str(report), status)
+                    self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+                    findings = json.loads(r.stdout)
+                    self.assertEqual([], findings, findings)
+
+    OUTSIDE_STATUS = {
+        "npm-audit": "2",
+        "pip-audit": "3",
+        "semgrep": "9",
+        "pattern-scan": "1",  # the discriminating case, named again below
+    }
+
+    def test_a_status_outside_completed_is_reported_as_did_not_run_to_completion(self):
+        script = self.write_script()
+        for kind, status in self.OUTSIDE_STATUS.items():
+            with self.subTest(kind=kind, status=status):
+                report = self.write_report(
+                    "%s-%s-out.json" % (kind, status), VALID_REPORT_DOC[kind]
+                )
+                r = self.run_tool_report(script, kind, str(report), status)
+                self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+                findings = json.loads(r.stdout)
+                self.assertEqual(1, len(findings), findings)
+                self.assertEqual("scan-error", findings[0]["type"])
+                self.assertIn("did not run to completion", findings[0]["message"])
+
+    def test_status_1_is_accepted_for_three_producers_and_an_error_for_pattern_scan(self):
+        """The discriminating case, named explicitly rather than folded into
+        the generic loops above: the literal status string "1" is INSIDE
+        npm-audit/pip-audit/semgrep's COMPLETED tuple and OUTSIDE
+        pattern-scan's -- same input, opposite verdict, depending only on
+        which producer it is."""
+        script = self.write_script()
+        for kind in ("npm-audit", "pip-audit", "semgrep"):
+            with self.subTest(kind=kind, expect="accepted"):
+                report = self.write_report("%s-one.json" % kind, VALID_REPORT_DOC[kind])
+                r = self.run_tool_report(script, kind, str(report), "1")
+                self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+                self.assertEqual([], json.loads(r.stdout))
+
+        report = self.write_report("pattern-scan-one.json", VALID_REPORT_DOC["pattern-scan"])
+        r = self.run_tool_report(script, "pattern-scan", str(report), "1")
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        findings = json.loads(r.stdout)
+        self.assertEqual(1, len(findings), findings)
+        self.assertEqual("scan-error", findings[0]["type"])
+
+
+class CompletedHandlersBindingTest(ToolReportPyTestBase):
+    """Deliverable 2, part 2: COMPLETED and HANDLERS must share the same
+    key set. read_tool() checks `kind not in HANDLERS` (:246) BEFORE it
+    ever touches `COMPLETED[kind]` (:254) -- a kind present in HANDLERS but
+    missing from COMPLETED passes that guard and only then raises, as an
+    UNHANDLED KeyError, never a scan_error. Count pinned at 4 for both, so
+    a removal shrinks the sweep below instead of narrowing it silently."""
+
+    def test_completed_and_handlers_share_the_same_key_set(self):
+        ns = load_tool_report_module()
+        self.assertEqual(set(ns["COMPLETED"]), set(ns["HANDLERS"]))
+
+    def test_both_dicts_are_pinned_at_4_entries(self):
+        ns = load_tool_report_module()
+        self.assertEqual(4, len(ns["COMPLETED"]))
+        self.assertEqual(4, len(ns["HANDLERS"]))
+
+
+class CompletedHandlersRemovalRedProofTest(ToolReportPyTestBase):
+    """Removes one producer's COMPLETED entry at a time from a scratch copy
+    of the extracted TOOL_REPORT_PY source (never scripts/quality-scan.sh
+    itself), leaving its HANDLERS entry untouched, and confirms read_tool()
+    reacts exactly as CompletedHandlersBindingTest's docstring predicts: an
+    UNHANDLED KeyError (non-zero exit, "KeyError" + the kind's own name on
+    stderr), not a scan_error finding -- proving the `if kind not in
+    HANDLERS` guard at :246 really does not catch this case. Each entry's
+    line is removed via a single, asserted-unique string match on the
+    extracted text (G-141) -- never a retyped/rebuilt dict -- and the
+    original (unmutated) run is checked first so a failure of THIS test can
+    never be blamed on a broken fixture."""
+
+    def test_removing_a_completed_entry_still_present_in_handlers_raises_keyerror(self):
+        source = tool_report_source()
+        for kind, statuses in COMPLETED_SHAPE.items():
+            with self.subTest(kind=kind):
+                needle = '    "%s": (' % kind
+                self.assertEqual(
+                    1, source.count(needle),
+                    "fixture assumption: COMPLETED literal moved -- %r" % needle,
+                )
+                lines = source.splitlines(keepends=True)
+                mutated_lines = [l for l in lines if not l.startswith(needle)]
+                self.assertEqual(len(lines) - 1, len(mutated_lines))
+                mutated_source = "".join(mutated_lines)
+
+                report = self.write_report("%s.json" % kind, VALID_REPORT_DOC[kind])
+                status = statuses[0]
+
+                before_script = self.write_script(source)
+                before = self.run_tool_report(before_script, kind, str(report), status)
+                self.assertEqual(0, before.returncode, before.stdout + before.stderr)
+                self.assertEqual([], json.loads(before.stdout))
+
+                after_script = self.write_script(mutated_source)
+                after = self.run_tool_report(after_script, kind, str(report), status)
+                self.assertNotEqual(0, after.returncode, after.stdout + after.stderr)
+                self.assertIn("KeyError", after.stderr)
+                self.assertIn(kind, after.stderr)
+
+
+# SEVERITIES (scripts/quality-scan.sh:91), consumed by findings_npm()'s
+# `buckets = [k for k in SEVERITIES if k in meta]` (:114). Copied here ONLY
+# to drive the per-entry sweep; SeveritiesShapeMatchesSourceTest below binds
+# it to the extracted source the same way COMPLETED_SHAPE is bound above.
+SEVERITIES_SHAPE = ("info", "low", "moderate", "high", "critical")
+
+
+class SeveritiesShapeMatchesSourceTest(ToolReportPyTestBase):
+    def test_severities_shape_equals_the_extracted_source(self):
+        ns = load_tool_report_module()
+        self.assertEqual(SEVERITIES_SHAPE, tuple(ns["SEVERITIES"]))
+
+
+class SeveritiesPerEntryTest(ToolReportPyTestBase):
+    """Deliverable 3: a missing severity name means that bucket is silently
+    DROPPED from findings_npm()'s total -- the report still parses and the
+    run still exits 0, the count is just wrong (never an error of its
+    own). Per-entry proof: an npm report carrying ONLY that one severity
+    bucket must produce exactly that count, for every one of the 5
+    entries, plus a count pin at 5."""
+
+    def test_each_severity_bucket_alone_produces_its_own_count(self):
+        script = self.write_script()
+        for sev in SEVERITIES_SHAPE:
+            with self.subTest(severity=sev):
+                report = self.write_report(
+                    "%s.json" % sev, {"metadata": {"vulnerabilities": {sev: 3}}}
+                )
+                r = self.run_tool_report(script, "npm-audit", str(report), "0")
+                self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+                findings = json.loads(r.stdout)
+                self.assertEqual(1, len(findings), findings)
+                self.assertIn("3 npm", findings[0]["message"])
+
+    def test_severities_count_is_pinned_at_5(self):
+        self.assertEqual(5, len(SEVERITIES_SHAPE))
+
+
+class SeveritiesRemovalRedProofTest(ToolReportPyTestBase):
+    """Removes one SEVERITIES entry at a time from a scratch copy of the
+    extracted TOOL_REPORT_PY source and confirms the SAME report that
+    produced a real finding before the removal is now silently read as
+    ZERO findings -- G-109's structural mutation (a tuple element removed,
+    not merely an inequality assertion), and the specific failure mode
+    quality-scan.sh's own SEVERITIES comment warns about: the report still
+    parses, the run still exits 0, the number is just wrong. Both the
+    before-run and the after-run go through the extracted source verbatim
+    -- the "before" value is not assumed, it is measured on the same
+    script object per subTest."""
+
+    SEVERITIES_NEEDLE = 'SEVERITIES = ("info", "low", "moderate", "high", "critical")\n'
+
+    def test_removing_a_severity_silently_drops_its_bucket_from_the_count(self):
+        source = tool_report_source()
+        self.assertEqual(
+            1, source.count(self.SEVERITIES_NEEDLE),
+            "fixture assumption: SEVERITIES literal moved",
+        )
+
+        for sev in SEVERITIES_SHAPE:
+            with self.subTest(severity=sev):
+                # All 5 buckets present, every one but the target at 0. This
+                # (not a single-bucket report) is what isolates "silently
+                # dropped from the total": after the target is removed from
+                # SEVERITIES, `buckets` is still non-empty (the other 4
+                # names are still in `meta`), so findings_npm() takes the
+                # SILENT sum-goes-to-0 path rather than raising
+                # ReportError("names no severity bucket") -- which is what
+                # a single-bucket report would trigger instead, proving a
+                # different (louder) failure mode than the one this
+                # deliverable is about.
+                meta = {s: (3 if s == sev else 0) for s in SEVERITIES_SHAPE}
+                report = self.write_report("%s.json" % sev, {"metadata": {"vulnerabilities": meta}})
+
+                before_script = self.write_script(source)
+                before = self.run_tool_report(before_script, "npm-audit", str(report), "0")
+                self.assertEqual(0, before.returncode, before.stdout + before.stderr)
+                before_findings = json.loads(before.stdout)
+                self.assertEqual(1, len(before_findings), before_findings)
+
+                remaining = tuple(s for s in SEVERITIES_SHAPE if s != sev)
+                mutated_source = source.replace(
+                    self.SEVERITIES_NEEDLE, "SEVERITIES = %r\n" % (remaining,)
+                )
+                self.assertNotEqual(source, mutated_source)
+
+                after_script = self.write_script(mutated_source)
+                after = self.run_tool_report(after_script, "npm-audit", str(report), "0")
+                self.assertEqual(0, after.returncode, after.stdout + after.stderr)
+                after_findings = json.loads(after.stdout)
+                self.assertEqual(
+                    [], after_findings,
+                    "removing %r from SEVERITIES did not silently drop its bucket" % sev,
+                )
 
 
 if __name__ == "__main__":

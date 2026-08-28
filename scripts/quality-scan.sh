@@ -386,6 +386,38 @@ scan_config() {
     python3 << 'PYEOF'  # exit-status: exempt set-e-sufficient
 import os, json, re
 
+# Directories that add noise, not signal, when scanning application source
+# for CORS wildcards or a DSGVO consent mechanism (see scan_dsgvo() below for
+# the second use). PO decision (WI-0126, 28.08.2026): unify this skip *list*
+# on this superset, "venv" included, everywhere it is used -- walking a
+# virtualenv looking for either signal yields third-party noise, never a
+# real finding about THIS project's own code.
+#
+# There are FOUR os.walk("src") call sites in this file, not three: the CORS
+# walk below, the PII walk and the consent walk in scan_dsgvo(), and a fourth,
+# unfiltered counting walk in scan_dsgvo() ("src_files = sum(...)") that gates
+# whether the consent finding fires at all. Only the first three carry a
+# SKIP_DIRS filter and are unified here; the fourth has no directory filter
+# and is deliberately left alone -- filtering it would change WHEN the
+# consent finding fires, a second, unapproved behaviour change. Consequence
+# (report, not fixed; see CHANGELOG.md and docs/workitems/WI-0126.md):
+# files under node_modules/venv/.git count toward "is there actual code"
+# (`src_files > 2` below), so a project whose only files live in a
+# virtualenv can trip the consent finding on venv noise alone.
+#
+# TWO separate definitions of this SKIP_DIRS tuple exist in this file -- this
+# one and scan_dsgvo()'s below -- because each lives inside its own
+# independently quoted `python3 << 'PYEOF'` heredoc (see the TOOL_REPORT_PY
+# heredoc's own comment above for the same constraint): nothing can be shared
+# between two quoted heredocs without unquoting the delimiter, which would
+# let the shell expand "$"-prefixed tokens inside the Python body it is meant
+# to protect. A third option -- one `export`ed shell variable read via
+# `os.environ` in both heredocs, sidestepping heredoc quoting entirely -- was
+# considered and declined: duplicating a four-tuple is simpler and more
+# YAGNI-compliant than introducing an env-var passing convention for one pair
+# of literals.
+SKIP_DIRS = ("node_modules", ".git", "__pycache__", "venv")
+
 findings = []
 
 # Check .env in .gitignore
@@ -419,7 +451,7 @@ for cfg_file in ["config.json", "config.yaml", "config.yml", "settings.py", "app
 
 # CORS wildcard check
 for root, dirs, files in os.walk("src"):
-    dirs[:] = [d for d in dirs if d not in ("node_modules", ".git", "__pycache__")]
+    dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
     for fname in files:
         if fname.endswith((".py", ".js", ".ts")):
             fpath = os.path.join(root, fname)
@@ -452,11 +484,15 @@ PII_PATTERNS = {
     "geburtsdatum": r'\b(geburtsdatum|date_of_birth|dob|birthdate)\b',
 }
 
+# See scan_config()'s SKIP_DIRS comment above for why this heredoc needs its
+# own separate definition of the same superset (WI-0126, 28.08.2026).
+SKIP_DIRS = ("node_modules", ".git", "__pycache__", "venv")
+
 findings = []
 
 # Check logging for PII
 for root, dirs, files in os.walk("src"):
-    dirs[:] = [d for d in dirs if d not in ("node_modules", ".git", "__pycache__", "venv")]
+    dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
     for fname in files:
         if not fname.endswith((".py", ".js", ".ts", ".jsx", ".tsx")):
             continue
@@ -484,7 +520,7 @@ for root, dirs, files in os.walk("src"):
 # Check for consent mechanism
 consent_found = False
 for root, dirs, files in os.walk("src"):
-    dirs[:] = [d for d in dirs if d not in ("node_modules", ".git", "__pycache__")]
+    dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
     for fname in files:
         fpath = os.path.join(root, fname)
         try:
