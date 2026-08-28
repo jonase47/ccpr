@@ -1141,11 +1141,21 @@ class ExternalToolExitStatusTest(unittest.TestCase):
         self.assertEqual(148, len(invocations))
         self.assertEqual(
             {
-                "checked-condition": 23,
+                # 28.08.2026, open-findings wave 1a: one invocation moved
+                # from bare to checked, total unchanged at 148.
+                # quality-scan.sh's report combiner was a bare
+                # `python3 -c "..."` with three shell values interpolated
+                # into Python source -- the very thing this file's target
+                # script forbids in its own header. It is now
+                # `if ! python3 "${SUMMARY_PY}" ...` with the values in
+                # argv, so the exit status is read instead of discarded.
+                # (The `mv` the same fix introduced is not tracked here:
+                # this scanner pins grep/awk/sed/python3/git only.)
+                "checked-condition": 24,
                 "checked-captured": 5,
                 "checked-chain": 14,
                 "discard-needs-exemption": 40,
-                "bare-needs-exemption": 66,
+                "bare-needs-exemption": 65,
             },
             by_disposition,
         )

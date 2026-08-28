@@ -85,11 +85,13 @@ against the real code path, the printed stdout is the observation).
 ## Deliverable 4's severity mismatch -- verified via a verbatim extraction,
 never a retyped copy
 
-quality-scan.sh's own summary combiner (the final `python3 -c "..."` block,
-:590-624 as of this tranche, not a `<<'EOF'` heredoc like TOOL_REPORT_PY but
-still bash-double-quoted Python source) explicitly buckets only 'critical',
-'high' and 'warning' by name and assigns EVERYTHING else to 'info' by
-subtraction. The npm-side SEVERITIES vocabulary (also in quality-scan.sh,
+quality-scan.sh's own summary combiner (the SUMMARY_PY block delimited by
+the `SUMMARYEOF` heredoc marker -- see SUMMARY_START_MARKER/
+SUMMARY_END_MARKER below; moved out of an inline `python3 -c "..."` block
+into this heredoc shape by WI-0126 wave 1a, see the comment above those
+markers) explicitly buckets only 'critical', 'high' and 'warning' by name
+and assigns EVERYTHING else to 'info' by subtraction. The npm-side
+SEVERITIES vocabulary (also in quality-scan.sh,
 inside the separate TOOL_REPORT_PY heredoc) is `("info", "low", "moderate",
 "high", "critical")` -- a rule with severity "low" or "moderate" is
 legitimate there but would land in the summary's 'info' bucket, silently.
@@ -433,15 +435,26 @@ class MissingKeyPositionDependentTruncationTest(unittest.TestCase):
 # quality-scan.sh's own summary combiner before pinning it.
 # ---------------------------------------------------------------------------
 
-SUMMARY_START_MARKER = '# Combine results into single JSON\npython3 -c "\n'
-SUMMARY_END_MARKER = '\n" <<< "$(printf'
+# Retargeted 28.08.2026 (WI-0126 wave 1a, defect 1): the combiner moved out
+# of an inline `python3 -c "..."` block (which used to interpolate
+# ${TIMESTAMP}/${SCOPE}/${PROJECT_DIR} straight into Python source -- an
+# apostrophe in a project path broke it, see test_quality_scan.py's
+# ApostropheInProjectPathTest) into a real file written via a quoted heredoc
+# (SUMMARY_PY, the same shape TOOL_REPORT_PY already used), invoked with the
+# three values as argv instead. The extraction markers below follow that
+# move; the extracted TEXT is unchanged Python except for reading
+# sys.argv[1:4] instead of shell-interpolated literals, which is why
+# _run_summary_combiner now passes three placeholder argv values the
+# summary combiner never inspects for its `summary` output.
+SUMMARY_START_MARKER = "cat > \"${SUMMARY_PY}\" <<'SUMMARYEOF'\n"
+SUMMARY_END_MARKER = "\nSUMMARYEOF"
 
 SEVERITIES_RE = re.compile(r"SEVERITIES = \(([^)]*)\)")
 
 
 def _extract_summary_combiner_source(script_text):
     assert script_text.count(SUMMARY_START_MARKER) == 1, (
-        "fixture assumption: exactly one combine-results-into-JSON marker "
+        "fixture assumption: exactly one SUMMARY_PY heredoc marker "
         "in quality-scan.sh"
     )
     start = script_text.index(SUMMARY_START_MARKER) + len(SUMMARY_START_MARKER)
@@ -449,27 +462,40 @@ def _extract_summary_combiner_source(script_text):
     return script_text[start:end]
 
 
-def _run_summary_combiner(source, findings):
+def _run_summary_combiner_report(source, findings):
     scan_line = json.dumps({"findings": findings})
     proc = subprocess.run(
-        [sys.executable, "-c", source],
+        [sys.executable, "-c", source, "2026-08-28T00:00:00", "sast", "/probe"],
         input=scan_line + "\n",
         capture_output=True,
         text=True,
         timeout=10,
     )
     assert proc.returncode == 0, proc.stderr
-    return json.loads(proc.stdout)["summary"]
+    return json.loads(proc.stdout)
+
+
+def _run_summary_combiner(source, findings):
+    return _run_summary_combiner_report(source, findings)["summary"]
 
 
 class SeverityBindingTest(unittest.TestCase):
     """quality-scan.sh's summary combiner (extracted verbatim below, never
-    retyped) explicitly buckets 'critical', 'high' and 'warning' by name and
-    assigns everything else to 'info' by subtraction. The npm-side
-    SEVERITIES vocabulary (a separate heredoc in the same script) legitimises
-    'low' and 'moderate' too -- a rule using either would be silently
-    mis-bucketed as 'info'. Verified against the real extracted source via a
-    real subprocess before pinning, per the briefing: do not fix, report.
+    retyped).
+
+    Updated 28.08.2026 (WI-0126 wave 1a, defect 2): this class used to pin
+    the mis-count as fact -- the combiner compared severities
+    case-SENSITIVELY against lowercase literals, so semgrep's own
+    'ERROR'/'WARNING' (test_quality_scan.py:456,462 prove semgrep's real
+    case) fell through to 'info' by subtraction, an ERROR included. PO
+    decision: normalise at the boundary, one vocabulary, one place -- this
+    combiner is the only step all four scans' findings converge through.
+    Known aliases fold to the safe set (`ERROR` -> `high`, case-insensitive
+    `warning`/`info`/`critical`/`high` pass through); anything else becomes
+    its own visible finding instead of being silently folded into 'info' --
+    which, as a side effect of a single closed vocabulary rather than a
+    semgrep-specific patch, also corrects the 'low'/'moderate' gap this
+    class previously documented as "not fixed here".
 
     Its two `for rule_name, rule in PATTERNS.items()` loops (bucketing and
     safe-set membership) carry no count assertion of their own: an emptied
@@ -510,20 +536,52 @@ class SeverityBindingTest(unittest.TestCase):
         self.assertIn("low", self.npm_severities)
         self.assertIn("moderate", self.npm_severities)
 
-    def test_low_and_moderate_are_silently_miscounted_as_info(self):
-        """The real mismatch, verified against the real extracted summary
-        combiner: a finding whose severity is 'low' or 'moderate' -- both
-        legitimate per SEVERITIES -- is counted into 'info', not dropped and
-        not counted under its own name (there is no bucket for either).
-        Not fixed here (that is a behaviour decision outside this
-        tranche's approval); PATTERNS uses neither severity today."""
+    def test_semgrep_style_uppercase_severities_fold_to_the_safe_set(self):
+        """Deliverable 2's actual defect, verified against the real
+        extracted source: semgrep's own case (ERROR/WARNING/INFO, see
+        test_quality_scan.py's SEMGREP_TWO_RESULTS fixture) must land in the
+        SAME bucket its lowercase equivalent would, ERROR mapping to 'high'
+        rather than passing through unchanged."""
+        cases = {"ERROR": "high", "WARNING": "warning", "INFO": "info", "CRITICAL": "critical"}
+        for raw, expected_bucket in cases.items():
+            with self.subTest(raw=raw):
+                summary = _run_summary_combiner(self.summary_source, [{"severity": raw}])
+                self.assertEqual(summary["total_findings"], 1)
+                self.assertEqual(summary[expected_bucket], 1)
+                for other in ("critical", "high", "warning", "info"):
+                    if other != expected_bucket:
+                        self.assertEqual(summary[other], 0)
+
+    def test_low_and_moderate_are_reported_not_silently_counted_as_info(self):
+        """Corrected 28.08.2026: 'low'/'moderate' -- legitimate per the npm
+        SEVERITIES vocabulary but outside this combiner's closed
+        {critical, high, warning, info} set -- used to be silently folded
+        into 'info' by subtraction. The fix keeps the original finding's
+        severity untouched (no bucket claims it) and adds ONE companion
+        finding recording the gap, landing in 'high' so it is impossible to
+        miss rather than indistinguishable from a clean bill."""
         for sev in ("low", "moderate"):
             with self.subTest(severity=sev):
                 summary = _run_summary_combiner(self.summary_source, [{"severity": sev}])
-                self.assertEqual(summary["info"], 1)
+                self.assertEqual(summary["total_findings"], 2)
+                self.assertEqual(summary["high"], 1)
                 self.assertEqual(summary["critical"], 0)
-                self.assertEqual(summary["high"], 0)
                 self.assertEqual(summary["warning"], 0)
+                self.assertEqual(summary["info"], 0)
+
+    def test_an_all_safe_set_input_produces_no_normalization_scan_entry(self):
+        """The severity-normalization scan record must only appear when
+        there is something to report -- an all-safe-set input must not grow
+        an extra scan entry, empty or otherwise."""
+        report = _run_summary_combiner_report(self.summary_source, [{"severity": "high"}])
+        self.assertEqual(len(report["scans"]), 1)
+        self.assertEqual(report["summary"]["total_findings"], 1)
+
+    def test_an_unrecognised_severity_adds_exactly_one_normalization_scan_entry(self):
+        report = _run_summary_combiner_report(self.summary_source, [{"severity": "low"}])
+        self.assertEqual(len(report["scans"]), 2)
+        self.assertEqual(len(report["scans"][1]["findings"]), 1)
+        self.assertEqual(report["scans"][0]["findings"][0]["severity"], "low")
 
 
 # ---------------------------------------------------------------------------
@@ -532,35 +590,38 @@ class SeverityBindingTest(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 class TruncationCapTest(unittest.TestCase):
-    def test_more_than_50_matches_are_capped_at_50(self):
+    """WI-0126 wave 1a, defect 3: the silent 50-match cap used to make "50
+    matches" and "50-plus-unknown-many matches" byte-identical output --
+    corrected 28.08.2026 to append exactly one extra finding (type
+    'scan-truncated') naming the real total, but only when the cap actually
+    trimmed something."""
+
+    def test_more_than_50_matches_are_capped_plus_one_truncation_marker(self):
         content = "eval(x)\n" * 60
         findings = _run_main_against({"many.py": content})
-        self.assertEqual(len(findings), 50)
+        self.assertEqual(len(findings), 51)
+        marker = findings[-1]
+        self.assertEqual(marker["type"], "scan-truncated")
+        self.assertIn("60", marker["message"])
+        self.assertIn("50", marker["message"])
 
-    def test_exactly_50_matches_also_produce_50(self):
+    def test_the_50_real_findings_preceding_the_marker_are_unaffected(self):
+        content = "eval(x)\n" * 60
+        findings = _run_main_against({"many.py": content})
+        real = findings[:-1]
+        self.assertEqual(len(real), 50)
+        for finding in real:
+            self.assertEqual(finding["type"], "pattern-eval/exec")
+        self.assertEqual({f["line"] for f in real}, set(range(1, 51)))
+
+    def test_exactly_50_matches_produce_50_with_no_marker(self):
         content = "eval(x)\n" * 50
         findings = _run_main_against({"exact.py": content})
         self.assertEqual(len(findings), 50)
-
-    def test_the_emitted_shape_carries_no_truncation_marker(self):
-        """60-match and exactly-50-match runs must be structurally
-        indistinguishable from the emitted JSON alone: both a bare list of
-        length 50, and no finding dict carries any extra key that could
-        signal "there were more". This is the module docstring's
-        documented "up to 50" behaviour, and the gap the briefing asks to
-        be recorded, not closed: a consumer parsing this stdout has no way
-        to tell "exactly 50 findings" from "at least 51 findings"."""
-        over_cap = _run_main_against({"many.py": "eval(x)\n" * 60})
-        at_cap = _run_main_against({"exact.py": "eval(x)\n" * 50})
-
-        self.assertIsInstance(over_cap, list)
-        self.assertIsInstance(at_cap, list)
-        self.assertEqual(len(over_cap), len(at_cap))
-
+        self.assertNotIn("scan-truncated", _finding_types(findings))
         expected_keys = {"type", "severity", "message", "file", "line"}
-        for findings in (over_cap, at_cap):
-            for finding in findings:
-                self.assertEqual(set(finding.keys()), expected_keys)
+        for finding in findings:
+            self.assertEqual(set(finding.keys()), expected_keys)
 
 
 if __name__ == "__main__":

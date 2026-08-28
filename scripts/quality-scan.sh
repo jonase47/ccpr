@@ -21,7 +21,19 @@ mkdir -p "${PROJECT_DIR}/docs"
 
 # Temporary results
 TMPDIR=$(mktemp -d /tmp/quality-scan-XXXXXX)
-trap "rm -rf ${TMPDIR}" EXIT
+# SUMMARY_TMP is declared empty here (not yet a path) so the trap below can
+# reference it unconditionally even on an exit that happens before the
+# combiner step ever runs, without tripping `set -u`. It is assigned its
+# real path once the combiner step creates its own scratch file directly
+# under docs/ -- see the comment there for why it no longer lives here
+# under ${TMPDIR}. Whichever exit path fires -- success (SUMMARY_TMP was
+# already renamed away by `mv`, so `rm -f` on it is a harmless no-op) or
+# either of the two `exit 1` branches below the combiner (the file still
+# sits there unrenamed) -- this single trap is the one place that cleans it
+# up; the file's OWN error handling never gets a chance to run its own
+# cleanup once `exit 1` fires.
+SUMMARY_TMP=""
+trap 'rm -rf "${TMPDIR}"; rm -f "${SUMMARY_TMP}"' EXIT
 # Note on WI-0055's measured "exit 0 having done nothing": a bash-level fatal
 # abort (the parse error this item fixes; the same applies to a `set -u`
 # unbound-variable hit) never sets $? to anything reflecting the abort, so no
@@ -164,8 +176,10 @@ def findings_semgrep(doc):
     results = doc.get("results")
     if not isinstance(results, list):
         raise ReportError("no results array in the report")
+    cap = 20
+    total = len(results)
     out = []
-    for r in results[:20]:
+    for r in results[:cap]:
         extra = r.get("extra", {})
         out.append({
             "type": "semgrep",
@@ -174,6 +188,17 @@ def findings_semgrep(doc):
             "file": r.get("path", ""),
             "line": r.get("start", {}).get("line", 0),
             "rule": r.get("check_id", ""),
+        })
+    # A silent cap makes "20 results" and "20-plus-unknown-many results"
+    # byte-identical output -- the same gap as the pattern-scan's 50-cap,
+    # but undocumented anywhere (WI-0126 wave 1a, defect 3). One extra
+    # finding, appended only when the cap actually trims something, names
+    # the real total instead.
+    if total > cap:
+        out.append({
+            "type": "scan-truncated",
+            "severity": "info",
+            "message": "semgrep reported %d findings; only the first %d are included" % (total, cap),
         })
     return out
 
@@ -589,8 +614,19 @@ for entry in "${results[@]}"; do
     fi
 done
 
-# Combine results into single JSON
-python3 -c "
+# Combine results into single JSON.
+#
+# TIMESTAMP/SCOPE/PROJECT_DIR reach this step through argv, never through
+# "${var}" inside the Python source -- the same rule the TOOL_REPORT_PY
+# heredoc's own header states (:58-65, rule 2). Measured 28.08.2026: a
+# project directory containing an apostrophe used to break the OLD
+# `python3 -c "... '${PROJECT_DIR}' ..."` form with a SyntaxError (WI-0126
+# wave 1a, defect 1) -- the same defect class WI-0055 already fixed twice
+# elsewhere in this file. The body lives in a real file, written via a
+# quoted heredoc, for the same reason TOOL_REPORT_PY does (a heredoc nested
+# inside a `$(...)` command substitution breaks bash's quote tracking).
+SUMMARY_PY="${TMPDIR}/quality_scan_summary.py"
+cat > "${SUMMARY_PY}" <<'SUMMARYEOF'
 import json, sys
 
 scans = []
@@ -602,48 +638,122 @@ for line in sys.stdin:
         except:
             pass
 
+# Normalise every finding's severity at this ONE boundary -- the only place
+# all four scans' findings converge (merge() upstream covers only two of
+# them). PO decision (WI-0126 wave 1a, defect 2): a closed vocabulary,
+# folded case-insensitively. Measured 28.08.2026: semgrep reports
+# 'ERROR'/'WARNING' (real semgrep 1.174.0, see test_quality_scan.py's
+# SEMGREP_TWO_RESULTS fixture), and the OLD bucketing below compared
+# case-SENSITIVELY against lowercase literals -- every semgrep finding,
+# including an ERROR, fell through to 'info' by subtraction. A value
+# outside this vocabulary (e.g. the npm-side SEVERITIES tuple's own 'low'/
+# 'moderate', which this combiner has never had a bucket for) is not
+# silently re-bucketed either: the original finding's severity is left
+# untouched, and one companion finding makes the gap visible instead of
+# indistinguishable from a clean bill.
+SEVERITY_ALIASES = {
+    'critical': 'critical',
+    'high': 'high',
+    'warning': 'warning',
+    'info': 'info',
+    'error': 'high',
+}
+
+unrecognised = []
+for scan in scans:
+    for finding in scan.get('findings', []):
+        raw = finding.get('severity')
+        key = raw.strip().lower() if isinstance(raw, str) else None
+        canonical = SEVERITY_ALIASES.get(key)
+        if canonical is not None:
+            finding['severity'] = canonical
+        else:
+            unrecognised.append({
+                'type': 'severity-unrecognised',
+                'severity': 'high',
+                'message': "a %r finding carries unrecognised severity %r -- not counted in any bucket" % (
+                    finding.get('type', '?'), raw,
+                ),
+                'detail': 'scan=%s' % scan.get('scan', '?'),
+            })
+if unrecognised:
+    scans.append({'scan': 'severity-normalization', 'findings': unrecognised})
+
 total_findings = sum(len(s.get('findings', [])) for s in scans)
 critical = sum(1 for s in scans for f in s.get('findings', []) if f.get('severity') == 'critical')
 high = sum(1 for s in scans for f in s.get('findings', []) if f.get('severity') == 'high')
 warning = sum(1 for s in scans for f in s.get('findings', []) if f.get('severity') == 'warning')
+info = sum(1 for s in scans for f in s.get('findings', []) if f.get('severity') == 'info')
 
 report = {
-    'timestamp': '${TIMESTAMP}',
-    'scope': '${SCOPE}',
-    'project': '${PROJECT_DIR}',
+    'timestamp': sys.argv[1],
+    'scope': sys.argv[2],
+    'project': sys.argv[3],
     'summary': {
         'total_findings': total_findings,
         'critical': critical,
         'high': high,
         'warning': warning,
-        'info': total_findings - critical - high - warning,
+        'info': info,
     },
     'scans': scans,
 }
 
 print(json.dumps(report, indent=2, ensure_ascii=False))
-" <<< "$(printf '%s\n' "${results[@]}")" > "${REPORT_FILE}"  # exit-status: exempt set-e-sufficient
+SUMMARYEOF
 
-# Make "the scan ran" and "the scan failed" distinguishable explicitly,
-# instead of relying only on the implicit chain of set -e propagating a
-# python3 failure this far (WI-0055: exit 0 used to be reported even when
-# no report was ever written -- see the trap comment above for why that
-# specific case cannot be recovered after the fact, and
-# scripts/tests/test_shell_script_syntax.py for what actually prevents it).
-if [ ! -s "${REPORT_FILE}" ]; then
-    echo "quality-scan.sh: FAILED -- no report was written to ${REPORT_FILE}" >&2
+# Written to a scratch file first and only moved into place once python3
+# has both exited 0 AND produced non-empty output. Independent of the
+# apostrophe class above (WI-0126 wave 1a's zusatzauflage): an aborted or
+# empty report build must never leave a 0-byte docs/.quality-scan-report.json
+# behind -- CLAUDE.md tells /p6-audit and /p6-pentest to use that file "if
+# it exists", and a 0-byte file measurably exists.
+#
+# Implementation scoping call, not a ratified decision (WI-0126 wave 1a
+# round 2, defect B -- unlike the SKIP_DIRS superset and the error->high
+# bucketing above, there is no PO decision backing this one): on failure,
+# write nothing at all rather than a file naming its own failure, so a
+# pre-existing report from an EARLIER successful run is left untouched
+# rather than clobbered by this run's failure. Open question, not decided
+# here: should a failed run instead delete a stale report, or overwrite it
+# with an explicit failure marker, given that /p6-audit and /p6-pentest only
+# check the file's EXISTENCE, not the exit code of the run that produced it?
+#
+# The scratch file is created directly under the same directory as
+# REPORT_FILE (docs/), not under ${TMPDIR} (mktemp -d /tmp/...) -- `mv` is
+# only atomic within one filesystem, and /tmp and a mounted project volume
+# are routinely separate mounts in the documented Docker deployment target
+# (CLAUDE.md), where a kill mid-copy would leave exactly the partial report
+# this scratch-then-move scheme exists to prevent. Do not move this back
+# under ${TMPDIR}: that reintroduces the cross-filesystem gap. Cleanup on
+# every exit path (success and both `exit 1` branches below) is handled by
+# the SUMMARY_TMP trap set near TMPDIR's own declaration, not by a trap
+# here -- ${TMPDIR}'s trap alone never reached this file even before this
+# fix, since this file never lived under ${TMPDIR}.
+SUMMARY_TMP=$(mktemp "${PROJECT_DIR}/docs/.quality-scan-report.json.tmp.XXXXXX")
+if ! python3 "${SUMMARY_PY}" "${TIMESTAMP}" "${SCOPE}" "${PROJECT_DIR}" \
+        <<< "$(printf '%s\n' "${results[@]}")" > "${SUMMARY_TMP}"; then
+    echo "quality-scan.sh: FAILED -- report generation exited non-zero" >&2
     exit 1
 fi
+if [ ! -s "${SUMMARY_TMP}" ]; then
+    echo "quality-scan.sh: FAILED -- report generation produced no output" >&2
+    exit 1
+fi
+mv "${SUMMARY_TMP}" "${REPORT_FILE}"
 
-# Print summary to stderr
+# Print summary to stderr. REPORT_FILE reaches Python through argv, not
+# through "${var}" inside the source -- found while fixing the combiner
+# step above (same defect class, same file, one function further down: an
+# apostrophe in PROJECT_DIR reaches this interpolation too).
 echo "Report written: ${REPORT_FILE}" >&2
 python3 -c "
-import json
-with open('${REPORT_FILE}') as f:
+import json, sys
+with open(sys.argv[1]) as f:
     r = json.load(f)
 s = r['summary']
 print(f\"Findings: {s['total_findings']} (Critical: {s['critical']}, High: {s['high']}, Warning: {s['warning']}, Info: {s['info']})\")
-" >&2  # exit-status: exempt set-e-sufficient
+" "${REPORT_FILE}" >&2  # exit-status: exempt set-e-sufficient
 
 # Also output to stdout for piping
 cat "${REPORT_FILE}"

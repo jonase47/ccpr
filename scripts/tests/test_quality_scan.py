@@ -67,7 +67,7 @@ class QualityScanTestBase(unittest.TestCase):
     # happens to be installed, and a test about a stubbed tool should not
     # depend on the real one's version either.
     REQUIRED_BINARIES = (
-        "bash", "sh", "python3", "mktemp", "dirname", "date", "mkdir", "cat", "rm",
+        "bash", "sh", "python3", "mktemp", "dirname", "date", "mkdir", "cat", "rm", "mv",
     )
     SANDBOX_PATH = False
 
@@ -248,27 +248,30 @@ class QualityScanExitStatusTest(QualityScanTestBase):
 
     def test_a_scan_that_completes_without_writing_a_report_is_a_distinct_failure(self):
         """Reproduces the narrower half of WI-0055's report-integrity gap
-        directly: a scratch copy whose final report-write step succeeds
-        (exit 0) but produces an EMPTY file -- the exact shape the new
-        `[ ! -s "${REPORT_FILE}" ]` guard exists to catch, as opposed to an
-        ordinary command failure (already covered by `set -e` on its own)."""
+        directly: a scratch copy whose SUMMARY_PY step succeeds (exit 0) but
+        prints nothing -- the exact shape the `[ ! -s "${SUMMARY_TMP}" ]`
+        guard exists to catch, as opposed to an ordinary command failure
+        (already covered by `set -e` on its own).
+
+        Updated 28.08.2026 (WI-0126 wave 1a, defect 1's zusatzauflage): the
+        pre-fix assertion here was `self.assertEqual(0, ...stat().st_size)`
+        -- it PINNED the exact 0-byte artefact this wave's fix removes. The
+        combiner now writes to a scratch file first and only `mv`s it into
+        place once python3 has both exited 0 AND produced non-empty output
+        (scripts/quality-scan.sh's SUMMARY_TMP block), so a failed
+        generation now leaves no report file at all, not a 0-byte one."""
         with tempfile.TemporaryDirectory(prefix="ccpr-quality-scan-mutant-") as tmp:
             mutant = Path(tmp) / "quality-scan.sh"
             shutil.copy2(SCRIPT, mutant)
             shutil.copytree(REPO_ROOT / "scripts" / "lib", Path(tmp) / "lib")
 
             content = mutant.read_text(encoding="utf-8")
-            needle = (
-                'print(json.dumps(report, indent=2, ensure_ascii=False))\n'
-                '" <<< "$(printf \'%s\\n\' "${results[@]}")" > "${REPORT_FILE}"'
-                '  # exit-status: exempt set-e-sufficient'
+            needle = 'print(json.dumps(report, indent=2, ensure_ascii=False))\nSUMMARYEOF'
+            self.assertEqual(
+                1, content.count(needle), "fixture assumption: report-write step moved"
             )
-            self.assertIn(needle, content, "fixture assumption: report-write step moved")
             mutated = content.replace(
-                needle,
-                'pass  # deliberately writes nothing, still exits 0\n'
-                '" <<< "$(printf \'%s\\n\' "${results[@]}")" > "${REPORT_FILE}"'
-                '  # exit-status: exempt set-e-sufficient',
+                needle, 'pass  # deliberately writes nothing, still exits 0\nSUMMARYEOF'
             )
             mutant.write_text(mutated, encoding="utf-8")
 
@@ -278,7 +281,46 @@ class QualityScanExitStatusTest(QualityScanTestBase):
             )
             self.assertNotEqual(0, r.returncode, r.stdout + r.stderr)
             self.assertIn("FAILED", r.stderr)
-            self.assertEqual(0, self.report_path().stat().st_size)
+            self.assertFalse(
+                self.report_path().exists(),
+                "a failed report generation must not leave a 0-byte artefact behind",
+            )
+            docs_dir = self.report_path().parent
+            leftover = sorted(p.name for p in docs_dir.glob("*")) if docs_dir.exists() else []
+            self.assertEqual(
+                [], leftover,
+                "a failed report generation must not leave its scratch file behind "
+                "(WI-0126 wave 1a round 2, defect A: the scratch file now lives next "
+                "to REPORT_FILE so mv stays a same-filesystem rename, so cleanup on "
+                "every exit path -- not just the ${TMPDIR} trap -- is load-bearing)",
+            )
+
+    def test_the_scratch_report_file_is_created_next_to_the_final_report(self):
+        """Defect A (WI-0126 wave 1a round 2): the pre-round-2 code built
+        SUMMARY_TMP as "${TMPDIR}/quality-scan-report.json.tmp" -- TMPDIR is
+        `mktemp -d /tmp/quality-scan-XXXXXX`, a DIFFERENT filesystem from
+        REPORT_FILE (`${PROJECT_DIR}/docs/...`) whenever /tmp and the project
+        volume are separate mounts (the documented Docker deployment target,
+        see CLAUDE.md). `mv` is only atomic within one filesystem; across two
+        it degrades to copy+unlink, and a kill mid-copy leaves exactly the
+        partial report the atomic-write fix exists to prevent. Fixed by
+        creating the scratch file directly under the same directory as
+        REPORT_FILE, so the later `mv` is a same-directory rename by
+        construction. Asserted structurally (grep the source), not by
+        forcing a real cross-filesystem mount in a unit test."""
+        content = SCRIPT.read_text(encoding="utf-8")
+        needle = 'SUMMARY_TMP="${TMPDIR}/quality-scan-report.json.tmp"'
+        self.assertEqual(
+            0, content.count(needle),
+            "the scratch file must no longer be created under ${TMPDIR} "
+            "(a different filesystem from REPORT_FILE in the documented "
+            "Docker deployment target)",
+        )
+        self.assertIn(
+            'SUMMARY_TMP=$(mktemp "${PROJECT_DIR}/docs/', content,
+            "the scratch file must be created directly under the same "
+            "directory as REPORT_FILE, so mv is a same-filesystem rename",
+        )
 
 
 class QualityScanQuotingMutationTest(QualityScanTestBase):
@@ -372,6 +414,48 @@ PYEOF
         self.assertEqual(before, SCRIPT.read_bytes())
         self.assertEqual(before_mode, stat.S_IMODE(SCRIPT.stat().st_mode))
 
+
+class ApostropheInProjectPathTest(QualityScanTestBase):
+    """WI-0126 wave 1a, defect 1: the final report-combiner step (quoting-scan.sh
+    :592-624 as of fc7e7bc) interpolated ${TIMESTAMP}/${SCOPE}/${PROJECT_DIR}
+    straight into `python3 -c "..."` source -- the exact class of defect this
+    file's own header (:58-65, rule 2) forbids in writing, and the one WI-0055
+    already fixed twice in the OTHER two Python blocks here. Measured
+    28.08.2026 against a real project directory containing an apostrophe:
+    SyntaxError, exit 1, and docs/.quality-scan-report.json left behind at 0
+    bytes -- a file CLAUDE.md tells /p6-audit and /p6-pentest to trust "if it
+    exists"."""
+
+    def setUp(self):
+        super().setUp()
+        self.project = self.project / "jonas's project"
+        self.project.mkdir()
+
+    def test_an_apostrophe_in_the_project_path_does_not_break_the_scan(self):
+        self.plant_sast_finding()
+        r = self.run_scan("sast")
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertNotIn("SyntaxError", r.stderr)
+
+        report_file = self.report_path()
+        self.assertTrue(report_file.is_file(), "no report was written")
+        self.assertGreater(report_file.stat().st_size, 0)
+
+        report = json.loads(report_file.read_text(encoding="utf-8"))
+        self.assertEqual(str(self.project), report["project"])
+        self.assertEqual("sast", report["scope"])
+        self.assertEqual(1, len(report["scans"][0]["findings"]))
+
+    def test_an_apostrophe_in_the_scope_argument_does_not_break_the_scan(self):
+        """SCOPE reaches the same interpolation site as PROJECT_DIR. The
+        `case "${SCOPE}" in ...` gate rejects any value that is not one of
+        the five known scopes before the combiner ever runs, so this is a
+        defence-in-depth proof, not a live exploit today -- the fix removes
+        the interpolation class for all three values uniformly regardless."""
+        r = self.run_scan("sa'st")
+        self.assertNotEqual(0, r.returncode)
+        self.assertNotIn("SyntaxError", r.stderr)
+        self.assertIn("Unknown scope", r.stderr)
 
 
 # -- WI-0102 fixtures ---------------------------------------------------
@@ -1969,6 +2053,62 @@ class SeveritiesRemovalRedProofTest(ToolReportPyTestBase):
                     [], after_findings,
                     "removing %r from SEVERITIES did not silently drop its bucket" % sev,
                 )
+
+
+# ---------------------------------------------------------------------------
+# WI-0126 wave 1a, defect 3 (second half): findings_semgrep()'s own silent
+# cap at 20 results (:168 as of fc7e7bc) -- unlike the pattern-scan's 50-cap,
+# this one carries no docstring at all. Same fix shape: one extra finding,
+# appended only when the cap actually trims something, naming the real
+# total.
+# ---------------------------------------------------------------------------
+
+def _semgrep_doc(count):
+    return {
+        "results": [
+            {
+                "check_id": "rule-%d" % i,
+                "path": "app.py",
+                "start": {"line": i},
+                "extra": {"severity": "warning", "message": "m%d" % i},
+            }
+            for i in range(count)
+        ]
+    }
+
+
+class SemgrepResultsCapTest(ToolReportPyTestBase):
+    def test_more_than_20_results_are_capped_plus_one_truncation_marker(self):
+        script = self.write_script()
+        report = self.write_report("semgrep-25.json", _semgrep_doc(25))
+        r = self.run_tool_report(script, "semgrep", str(report), "0")
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        findings = json.loads(r.stdout)
+        self.assertEqual(21, len(findings))
+        marker = findings[-1]
+        self.assertEqual("scan-truncated", marker["type"])
+        self.assertIn("25", marker["message"])
+        self.assertIn("20", marker["message"])
+
+    def test_the_20_real_findings_preceding_the_marker_are_unaffected(self):
+        script = self.write_script()
+        report = self.write_report("semgrep-25.json", _semgrep_doc(25))
+        r = self.run_tool_report(script, "semgrep", str(report), "0")
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        findings = json.loads(r.stdout)
+        real = findings[:-1]
+        self.assertEqual(len(real), 20)
+        for finding in real:
+            self.assertEqual(finding["type"], "semgrep")
+
+    def test_exactly_20_results_produce_20_with_no_marker(self):
+        script = self.write_script()
+        report = self.write_report("semgrep-20.json", _semgrep_doc(20))
+        r = self.run_tool_report(script, "semgrep", str(report), "0")
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        findings = json.loads(r.stdout)
+        self.assertEqual(20, len(findings))
+        self.assertNotIn("scan-truncated", [f["type"] for f in findings])
 
 
 if __name__ == "__main__":

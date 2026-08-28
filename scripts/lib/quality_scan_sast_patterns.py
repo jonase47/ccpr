@@ -19,7 +19,11 @@ no such parity constraint to defend, and it is trivially unit-testable and
 Behaviour is unchanged from the heredoc body it replaces: walks `src`
 (relative to the caller's current working directory -- scan_sast() invokes
 this after cd'ing into the target project directory) and reports up to 50
-pattern matches as JSON on stdout.
+pattern matches as JSON on stdout. WI-0126 wave 1a, defect 3 (28.08.2026):
+when there are more than 50, one extra finding (type "scan-truncated",
+severity "info") is appended naming the real total -- the cap used to be
+silent, making "50 matches" and "50-plus-unknown-many matches"
+byte-identical output.
 """
 
 import os
@@ -82,7 +86,20 @@ def main():
             except Exception:
                 pass
 
-    print(json.dumps(findings[:50]))
+    # A silent cap makes "50 matches" and "50-plus-unknown-many matches"
+    # byte-identical output (WI-0126 wave 1a, defect 3). One extra finding,
+    # appended only when the cap actually trims something, names the real
+    # total instead.
+    cap = 50
+    total = len(findings)
+    capped = findings[:cap]
+    if total > cap:
+        capped.append({
+            "type": "scan-truncated",
+            "severity": "info",
+            "message": "pattern scan found %d matches; only the first %d are included" % (total, cap),
+        })
+    print(json.dumps(capped))
 
 
 if __name__ == "__main__":

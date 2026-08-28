@@ -375,6 +375,39 @@ All notable changes to this project are documented in this file. The format is b
   Docs: `Manual/system/conformance.md`.
 
 ### Fixed
+- **Three defects in `quality-scan.sh`'s report path, all in the step that produces the file
+  `/p6-audit` and `/p6-pentest` read** (open findings #6, #8-adjacent).
+
+  *An apostrophe in the project path killed the scan and left a 0-byte report.* The report
+  combiner interpolated `${TIMESTAMP}`, `${SCOPE}` and `${PROJECT_DIR}` into a
+  `python3 -c "..."` string. Measured against a path containing `'`: `SyntaxError:
+  unterminated string literal`, exit 1, and `docs/.quality-scan-report.json` present at zero
+  bytes — a file CLAUDE.md tells the audit skills to use *if it exists*. This is the same
+  defect WI-0055 fixed twice in this file, and the file's own header forbids it in writing;
+  a second, unnoticed occurrence in the stderr summary printer was found while fixing the
+  first. Values now travel through `argv`, and the report is written to a scratch file
+  beside its destination and renamed in only after the combiner exits 0 with non-empty
+  output — closing the whole "an aborted run leaves something that looks like a result"
+  class, not just the apostrophe. The scratch file is placed next to the target rather than
+  under `/tmp` on purpose: `mv` is atomic within one filesystem, and CCPR's documented
+  deployment target is a container where those are routinely two.
+
+  *Every semgrep finding was counted as `info`.* semgrep emits uppercase severities; the
+  summary compared lowercase and assigned the remainder to `info` by subtraction. A semgrep
+  **ERROR** therefore appeared as `info` in the line a person reads to decide whether a
+  release is safe. Severities are now normalised once, at the single point all four scans
+  converge, which fixes the stored per-finding value as well as the summary. An unrecognised
+  severity is not guessed at: the finding keeps its own value and a separate
+  `severity-normalization` entry names the type and value and says it was counted in no
+  bucket.
+
+  *Two caps truncated silently.* The pattern scan kept 50 findings and semgrep 20, with no
+  trace either way, so "50 findings" and "50 plus an unknown number more" were identical
+  output. Both now append one `scan-truncated` finding naming the true total.
+
+  Three existing tests pinned these defects as facts and had to change — one asserted the
+  report was zero bytes, one that severities were miscounted, one that no truncation marker
+  ever appears. Had none of them changed, nothing would have been fixed.
 - **A `.gitignore`-only commit set the anchored-state comparison point** (WI-0123). `anchor.sh`
   classified a commit as production code if it touched anything outside `docs/` and `.claude/` that
   was not a `.md` file. `.gitignore` passes that test, so a commit changing nothing about the running
