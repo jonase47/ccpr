@@ -384,8 +384,8 @@ All notable changes to this project are documented in this file. The format is b
 
   | Project | reported | actual last code change | off by |
   |---|---|---|---|
-  | NutriMatch | `11606deb` — `chore(claude)` + 7 lines of `.gitignore` | `bec9a8a` | 14 days |
-  | productdata | `87641bea` — `.gitignore` only, 5 added lines | `63b0dfc0` | 8 days |
+  | consumer-c | `11606deb` — `chore(claude)` + 7 lines of `.gitignore` | `bec9a8a` | 14 days |
+  | consumer-b | `87641bea` — `.gitignore` only, 5 added lines | `63b0dfc0` | 8 days |
 
   Frequency was never the issue: hygiene-only commits are ~2% of production-code commits across four
   repositories. What matters is how often one is the **newest** commit, because that is the one
@@ -861,7 +861,7 @@ All notable changes to this project are documented in this file. The format is b
 - **`memory-lint.sh` excluded every `MEMORY.md` index from its checks, on a stated reason that
   turned out to be false (WI-0108).** The exclusion comment read "indexes have no frontmatter" —
   measured 26.08.2026 across the four reference stores this project draws on (ccpr-gh,
-  productdata, Kalza, ccpr): 16 of 27 index files DO carry a frontmatter block, and none of those
+  consumer-b, Org-X, ccpr): 16 of 27 index files DO carry a frontmatter block, and none of those
   16 had ever been validated, because the `find` populating the checked-files list excluded every
   file literally named `MEMORY.md` regardless of its content.
 
@@ -890,7 +890,7 @@ All notable changes to this project are documented in this file. The format is b
   The sibling exclusion in check (i) (Tier-2-global silo validation,
   `[[ "$gbase" == "MEMORY.md" ]] && continue`) was aligned the same way, for consistency rather
   than because it fixes anything measurable today: only one Tier-2-global index exists across the
-  reference stores (`~/.claude/memory/kalza/MEMORY.md`), and it has no frontmatter, so this half
+  reference stores (`~/.claude/memory/org-x/MEMORY.md`), and it has no frontmatter, so this half
   changes zero findings in any store currently in use.
 
 - **`phase-docs-lint.sh`'s empty-scope report read like a clean pass, and the generator commands it
@@ -1498,7 +1498,7 @@ All notable changes to this project are documented in this file. The format is b
   miss now falls back to `$PROJECT_DIR` before the entry is declared dead, mirroring WI-0071's fix
   exactly: same fallback base, same message wording, same severity split (a root-relative hit is
   `info`, naming both candidate paths, not silence — two bases without saying so is the unvalidated
-  drift this lint exists to catch). Measured against a real store (productdata): the one file the
+  drift this lint exists to catch). Measured against a real store (consumer-b): the one file the
   defect was found on, `docs/memory/project_attribute-mapping-slice-b-gap.md`, still errors after
   this fix — its `related:` entry (`planning/sprint/S19-VALUEMAP-ARCH.md`) is written relative to
   `docs/`, not to the project root, so neither base resolves it. That is a genuinely different
@@ -1946,7 +1946,7 @@ All notable changes to this project are documented in this file. The format is b
 - **Sprint-review reports get a decided header schema (WI-0072).** `/p5-review-sprint` prescribed
   nothing more than "record the reviewed range in the report header" — measured in the field: five
   different header shapes across two real projects, including a bare `key: value` body with no `---`
-  block at all (NutriMatch, 4/4 files) and a project that had already written itself a convention
+  block at all (consumer-c, 4/4 files) and a project that had already written itself a convention
   document reacting to the same drift. `commands/p5-review-sprint.md` now prescribes YAML frontmatter
   (`kind: review`, `sprint`, `base_commit`, `reviewed_head`, `reviewer`, `last_updated`) in its write
   step and repeats it as a `## Result` acceptance criterion, mirroring `constitution.md`'s pattern.
@@ -1971,7 +1971,7 @@ All notable changes to this project are documented in this file. The format is b
   the required-fields check immediately after being marked is left unmigrated and reported by name
   instead, so a clean lint run never turns into a permanently red one with no path back. The script
   creates the frontmatter block itself where none exists, since `fm_set`/`fm_set_many` refuse to write
-  into a file that has none. Running it against the real erfinderwerkstatt corpus caught a live defect
+  into a file that has none. Running it against the real consumer-a corpus caught a live defect
   before any file was written: its zero-padded filenames (`SPRINT-03-review.md`) compared as a string
   against the project's own unpadded `sprint: 3`, producing a false conflict warning — fixed via
   base-10 arithmetic normalisation (`10#$n`, not a bare leading-zero literal, which bash reads as
@@ -2410,9 +2410,9 @@ All notable changes to this project are documented in this file. The format is b
   | Inventory | Findings | Exit (old default `warn`) | Exit (new default `err`) |
   |---|---|---|---|
   | ccpr-gh | identical | 1 | 1 |
-  | productdata | identical | 2 | 2 |
-  | NutriMatch | identical | 1 | 1 |
-  | erfinderwerkstatt | identical | 1 | 1 |
+  | consumer-b | identical | 2 | 2 |
+  | consumer-c | identical | 1 | 1 |
+  | consumer-a | identical | 1 | 1 |
 
   check (n) contributes zero findings in all four, so there is nothing for the severity to reclassify.
 

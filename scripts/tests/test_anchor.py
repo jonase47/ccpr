@@ -1231,9 +1231,9 @@ class HygieneFileClassificationTest(AnchorTestBase):
     """WI-0123: a commit touching only repo-/editor-hygiene files (files
     that describe how the repository or the editor is handled, not the
     system that runs) must not set the anchored-state comparison point.
-    Two real projects independently hit this the same week -- NutriMatch's
+    Two real projects independently hit this the same week -- consumer-c's
     reported last production-code commit was a `.gitignore` edit 14 days
-    behind the real one, productdata's was a `.gitignore` edit 8 days
+    behind the real one, consumer-b's was a `.gitignore` edit 8 days
     behind. See ADR-0009 'The comparison point, measured' for the decided
     criterion and the sibling names considered and rejected
     (.dockerignore, .env.example, .nvmrc/.tool-versions).

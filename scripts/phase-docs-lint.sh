@@ -283,7 +283,7 @@ for file in ${FILES[@]+"${FILES[@]}"}; do
             # OR reviewed_base (WI-0072 correction, 22.08.2026), not
             # base_commit alone -- both are already accepted, equally
             # validated names in the (i) commit-anchor-family check below.
-            # The real erfinderwerkstatt corpus writes reviewed_base for
+            # The real consumer-a corpus writes reviewed_base for
             # every review it authored under this schema and never
             # base_commit; requiring one specific name would fail a
             # document that carries everything the schema asks for, just

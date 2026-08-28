@@ -1611,8 +1611,26 @@ class RealConfigurationConformanceTest(unittest.TestCase):
 # Inviolable #2 ("No personal or tenant data in shipped artifacts")
 # forbids, and no tracked file could ever be mistaken for a checked-in
 # conformance report by its own heading shape.
+#
+# WI-0126 wave 0.1: a fourth literal used to sit in this tuple -- a real
+# consumer/tenant project name. That duplicated, in a second place, exactly
+# what `scripts/artifact-gate.sh --require-denylist` now enforces repo-wide
+# from a single, personal, non-distributed config (gate.denyNames /
+# CCPR_GATE_DENY_NAMES), and it made this file itself a second offender:
+# `artifact-gate` flagged this very line for containing a configured
+# deny-list name. Project/tenant names are the gate's job now; only the
+# personal-data SHAPES stay here. Measured (WI-0126): none of the three
+# remaining literals below currently trip artifact-gate's content patterns
+# on this file (`/Users/` and `/home/` only match GATE_RE_PERSONAL as a
+# full `/Users/<name>/` path shape, and a bare `jonascode` matches no
+# configured pattern) -- so no self-exemption marker is added here. Should
+# that change, the marker documented at scripts/lib/discipline_gate.sh:39-49
+# is not reusable as-is: it is bound to that file's own resolved path
+# (`_GATE_PATTERN_SOURCE`) and blanks marked lines only when scanning THAT
+# file, so it would need a distinct, gate-side extension to cover this file
+# too -- out of this work item's write boundary (scripts/tests/** only).
 # ---------------------------------------------------------------------------
-FORBIDDEN_PERSONAL_SUBSTRINGS = ("jonascode", "/Users/", "/home/", "erfinderwerkstatt")
+FORBIDDEN_PERSONAL_SUBSTRINGS = ("jonascode", "/Users/", "/home/")
 
 
 class RepositoryHygieneTest(unittest.TestCase):

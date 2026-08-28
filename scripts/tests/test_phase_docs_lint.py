@@ -1039,7 +1039,7 @@ class CheckHCoversTest(PhaseDocsLintTestBase):
         `var=$(cmd)` assignment; under `set -euo pipefail` a failing command
         substitution kills the whole script, silently (exit 1, zero bytes
         of stdout), before the report is ever printed. Reproduced against a
-        real project (games/erfinderwerkstatt, covers: src/adapters/
+        real project (consumer-a, covers: src/adapters/
         purpose-input/, several real files, no placeholder at all) --
         every existing covers: fixture at the time was either empty,
         placeholder-only, or a single file/single-entry directory, so none
@@ -1822,7 +1822,7 @@ class ReviewsProfileBaseFieldAliasTest(PhaseDocsLintTestBase):
     """WI-0072 correction (22.08.2026): the base-of-reviewed-range
     field is NOT `base_commit` specifically -- it is `base_commit` OR
     `reviewed_base`, exactly the two names the (i) commit-anchor-family
-    check already treats as equally valid. The real erfinderwerkstatt
+    check already treats as equally valid. The real consumer-a
     corpus (SPRINT-02, SPRINT-03) writes `reviewed_base` for every review it
     authored under this schema and never once writes `base_commit` --
     requiring the latter specifically would fail a document that carries

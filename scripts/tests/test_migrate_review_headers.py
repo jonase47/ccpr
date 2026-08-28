@@ -164,7 +164,7 @@ class FilenamePatternMatchTest(MigrateTestBase):
 
 
 class SprintNumberNormalizationTest(MigrateTestBase):
-    """The real erfinderwerkstatt corpus zero-pads sprint numbers in the
+    """The real consumer-a corpus zero-pads sprint numbers in the
     filename (SPRINT-01-review.md, SPRINT-02-review.md, SPRINT-03-review.md)
     while its OWN frontmatter already carries the unpadded form (sprint: 3)
     -- the two must compare and write equal, not trigger a false sprint
@@ -192,7 +192,7 @@ class SprintNumberNormalizationTest(MigrateTestBase):
 
 
 class NoFrontmatterBlockTest(MigrateTestBase):
-    """The real NutriMatch corpus: 4 sprint-review-shaped files, zero of
+    """The real consumer-c corpus: 4 sprint-review-shaped files, zero of
     them carry a `---` block. Since none of WI-0072's five required fields
     can exist without a frontmatter block, and reviewer/last_updated are
     never hoisted (only the three anchor keys are -- Korrektur 2), a
@@ -279,7 +279,7 @@ class ReconstructionStillForbiddenTest(MigrateTestBase):
 class MovesExistingAnchorValueTest(MigrateTestBase):
     """Korrektur 2: a body line that is ALREADY an exact `<key>: <value>`
     for one of the three known anchor keys is not a guess -- it gets moved
-    (not removed) into frontmatter. This is the real erfinderwerkstatt
+    (not removed) into frontmatter. This is the real consumer-a
     SPRINT-01-review.md shape: reviewed_base/reviewed_head/delta_base/date
     as plain body text directly under the H1, no `---` at all."""
 
@@ -314,7 +314,7 @@ class MovesExistingAnchorValueTest(MigrateTestBase):
         self.assertNotIn("delta_base", fm_block)
         self.assertIn(body, text)  # original body lines untouched, verbatim
 
-    def test_erfinderwerkstatt_sprint_01_shape_is_hoisted_but_stays_incomplete(self):
+    def test_consumer_a_sprint_01_shape_is_hoisted_but_stays_incomplete(self):
         """Direct regression pin for the real corpus shape that surfaced
         this correction: H1 immediately followed (no blank line) by four
         plain-text lines, two of which are known anchor keys, two of which
@@ -478,7 +478,7 @@ class FencedCodeBlockNotHoistedTest(MigrateTestBase):
         self.assertNotIn("reviewed_head", fm_block)
 
     def test_fenced_example_in_a_file_without_a_frontmatter_block_is_also_not_hoisted(self):
-        # The real erfinderwerkstatt SPRINT-01 shape has NO frontmatter
+        # The real consumer-a SPRINT-01 shape has NO frontmatter
         # block at all -- fence-tracking must apply in that branch too, not
         # only after a block already exists.
         body = (
@@ -580,7 +580,7 @@ class CompletenessGateTest(MigrateTestBase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_reviewed_base_satisfies_completeness_the_same_as_base_commit(self):
-        """The real erfinderwerkstatt SPRINT-02/SPRINT-03 shape: every
+        """The real consumer-a SPRINT-02/SPRINT-03 shape: every
         WI-0072 field present, but under `reviewed_base` rather than
         `base_commit` -- both are equally valid (phase-docs-lint.sh
         correction, same date)."""

@@ -613,10 +613,10 @@ system that runs.
 
 Two of the three reference projects hit this the same week, independently:
 
-- NutriMatch's reported last production-code commit was a `chore(claude): stop tracking the
+- consumer-c's reported last production-code commit was a `chore(claude): stop tracking the
   machine-local permission allowlist` commit that also touched seven lines of `.gitignore`. The real
   last code change was 14 days earlier.
-- productdata's reported last production-code commit was `chore(gitignore): catch every .env variant,
+- consumer-b's reported last production-code commit was `chore(gitignore): catch every .env variant,
   not only the expected ones` — one file, five added lines, nothing else. The real last code change
   was 8 days earlier.
 
@@ -627,7 +627,7 @@ across the three reference projects, was two out of three.
 ### The criterion
 
 Not "exclude every dotfile at the repository root" — the original "comparison point, measured" section
-already rejected that direction: `.dockerignore` and `Dockerfile` land together in a real NutriMatch
+already rejected that direction: `.dockerignore` and `Dockerfile` land together in a real consumer-c
 commit (`fe94c16`), and a rule that swept dotfiles wholesale would trade the too-recent-comparison-point
 problem for the opposite, worse one — a comparison point that is too OLD, which silently under-reports
 drift instead of over-reporting it.
@@ -684,9 +684,9 @@ the framework's next ADR revision does.
 ### Consequence
 
 `EXCLUDE_SUFFIXES` in `scripts/anchor.sh` gains `.gitignore`, `.gitattributes`, `.editorconfig`,
-`.prettierignore` alongside `.md`. Re-measured: NutriMatch's reported last production-code commit moves
-from the `.gitignore`-touching chore to the real last code commit 14 days earlier; productdata's moves
-similarly, 8 days earlier. The third reference project (`games/erfinderwerkstatt`) is unaffected — zero
+`.prettierignore` alongside `.md`. Re-measured: consumer-c's reported last production-code commit moves
+from the `.gitignore`-touching chore to the real last code commit 14 days earlier; consumer-b's moves
+similarly, 8 days earlier. The third reference project (`consumer-a`) is unaffected — zero
 hygiene-only commits in its last 110.
 
 The next candidate for this list is decided by the same question, not by resemblance to the four names

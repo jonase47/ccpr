@@ -408,7 +408,7 @@ if [[ -d "$TIER2_GLOBAL_DIR" ]]; then
         # MEMORY.md indexes MAY have no frontmatter — skip only when they truly
         # don't, aligned with the project-scope rule (WI-0108). Measured
         # 26.08.2026: the only Tier-2-global index that exists today
-        # (~/.claude/memory/kalza/MEMORY.md) has none, so this alignment changes
+        # (~/.claude/memory/org-x/MEMORY.md) has none, so this alignment changes
         # nothing for any store currently in use — it only stops this site from
         # drifting from the rule the project-scope checks now follow.
         if [[ "$gbase" == "MEMORY.md" ]] && ! fm_has "$gfile"; then

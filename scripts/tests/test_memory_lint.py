@@ -171,7 +171,7 @@ def related_text(name="related probe", related_entries=()):
     """Builds a valid Tier-1 memory file carrying a `related:` block (WI-0078,
     check (f)'s cross-ref field). Block-list form only — the real-world
     fixture this fix was measured against (docs/memory/
-    project_attribute-mapping-slice-b-gap.md in productdata) uses the block
+    project_attribute-mapping-slice-b-gap.md in consumer-b) uses the block
     form, and fm_list's two spellings are already exercised for phase-docs-lint
     (test_phase_docs_lint.py CheckFRelatedCrossRefsTest) against the same
     shared lib/frontmatter.sh — re-proving both here would test the library,
@@ -6282,7 +6282,7 @@ last_updated: {TODAY}
 class Tier2GlobalIndexFrontmatterOptionalTest(MemoryLintFixture, unittest.TestCase):
     """The sibling of IndexFrontmatterOptionalTest for check (i)'s Tier-2-global silo
     scan (WI-0108). Measured: only one Tier-2-global index exists across the reference
-    stores (~/.claude/memory/kalza/MEMORY.md) and it has no frontmatter, so aligning
+    stores (~/.claude/memory/org-x/MEMORY.md) and it has no frontmatter, so aligning
     this site changes nothing today — these two tests exist to prove the alignment is
     behaviour-preserving for the no-frontmatter case and correctly permissive for the
     (currently hypothetical) with-frontmatter case, not because a real fixture needs
@@ -6290,29 +6290,29 @@ class Tier2GlobalIndexFrontmatterOptionalTest(MemoryLintFixture, unittest.TestCa
     """
 
     def test_tier2_global_index_without_frontmatter_stays_silent(self):
-        agent_dir = self.fake_home / ".claude" / "memory" / "kalza"
+        agent_dir = self.fake_home / ".claude" / "memory" / "org-x"
         agent_dir.mkdir(parents=True)
-        (agent_dir / "MEMORY.md").write_text("# Kalza shared memory\n\nBody.\n", encoding="utf-8")
+        (agent_dir / "MEMORY.md").write_text("# Org-X shared memory\n\nBody.\n", encoding="utf-8")
 
         result = self.run_lint()
 
         errors = self.findings(result.stdout, "Errors")
         warnings = self.findings(result.stdout, "Warnings")
-        self.assertFalse(any("memory/kalza/MEMORY.md" in e for e in errors), errors)
-        self.assertFalse(any("memory/kalza/MEMORY.md" in w for w in warnings), warnings)
+        self.assertFalse(any("memory/org-x/MEMORY.md" in e for e in errors), errors)
+        self.assertFalse(any("memory/org-x/MEMORY.md" in w for w in warnings), warnings)
 
     def test_tier2_global_index_with_frontmatter_is_validated_like_any_other_silo_file(self):
-        agent_dir = self.fake_home / ".claude" / "memory" / "kalza"
+        agent_dir = self.fake_home / ".claude" / "memory" / "org-x"
         agent_dir.mkdir(parents=True)
         (agent_dir / "MEMORY.md").write_text(
-            "---\nname: kalza index\ndescription: shared index\n---\n\n# Kalza\n",
+            "---\nname: org-x index\ndescription: shared index\n---\n\n# Org-X\n",
             encoding="utf-8",
         )
 
         warnings = self.findings(self.run_lint().stdout, "Warnings")
 
         self.assertTrue(
-            any("memory/kalza/MEMORY.md" in w and "scope: tier-2-global" in w for w in warnings),
+            any("memory/org-x/MEMORY.md" in w and "scope: tier-2-global" in w for w in warnings),
             warnings,
         )
 

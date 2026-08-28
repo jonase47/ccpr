@@ -19,12 +19,13 @@ test_external_tool_exit_status.py) that never ships to `scripts/`.
 Six `covers:` tests in test_phase_docs_lint.py asserted only
 `self.assertFalse(any("covers:" in w for w in warnings), warnings)`. When
 phase-docs-lint.sh died with empty stdout (a real WI-0122 regression,
-reproduced against games/erfinderwerkstatt), `findings()` returned `[]` and
+reproduced against consumer-a), `findings()` returned `[]` and
 every one of them passed -- the full suite reported "1481 tests, OK" while
-the tool was dead. Measured on the exact parent state of commit 5ee931b
-(pinned offline as fixtures/parent_test_phase_docs_lint.py.txt -- the
-`.txt` extension keeps `unittest discover` from importing it as a test
-module): 6 of `CheckHCoversTest`/`CheckHCoversEmptyDirectoryDetectionTest`'s
+the tool was dead. Measured on the parent state of commit 5ee931b, with
+project names redacted per Constitution Inviolable #2 (pinned offline as
+fixtures/parent_test_phase_docs_lint.py.txt -- the `.txt` extension keeps
+`unittest discover` from importing it as a test module): 6 of
+`CheckHCoversTest`/`CheckHCoversEmptyDirectoryDetectionTest`'s
 11 methods were exactly this shape; the other 5 carry an `assertTrue` on an
 expected finding and are not blind. See
 ParentStateDiscriminationTest below -- the acceptance case this module is
@@ -787,7 +788,8 @@ class UnrelatedAssertTrueDoesNotMaskABlindNegativeAssertionTest(unittest.TestCas
 
 class ParentStateDiscriminationTest(unittest.TestCase):
     """WI-0125 acceptance: run the scanner against the pinned parent state
-    of commit 5ee931b (fixtures/parent_test_phase_docs_lint.py.txt) and
+    of commit 5ee931b, with project names redacted per Constitution
+    Inviolable #2 (fixtures/parent_test_phase_docs_lint.py.txt) and
     require it to flag precisely the six negative-only `covers:` methods,
     never the five sibling methods that carry a positive assertion. This is
     the discriminating case the work item is not accepted without."""

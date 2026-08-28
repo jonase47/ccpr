@@ -53,7 +53,7 @@ ROOT="${1:-$(pwd)}"
 # keep both in sync when a new kind is introduced. This is not a closed
 # allow-list: a project may legitimately carry its own document genres this
 # repository never saw (measured 26.08.2026 against two real CCPR-using
-# projects — productdata, Kalza — 16 distinct unrecognised-but-legitimate
+# projects — consumer-b, Org-X — 16 distinct unrecognised-but-legitimate
 # values between them). is_valid_kind() below therefore only decides whether
 # a value is RECOGNISED; check (c) reports an unrecognised one as a warning,
 # not an error (measured 26.08.2026, follow-up to WI-0112a — no separate WI filed).

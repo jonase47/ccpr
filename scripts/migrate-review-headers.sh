@@ -221,7 +221,7 @@ _ensure_frontmatter_block() {
 # OPENER and CLOSER lines themselves are dropped too, not just their
 # content), in BOTH branches — a fenced example is a fenced example
 # whether or not the file happens to have a frontmatter block yet (the
-# real erfinderwerkstatt SPRINT-01 shape that motivated the hoist feature
+# real consumer-a SPRINT-01 shape that motivated the hoist feature
 # in the first place has no frontmatter block AT ALL). One shared awk
 # pass handles both cases via the ENVIRON-supplied has_fm flag, rather
 # than two separate invocations piped together — same invocation COUNT
@@ -348,7 +348,7 @@ while IFS= read -r file; do
 
     sprint_num_raw="$(printf '%s' "$bn" | sed -E 's/^SPRINT-([0-9]+)-review\.md$/\1/')"  # exit-status: exempt set-e-sufficient
     # Normalized via base-10 arithmetic evaluation, NOT the raw filename
-    # digits: the real erfinderwerkstatt corpus zero-pads (SPRINT-03-...)
+    # digits: the real consumer-a corpus zero-pads (SPRINT-03-...)
     # while its own frontmatter already carries the unpadded form
     # (sprint: 3) -- comparing/writing the padded string would both create
     # a false sprint-conflict warning and write a value the project's own
