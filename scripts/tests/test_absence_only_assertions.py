@@ -231,6 +231,19 @@ EXEMPTION_REASONS = {
         "assertion, invisible to this scanner's name-tracking, not a gap "
         "in the underlying test."
     ),
+    "chained-stdout-slice-not-tracked-as-output": (
+        "found in WI-0126 tranche 4 round 2: `_stdout_bound_names`/"
+        "`_is_stdout_like` only track a name bound in ONE hop directly "
+        "from a `<expr>.stdout` attribute access -- a name assigned from "
+        "a further chain off that attribute (`result.stdout.split(...)"
+        "[1].split(...)[0]`, extracting one report section's text) is "
+        "invisible to this one-hop tracking. The method's `assertIn(...)` "
+        "calls against such a section variable are genuine positive "
+        "liveness assertions about the SAME subprocess result -- they "
+        "just never register as one, so this scanner sees only the "
+        "method's negative-shaped assertions about the same derived name "
+        "and misses that the positive ones exist at all."
+    ),
 }
 
 NEEDS_EXEMPTION = {"absence-only-needs-exemption"}
@@ -299,6 +312,8 @@ KNOWN_FINDINGS = {
     ("test_phase_docs_lint.py", "CommitAnchorFamilyTest", "test_each_anchor_field_with_valid_hex_in_a_non_git_project_produces_no_findings"): "known-risk-not-yet-fixed",
     ("test_phase_docs_lint.py", "CommitAnchorFamilyTest", "test_anchor_resolvable_to_an_actual_commit_produces_no_findings"): "known-risk-not-yet-fixed",
     ("test_phase_docs_lint.py", "CommitAnchorFamilyTest", "test_anchor_fields_absent_produce_no_findings"): "known-risk-not-yet-fixed",
+    ("test_conformance_run.py", "CheckHasSummaryLineTranspositionTest", "test_swap_flips_which_of_the_two_gets_the_c1_contradiction_finding"): "chained-stdout-slice-not-tracked-as-output",
+    ("test_conformance_run.py", "CheckSubcmdTranspositionRealScriptTest", "test_swap_turns_memory_lint_into_a_c2_finding_and_anchor_into_could_not_run"): "chained-stdout-slice-not-tracked-as-output",
 }
 
 
@@ -884,9 +899,9 @@ class NoStaleKnownFindingsTest(unittest.TestCase):
 
 class ClassificationCountsTest(unittest.TestCase):
     def test_classification_counts(self):
-        """Regression pin on the measured baseline: 943 `test_*` methods
+        """Regression pin on the measured baseline: 949 `test_*` methods
         across the corpus call something shaped like a subprocess invocation
-        and are therefore in scope for this check; 54 of those are
+        and are therefore in scope for this check; 56 of those are
         absence-only-needs-exemption (all accounted for via KNOWN_FINDINGS
         above), the rest carry at least one recognised positive/liveness
         assertion. A change in either number means a test changed shape or
@@ -913,13 +928,20 @@ class ClassificationCountsTest(unittest.TestCase):
           943 / 54             WI-0126 tranche 3b (quality-scan.sh content
                                lists: PII_PATTERNS, consent terms, config
                                filenames, and the .venv skip-list binding)
+          949 / 56             WI-0126 tranche 4 (conformance-run.sh's four
+                               uncovered columns). The first time this guard
+                               caught REAL new blind tests rather than only
+                               moving its own counts: three were flagged
+                               before commit, one genuinely absence-only and
+                               fixed with a returncode assertion, two
+                               registered as a new false-positive category
 
         The flagged count has not moved since round 2: every test added by
         WI-0126 so far carries a recognised liveness assertion."""
         recs = scan_tree()
         flagged = [r for r in recs if r.disposition in NEEDS_EXEMPTION]
-        self.assertEqual(943, len(recs))
-        self.assertEqual(54, len(flagged))
+        self.assertEqual(949, len(recs))
+        self.assertEqual(56, len(flagged))
 
 
 class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):

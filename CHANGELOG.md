@@ -167,6 +167,74 @@ All notable changes to this project are documented in this file. The format is b
   re-read of the ~90-line module found no other enumerated list beyond `PATTERNS` and the `:66`
   skip tuple tranche 3b already bound.
 
+- **The alignment invariant across `conformance-run.sh`'s seven parallel check-table columns, plus
+  per-entry coverage for the four still-uncovered ones (WI-0126, tranche 4)**. `CHECK_NAMES`,
+  `CHECK_SCRIPTS`, `CHECK_SUBCMD`, `CHECK_ARG_SHAPE`, `CHECK_EXIT_SET`, `CHECK_C2_EXEMPT` and
+  `CHECK_HAS_SUMMARY_LINE` (`conformance-run.sh:168-197`) are seven bash arrays aligned by
+  POSITION only — bash 3.2 has no associative arrays. Only three of the seven had any test tying
+  their lengths together (inside a parser helper, not a test of its own); `CHECK_SUBCMD`,
+  `CHECK_ARG_SHAPE` and `CHECK_C2_EXEMPT` had **zero** references anywhere in the suite,
+  `CHECK_HAS_SUMMARY_LINE` had exactly one, in a comment. Measured directly under this file's own
+  `set -euo pipefail`: a column one entry SHORTER than its six siblings dies loudly (`unbound
+  variable`, exit 1) the instant the classifier reaches the missing index — but a column
+  TRANSPOSED to the same length runs to completion silently, with check N quietly getting check
+  M's argument shape, exit set or exemption. A removal proof would therefore pass while proving
+  the wrong thing; every per-entry proof for the four uncovered columns here is a swap in a
+  scratch copy, not a removal, following G-109.
+
+  `parse_check_exit_set_table`'s former private array parser is now a module-level helper shared
+  by a new `parse_full_check_table`, which reads all seven columns and asserts they agree on
+  length (5) — a scratch copy proves this fires both when a column is shortened by one entry and
+  when an untied EIGHTH `CHECK_*` array is added, found by sweeping the whole file for the pattern
+  rather than trusting this test module's own enumeration of seven names. `CHECK_SUBCMD` (only
+  `anchor` carries `status`), `CHECK_ARG_SHAPE` (a 3/2 `project`/`docs` split), `CHECK_C2_EXEMPT`
+  (only `anchor` is exempt) and `CHECK_HAS_SUMMARY_LINE` (only `anchor` lacks one) each get a
+  transposition proof crossing their own asymmetry: `CHECK_ARG_SHAPE`'s and
+  `CHECK_HAS_SUMMARY_LINE`'s swaps are clean two-sided flips (a Files-scanned:-0 report appears
+  for both swapped checks; a self-contradicting report's C1 finding moves from one check to the
+  other). `CHECK_C2_EXEMPT`'s swap is measured, not assumed, to be one-sided: gaining exemption
+  silences a real finding for `memory-lint`, but `anchor` gaining non-exempt status changes
+  nothing observable, because the independent C2 candidate probe (`_c2_probe_has_candidates`) has
+  no `case` arm for `anchor` at all — a genuine, orthogonal double-guard, reported as measured
+  rather than forced into a symmetric assertion the code does not support. `CHECK_SUBCMD`'s swap
+  is the one end-to-end proof driving the REAL `memory-lint.sh`/`anchor.sh` (never stubs) against a
+  real git-initialised consumer: memory-lint.sh reads only its own `$1` as the project directory
+  (silently ignoring a stolen `$2`), so gaining a leading `status` token makes it scan the wrong,
+  nonexistent directory instead of erroring — turning a populated consumer into a spurious C2
+  finding; anchor.sh dispatches on its own `$1` as a subcommand name, so losing `status` makes the
+  consumer's absolute path look like an unrecognised subcommand, landing it under Could-Not-Run.
+
+  Enumerated (deliverable 5): `KNOWN_PIN_FIELDS` (5 entries: `exit`, `errors`, `warnings`, `info`,
+  `filesScanned`, `:802`) already has genuine per-entry BEHAVIOURAL coverage via
+  `PinFieldEvaluationTest`, even though the constant itself is never parsed from source by name —
+  judged adequately covered, no new test added. The three inline known-key sets in the config
+  reader (`{"consumers","pins"}` at the `conformance` level, `{"id","path","optional"}` per
+  consumer, and the 8-key pin-object set, `:729/754/822`) each have a dedicated unknown-key
+  rejection test, and their KNOWN members are transitively exercised by nearly every other test in
+  the module — judged covered by the rest of the suite, not a fresh gap. `RESULT_*`, `CONSUMER_*`
+  and `PIN_*` are runtime accumulators that start empty, as the briefing already named — out of
+  scope. One genuine gap found and reported, not fixed (outside this tranche's four-column scope):
+  Rule 3's two mandatory-report-line lists (`:580` anchor's own two lines, `:587` the generic
+  three) have no test that removes ONE line from a stub report and confirms the classifier's own
+  "missing mandatory line(s)" message names exactly that line — `RealCheckSkeletonTest` only pins
+  that the REAL checks' output happens to include these substrings today, which is a presence
+  check on real output, not a red proof of the classifier's own reaction to an absent one. Flagged
+  as a candidate for a future tranche.
+
+  **Round 2 — WI-0125's own absence-only guard fired on three of this tranche's new tests before
+  commit.** `test_swap_flips_which_of_the_two_gets_the_c1_contradiction_finding` and
+  `test_swap_turns_memory_lint_into_a_c2_finding_and_anchor_into_could_not_run` are measured
+  scanner false positives, not real gaps: both derive a report-section variable through a chained
+  `result.stdout.split(...)[i].split(...)[j]` and assert real, positive facts against it, but
+  `_is_stdout_like`/`_stdout_bound_names` only track a name bound in ONE hop directly from
+  `.stdout` — a fourth false-positive category, distinct from the three already registered, and
+  recorded as `chained-stdout-slice-not-tracked-as-output` in `test_absence_only_assertions.py`'s
+  `EXEMPTION_REASONS`/`KNOWN_FINDINGS` rather than widening the scanner itself (a decision outside
+  this tranche's write boundary, same call as tranche 3c's module-level-helper blind spot).
+  `test_anchor_gaining_non_exempt_status_measured_to_not_change_its_own_report` genuinely lacked a
+  liveness assertion: measured directly, the mutated run's own exit code is 0 (both halves of the
+  swap null out), so it now asserts that fact instead of relying on the section text alone.
+
 - **An ADR convention: a resolved open point records its resolution in place (WI-0127)**.
   ADR-0009's follow-up 4 read "undefined" for six days after an addendum in the same file had
   answered it, and a proposal contradicting that answer was made on the strength of the stale

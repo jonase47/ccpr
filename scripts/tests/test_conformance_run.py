@@ -263,10 +263,18 @@ class ConformanceRunTestBase(unittest.TestCase):
         e.update(extra)
         return e
 
-    def run_conformance(self, *args, **extra_env):
+    def run_conformance(self, *args, script_path=None, cwd=None, **extra_env):
+        # script_path/cwd (WI-0126 tranche 4): every existing call site
+        # omits both and keeps this method's original behaviour unchanged
+        # (SCRIPT_PATH, inherited cwd) -- the two new kwargs exist only for
+        # the CHECK_* column transposition/red-proof tests, which must run
+        # a SCRATCH-mutated copy of conformance-run.sh (never the shipped
+        # file) and, for one of them, a specific cwd so a relative
+        # PROJECT_DIR fallback resolves deterministically.
         return subprocess.run(
-            ["bash", str(SCRIPT_PATH), *[str(a) for a in args]],
+            ["bash", str(script_path or SCRIPT_PATH), *[str(a) for a in args]],
             capture_output=True, text=True, env=self.env(**extra_env),
+            cwd=str(cwd) if cwd else None,
         )
 
     @staticmethod
@@ -1324,26 +1332,29 @@ def parse_documented_exit_set(script_path):
     return codes
 
 
+def _parse_paren_array(name, text):
+    """Parses one NAME=(...) parenthesized array literal out of shell
+    source text, accepting either a bare or a double-quoted token per
+    element -- conformance-run.sh's own CHECK_EXIT_SET quotes its elements
+    because each one is itself a space-separated set ("0 1 2 3"), while
+    every other CHECK_* column is bare, so both forms must be read from the
+    same helper rather than assuming one shape. Module-level (WI-0126
+    tranche 4) so every CHECK_* column can share it, generalising what used
+    to be parse_check_exit_set_table's own private nested _array()."""
+    m = re.search(r"^%s=\(([^)]*)\)" % re.escape(name), text, re.MULTILINE)
+    assert m is not None, "conformance-run.sh's own %s array not found -- fixture assumption broken" % name
+    return [quoted if quoted else bare for quoted, bare in re.findall(r'"([^"]*)"|(\S+)', m.group(1))]
+
+
 def parse_check_exit_set_table(script_path):
     """conformance-run.sh's own CHECK_NAMES / CHECK_SCRIPTS / CHECK_EXIT_SET
     parallel-array table, read by parsing the shell source directly --
     deliberately not by sourcing the script, which would require invoking
     bash for nothing else this parser needs."""
     text = script_path.read_text(encoding="utf-8")
-
-    def _array(name):
-        # CHECK_NAMES/CHECK_SCRIPTS are bare (unquoted) word arrays;
-        # CHECK_EXIT_SET's own elements are quoted because each one is
-        # itself a space-separated set ("0 1 2 3") -- both forms must be
-        # read from the same helper, so a bare-word or a quoted token is
-        # accepted per element rather than assuming one shape.
-        m = re.search(r"^%s=\(([^)]*)\)" % re.escape(name), text, re.MULTILINE)
-        assert m is not None, "conformance-run.sh's own %s array not found -- fixture assumption broken" % name
-        return [quoted if quoted else bare for quoted, bare in re.findall(r'"([^"]*)"|(\S+)', m.group(1))]
-
-    names = _array("CHECK_NAMES")
-    scripts = _array("CHECK_SCRIPTS")
-    exit_sets = _array("CHECK_EXIT_SET")
+    names = _parse_paren_array("CHECK_NAMES", text)
+    scripts = _parse_paren_array("CHECK_SCRIPTS", text)
+    exit_sets = _parse_paren_array("CHECK_EXIT_SET", text)
     assert len(names) == len(scripts) == len(exit_sets), "conformance-run.sh's check-table arrays disagree on length"
     return {name: (scripts[i], set(int(c) for c in exit_sets[i].split())) for i, name in enumerate(names)}
 
@@ -1633,6 +1644,481 @@ class RepositoryHygieneTest(unittest.TestCase):
             if heading in text.splitlines():
                 offenders.append(rel)
         self.assertEqual([], offenders)
+
+
+# ---------------------------------------------------------------------------
+# WI-0126 tranche 4 -- the seven CHECK_* parallel arrays (:168-197) are
+# aligned by POSITION only, and four of the seven columns
+# (CHECK_SUBCMD, CHECK_ARG_SHAPE, CHECK_C2_EXEMPT, CHECK_HAS_SUMMARY_LINE)
+# had no per-entry coverage before this tranche.
+#
+# The discriminating mutation for every column below is a SWAP, not a
+# removal (G-109): measured directly, a column one entry SHORTER than its
+# siblings dies loudly under this file's own `set -euo pipefail`
+# (CheckTableShortColumnRedProofTest below) -- but a TRANSPOSED column of
+# the same length runs to completion silently, with check N quietly
+# getting check M's argument shape, exit set, or exemption. A removal
+# proof would therefore pass while proving the wrong thing for these four
+# columns; every per-entry proof here swaps two entries in a SCRATCH copy
+# of conformance-run.sh (the shipped file is never touched, matching
+# ContractTableExitCodeBindingRedProofTest's own convention above) and
+# shows the run's behaviour changes for exactly those two checks.
+# ---------------------------------------------------------------------------
+
+CHECK_TABLE_COLUMN_NAMES = (
+    "CHECK_NAMES",
+    "CHECK_SCRIPTS",
+    "CHECK_SUBCMD",
+    "CHECK_ARG_SHAPE",
+    "CHECK_EXIT_SET",
+    "CHECK_C2_EXEMPT",
+    "CHECK_HAS_SUMMARY_LINE",
+)
+
+# Digits included on purpose ([A-Za-z0-9_], not [A-Za-z_]) -- the WI-0126
+# briefing measured that a first-draft enumeration regex using [A-Z_] alone
+# silently skipped CHECK_C2_EXEMPT, since [A-Z_] excludes the "2".
+CHECK_TABLE_ARRAY_RE = re.compile(r"^(CHECK_[A-Za-z0-9_]*)=\(", re.MULTILINE)
+
+
+def find_check_table_array_names(script_path=SCRIPT_PATH):
+    """Every CHECK_*=(...) array literal actually declared in the script,
+    found by sweeping the WHOLE file rather than by trusting
+    CHECK_TABLE_COLUMN_NAMES's own enumeration -- the point of this sweep
+    is to notice a future EIGHTH column nobody added to that tuple, not to
+    confirm the seven this test file already knows about."""
+    return tuple(CHECK_TABLE_ARRAY_RE.findall(script_path.read_text(encoding="utf-8")))
+
+
+def parse_full_check_table(script_path=SCRIPT_PATH):
+    """All seven of conformance-run.sh's parallel CHECK_* arrays, aligned
+    by POSITION only. Returns {column_name: tuple_of_values}. Asserts every
+    column has the SAME length -- the alignment invariant WI-0126 tranche 4
+    exists to pin: a future eighth column that nobody ties in here, or an
+    existing column narrowed by one entry, fails this assertion the moment
+    it disagrees in length with its six siblings, rather than silently
+    shifting every check after it by one position at runtime."""
+    text = script_path.read_text(encoding="utf-8")
+    columns = {name: tuple(_parse_paren_array(name, text)) for name in CHECK_TABLE_COLUMN_NAMES}
+    lengths = {name: len(values) for name, values in columns.items()}
+    assert len(set(lengths.values())) == 1, "conformance-run.sh's CHECK_* columns disagree on length: %r" % (lengths,)
+    return columns
+
+
+class CheckTableAlignmentTest(unittest.TestCase):
+    def test_all_seven_columns_are_five_entries_long(self):
+        columns = parse_full_check_table()
+        self.assertEqual(7, len(columns))
+        for name, values in columns.items():
+            self.assertEqual(5, len(values), "%s has %d entries, expected 5: %r" % (name, len(values), values))
+
+    def test_exactly_the_seven_named_columns_exist_in_source(self):
+        self.assertEqual(CHECK_TABLE_COLUMN_NAMES, find_check_table_array_names())
+
+
+class CheckTableAlignmentRedProofTest(unittest.TestCase):
+    """Mutation-based RED proof (G-107) for the alignment invariant itself:
+    a scratch copy with one column shortened by one entry must make
+    parse_full_check_table's own length assertion fire, and a scratch copy
+    with an EIGHTH CHECK_* array added -- one nobody ties into
+    CHECK_TABLE_COLUMN_NAMES -- must make find_check_table_array_names's
+    result stop matching the pinned seven. These are the two halves of
+    deliverable 1's own promise ("pin both the length (5) and the column
+    count (7)")."""
+
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="wi0126-t4-alignment-redproof-"))
+        self.addCleanup(shutil.rmtree, self.tmpdir, ignore_errors=True)
+
+    def test_a_shortened_column_breaks_the_length_invariant(self):
+        before, before_mode = SCRIPT_PATH.read_bytes(), SCRIPT_PATH.stat().st_mode
+        original = SCRIPT_PATH.read_text(encoding="utf-8")
+        needle = "CHECK_C2_EXEMPT=(0 0 0 0 1)"
+        self.assertIn(needle, original, "fixture assumption broken -- update this test")
+        mutated = original.replace(needle, "CHECK_C2_EXEMPT=(0 0 0 1)", 1)
+        self.assertNotEqual(original, mutated)
+        scratch = self.tmpdir / "conformance-run.sh"
+        scratch.write_text(mutated, encoding="utf-8")
+
+        with self.assertRaises(AssertionError):
+            parse_full_check_table(scratch)
+
+        # Same G-143 safety net every sibling scratch-mutation test in this
+        # file carries. These two never open SCRIPT_PATH for writing, so the
+        # risk is nil -- but a reader scanning this section learns to expect
+        # the assertion, and its absence reads as an oversight rather than as
+        # "this one is a pure text parse" (WI-0126 tranche 4 review).
+        self.assertEqual(before, SCRIPT_PATH.read_bytes(), "shipped file content changed")
+        self.assertEqual(before_mode, SCRIPT_PATH.stat().st_mode, "shipped file mode bits changed")
+
+    def test_an_untied_eighth_column_breaks_the_count_invariant(self):
+        before, before_mode = SCRIPT_PATH.read_bytes(), SCRIPT_PATH.stat().st_mode
+        original = SCRIPT_PATH.read_text(encoding="utf-8")
+        needle = "CHECK_COUNT=${#CHECK_NAMES[@]}"
+        self.assertIn(needle, original, "fixture assumption broken -- update this test")
+        mutated = original.replace(needle, "CHECK_FOO=(a b c d e)\n" + needle, 1)
+        self.assertNotEqual(original, mutated)
+        scratch = self.tmpdir / "conformance-run.sh"
+        scratch.write_text(mutated, encoding="utf-8")
+
+        found = find_check_table_array_names(scratch)
+        self.assertEqual(8, len(found))
+        self.assertNotEqual(CHECK_TABLE_COLUMN_NAMES, found)
+
+        self.assertEqual(before, SCRIPT_PATH.read_bytes(), "shipped file content changed")
+        self.assertEqual(before_mode, SCRIPT_PATH.stat().st_mode, "shipped file mode bits changed")
+
+
+DISCIPLINE_GATE_LIB = REPO_ROOT / "scripts" / "lib" / "discipline_gate.sh"
+
+
+def _write_mutated_conformance_script(tmpdir, mutate_fn):
+    """Copies conformance-run.sh AND its own sourced lib/discipline_gate.sh
+    (`. "$HERE/lib/discipline_gate.sh"`, :164 -- a scratch copy of
+    conformance-run.sh alone dies at that source line before reaching
+    anything this tranche mutates, the same lib-alongside-the-script
+    requirement list-coverage.md's tranche 1 entry already names for
+    phase-docs-lint.sh/anchor.sh) into tmpdir, applying
+    mutate_fn(original_text) -> mutated_text to the top-level script only.
+    Asserts the shipped files are unchanged afterwards (G-143)."""
+    before = SCRIPT_PATH.read_bytes()
+    before_mode = SCRIPT_PATH.stat().st_mode
+    lib_before = DISCIPLINE_GATE_LIB.read_bytes()
+
+    original = before.decode("utf-8")
+    mutated = mutate_fn(original)
+    assert mutated != original, "mutation had no effect"
+
+    scratch = tmpdir / "conformance-run.sh"
+    scratch.write_text(mutated, encoding="utf-8")
+    scratch.chmod(0o755)
+    (tmpdir / "lib").mkdir(exist_ok=True)
+    shutil.copy2(DISCIPLINE_GATE_LIB, tmpdir / "lib" / "discipline_gate.sh")
+
+    assert before == SCRIPT_PATH.read_bytes(), "shipped conformance-run.sh content changed"
+    assert before_mode == SCRIPT_PATH.stat().st_mode, "shipped conformance-run.sh mode bits changed"
+    assert lib_before == DISCIPLINE_GATE_LIB.read_bytes(), "shipped lib/discipline_gate.sh content changed"
+    return scratch
+
+
+def _swap_literal(varname, old_line, new_line):
+    """A mutate_fn (for _write_mutated_conformance_script) that asserts the
+    EXACT literal array line is present before replacing it (G-141) --
+    every CHECK_* column's transposition mutation below is built from this
+    one helper, differing only in which two positions the literal swaps."""
+
+    def _mutate(original):
+        assert old_line in original, (
+            "conformance-run.sh's own %s literal line changed -- update this test: %r" % (varname, old_line)
+        )
+        mutated = original.replace(old_line, new_line, 1)
+        assert mutated != original
+        return mutated
+
+    return _mutate
+
+
+class CheckTableShortColumnRedProofTest(ConformanceRunTestBase):
+    """WI-0126 tranche 4, deliverable 4: pins the LOUD failure a SHORTENED
+    column produces under this file's own `set -euo pipefail` -- the
+    opposite of every transposition proof in this section. Measured
+    directly: a column one entry short does not silently misalign: it dies
+    with 'unbound variable' the instant _run_and_classify_check reaches the
+    missing index, before it ever invokes the check script itself. A later
+    refactor that added a `${arr[i]:-}` default to one of the CHECK_*
+    lookups -- turning this loud case silent -- would flip this test from
+    'sees the expected unbound-variable death' to 'sees a clean run
+    instead', which is exactly a regression, not a pass."""
+
+    def setUp(self):
+        super().setUp()
+        self.consumer = self.make_consumer_dir("alpha")
+        self.write_config(conformance={"consumers": [{"id": "alpha", "path": str(self.consumer)}]})
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="wi0126-t4-shortcol-"))
+        self.addCleanup(shutil.rmtree, self.tmpdir, ignore_errors=True)
+
+    def test_a_column_one_entry_short_dies_with_unbound_variable(self):
+        scratch = _write_mutated_conformance_script(self.tmpdir, _swap_literal(
+            "CHECK_SUBCMD",
+            'CHECK_SUBCMD=("" "" "" "" status)',
+            'CHECK_SUBCMD=("" "" "" "")',
+        ))
+        r = self.run_conformance(script_path=scratch)
+        self.assertEqual(1, r.returncode, self.output(r))
+        self.assertIn("unbound variable", r.stderr, self.output(r))
+
+
+class CheckTableUncoveredColumnsValuesTest(unittest.TestCase):
+    """Parsed-from-source pins for the four columns this tranche covers --
+    weak alone (list-coverage.md's house-pattern ranking, level 1: a
+    hardcoded expectation catches narrowing but proves nothing about
+    whether the value actually DRIVES behaviour), paired below with one
+    transposition-proof class per column that supplies the missing half."""
+
+    def test_check_subcmd_only_anchor_carries_a_subcommand(self):
+        self.assertEqual(("", "", "", "", "status"), parse_full_check_table()["CHECK_SUBCMD"])
+
+    def test_check_arg_shape_is_a_three_two_split(self):
+        self.assertEqual(("project", "project", "docs", "docs", "project"), parse_full_check_table()["CHECK_ARG_SHAPE"])
+
+    def test_check_c2_exempt_only_anchor_is_exempt(self):
+        self.assertEqual(("0", "0", "0", "0", "1"), parse_full_check_table()["CHECK_C2_EXEMPT"])
+
+    def test_check_has_summary_line_only_anchor_lacks_one(self):
+        self.assertEqual(("1", "1", "1", "1", "0"), parse_full_check_table()["CHECK_HAS_SUMMARY_LINE"])
+
+
+class CheckArgShapeTranspositionTest(ConformanceRunTestBase):
+    """WI-0126 tranche 4, deliverable 3: swaps CHECK_ARG_SHAPE's memory-lint
+    (idx0, 'project') and manual-lint (idx2, 'docs') entries in a scratch
+    copy -- crossing the column's own 3/2 split (briefing :171-183). Both
+    stubs branch on whether their own first argument ends in '/docs',
+    mirroring DocsRootAsymmetryTest's existing stub shape above (the same
+    trap named there: getting this column wrong for a 'docs' check turns a
+    populated consumer into a silent Files-scanned:-0 run, which C2 then
+    reports as a CCPR defect that is actually our own argument mistake)."""
+
+    def setUp(self):
+        super().setUp()
+        self.consumer = self.make_consumer_dir("alpha")
+        (self.consumer / "docs" / "memory").mkdir(parents=True)
+        (self.consumer / "docs" / "memory" / "note.md").write_text("# note\n", encoding="utf-8")
+        self.write_config(conformance={"consumers": [{"id": "alpha", "path": str(self.consumer)}]})
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="wi0126-t4-argshape-"))
+        self.addCleanup(shutil.rmtree, self.tmpdir, ignore_errors=True)
+
+    @staticmethod
+    def _branching_stub(clean_when_docs_suffixed):
+        """Reports CLEAN_FILES_SCANNED_REPORT when its own $1 ends in
+        '/docs' and clean_when_docs_suffixed is True (or when it does NOT
+        and clean_when_docs_suffixed is False); a Files-scanned:-0 report
+        in the other case."""
+        clean = CLEAN_FILES_SCANNED_REPORT.rstrip("\n")
+        dirty = CLEAN_FILES_SCANNED_REPORT.replace("**Files scanned:** 3", "**Files scanned:** 0").rstrip("\n")
+        docs_branch, other_branch = (clean, dirty) if clean_when_docs_suffixed else (dirty, clean)
+        return "\n".join([
+            "#!/usr/bin/env bash",
+            'case "$1" in',
+            "  */docs)",
+            "    cat <<'STUB_EOF'", docs_branch, "STUB_EOF",
+            "    exit 0", "    ;;",
+            "  *)",
+            "    cat <<'STUB_EOF'", other_branch, "STUB_EOF",
+            "    exit 0", "    ;;",
+            "esac",
+        ]) + "\n"
+
+    def _write_branching_stub(self, filename, clean_when_docs_suffixed):
+        path = self.checks_dir / filename
+        path.write_text(self._branching_stub(clean_when_docs_suffixed), encoding="utf-8")
+        path.chmod(0o755)
+
+    def test_swapping_memory_lint_and_manual_lint_flips_c2_for_exactly_those_two(self):
+        # memory-lint's TRUE shape is 'project' (bare path, no /docs
+        # suffix) -- clean when NOT suffixed.
+        self._write_branching_stub("memory-lint.sh", clean_when_docs_suffixed=False)
+        # manual-lint's TRUE shape is 'docs' -- clean when suffixed.
+        self._write_branching_stub("manual-lint.sh", clean_when_docs_suffixed=True)
+
+        baseline = self.run_conformance()
+        self.assertEqual(0, baseline.returncode, self.output(baseline))
+        self.assertNotIn("memory-lint on alpha", baseline.stdout, self.output(baseline))
+        self.assertNotIn("manual-lint on alpha", baseline.stdout, self.output(baseline))
+
+        scratch = _write_mutated_conformance_script(self.tmpdir, _swap_literal(
+            "CHECK_ARG_SHAPE",
+            "CHECK_ARG_SHAPE=(project project docs docs project)",
+            "CHECK_ARG_SHAPE=(docs project project docs project)",
+        ))
+        after = self.run_conformance(script_path=scratch)
+        self.assertEqual(1, after.returncode, self.output(after))
+        c2_section = after.stdout.split("### Zero scope (C2)", 1)[1].split("### Could Not Run", 1)[0]
+        self.assertIn("memory-lint on alpha", c2_section, self.output(after))
+        self.assertIn("manual-lint on alpha", c2_section, self.output(after))
+        self.assertNotIn("phase-docs-lint", c2_section, self.output(after))
+        self.assertNotIn("doc-volume-check", c2_section, self.output(after))
+        self.assertNotIn("anchor", c2_section, self.output(after))
+
+
+class CheckC2ExemptTranspositionTest(ConformanceRunTestBase):
+    """WI-0126 tranche 4, deliverable 3: swaps CHECK_C2_EXEMPT's memory-lint
+    (idx0, 0) and anchor (idx4, 1) entries. Measured, not assumed: memory-
+    lint's half of the swap is a real, two-sided behaviour change (gaining
+    exemption silences a C2 finding that fires at baseline); anchor's half
+    does NOT observably change, because _c2_probe_has_candidates (:283-311)
+    has no `case` arm for 'anchor' at all -- its `*) return 1 ;;` default
+    means the probe never reports a candidate for that name regardless of
+    the exempt flag. That is a genuine, orthogonal double-guard (the exempt
+    flag short-circuits before the probe runs; the probe's own switch would
+    catch it even if the flag did not) -- reported here as measured rather
+    than forced into a two-sided assertion neither the code nor the run
+    supports."""
+
+    def setUp(self):
+        super().setUp()
+        self.consumer = self.make_consumer_dir("alpha")
+        (self.consumer / "docs" / "memory").mkdir(parents=True)
+        (self.consumer / "docs" / "memory" / "note.md").write_text("# note\n", encoding="utf-8")
+        self.write_config(conformance={"consumers": [{"id": "alpha", "path": str(self.consumer)}]})
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="wi0126-t4-c2exempt-"))
+        self.addCleanup(shutil.rmtree, self.tmpdir, ignore_errors=True)
+        # memory-lint reports Files scanned: 0 despite the real candidate
+        # planted above -- the exact shape C2 exists to catch.
+        self.write_stub("memory-lint.sh", CLEAN_FILES_SCANNED_REPORT.replace("**Files scanned:** 3", "**Files scanned:** 0"), 0)
+        # anchor's report is given a hypothetical, non-real 'Files
+        # scanned:' line -- anchor's REAL report never has one
+        # (CHECK_C2_EXEMPT's own comment calls this "structurally exempt",
+        # :186-191); this stub is what tests whether the exempt FLAG, not
+        # merely the report's own shape, is what prevents a spurious
+        # finding.
+        anchor_with_files_line = CLEAN_ANCHOR_REPORT.replace("**Anchors:**", "**Files scanned:** 0\n**Anchors:**", 1)
+        self.write_stub("anchor.sh", anchor_with_files_line, 0)
+
+    def test_memory_lint_loses_its_c2_finding_after_gaining_exemption(self):
+        baseline = self.run_conformance()
+        self.assertEqual(1, baseline.returncode, self.output(baseline))
+        self.assertIn("memory-lint on alpha", baseline.stdout.split("### Zero scope (C2)", 1)[1], self.output(baseline))
+
+        scratch = _write_mutated_conformance_script(self.tmpdir, _swap_literal(
+            "CHECK_C2_EXEMPT",
+            "CHECK_C2_EXEMPT=(0 0 0 0 1)",
+            "CHECK_C2_EXEMPT=(1 0 0 0 0)",
+        ))
+        after = self.run_conformance(script_path=scratch)
+        c2_section = after.stdout.split("### Zero scope (C2)", 1)[1].split("### Could Not Run", 1)[0]
+        self.assertNotIn("memory-lint on alpha", c2_section, self.output(after))
+
+    def test_anchor_gaining_non_exempt_status_measured_to_not_change_its_own_report(self):
+        scratch = _write_mutated_conformance_script(self.tmpdir, _swap_literal(
+            "CHECK_C2_EXEMPT",
+            "CHECK_C2_EXEMPT=(0 0 0 0 1)",
+            "CHECK_C2_EXEMPT=(1 0 0 0 0)",
+        ))
+        after = self.run_conformance(script_path=scratch)
+        # Real liveness guard, not an inference from the section text alone
+        # (WI-0125/WI-0126 tranche 4 round 2): both halves of this swap null
+        # out -- memory-lint gains exemption and loses its own C2 finding,
+        # anchor never had one to begin with (see the class docstring) --
+        # so the run's own exit code is measured to be 0, not merely
+        # assumed from an empty-looking "_none_" section.
+        self.assertEqual(0, after.returncode, self.output(after))
+        c2_section = after.stdout.split("### Zero scope (C2)", 1)[1].split("### Could Not Run", 1)[0]
+        self.assertNotIn("anchor on alpha", c2_section, self.output(after))
+
+
+class CheckHasSummaryLineTranspositionTest(ConformanceRunTestBase):
+    """WI-0126 tranche 4, deliverable 3: swaps CHECK_HAS_SUMMARY_LINE's
+    memory-lint (idx0, 1) and anchor (idx4, 0) entries -- unlike
+    CHECK_C2_EXEMPT above, Rule 5 (the internal-contradiction check) has no
+    per-name special case, so this swap produces a genuinely two-sided
+    flip: the check that LOSES its summary-line flag stops being checked
+    for a 0-errors/0-warnings-but-nonzero-exit contradiction (its finding
+    demotes from C1 to a plain P finding), and the check that GAINS the
+    flag starts being checked for exactly that contradiction (a P finding
+    promotes to C1)."""
+
+    def setUp(self):
+        super().setUp()
+        self.consumer = self.make_consumer_dir("alpha")
+        self.write_config(conformance={"consumers": [{"id": "alpha", "path": str(self.consumer)}]})
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="wi0126-t4-hassummary-"))
+        self.addCleanup(shutil.rmtree, self.tmpdir, ignore_errors=True)
+        # memory-lint: a self-contradicting report (0 errors, 0 warnings,
+        # but a non-zero exit) -- within its own {0,1,2,3} exit set, so
+        # Rule 1 does not fire.
+        self.write_stub("memory-lint.sh", CLEAN_FILES_SCANNED_REPORT.replace("**Exit:** 0", "**Exit:** 1"), 1)
+        # anchor: the same self-contradiction shape, spliced into its own
+        # report skeleton (a hypothetical -- anchor's REAL report has no
+        # Summary line at all, see CHECK_HAS_SUMMARY_LINE's own comment) --
+        # within anchor's {0,2,3} exit set.
+        anchor_with_summary = CLEAN_ANCHOR_REPORT.replace(
+            "**Anchors:**", "**Summary:** 0 errors, 0 warnings, 0 info.\n**Anchors:**", 1
+        ).replace("**Exit:** 0", "**Exit:** 3")
+        self.write_stub("anchor.sh", anchor_with_summary, 3)
+
+    def test_swap_flips_which_of_the_two_gets_the_c1_contradiction_finding(self):
+        baseline = self.run_conformance()
+        c1_before = baseline.stdout.split("### Contract violations (C1)", 1)[1].split("### Zero scope (C2)", 1)[0]
+        p_before = baseline.stdout.split("### Consumer findings (P)", 1)[1]
+        self.assertIn("memory-lint on alpha", c1_before, self.output(baseline))
+        self.assertNotIn("anchor", c1_before, self.output(baseline))
+        self.assertIn("anchor on alpha", p_before, self.output(baseline))
+        self.assertNotIn("memory-lint", p_before, self.output(baseline))
+
+        scratch = _write_mutated_conformance_script(self.tmpdir, _swap_literal(
+            "CHECK_HAS_SUMMARY_LINE",
+            "CHECK_HAS_SUMMARY_LINE=(1 1 1 1 0)",
+            "CHECK_HAS_SUMMARY_LINE=(0 1 1 1 1)",
+        ))
+        after = self.run_conformance(script_path=scratch)
+        c1_after = after.stdout.split("### Contract violations (C1)", 1)[1].split("### Zero scope (C2)", 1)[0]
+        p_after = after.stdout.split("### Consumer findings (P)", 1)[1]
+        self.assertIn("anchor on alpha", c1_after, self.output(after))
+        self.assertNotIn("memory-lint", c1_after, self.output(after))
+        self.assertIn("memory-lint on alpha", p_after, self.output(after))
+        self.assertNotIn("anchor", p_after, self.output(after))
+
+
+class CheckSubcmdTranspositionRealScriptTest(ConformanceRunTestBase):
+    """WI-0126 tranche 4, deliverable 3's 'at least one end-to-end shape':
+    swaps CHECK_SUBCMD's memory-lint (idx0, '') and anchor (idx4, 'status')
+    entries and drives the REAL shipped memory-lint.sh/anchor.sh (never
+    stubs) against a real, git-initialised consumer -- the pair whose own
+    CLI parsing reacts most differently to gaining/losing a leading
+    subcommand token: memory-lint.sh reads only its OWN $1 as the project
+    directory (silently ignoring a $2), so gaining a leading 'status'
+    token makes it scan the wrong (nonexistent) directory instead of
+    erroring; anchor.sh dispatches on its own $1 as a subcommand name, so
+    losing 'status' makes the consumer's own absolute path look like an
+    unrecognised subcommand."""
+
+    def setUp(self):
+        super().setUp()
+        self.consumer = self.make_consumer_dir("alpha")
+        (self.consumer / "docs").mkdir()
+        (self.consumer / "docs" / "memory").mkdir()
+        (self.consumer / "docs" / "memory" / "note.md").write_text(
+            "---\n"
+            "name: fixture\n"
+            "description: WI-0126 tranche 4 fixture note\n"
+            "type: patterns\n"
+            "last_updated: 28.08.2026\n"
+            "---\n"
+            "# note\n",
+            encoding="utf-8",
+        )
+        subprocess.run(["git", "init", "-q"], cwd=str(self.consumer), check=True)
+        self.write_config(conformance={"consumers": [{"id": "alpha", "path": str(self.consumer)}]})
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="wi0126-t4-subcmd-"))
+        self.addCleanup(shutil.rmtree, self.tmpdir, ignore_errors=True)
+        self.real_scripts_dir = str(REPO_ROOT / "scripts")
+
+    def test_swap_turns_memory_lint_into_a_c2_finding_and_anchor_into_could_not_run(self):
+        baseline = self.run_conformance(CCPR_CONFORMANCE_SCRIPT_DIR=self.real_scripts_dir)
+        could_not_run_before = baseline.stdout.split("### Could Not Run", 1)[1].split("### Pinned expectations", 1)[0]
+        self.assertNotIn("anchor on alpha", could_not_run_before, self.output(baseline))
+        if "### Zero scope (C2)" in baseline.stdout:
+            c2_before = baseline.stdout.split("### Zero scope (C2)", 1)[1].split("### Could Not Run", 1)[0]
+            self.assertNotIn("memory-lint on alpha", c2_before, self.output(baseline))
+
+        scratch = _write_mutated_conformance_script(self.tmpdir, _swap_literal(
+            "CHECK_SUBCMD",
+            'CHECK_SUBCMD=("" "" "" "" status)',
+            'CHECK_SUBCMD=(status "" "" "" "")',
+        ))
+        # cwd=self.tmpdir (an EMPTY scratch dir): memory-lint.sh now reads
+        # its own $1 ("status", the entry it stole from anchor) as
+        # PROJECT_DIR, a RELATIVE path -- pinning cwd is what keeps
+        # "status/docs/memory" deterministically absent rather than
+        # depending on wherever this test suite happens to be invoked from.
+        after = self.run_conformance(
+            script_path=scratch, cwd=self.tmpdir, CCPR_CONFORMANCE_SCRIPT_DIR=self.real_scripts_dir,
+        )
+        c2_after = after.stdout.split("### Zero scope (C2)", 1)[1].split("### Could Not Run", 1)[0]
+        could_not_run_after = after.stdout.split("### Could Not Run", 1)[1].split("### Pinned expectations", 1)[0]
+        self.assertIn("memory-lint on alpha", c2_after, self.output(after))
+        self.assertIn("anchor on alpha", could_not_run_after, self.output(after))
+        self.assertIn("unknown subcommand", could_not_run_after, self.output(after))
 
 
 if __name__ == "__main__":
