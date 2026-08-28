@@ -12,7 +12,7 @@ If not provided: Sub-skills make their own recommendations.
 ### 0. Ensure Phase Index Exists
 Make sure `docs/architecture/ARCHITECTURE.md` exists with the standard phase-index header (Status / Last Updated / Key Decisions / Open Risks / Detail Files / Gate Notes — see `~/.claude/docs/PROJECT_PHASES.md`). If missing, create it with empty placeholders. The sub-skills below each refresh their own row in the **Detail Files** table.
 
-**Lean-Index Rule**: `ARCHITECTURE.md` is an **index**, not a detail file. Keep it ≤15 KB. Component descriptions live in `COMPONENTS.md` (or `components/<COMPONENT>.md` if Sub-Index applies). Tech-stack rationale lives in `TECH_STACK.md`. ADRs live under `adr/`. NFRs live in `NFR.md`. The index aggregates one-line decisions and links — nothing else.
+**Lean-Index Rule**: `ARCHITECTURE.md` is an **index**, not a detail file. Keep it ≤15 KB. Component descriptions live in `COMPONENTS.md` (or `components/<COMPONENT>.md` if Sub-Index applies). Tech-stack rationale lives in `TECH_STACK.md`. ADRs live under `ADR/` (the same spelling `gate-p3.md` globs and `p3-arch-adr.md` writes to; case matters on case-sensitive filesystems). NFRs live in `NFR.md`. The index aggregates one-line decisions and links — nothing else.
 
 ### 1. Component Diagram & Data Flows
 `/p3-arch-components $ARGUMENTS` – Creates the system architecture overview with component diagram and data flows.
