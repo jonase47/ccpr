@@ -374,6 +374,10 @@ class MemoryLintTest(MemoryLintFixture, unittest.TestCase):
         result = self.run_lint()
 
         self.assertEqual(self.findings(result.stdout, "Errors"), [], result.stdout)
+        # WI-0128: proves the run actually scanned conventions.md (and not merely
+        # that a scan of NOTHING is error-free) — a lint that silently skipped the
+        # senior-developer/ silo would pass the assertion above vacuously.
+        self.assertIn("**Files scanned:** 5", result.stdout, result.stdout)
 
     def test_tier1_file_with_type_patterns_still_errors(self):
         """The Tier-1 enum stays closed — 'patterns' is a Tier-2-only allowance."""
@@ -430,6 +434,10 @@ class MemoryLintTest(MemoryLintFixture, unittest.TestCase):
 
         errors = self.findings(result.stdout, "Errors")
         self.assertFalse(any("status=" in e for e in errors), errors)
+        # WI-0128: "no status= error" is vacuously true on a run that never
+        # reached project_status.md — pin that the fixture (index + the four
+        # base files + project_status.md) was actually scanned.
+        self.assertIn("**Files scanned:** 5", result.stdout, result.stdout)
 
     def test_status_archived_is_valid(self):
         self.write_index(CLEAN_INDEX + "- [Status](project_status.md) — probe\n")
@@ -439,6 +447,7 @@ class MemoryLintTest(MemoryLintFixture, unittest.TestCase):
 
         errors = self.findings(result.stdout, "Errors")
         self.assertFalse(any("status=" in e for e in errors), errors)
+        self.assertIn("**Files scanned:** 5", result.stdout, result.stdout)
 
     def test_status_superseded_is_valid(self):
         self.write_index(CLEAN_INDEX + "- [Status](project_status.md) — probe\n")
@@ -448,6 +457,7 @@ class MemoryLintTest(MemoryLintFixture, unittest.TestCase):
 
         errors = self.findings(result.stdout, "Errors")
         self.assertFalse(any("status=" in e for e in errors), errors)
+        self.assertIn("**Files scanned:** 5", result.stdout, result.stdout)
 
     def test_status_absent_is_valid(self):
         """No `status:` line at all — the field is optional."""
@@ -460,6 +470,7 @@ class MemoryLintTest(MemoryLintFixture, unittest.TestCase):
         warnings = self.findings(result.stdout, "Warnings")
         self.assertFalse(any("status=" in e for e in errors), errors)
         self.assertFalse(any("status=" in w for w in warnings), warnings)
+        self.assertIn("**Files scanned:** 5", result.stdout, result.stdout)
 
     def test_status_stale_is_no_longer_a_valid_value(self):
         """The literal defect this item fixes: `stale` used to be legal.
@@ -520,6 +531,9 @@ class MemoryLintTest(MemoryLintFixture, unittest.TestCase):
 
         warnings = self.findings(result.stdout, "Warnings")
         self.assertFalse(any("days old" in w for w in warnings), warnings)
+        # WI-0128: "no age warning" is vacuous unless project_status.md's
+        # OLD_DATE last_updated was actually read.
+        self.assertIn("**Files scanned:** 5", result.stdout, result.stdout)
 
     def test_superseded_still_suppresses_the_age_warning(self):
         self.write_index(CLEAN_INDEX + "- [Status](project_status.md) — probe\n")
@@ -529,6 +543,7 @@ class MemoryLintTest(MemoryLintFixture, unittest.TestCase):
 
         warnings = self.findings(result.stdout, "Warnings")
         self.assertFalse(any("days old" in w for w in warnings), warnings)
+        self.assertIn("**Files scanned:** 5", result.stdout, result.stdout)
 
     def test_stale_does_not_suppress_the_age_warning(self):
         """The regression pin for the defect itself: a `status: stale` file is now
@@ -578,6 +593,10 @@ class MemoryLintTest(MemoryLintFixture, unittest.TestCase):
         infos = self.findings(result.stdout, "Info")
         self.assertFalse(any("related:" in e for e in errors), errors)
         self.assertFalse(any("related:" in i for i in infos), infos)
+        # WI-0128: "no related: finding" is vacuous unless project_main-doc-
+        # relative.md's own related: block was actually read and resolved —
+        # pin that both sidecar files this test wrote were scanned.
+        self.assertIn("**Files scanned:** 6", result.stdout, result.stdout)
 
     def test_related_entry_resolvable_only_at_project_root_is_info_not_error(self):
         """A file nested under a Tier-2 silo writes a related: entry rooted at the
@@ -676,6 +695,11 @@ class MemoryLintTest(MemoryLintFixture, unittest.TestCase):
         infos = self.findings(result.stdout, "Info")
         self.assertFalse(any("related:" in e for e in errors), errors)
         self.assertFalse(any("related:" in i for i in infos), infos)
+        # WI-0128: "no related: finding" is vacuous unless project_main-both.md
+        # was actually read — pin that the two docs/memory sidecars this test
+        # wrote (the root-planted copy is outside docs/memory/** and does not
+        # count) were scanned.
+        self.assertIn("**Files scanned:** 6", result.stdout, result.stdout)
 
     # --- Regression pin for the pre-existing behaviour being extended --------------
 
@@ -1792,12 +1816,22 @@ class MemoryLintTest(MemoryLintFixture, unittest.TestCase):
     def test_a_closed_fence_does_not_warn_about_an_unclosed_one(self):
         """Control: a fence that closes before end-of-file must not trigger the
         new warning at all."""
-        self.write_index(CLEAN_INDEX + "```\n- [Example](dead_fenced.md)\n```\n")
+        self.write_index(
+            CLEAN_INDEX + "```\n- [Example](dead_fenced.md)\n```\n- [After](dead_after_fenced.md)\n"
+        )
 
         result = self.run_lint()
 
         warnings = self.findings(result.stdout, "Warnings")
         self.assertFalse(any("never closed" in w for w in warnings), warnings)
+        # WI-0128: "no 'never closed' warning" is also true of a scan that never
+        # ran at all. Prove the fence genuinely re-opened link checking by
+        # requiring the dead link written AFTER the close to still be caught —
+        # a state-machine regression that left in_fence stuck true would swallow
+        # it and this would go red.
+        findings = self.link_findings(result.stdout)
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("dead_after_fenced.md", findings[0])
 
     # --- WI-0043: an unclosed HTML comment silently switches the check off too -----
     # Same defect class as the unclosed-fence case above, one construct over: an
@@ -1828,12 +1862,20 @@ class MemoryLintTest(MemoryLintFixture, unittest.TestCase):
     def test_a_closed_html_comment_does_not_warn_about_an_unclosed_one(self):
         """Control: a comment block that closes before end-of-file must not
         trigger the new warning at all."""
-        self.write_index(CLEAN_INDEX + "<!--\n- [Example](dead_commented.md)\n-->\n")
+        self.write_index(
+            CLEAN_INDEX + "<!--\n- [Example](dead_commented.md)\n-->\n- [After](dead_after_commented.md)\n"
+        )
 
         result = self.run_lint()
 
         warnings = self.findings(result.stdout, "Warnings")
         self.assertFalse(any("never closed" in w for w in warnings), warnings)
+        # WI-0128: same proof as the fence control above — the dead link written
+        # AFTER the comment closes must still be caught, or in_html_comment got
+        # stuck true and this scan silently stopped checking links.
+        findings = self.link_findings(result.stdout)
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("dead_after_commented.md", findings[0])
 
     def test_the_unclosed_comment_warning_names_its_own_construct(self):
         """Both mechanisms report 'never closed' — the message must still say
@@ -3632,6 +3674,11 @@ class MemoryLintTest(MemoryLintFixture, unittest.TestCase):
         )
         self.assertFalse(any("project_crlf_fenced.md" in f for f in findings), findings)
         self.assertTrue(any("project_crlf_after.md" in f for f in findings), findings)
+        # WI-0128: same fact as the assertTrue above, phrased directly against
+        # result.stdout — link_findings() already proves it, but the wrapper is
+        # what leaves a crashed-with-empty-stdout run producing an empty
+        # findings list and this same assertTrue vacuously true.
+        self.assertIn("project_crlf_after.md", result.stdout)
 
 
     # --- thematic break and setext underline as boundaries (WI-0082) ----------
@@ -6192,6 +6239,10 @@ last_updated: {TODAY}
         warnings = self.findings(result.stdout, "Warnings")
         self.assertFalse(any("MEMORY.md" in e for e in errors), errors)
         self.assertFalse(any("MEMORY.md" in w for w in warnings), warnings)
+        # WI-0128: this class exists to prove MEMORY.md is no longer excluded
+        # from FILES (see class docstring) — pin that it was actually counted,
+        # not merely that scanning nothing produced no MEMORY.md findings.
+        self.assertIn("**Files scanned:** 4", result.stdout, result.stdout)
 
     def test_index_with_valid_frontmatter_is_silent(self):
         """A MEMORY.md that DOES carry a complete, valid frontmatter block must pass
@@ -6205,6 +6256,7 @@ last_updated: {TODAY}
         warnings = self.findings(result.stdout, "Warnings")
         self.assertFalse(any("docs/memory/MEMORY.md" in e for e in errors), errors)
         self.assertFalse(any("docs/memory/MEMORY.md" in w for w in warnings), warnings)
+        self.assertIn("**Files scanned:** 4", result.stdout, result.stdout)
 
     def test_type_index_is_accepted_on_the_closed_tier1_enum(self):
         """docs/memory/MEMORY.md sits at parent_dir == 'memory' — the Tier-1 branch of
@@ -6212,9 +6264,11 @@ last_updated: {TODAY}
         be a member of that enum, not merely tolerated by the looser Tier-2 one."""
         self.write_index(self.VALID_INDEX_FRONTMATTER)
 
-        errors = self.findings(self.run_lint().stdout, "Errors")
+        result = self.run_lint()
+        errors = self.findings(result.stdout, "Errors")
 
         self.assertFalse(any("type=" in e for e in errors), errors)
+        self.assertIn("**Files scanned:** 4", result.stdout, result.stdout)
 
     def test_index_with_a_missing_required_field_is_reported(self):
         """Once an index carries frontmatter, it is validated like any other file — an
@@ -6246,9 +6300,11 @@ last_updated: {TODAY}
         from this specific check regardless of its type value."""
         self.write_index(self.VALID_INDEX_FRONTMATTER)
 
-        warnings = self.findings(self.run_lint().stdout, "Warnings")
+        result = self.run_lint()
+        warnings = self.findings(result.stdout, "Warnings")
 
         self.assertFalse(any("Tier-1 naming convention" in w for w in warnings), warnings)
+        self.assertIn("**Files scanned:** 4", result.stdout, result.stdout)
 
     def test_default_fixture_file_count_now_includes_the_persona_index(self):
         """setUp() already writes a Tier-2 persona index (senior-developer/MEMORY.md,
@@ -6271,12 +6327,14 @@ last_updated: {TODAY}
         own body. It must not."""
         self.write_index(CLEAN_INDEX)
 
-        warnings = self.findings(self.run_lint().stdout, "Warnings")
+        result = self.run_lint()
+        warnings = self.findings(result.stdout, "Warnings")
 
         self.assertFalse(
             any("MEMORY.md' not referenced in Tier-1 index" in w for w in warnings),
             warnings,
         )
+        self.assertIn("**Files scanned:** 4", result.stdout, result.stdout)
 
 
 class Tier2GlobalIndexFrontmatterOptionalTest(MemoryLintFixture, unittest.TestCase):
@@ -6293,6 +6351,12 @@ class Tier2GlobalIndexFrontmatterOptionalTest(MemoryLintFixture, unittest.TestCa
         agent_dir = self.fake_home / ".claude" / "memory" / "org-x"
         agent_dir.mkdir(parents=True)
         (agent_dir / "MEMORY.md").write_text("# Org-X shared memory\n\nBody.\n", encoding="utf-8")
+        # WI-0128: a sibling, non-index file with no frontmatter in the SAME
+        # silo directory — proves check (i) actually walked this directory. A
+        # broken $TIER2_GLOBAL_DIR/find (or a scan that silently skipped the
+        # silo entirely) would leave both this file and MEMORY.md unseen, and
+        # every assertion below would be vacuously true.
+        (agent_dir / "sibling.md").write_text("# Sibling\n\nBody.\n", encoding="utf-8")
 
         result = self.run_lint()
 
@@ -6300,6 +6364,13 @@ class Tier2GlobalIndexFrontmatterOptionalTest(MemoryLintFixture, unittest.TestCa
         warnings = self.findings(result.stdout, "Warnings")
         self.assertFalse(any("memory/org-x/MEMORY.md" in e for e in errors), errors)
         self.assertFalse(any("memory/org-x/MEMORY.md" in w for w in warnings), warnings)
+        self.assertTrue(
+            any(
+                "memory/org-x/sibling.md" in e and "without YAML frontmatter" in e
+                for e in errors
+            ),
+            errors,
+        )
 
     def test_tier2_global_index_with_frontmatter_is_validated_like_any_other_silo_file(self):
         agent_dir = self.fake_home / ".claude" / "memory" / "org-x"

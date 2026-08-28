@@ -277,24 +277,6 @@ KNOWN_FINDINGS = {
     ("test_manual_lint.py", "CheckBReverseLinkTest", "test_link_with_extra_text_around_it_is_still_recognised"): "known-risk-not-yet-fixed",
     ("test_manual_lint.py", "ReverseLinkMutationProofTest", "test_pointing_at_the_true_parent_is_silent"): "known-risk-not-yet-fixed",
     ("test_manual_lint.py", "KindVocabularyMutationProofTest", "test_real_value_is_silent"): "known-risk-not-yet-fixed",
-    ("test_memory_lint.py", "MemoryLintTest", "test_a_cr_terminated_fence_closes_the_fence"): "helper-bound-list-not-recognised-as-findings",
-    ("test_memory_lint.py", "MemoryLintTest", "test_tier2_topic_file_with_type_patterns_is_not_an_error"): "known-risk-not-yet-fixed",
-    ("test_memory_lint.py", "MemoryLintTest", "test_status_active_is_valid"): "known-risk-not-yet-fixed",
-    ("test_memory_lint.py", "MemoryLintTest", "test_status_archived_is_valid"): "known-risk-not-yet-fixed",
-    ("test_memory_lint.py", "MemoryLintTest", "test_status_superseded_is_valid"): "known-risk-not-yet-fixed",
-    ("test_memory_lint.py", "MemoryLintTest", "test_status_absent_is_valid"): "known-risk-not-yet-fixed",
-    ("test_memory_lint.py", "MemoryLintTest", "test_archived_still_suppresses_the_age_warning"): "known-risk-not-yet-fixed",
-    ("test_memory_lint.py", "MemoryLintTest", "test_superseded_still_suppresses_the_age_warning"): "known-risk-not-yet-fixed",
-    ("test_memory_lint.py", "MemoryLintTest", "test_related_entry_resolved_document_relative_stays_silent"): "known-risk-not-yet-fixed",
-    ("test_memory_lint.py", "MemoryLintTest", "test_related_entry_resolvable_at_both_bases_resolves_document_relative_and_stays_silent"): "known-risk-not-yet-fixed",
-    ("test_memory_lint.py", "MemoryLintTest", "test_a_closed_fence_does_not_warn_about_an_unclosed_one"): "known-risk-not-yet-fixed",
-    ("test_memory_lint.py", "MemoryLintTest", "test_a_closed_html_comment_does_not_warn_about_an_unclosed_one"): "known-risk-not-yet-fixed",
-    ("test_memory_lint.py", "IndexFrontmatterOptionalTest", "test_index_without_frontmatter_is_silent"): "known-risk-not-yet-fixed",
-    ("test_memory_lint.py", "IndexFrontmatterOptionalTest", "test_index_with_valid_frontmatter_is_silent"): "known-risk-not-yet-fixed",
-    ("test_memory_lint.py", "IndexFrontmatterOptionalTest", "test_type_index_is_accepted_on_the_closed_tier1_enum"): "known-risk-not-yet-fixed",
-    ("test_memory_lint.py", "IndexFrontmatterOptionalTest", "test_tier1_naming_convention_does_not_fire_on_the_index_itself"): "known-risk-not-yet-fixed",
-    ("test_memory_lint.py", "IndexFrontmatterOptionalTest", "test_index_with_no_frontmatter_does_not_trigger_the_index_self_reference_check"): "known-risk-not-yet-fixed",
-    ("test_memory_lint.py", "Tier2GlobalIndexFrontmatterOptionalTest", "test_tier2_global_index_without_frontmatter_stays_silent"): "known-risk-not-yet-fixed",
     ("workitems/test_migrate.py", "MigrateLocalToYouTrackTest", "test_second_full_run_is_a_no_op_no_duplicates"): "in-process-call-not-a-subprocess",
     ("test_phase_docs_lint.py", "CheckAFrontmatterPresenceTest", "test_document_with_frontmatter_is_not_warned_for_missing_frontmatter"): "known-risk-not-yet-fixed",
     ("test_phase_docs_lint.py", "CheckBRequiredFieldsTest", "test_document_with_all_required_fields_is_not_reported"): "known-risk-not-yet-fixed",
@@ -901,7 +883,7 @@ class ClassificationCountsTest(unittest.TestCase):
     def test_classification_counts(self):
         """Regression pin on the measured baseline: 978 `test_*` methods
         across the corpus call something shaped like a subprocess invocation
-        and are therefore in scope for this check; 56 of those are
+        and are therefore in scope for this check; 38 of those are
         absence-only-needs-exemption (all accounted for via KNOWN_FINDINGS
         above), the rest carry at least one recognised positive/liveness
         assertion. A change in either number means a test changed shape or
@@ -912,6 +894,27 @@ class ClassificationCountsTest(unittest.TestCase):
         growing paragraph:
 
           in-scope / flagged   when
+          978 / 38             WI-0128 wave 3 tranche 1 (memory_lint
+                               module, 18 of the 56 KNOWN_FINDINGS entries):
+                               each fixed test gets a positive assertion
+                               specific to its own claim -- 14 pin
+                               "**Files scanned:** N" against the exact
+                               fixture the test wrote, 2 (the closed-
+                               fence/closed-comment controls) add a dead
+                               link AFTER the close and assert it is still
+                               caught, 1 (a sibling Tier-2-global file
+                               with no frontmatter) proves check (i)
+                               actually walked the silo directory, and 1
+                               (the CR-terminated-fence test) already had
+                               a real `assertTrue` this scanner could not
+                               see (bound through `link_findings`, not
+                               `self.findings` -- the `helper-bound-list-
+                               not-recognised-as-findings` category) and
+                               gets a second, classifier-visible
+                               `assertIn` on the same fact. In-scope
+                               unchanged: no method was added or removed,
+                               only assertions inside existing methods.
+                               Flagged: -18.
           915 / 53             WI-0125, 27.08.2026, first measurement
           916 / 53             + test_doc_volume_check's liveness red proof
           916 / 54             round 2 finding B: the `assertTrue` branch
@@ -999,7 +1002,7 @@ class ClassificationCountsTest(unittest.TestCase):
         recs = scan_tree()
         flagged = [r for r in recs if r.disposition in NEEDS_EXEMPTION]
         self.assertEqual(978, len(recs))
-        self.assertEqual(56, len(flagged))
+        self.assertEqual(38, len(flagged))
 
 
 class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
