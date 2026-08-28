@@ -12,7 +12,7 @@ import re
 # Add lib to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "lib"))
 
-from next_steps import extract_phase_from_handover, PHASE_SEQUENCES
+from next_steps import extract_phase_from_handover
 
 # Command -> phase mapping (derived from command prefix)
 def get_command_phase(command: str) -> str:
@@ -111,17 +111,24 @@ def check_gate_passed(gate: str, project_dir: str) -> bool:
         if os.path.isfile(path):
             with open(path, "r", encoding="utf-8", errors="ignore") as f:
                 content = f.read().lower()
-            # Check for "Go" verdict
-            if re.search(r"\bgo\b", content) and not re.search(r"\bno.go\b", content):
-                return True
-            # Also accept if the file exists (some projects may not use Go/No-Go format)
+            # No gate command prescribes a verdict-line syntax -- all of
+            # them only say to append the verdict under "Gate Notes". Since
+            # it is appended, the LAST Go/No-Go token in the document is the
+            # actual conclusion, not an earlier one: several gate commands
+            # instruct writers to name "No-Go" in prose when flagging an
+            # Inviolable breach, and that prose mention must not override a
+            # later "Verdict: Go" (WI-0128, finding #5 follow-up).
+            verdict_matches = list(re.finditer(r"\b(no.go)\b|\b(go)\b", content))
+            if verdict_matches:
+                # group(1) set -> the match was "no-go"; group(2) set -> "go"
+                return verdict_matches[-1].group(1) is None
+            # Lenient fallback: the file exists but uses no Go/No-Go
+            # vocabulary at all (some projects may not use that format).
+            # Absence of any verdict language is not itself a rejection.
             return True
 
     # Also check HANDOVER.md for phase completion hints
-    handover_path = os.path.join(project_dir, "docs", "HANDOVER.md")
-    if os.path.isfile(handover_path):
-        with open(handover_path, "r", encoding="utf-8", errors="ignore") as f:
-            content = f.read()
+    if os.path.isfile(os.path.join(project_dir, "docs", "HANDOVER.md")):
         # Check if current phase is beyond the gate's phase
         info = extract_phase_from_handover(project_dir)
         if info["phase"]:

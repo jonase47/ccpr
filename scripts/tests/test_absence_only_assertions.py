@@ -899,7 +899,7 @@ class NoStaleKnownFindingsTest(unittest.TestCase):
 
 class ClassificationCountsTest(unittest.TestCase):
     def test_classification_counts(self):
-        """Regression pin on the measured baseline: 973 `test_*` methods
+        """Regression pin on the measured baseline: 978 `test_*` methods
         across the corpus call something shaped like a subprocess invocation
         and are therefore in scope for this check; 56 of those are
         absence-only-needs-exemption (all accounted for via KNOWN_FINDINGS
@@ -928,6 +928,16 @@ class ClassificationCountsTest(unittest.TestCase):
           943 / 54             WI-0126 tranche 3b (quality-scan.sh content
                                lists: PII_PATTERNS, consent terms, config
                                filenames, and the .venv skip-list binding)
+          978 / 56             WI-0128 wave 3a review round: +2, the two
+                               last-wins direction tests, both of which
+                               drive the CLI. The round's third new test
+                               (the reasons-text divergence the first
+                               attempt had ruled out) is in-process and
+                               correctly out of this scanner's scope.
+                               Flagged unchanged.
+          976 / 56             WI-0128 wave 3a (command-check.py's gate
+                               verdict). Flagged unchanged for the ninth
+                               consecutive wave.
           973 / 56             WI-0128 wave 2a: three Rule-3 red proofs in
                                test_conformance_run.py drive the real script,
                                so they are in scope. Flagged unchanged -- all
@@ -988,7 +998,7 @@ class ClassificationCountsTest(unittest.TestCase):
         count."""
         recs = scan_tree()
         flagged = [r for r in recs if r.disposition in NEEDS_EXEMPTION]
-        self.assertEqual(973, len(recs))
+        self.assertEqual(978, len(recs))
         self.assertEqual(56, len(flagged))
 
 
@@ -1004,7 +1014,8 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
         test_next_steps_lists.py, tranche 3c added
         test_quality_scan_sast_patterns.py, WI-0128 wave 1c added
         test_adr_status_mapping.py, wave 2b added
-        test_agent_frontmatter.py.
+        test_agent_frontmatter.py, wave 3a added
+        test_command_check.py.
 
         That last one is a worked example of the boundary described in
         ClassificationCountsTest: it drives `git show` through
@@ -1020,7 +1031,7 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
         population change"."""
         files = sorted(TESTS_DIR.glob("*.py")) + sorted((TESTS_DIR / "workitems").glob("*.py"))
         names = sorted(f.relative_to(TESTS_DIR).as_posix() for f in files if f.name != "__init__.py")
-        self.assertEqual(44, len(names))
+        self.assertEqual(45, len(names))
         self.assertIn("test_absence_only_assertions.py", names)
         self.assertIn("test_phase_docs_lint.py", names)
         self.assertIn("workitems/test_migrate.py", names)
