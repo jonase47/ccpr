@@ -857,7 +857,7 @@ class NoStaleKnownFindingsTest(unittest.TestCase):
 
 class ClassificationCountsTest(unittest.TestCase):
     def test_classification_counts(self):
-        """Regression pin on the measured baseline: 1004 `test_*` methods
+        """Regression pin on the measured baseline: 1005 `test_*` methods
         across the corpus call something shaped like a subprocess invocation
         and are therefore in scope for this check; 0 of those are currently
         absence-only-needs-exemption -- `KNOWN_FINDINGS` above is empty for
@@ -871,6 +871,17 @@ class ClassificationCountsTest(unittest.TestCase):
         growing paragraph:
 
           in-scope / flagged   when
+          1005 / 0             the shipped-script executable-bit pin
+                               (29.08.2026): +1, a `git ls-files -s` call
+                               asserting the GIT INDEX mode rather than the
+                               filesystem's, because the index is what a
+                               clone reproduces and a local `chmod +x`
+                               without a commit would keep a stat-based
+                               check green while still shipping wrong. Not
+                               flagged: its first assertion pins the scanned
+                               line count against the enumeration, so a
+                               truncated `git ls-files` cannot read as
+                               "everything is executable".
           1004 / 0             `scripts/check-all.sh` and its test module
                                (29.08.2026): one command that runs the seven
                                quality checks and compares each against a
@@ -1142,7 +1153,7 @@ class ClassificationCountsTest(unittest.TestCase):
         count."""
         recs = scan_tree()
         flagged = [r for r in recs if r.disposition in NEEDS_EXEMPTION]
-        self.assertEqual(1004, len(recs))
+        self.assertEqual(1005, len(recs))
         self.assertEqual(0, len(flagged))
 
 
