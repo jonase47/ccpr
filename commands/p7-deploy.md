@@ -11,19 +11,19 @@ If not provided: Ask for the target environment. Without a clear specification, 
 
 ### 1. Read Context and Check Prerequisites
 Read the following files (if available):
-- **DEPLOYMENT_CHECKLIST.md** (has the preparation from `/p7-prepare` been completed?)
+- **PREPARE.md** (has the preparation from `/p7-prepare` been completed?)
 - **INFRASTRUCTURE.md** (deployment procedure, rollback strategy)
 - **GATE_P6.md** (approval status)
 
 Mandatory checks before deployment:
-- Does DEPLOYMENT_CHECKLIST.md exist with a completed checklist? If not → stop, recommend `/p7-prepare` first.
+- Does PREPARE.md exist with a completed checklist? If not → stop, recommend `/p7-prepare` first.
 - Is Gate 6 approved with green or yellow? If not → stop.
 
 ### 2. Delegation to DevOps Agent (Lead)
 Delegate the deployment to the **devops** agent:
 
 > Execute the deployment to the following environment: **$ARGUMENTS**
-> Deployment procedure from INFRASTRUCTURE.md and DEPLOYMENT_CHECKLIST.md: [Apply procedure]
+> Deployment procedure from INFRASTRUCTURE.md and PREPARE.md: [Apply procedure]
 >
 > **A. Execute Deployment**
 > Execute the deployment step by step and document each step:
@@ -45,7 +45,7 @@ Delegate the deployment to the **devops** agent:
 >
 > **C. Immediate Rollback on Smoke Test Failure**
 > If a smoke test fails:
-> 1. Immediately initiate rollback (according to the rollback plan from DEPLOYMENT_CHECKLIST.md)
+> 1. Immediately initiate rollback (according to the rollback plan from PREPARE.md)
 > 2. Document the failure
 > 3. Mark deployment as failed
 > 4. Analyse the cause before the next deployment attempt

@@ -5,7 +5,7 @@ Analyses production errors and performance issues, evaluates incidents, and init
 ## Argument: $ARGUMENTS = [Incident/area, e.g. "500 errors since 14:30", "high response times", "weekly review"]
 
 If provided: Analyse the described incident or conduct the review for the specified area.
-If not provided: Read RUNBOOK.md and current monitoring data and conduct a general operational review. If any context is missing, ask whether a specific incident exists or a scheduled review should be performed.
+If not provided: Read MONITORING.md and current monitoring data and conduct a general operational review. If any context is missing, ask whether a specific incident exists or a scheduled review should be performed.
 
 ## 0. Work-item adoption guard (ADR-0002 §8)
 
@@ -23,7 +23,7 @@ See Manual/WORKITEMS.md §8 for the full guard rationale and the status-verb map
 
 ### 1. Read Context
 Read the following files (if available):
-- **RUNBOOK.md** (incident response process, alerting thresholds, escalation paths)
+- **MONITORING.md** (incident response process, alerting thresholds, escalation paths)
 - **DEPLOYMENT_LOG.md** (most recent deployment – frequently the cause of new incidents)
 - **ARCHITECTURE.md** (system components – for root cause analysis)
 - Previous incident reports (if available)
@@ -32,7 +32,7 @@ Read the following files (if available):
 Delegate operational analysis to the **devops** agent:
 
 > Analyse the following incident or operational area: **$ARGUMENTS**
-> Incident response process from RUNBOOK.md: [Apply process and thresholds]
+> Incident response process from MONITORING.md: [Apply process and thresholds]
 >
 > **A. For a Specific Incident**
 >
@@ -114,7 +114,7 @@ Update `docs/operations/OPS.md`:
 - Optional **`docs/operations/snapshots/INCIDENT_REPORT_<date>.md`** (per-incident post-mortem)
 - Follow-up tasks as new work items (structured store) or new items in **`docs/planning/BACKLOG.md`** (prose fallback) — either way, input for `/p8-iteration`
 - **`docs/operations/OPS.md`** (phase index updated)
-- Updated **RUNBOOK.md** if applicable (incorporate lessons from the incident)
+- Updated **MONITORING.md** if applicable (incorporate lessons from the incident)
 
 ### Handover Epilogue
 **Before writing.** `docs/HANDOVER.md` is capped — the file states its own limit in its header

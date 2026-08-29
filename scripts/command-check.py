@@ -70,7 +70,7 @@ COMMAND_PREREQUISITES = {
         "gate": "gate-p6",
     },
     "p7-deploy": {
-        "files": ["docs/launch/RUNBOOK.md"],
+        "files": ["docs/launch/PREPARE.md"],
         "gate": "gate-p6",
     },
     "p4-backlog": {

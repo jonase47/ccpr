@@ -61,7 +61,7 @@ Delegate monitoring setup to the **devops** agent:
 > - Run through the rollback procedure once completely
 > - Measure time: how long does a complete rollback take?
 > - Check database state: is the state after rollback consistent?
-> - Document the test result in RUNBOOK.md
+> - Document the test result in MONITORING.md
 
 ### 3. Delegation to Security Master Agent (Support)
 Delegate security monitoring configuration to the **security-master** agent:

@@ -208,6 +208,21 @@ class CommandPrerequisitesSchemaTest(unittest.TestCase):
                 self.assertTrue(spec["gate"] is None or isinstance(spec["gate"], str))
 
 
+class CommandPrerequisitesP7DeployPointsAtPrepareArtifactTest(unittest.TestCase):
+    """P7 doc rename (WI-0128): /p7-prepare writes docs/launch/PREPARE.md
+    (p7-prepare.md:71,94) and /p7-deploy itself reads/updates that same file
+    (p7-deploy.md:75). Before this fix, p7-deploy's own prerequisite still
+    named the pre-rename legacy filename, a file nothing produces — pinning
+    the exact artifact /p7-prepare hands off so a future rename cannot
+    silently drift the two apart again."""
+
+    def test_p7_deploy_prerequisite_is_exactly_the_prepare_artifact(self):
+        self.assertEqual(
+            cc.COMMAND_PREREQUISITES["p7-deploy"]["files"],
+            ["docs/launch/PREPARE.md"],
+        )
+
+
 class CommandPrerequisitesReadyAndBlockedTest(unittest.TestCase):
     """Per-entry behavioural coverage for all 16 COMMAND_PREREQUISITES
     entries, driving check_command() directly (not the source dict

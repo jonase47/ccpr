@@ -113,7 +113,7 @@ Every phase produces a slim **phase index** plus one **detail file per subskill*
 │   │   └── INFRA.md           ← P3 sub-index: HOSTING.md, CICD.md, MONITORING.md, TESTSTRATEGY.md
 │   ├── planning/              ← P4: PROJECT_PLAN.md (index) + BACKLOG.md, SPRINT.md, RISKS.md
 │   ├── quality/               ← P6: QA.md (index) + A11Y.md, AUDIT.md, FUNCTIONAL.md, PENTEST.md sub-indexes plus their detail files
-│   ├── launch/                ← P7: LAUNCH.md (index) + RUNBOOK.md, DEPLOYMENT.md, MONITORING.md, RELEASE_DOCS.md, GTM.md
+│   ├── launch/                ← P7: LAUNCH.md (index) + DEPLOYMENT.md, MONITORING.md, RELEASE_DOCS.md, GTM.md
 │   └── operations/            ← P8: OPS.md (index) + BUSINESS.md, ITERATION.md, OPS_REVIEW.md, SECURITY.md
 ├── src/                       ← P5: Source code
 ├── tests/                     ← P5: Tests

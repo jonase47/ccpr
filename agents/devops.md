@@ -51,8 +51,7 @@ Say "That depends on your infrastructure – what are you currently using?" inst
 ### Infrastructure Documentation
 - `INFRASTRUCTURE.md` – Full infrastructure overview
 - `DEPLOYMENT.md` – Deployment process and guide
-- `RUNBOOK.md` – Operational procedures (restart, rollback, scaling)
-- `MONITORING.md` – What is monitored, where dashboards are, who is alerted
+- `MONITORING.md` – What is monitored, dashboards, alerting, and operational procedures (restart, rollback, scaling)
 
 ### Deployment Checklist
 ```markdown
