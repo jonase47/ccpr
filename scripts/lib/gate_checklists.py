@@ -121,6 +121,35 @@ GATE_CHECKLISTS = {
 }
 
 
+# Path of the gate protocol file each gate command itself writes, i.e. the
+# file `check_gate_passed()` in scripts/command-check.py must probe to know
+# whether a gate has been passed (WI-0129, finding F1). Hand-verified
+# against each commands/gate-pN.md's own "Create `docs/<folder>/
+# GATE_P<N>.md`" statement -- not derived from this module's own
+# GATE_CHECKLISTS keys, even though each phase's first GATE_CHECKLISTS
+# entry happens to sit in the same folder (its "phase index" document):
+# coupling the gate-file location to GATE_CHECKLISTS' key insertion order
+# would trade one incidental-structure bug for another, and nothing pins
+# that insertion order today.
+#
+# "gate-p5" is intentionally absent: /gate-p5 (commands/gate-p5.md) never
+# writes a dedicated gate file -- its sprint verdict lives in
+# docs/planning/SPRINT.md instead, a differently-shaped document (sprint
+# status prose, not a Go/No-Go protocol). Parsing that verdict is out of
+# scope for WI-0129; command-check.py's check_gate_passed() falls back to
+# the HANDOVER.md phase-comparison check for any gate absent from this
+# dict, which is the only mechanism gate-p5 has ever had.
+GATE_FILE_PATHS = {
+    "gate-p0": "docs/discovery/GATE_P0.md",
+    "gate-p1": "docs/concept/GATE_P1.md",
+    "gate-p2": "docs/validation/GATE_P2.md",
+    "gate-p3": "docs/architecture/GATE_P3.md",
+    "gate-p4": "docs/planning/GATE_P4.md",
+    "gate-p6": "docs/quality/GATE_P6.md",
+    "gate-p7": "docs/launch/GATE_P7.md",
+}
+
+
 # Content patterns for deeper mechanical checks per gate
 CONTENT_PATTERNS = {
     "p0": {

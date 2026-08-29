@@ -166,6 +166,31 @@ Two rules, both cheap at the moment you write the answer and expensive later:
 There is no automated check for either rule. Building one was deliberately deferred
 until the convention has produced enough annotated cases to measure a check against.
 
+### Derive a contract test's expectation from the other artifact, not the code under test
+
+A test whose subject is a contract *between two artifacts* — "does tool A read the
+path tool B writes?" — must derive its expected value from artifact B, never from
+artifact A's own source. Deriving it from A makes the test agree with A by
+construction, so the question the test exists to ask can never be asked.
+
+Worked example (WI-0129): `command-check.py`'s `check_gate_passed()` probed
+`docs/GATE_P4.md`, a flat path no `/gate-p4` command has ever written — every real
+gate command writes into a phase folder (`docs/planning/GATE_P4.md`). The
+corresponding test's fixture helper built its file at `docs/GATE_<PHASE>.md`,
+documented in its own docstring as "the path `check_gate_passed` probes". The
+fixture took its path from the code being tested, so the fix and its test agreed
+with each other while both disagreed with every shipped `gate-pN.md` command. The
+fix: derive the expected path from the command files' own "Create `docs/<folder>/
+GATE_P<N>.md`" statements — but only on the test side. `GATE_FILE_PATHS`, the dict
+`check_gate_passed()` actually consults in production, stays a hand-authored
+mapping (its own comment says so); nothing at runtime parses `commands/gate-pN.md`.
+The test parses each command's claim independently and asserts it equals
+`GATE_FILE_PATHS` (`GateFilePathsMatchesTheCommandsClaimTest`). That is a drift
+guard between two independently authored representations, not a single shared
+source of truth: a maintainer still has to hand-edit `GATE_FILE_PATHS` whenever a
+`gate-pN.md` write-target sentence changes — the guard only catches the moment the
+two disagree, at test time; it does not remove the manual step.
+
 ## Adding yourself
 
 New contributors may add their name (or handle) to [`AUTHORS`](AUTHORS) in the same PR.

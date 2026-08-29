@@ -13,6 +13,7 @@ import re
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "lib"))
 
 from next_steps import extract_phase_from_handover
+from gate_checklists import GATE_FILE_PATHS
 
 # Command -> phase mapping (derived from command prefix)
 def get_command_phase(command: str) -> str:
@@ -97,17 +98,50 @@ COMMAND_PREREQUISITES = {
 
 
 def check_gate_passed(gate: str, project_dir: str) -> bool:
-    """Check if a gate has been passed (GATE_PX.md exists with 'Go')."""
-    # Try multiple possible locations and naming patterns
-    phase = gate.replace("gate-", "").upper()
+    """Check if a gate has been passed (its own GATE_PX.md exists with 'Go').
 
-    possible_paths = [
-        os.path.join(project_dir, "docs", f"GATE_{phase}.md"),
-        os.path.join(project_dir, "docs", f"{gate.upper()}.md"),
-        os.path.join(project_dir, "docs", f"gate-{phase.lower()}.md"),
-    ]
+    The path probed comes from GATE_FILE_PATHS (scripts/lib/
+    gate_checklists.py) -- the phase-folder path each gate-pN.md command
+    itself claims to write (e.g. docs/planning/GATE_P4.md), not the three
+    flat legacy paths (docs/GATE_P4.md, docs/GATE-P4.md, docs/gate-p4.md)
+    probed before this fix. No command, script, template or doc in this
+    repo ever wrote to any of those three shapes -- dropped outright
+    (WI-0129, finding F1).
 
-    for path in possible_paths:
+    "gate-p5" has no entry in GATE_FILE_PATHS: /gate-p5 never writes a
+    dedicated gate file at all (its sprint verdict lives in
+    docs/planning/SPRINT.md, a differently-shaped document; parsing it is
+    out of scope here). For any gate absent from GATE_FILE_PATHS, this
+    function skips the file probe entirely and falls straight through to
+    the HANDOVER.md phase-comparison check below.
+
+    That fallback is not gate-p5-only, though: a MAPPED gate (one with an
+    entry in GATE_FILE_PATHS -- all seven of gate-p0/1/2/3/4/6/7) whose
+    phase-folder file simply does not yet exist on disk falls through to
+    the exact same HANDOVER.md comparison -- the `if os.path.isfile(path):`
+    check below has no `else`, so a missing file is not itself a "blocked"
+    verdict. This is pre-existing behaviour, unchanged by this fix.
+
+    WI-0129's F5 ("HANDOVER phase claim overrides any gate, verdict never
+    read", docs/workitems/WI-0129.md) named this same symptom under the
+    pre-fix probe, where it was unconditional: none of the three flat
+    candidate paths was ever a real write target (finding F1), so no gate
+    file could ever be found and this fallback ran for every gate, every
+    time, regardless of what verdict a project had actually written.
+    Post-fix, an existing gate file at its claimed path IS found and IS
+    read -- the fallback now only runs while that file has not yet been
+    written, a narrower window than what F5 described. Whether staying
+    lenient even for that narrower window is still the right call for all
+    seven mapped gates is a separate, currently untracked open question --
+    NOT the same thing as finding 20 in docs/.handover-archive/2026-08-28-
+    open-findings.md, which is about gate-p5 specifically (a gate with no
+    file at all, by design, so it can ONLY ever pass through this fallback
+    -- a different mechanism from a mapped gate's file being merely not
+    yet written). Not decided or scoped here either way.
+    """
+    gate_file_rel = GATE_FILE_PATHS.get(gate)
+    if gate_file_rel:
+        path = os.path.join(project_dir, gate_file_rel)
         if os.path.isfile(path):
             with open(path, "r", encoding="utf-8", errors="ignore") as f:
                 content = f.read().lower()
