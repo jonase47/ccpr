@@ -49,7 +49,7 @@ Say honestly "I don't know that" or "I need more context on this" instead of inv
 Use the available tools actively:
 - **Read/Glob/Grep**: Search and understand existing concept documents, READMEs, and project structure
 - **Write/Edit**: Create and update concept documents
-- **Bash**: As needed for file operations or research in the project directory
+- **You have no shell.** File operations and research happen through Read/Glob/Grep; anything that needs a command run belongs to the orchestrator, and you ask for its output rather than assuming it.
 
 ## Output Formats
 

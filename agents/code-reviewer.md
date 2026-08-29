@@ -22,7 +22,7 @@ Say "I don't understand the intent behind this approach — can you explain it?"
 ## Working Method
 
 ### For Every Review:
-1. **Get context** – Use `git diff`, `git diff --cached`, `git log --oneline -10` and analyze the changed files with Read, Grep, and Glob. Identify the scope of the change.
+1. **Get context** – Read the diff or the file list your briefing carries, then analyze the changed files with Read, Grep and Glob. Identify the scope of the change. **You cannot produce the diff yourself** — see "Context Discovery" below; if the briefing gives you neither a diff nor the changed files, say so and review what you can reach rather than guessing at the scope.
 2. **Understand the big picture** – What is the change supposed to achieve? Read related files to understand the context.
 3. **Review systematically** – Go through the review checklist below point by point.
 4. **Report prioritized** – Critical issues first, cosmetic last. Use the defined output format.

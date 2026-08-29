@@ -32,7 +32,7 @@ Say "Who am I writing this for?" instead of producing generic documentation. **D
 ### For New Documentation:
 1. **Clarify Target Audience** – Who reads this? What do they already know? Ask if unclear.
 2. **Define goal** – What should the reader be able to do or know afterward?
-3. **Analyze codebase** – Use the available tools (Read, Grep, Glob, Bash) to thoroughly understand the existing code, project structure, and existing documentation. Read relevant source files, search for configuration files, analyze package manager files for dependencies.
+3. **Analyze codebase** – Use the available tools (Read, Grep, Glob) to thoroughly understand the existing code, project structure, and existing documentation. Read relevant source files, search for configuration files, analyze package manager files for dependencies.
 4. **Write** – Clear, concise, structured. Use Write or Edit to create or update files.
 5. **Review** – Check that the documentation matches the code. Verify code examples.
 
@@ -48,7 +48,7 @@ Before you start writing, always perform a systematic analysis:
 - `Read` for package.json, Cargo.toml, pyproject.toml or similar project files
 - `Grep` to search for existing documentation, comments, and TODOs
 - `Read` for existing README, CHANGELOG, docs/ directories
-- `Bash` for `git log --oneline -20` for changelogs, or to verify build commands
+- **You have no shell.** For a changelog, the orchestrator hands you the commit log in the briefing — ask for it if it is missing. Build and install commands are quoted from the project's own documentation and marked as unverified; you cannot run them, and a correctly quoted command is not evidence that it works.
 
 ## Output Formats
 

@@ -106,8 +106,9 @@ Once the domain is clear: **hand off with bundled context** to the responsible a
 During the status snapshot, proactively check:
 
 - **HANDOVER.md > 8 KB / >150 lines** → hint "recommend HANDOVER archival (`docs/.handover-archive/<YYYY-MM-DD>-<slug>.md`)".
-- **Inbox entries in HANDOVER.md** (usually under `## Open Points`) → count them with
-  `grep -c '^- INBOX [|]' docs/HANDOVER.md` and hint "N inbox entries → `/cleanup` triages them".
+- **Inbox entries in HANDOVER.md** (usually under `## Open Points`) → count them with the **Grep
+  tool** in count mode, pattern `^- INBOX [|]` over `docs/HANDOVER.md`, and hint "N inbox entries
+  → `/cleanup` triages them". You have no shell; this is a Grep-tool call, not a `grep -c` command.
   Bracket the separator as `[|]`; a bare `^- INBOX |` is alternation in ERE and in GNU BRE and
   matches every line of the file. The template's format example is inside a blockquote and does not
   match, so a fresh HANDOVER counts 0. From 8 entries on (ceiling is 10) name it as the top cleanup

@@ -463,6 +463,37 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Fixed
 
+- **Four shipped agents were instructed to do things their own tool list forbids** (WI-0129,
+  finding F9). `agents/code-reviewer.md` said "Use `git diff`, `git diff --cached`,
+  `git log --oneline -10`" in step 1 of its working method and, eight lines later, "**You have no
+  shell.** … You cannot run `git diff`." Its `tools:` line settles which sentence was true.
+
+  Measuring the class rather than the instance found three more, none of them in the external
+  review that reported the first: `security-master` named the Bash tool **four times** ("using
+  Bash tool", "Execute … via Bash") without carrying it; `system-architekt` told itself "You have
+  access to Read, Write, Edit, Bash, Grep, and Glob tools"; `konzeptor` and `tech-writer` listed
+  Bash among their available tools. A shipped agent that reads its own instructions cannot comply
+  with them, and has no way to discover that until it tries.
+
+  Resolved by asking, per agent, whether the shell is part of its job. `security-master`'s is —
+  dependency auditing is in its brief and `pentester` and `devops` already carry Bash — so it
+  **gained** the tool. The others' mentions were incidental capability lists, so the prose was
+  corrected to the truth: they say plainly that they have no shell, and where a command's output
+  is genuinely needed (a commit log for a changelog, a diff for a review) the text now says the
+  orchestrator supplies it.
+
+  **Rule 5 in the agent lint** keeps it from returning: an agent whose body names the `Bash` tool
+  must carry `Bash` in `tools:` — the exact mirror of Rule 4, which does the same for the `Agent`
+  tool. The rule deliberately detects the **tool's name**, not shell commands. A command-shaped
+  detector was written first and measured against the corrected tree: it flagged three agents,
+  and two of the flagged sentences were the corrections themselves — "You cannot run `git diff`"
+  and "not a `grep -c` command". A rule that fires on the cure is worse than no rule, so its
+  boundary is documented instead: Rule 5 does not see an instruction that names a command without
+  naming the tool, which is the shape `code-reviewer`'s original defect had. Those three sentences
+  are pinned as regression fixtures so a future widening of the pattern fails loudly.
+
+  The body-mention corpus pin moves 7 → 4, and every one of the four now carries the tool it names.
+
 - **A gate with no artifact, and a command that does not exist, both stop reporting `ready`**
   (WI-0129, findings F5 and F6). Two fail-open paths in `scripts/command-check.py`.
 

@@ -59,6 +59,62 @@ KnownToolsTest by design. That failure is the intended signal for a human
 to look at the new name and decide whether it is a typo (this project has
 already shipped the `Task` vs. `Agent` confusion once) or a genuine
 addition that belongs in this snapshot.
+
+## Rule 5 and the trap in it
+
+Rule 5 mirrors Rule 4 for a different capability: an agent whose BODY names
+the `Bash` TOOL must carry `Bash` in `tools`. The naive way to build this --
+grep the body for anything shell-command-shaped (a backtick-quoted `git`,
+`grep`, `npm`, ...) -- was measured against the ALREADY-FIXED tree (finding
+F9, 29.08.2026) and produces exactly the false positives Rule 4's own trap
+predicts: `code-reviewer.md` denying it "cannot run `git diff`",
+`project-guide.md` explaining "this is a Grep-tool call, not a `grep -c`
+command", and `tech-writer.md`'s style guidance quoting `npm install` as an
+example of a backticked code term. All three name a COMMAND, never the word
+`Bash`, and two of the three are the exact sentences the F9 fix added to
+DENY the capability. A command-shaped detector flags the cure as the
+disease -- see BashToolDetectorBoundaryTest for these three as named
+regression pins.
+
+Rule 5 therefore keys on the literal word `Bash` (the tool name, not a
+command) appearing in the BODY -- restricted the same way Rule 4 is
+restricted, since `tools: ... Bash` is itself a mention of the word -- with
+one guard: a mention immediately preceded by "no " ("you have no Bash
+access", the correct way to document absence -- see `project-guide.md` and
+`project-planner.md`) does not count as a claim of the capability. This is
+a narrow, snapshot-style guard, not a general negation parser -- a
+differently-phrased denial ("Bash is not available", "cannot use Bash") is
+NOT covered and would need a matching guard added deliberately, the same
+posture KNOWN_TOOLS takes for a new tool name (see "What Rule 3 is and is
+not" above).
+
+What this shape sees and what it does not: it sees an agent's body claiming
+or instructing use of the Bash TOOL by name. It does NOT see an agent
+telling itself to run a shell command without ever naming the tool --
+`code-reviewer.md`'s original defect ("Use `git diff`, `git diff --cached`,
+`git log --oneline -10`") named commands, never "Bash", and Rule 5 would
+have missed it exactly as it was written before the F9 fix. That gap is
+intentional and stays open; closing it needs a command-shaped detector,
+which the false-positive measurement above rules out as a naive regex and
+which this wave does not attempt.
+
+## Rule 5, measured against today's tree
+
+Rule 5 does NOT report zero findings against the current tree, contrary to
+this wave's starting assumption. It finds three agents whose body
+affirmatively names the Bash tool while `tools:` lacks it -- none of them
+among F9's original four, none of them touched by this wave's write
+boundary: `konzeptor.md` ("**Bash**: As needed for file operations or
+research in the project directory"), `system-architekt.md` (three
+mentions -- "using available tools (Read, Grep, Glob, Bash)", "You have
+access to Read, Write, Edit, Bash, Grep, and Glob tools", "**Bash**: Run
+commands to inspect infrastructure configs..."), and `tech-writer.md`'s
+OTHER Bash mention, distinct from the one F9 already fixed ("Use the
+available tools (Read, Grep, Glob, Bash) to thoroughly understand...").
+AgentBashToolRequiredTest asserts zero violations per this wave's
+specification and is RED today for exactly these three reasons -- a real,
+reported finding, not a detector defect; fixing agents/*.md is outside this
+wave's write boundary.
 """
 
 import re
@@ -151,6 +207,29 @@ def invoked_agents_in_body(body, self_name, known_names):
         if candidate in known_names and candidate != self_name:
             found.add(candidate)
     return found
+
+
+# Rule 5: a literal mention of the Bash TOOL in the body -- "Bash" as a
+# capitalized whole word. Guarded against the one denial shape seen in the
+# corpus ("you have no Bash access"); see the module docstring's "Rule 5
+# and the trap in it" for what this guard does and does not cover.
+BASH_TOOL_RE = re.compile(r"\bBash\b")
+BASH_DENIAL_PREFIX = "no "
+
+
+def body_names_bash_tool(body):
+    """Rule 5's detector: True if `body` (already restricted to the
+    post-frontmatter text) affirmatively names the Bash tool -- i.e. some
+    occurrence of the word "Bash" is not immediately preceded by "no "
+    (the corpus's one denial shape, "you have no Bash access"). See the
+    module docstring's "Rule 5 and the trap in it" for the boundary this
+    narrow guard draws."""
+    for m in BASH_TOOL_RE.finditer(body):
+        prefix = body[max(0, m.start() - len(BASH_DENIAL_PREFIX)):m.start()]
+        if prefix.lower() == BASH_DENIAL_PREFIX:
+            continue
+        return True
+    return False
 
 
 def read_git_show(ref_and_path):
@@ -422,6 +501,134 @@ class Rule4HistoricalRedProofTest(unittest.TestCase):
             not invoked or "Agent" in parse_tools(fm),
             "Rule 4 false-positived against the already-fixed post-fix state",
         )
+
+
+if __name__ == "__main__":
+    unittest.main()
+
+
+class BashToolDetectorBoundaryTest(unittest.TestCase):
+    """Unit-level RED proofs for body_names_bash_tool/BASH_TOOL_RE itself --
+    mirrors InvocationDetectorBoundaryTest. Proves the detector fires on an
+    affirmative mention, stays silent on the one denial shape seen in the
+    corpus, and -- the reason a command-shaped detector was rejected, see
+    the module docstring's "Rule 5 and the trap in it" -- stays silent on
+    three real sentences that name a shell COMMAND but never the word
+    "Bash". These three are regression pins: if they ever go red, Rule 5
+    widened past naming the tool and started matching commands again."""
+
+    def test_an_affirmative_bash_mention_is_detected(self):
+        body = "**Bash**: Run `npm audit`, `pip audit` to check dependencies."
+        self.assertTrue(body_names_bash_tool(body))
+
+    def test_no_bash_access_denial_is_not_detected(self):
+        body = "you have no Bash access, so you cannot run `workitems list` yourself."
+        self.assertFalse(body_names_bash_tool(body))
+
+    def test_code_reviewer_git_diff_denial_sentence_is_not_detected(self):
+        # Regression pin -- code-reviewer.md's F9 fix wording: denies a
+        # COMMAND ("git diff"), never names "Bash".
+        body = "**You have no shell.** ... You cannot run `git diff`."
+        self.assertFalse(body_names_bash_tool(body))
+
+    def test_project_guide_grep_c_sentence_is_not_detected(self):
+        # Regression pin -- project-guide.md's F9 fix wording: denies a
+        # COMMAND ("grep -c"), never names "Bash".
+        body = "You have no shell; this is a Grep-tool call, not a `grep -c` command."
+        self.assertFalse(body_names_bash_tool(body))
+
+    def test_tech_writer_npm_install_backtick_sentence_is_not_detected(self):
+        # Regression pin -- tech-writer.md's style-guide example, quoting
+        # `npm install` as a backticked code term; no relation to Bash.
+        body = "- Code terms in backticks: `config.yaml`, `npm install`"
+        self.assertFalse(body_names_bash_tool(body))
+
+
+class BashToolMentionInBodyTest(unittest.TestCase):
+    """Measured corpus (mirrors BodyInvocationDetectionTest): which agents'
+    bodies affirmatively name the Bash tool today, regardless of whether
+    they carry it in tools:. Restricted to the BODY -- if a mutation makes
+    this scan the frontmatter too, `tools: ... Bash` is itself a mention of
+    the word, and business-analyst/devops/ux-designer (Bash in tools:, no
+    body mention) would spuriously join this set. If this count changes,
+    Rule 5's "restrict to body" premise needs re-triage, not a widened
+    acceptance.
+
+    The set was seven when Rule 5 was first written and is four now. The
+    same run that introduced the rule found three further agents claiming
+    the tool in prose while `tools:` did not carry it -- `konzeptor`,
+    `system-architekt`, and a second `tech-writer` mention beyond the one
+    finding F9 named. Nobody had reported them; the external review found
+    only `code-reviewer`, and the orchestrator's own first sweep missed
+    them because it searched for backticked shell COMMANDS rather than for
+    the tool's name. All three were incidental "you have these tools"
+    sentences, not job requirements, so the prose was corrected to the
+    truth rather than the capability granted. `security-master` went the
+    other way -- its documented job is dependency auditing, so it gained
+    `Bash` (PO decision, 29.08.2026). Each of the four that remain carries
+    the tool it names."""
+
+    def test_four_agent_bodies_name_the_bash_tool(self):
+        mentioners = set()
+        for path in _iter_agent_files():
+            fm, body = split_frontmatter(path.read_text(encoding="utf-8"))
+            if body_names_bash_tool(body):
+                mentioners.add(field_value(fm, "name"))
+        self.assertEqual(
+            mentioners,
+            {"debugger", "pentester", "security-master", "senior-developer"},
+            "the set of agents whose body names the Bash tool diverged "
+            "from the measured corpus; got: {}".format(sorted(mentioners)),
+        )
+
+
+class AgentBashToolRequiredTest(unittest.TestCase):
+    """Rule 5, applied to the current tree: any agent whose body
+    affirmatively names the Bash tool must carry `Bash` in its own tools:.
+    UNLIKE Rule 4 (clean today), this IS red against the real tree -- see
+    the module docstring's "Rule 5, measured against today's tree". Three
+    agents untouched by the F9 fix (konzeptor.md, system-architekt.md,
+    tech-writer.md's second Bash mention) make the same claim
+    security-master.md made before its fix. This is a real, reported
+    finding, not a detector defect -- fixing agents/*.md is outside this
+    wave's write boundary."""
+
+    def test_every_body_bash_mention_is_covered_by_tools(self):
+        violations = []
+        for path in _iter_agent_files():
+            fm, body = split_frontmatter(path.read_text(encoding="utf-8"))
+            if body_names_bash_tool(body) and "Bash" not in parse_tools(fm):
+                violations.append(path.name)
+        self.assertFalse(
+            violations,
+            "agent(s) whose body names the Bash tool without carrying it "
+            "in tools: -- see the module docstring's \"Rule 5, measured "
+            "against today's tree\" for what each one says and why it is "
+            "out of this wave's write boundary:\n" + "\n".join(sorted(violations)),
+        )
+
+
+class SyntheticBashViolationTest(unittest.TestCase):
+    """In-memory RED proofs for the end-to-end Rule 5 check (detector +
+    tools: cross-check together) -- mirrors RequiredFieldsTest's synthetic
+    pattern (G-107/G-143: no real agents/*.md file may be mutated for
+    this). The real corpus already has non-synthetic violations (see
+    AgentBashToolRequiredTest), but a violation found by accident does not
+    prove the check discriminates -- these two are the deliberate positive
+    and negative it is measured against."""
+
+    def test_a_synthetic_agent_naming_bash_without_the_tool_is_a_violation(self):
+        fm = "name: fake-agent\ndescription: x\ntools: Read, Grep\nmodel: sonnet"
+        body = "**Bash**: Run `npm audit` to check dependencies."
+        is_violation = body_names_bash_tool(body) and "Bash" not in parse_tools(fm)
+        self.assertTrue(is_violation)
+
+    def test_a_synthetic_agent_naming_bash_and_carrying_it_is_not_a_violation(self):
+        fm = "name: fake-agent\ndescription: x\ntools: Read, Grep, Bash\nmodel: sonnet"
+        body = "**Bash**: Run `npm audit` to check dependencies."
+        is_violation = body_names_bash_tool(body) and "Bash" not in parse_tools(fm)
+        self.assertFalse(is_violation)
+
 
 
 if __name__ == "__main__":
