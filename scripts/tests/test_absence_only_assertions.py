@@ -1227,7 +1227,7 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
         contribution to either number."""
         files = sorted(TESTS_DIR.glob("*.py")) + sorted((TESTS_DIR / "workitems").glob("*.py"))
         names = sorted(f.relative_to(TESTS_DIR).as_posix() for f in files if f.name != "__init__.py")
-        self.assertEqual(50, len(names))
+        self.assertEqual(51, len(names))
         self.assertIn("test_absence_only_assertions.py", names)
         self.assertIn("test_run_tests_heredoc_injection.py", names)
         self.assertIn("test_heredoc_interpolation_scan.py", names)

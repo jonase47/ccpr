@@ -8,6 +8,29 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Added
 
+- **The instinct sampler and the shipped index are now checked against each other** (WI-0129,
+  finding F14, the part that stayed open). CCPR ships its starter instincts in two shapes —
+  `instincts.md`, the 45-entry split-layout index, and `templates/STARTER_INSTINCTS.md`, a flat
+  13-entry sampler for adopters who prefer one file — and nothing compared them.
+
+  They agree today; this pins that rather than repairing it. The reason it is worth pinning is
+  that `/postmortem` **deletes** instincts when confidence decays to 0.3 — three went in the most
+  recent round alone. A sampler entry naming an instinct the full set has dropped would point an
+  adopter's entry point at something that no longer exists, and nothing would have noticed.
+
+  The test parses **entries**, not mentions: the index's `- G-NNN` bullets and the sampler's
+  `### G-NNN` headings. That distinction is the whole difficulty — both files also name instinct
+  IDs in prose, the index alone listing ten under "Intentionally NOT in this starter set", and a
+  naive ID grep counts 55 and 24 instead of 45 and 13. Those ten are pinned as excluded, so a
+  future parser that starts counting mentions fails loudly instead of quietly agreeing with
+  itself.
+
+  **What it does not close, stated in its own docstring**: the defect that actually occurred was
+  in neither file. `CLAUDE.md` characterised the relationship between them wrongly while every
+  number it gave was correct. No structural test sees that. This closes the drift class — an ID
+  that stops existing, a count that moves unnoticed — and leaves the description class where it
+  belongs, with a reader.
+
 - **`scripts/check-all.sh` — one command for the seven quality checks, compared against a
   versioned baseline.** `CONTRIBUTING.md` asked a contributor to remember seven separate
   commands and to know, from prose, which of them are *supposed* to fail. Nothing recorded
