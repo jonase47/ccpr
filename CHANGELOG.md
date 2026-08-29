@@ -501,6 +501,26 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Fixed
 
+- **The shipped `CLAUDE.md` presented two instinct-adoption paths as equivalent when one carries
+  a third of the other** (WI-0129, finding F14). It offered "Two ways to adopt the starter
+  content" and described the single-file option as shipping *"the same 13 generic instincts as
+  one file"* — a phrase with no antecedent, since the bullet above it never mentions 13.
+  Measured: the split layout carries **45** instincts, `templates/STARTER_INSTINCTS.md` carries
+  **13**.
+
+  The sampler file itself was never wrong; it says so three times in its own header ("the only
+  path that ships the full 45-instinct set", "happy with a reduced set"). The drift sat entirely
+  in the summary of it — the shape the finding describes: a second register restating a first,
+  with nothing comparing them. An adopter reading only `CLAUDE.md` would have taken the reduced
+  set believing it equivalent.
+
+  Recorded so the next reader does not repeat the measurement: 13 and 45 are both correct as the
+  files state them. A first pass reported 24 and 55 and was wrong — that was grep counting
+  instinct IDs mentioned inside each file's "intentionally NOT included" prose, not entries.
+
+  Findings F12 and F13 were verified in the same round and need no change; their dispositions,
+  with the measurements behind them, are recorded in the work item.
+
 - **The monitor hook validates the session id before it reaches a path, and stops writing session
   state where every local process can read it** (WI-0129, finding F10). `hooks/agent-monitor.py`
   is wired into `settings.json` on **ten** events, so it runs on essentially every action in every

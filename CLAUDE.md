@@ -129,9 +129,9 @@ Global instincts are split into a **slim autoloaded index** plus thematic topic 
 
 Instincts are short rules with confidence scores (0.3-0.9) derived from session experience. Follow instincts proportionally to their confidence score.
 
-**Two ways to adopt the starter content:**
-- Split structure (recommended once your instincts.md grows past ~25 KB): the CCPR-shipped `instincts.md` + `instincts/` + `instincts-archive/` already model the layout. Copy them as-is to `~/.claude/` and let `/postmortem` extend them.
-- Single-file alternative: `~/.claude/templates/STARTER_INSTINCTS.md` ships the same 13 generic instincts as one file. Use this if you prefer a single flat list and your instincts.md stays well under the 25 KB Read-token cap.
+**Two ways to adopt the starter content — and they do not carry the same amount:**
+- Split structure (recommended, and **the only path that ships the full set**): the CCPR-shipped `instincts.md` + `instincts/` + `instincts-archive/` model the layout and carry **45 instincts**. Copy them as-is to `~/.claude/` and let `/postmortem` extend them.
+- Single-file alternative: `~/.claude/templates/STARTER_INSTINCTS.md` is a flat **sampler of 13** of those instincts, not the same set in another shape. Use it if you prefer one flat list and accept the reduced set; you can switch to the split layout later without losing anything. The file states its own boundary in its header — believe that over any summary of it, including this one.
 
 **Sharing instincts/memory across a team (org tier).** When several people run CCPR against a shared setup, promote team-/platform-relevant instincts and memories into a **shared org-tier repo** (ADR-0006/0007) instead of re-learning them per person — while personal knowledge stays local. `scripts/memory-sync.sh` implements it:
 - **`memory-sync.sh pull`** clones/fetches the shared repo and materializes a **read-only overlay**: shared instincts → `~/.claude/instincts/<shared>.md` (autoloaded via an index block), shared persona instincts → `~/.claude/memory/{agent}/<shared>.md`, shared facts → `~/.claude/memory/<ns>/`.
