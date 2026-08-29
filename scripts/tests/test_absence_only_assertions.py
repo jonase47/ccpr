@@ -857,7 +857,7 @@ class NoStaleKnownFindingsTest(unittest.TestCase):
 
 class ClassificationCountsTest(unittest.TestCase):
     def test_classification_counts(self):
-        """Regression pin on the measured baseline: 1005 `test_*` methods
+        """Regression pin on the measured baseline: 1017 `test_*` methods
         across the corpus call something shaped like a subprocess invocation
         and are therefore in scope for this check; 0 of those are currently
         absence-only-needs-exemption -- `KNOWN_FINDINGS` above is empty for
@@ -871,6 +871,13 @@ class ClassificationCountsTest(unittest.TestCase):
         growing paragraph:
 
           in-scope / flagged   when
+          1017 / 0             WI-0129 finding F8 (29.08.2026): the user's
+                               test path reaches the vitest/jest/cargo/go
+                               runners as one argument again, or as none.
+                               +12 in scope, all driving run-tests.sh with an
+                               argv-capturing fake tool on PATH; flagged
+                               unchanged at 0, each asserts on the recorded
+                               argument vector. File count 48 -> 49.
           1005 / 0             the shipped-script executable-bit pin
                                (29.08.2026): +1, a `git ls-files -s` call
                                asserting the GIT INDEX mode rather than the
@@ -1153,7 +1160,7 @@ class ClassificationCountsTest(unittest.TestCase):
         count."""
         recs = scan_tree()
         flagged = [r for r in recs if r.disposition in NEEDS_EXEMPTION]
-        self.assertEqual(1005, len(recs))
+        self.assertEqual(1017, len(recs))
         self.assertEqual(0, len(flagged))
 
 
@@ -1202,7 +1209,7 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
         contribution to either number."""
         files = sorted(TESTS_DIR.glob("*.py")) + sorted((TESTS_DIR / "workitems").glob("*.py"))
         names = sorted(f.relative_to(TESTS_DIR).as_posix() for f in files if f.name != "__init__.py")
-        self.assertEqual(48, len(names))
+        self.assertEqual(49, len(names))
         self.assertIn("test_absence_only_assertions.py", names)
         self.assertIn("test_run_tests_heredoc_injection.py", names)
         self.assertIn("test_heredoc_interpolation_scan.py", names)

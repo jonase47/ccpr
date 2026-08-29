@@ -185,10 +185,24 @@ run_jest_or_vitest() {
     local tmpfile
     tmpfile=$(mktemp /tmp/jest-report-XXXXXX.json)
 
+    # `test_arg` may be empty (no TEST_PATH given) -- an unconditional
+    # `"${test_arg}"` would then pass a literal empty-string argument to
+    # the runner, which is NOT the same as passing none. `runner_args` is
+    # built conditionally so a non-empty path reaches the runner as
+    # exactly one argument (space/glob-safe) and an empty path contributes
+    # none at all. `${runner_args[@]+"${runner_args[@]}"}` guards against
+    # `set -u` under bash 3.2, where `"${arr[@]}"` on an EMPTY array is an
+    # unbound-variable error (see scripts/phase-docs-lint.sh's FILES[@]
+    # guard for the same pattern).
+    local runner_args=()
+    if [ -n "${test_arg}" ]; then
+        runner_args=("${test_arg}")
+    fi
+
     if [ "${runner}" = "vitest" ]; then
-        npx vitest run ${test_arg} --reporter=json 2>/dev/null > "${tmpfile}" || true
+        npx vitest run ${runner_args[@]+"${runner_args[@]}"} --reporter=json 2>/dev/null > "${tmpfile}" || true
     else
-        npx jest ${test_arg} --json --outputFile="${tmpfile}" 2>/dev/null || true
+        npx jest ${runner_args[@]+"${runner_args[@]}"} --json --outputFile="${tmpfile}" 2>/dev/null || true
     fi
 
     RUN_TESTS_TMPFILE="${tmpfile}" RUN_TESTS_RUNNER="${runner}" RUN_TESTS_TIMESTAMP="${TIMESTAMP}" python3 << 'PYEOF'  # exit-status: exempt set-e-sufficient
@@ -242,7 +256,15 @@ run_cargo() {
     # See run_pytest's fallback branch for why this is an EXIT trap, not a
     # manual `rm -f` placed after the heredoc.
     trap "rm -f '${raw_tmpfile}'" EXIT
-    cargo test ${test_arg} > "${raw_tmpfile}" 2>&1 || true
+    # See run_jest_or_vitest for why `test_arg` is passed via a
+    # conditionally-populated array rather than a bare `"${test_arg}"`:
+    # `test_arg` defaults to empty here, and `cargo test ""` is not the
+    # same as `cargo test` (a literal empty filter argument vs. none).
+    local runner_args=()
+    if [ -n "${test_arg}" ]; then
+        runner_args=("${test_arg}")
+    fi
+    cargo test ${runner_args[@]+"${runner_args[@]}"} > "${raw_tmpfile}" 2>&1 || true
 
     RUN_TESTS_RAW_FILE="${raw_tmpfile}" RUN_TESTS_TIMESTAMP="${TIMESTAMP}" python3 << 'PYEOF'  # exit-status: exempt set-e-sufficient
 import os, re, json
@@ -292,7 +314,11 @@ run_go() {
     # See run_pytest's fallback branch for why this is an EXIT trap, not a
     # manual `rm -f` placed after the heredoc.
     trap "rm -f '${raw_tmpfile}'" EXIT
-    go test -v -count=1 ${test_arg} > "${raw_tmpfile}" 2>&1 || true
+    # `test_arg` defaults to `./...` here, never empty, so a plain quote is
+    # sufficient and correct -- same shape as the pytest sites above. No
+    # conditional-array dance needed (contrast run_jest_or_vitest/
+    # run_cargo, whose default IS empty).
+    go test -v -count=1 "${test_arg}" > "${raw_tmpfile}" 2>&1 || true
 
     RUN_TESTS_RAW_FILE="${raw_tmpfile}" RUN_TESTS_TIMESTAMP="${TIMESTAMP}" python3 << 'PYEOF'  # exit-status: exempt set-e-sufficient
 import os, re, json
