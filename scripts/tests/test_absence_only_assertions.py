@@ -857,7 +857,7 @@ class NoStaleKnownFindingsTest(unittest.TestCase):
 
 class ClassificationCountsTest(unittest.TestCase):
     def test_classification_counts(self):
-        """Regression pin on the measured baseline: 995 `test_*` methods
+        """Regression pin on the measured baseline: 1004 `test_*` methods
         across the corpus call something shaped like a subprocess invocation
         and are therefore in scope for this check; 0 of those are currently
         absence-only-needs-exemption -- `KNOWN_FINDINGS` above is empty for
@@ -871,6 +871,16 @@ class ClassificationCountsTest(unittest.TestCase):
         growing paragraph:
 
           in-scope / flagged   when
+          1004 / 0             `scripts/check-all.sh` and its test module
+                               (29.08.2026): one command that runs the seven
+                               quality checks and compares each against a
+                               versioned baseline instead of against exit 0 --
+                               two of the seven are non-zero by design.
+                               +9 in scope, all of them driving the real
+                               script through a stub seam. Flagged unchanged
+                               at 0: every one asserts on a returncode or on
+                               named summary output. The file-enumeration pin
+                               below moves 47 -> 48 in the same run.
           995 / 0              WI-0129 findings F3/F4 + the gate-p5 decision
                                (29.08.2026): the gate verdict moved from a
                                prose scan to the declared `gate:` frontmatter
@@ -1132,7 +1142,7 @@ class ClassificationCountsTest(unittest.TestCase):
         count."""
         recs = scan_tree()
         flagged = [r for r in recs if r.disposition in NEEDS_EXEMPTION]
-        self.assertEqual(995, len(recs))
+        self.assertEqual(1004, len(recs))
         self.assertEqual(0, len(flagged))
 
 
@@ -1181,7 +1191,7 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
         contribution to either number."""
         files = sorted(TESTS_DIR.glob("*.py")) + sorted((TESTS_DIR / "workitems").glob("*.py"))
         names = sorted(f.relative_to(TESTS_DIR).as_posix() for f in files if f.name != "__init__.py")
-        self.assertEqual(47, len(names))
+        self.assertEqual(48, len(names))
         self.assertIn("test_absence_only_assertions.py", names)
         self.assertIn("test_run_tests_heredoc_injection.py", names)
         self.assertIn("test_heredoc_interpolation_scan.py", names)

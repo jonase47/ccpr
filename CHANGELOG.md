@@ -8,6 +8,44 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Added
 
+- **`scripts/check-all.sh` — one command for the seven quality checks, compared against a
+  versioned baseline.** `CONTRIBUTING.md` asked a contributor to remember seven separate
+  commands and to know, from prose, which of them are *supposed* to fail. Nothing recorded
+  those expectations in a form a machine could read, and nothing noticed if a check was
+  skipped entirely.
+
+  **The design point is that exit zero is not the pass criterion.** Measured on this
+  repository: `memory-lint.sh` exits 1 and `doc-volume-check.sh` exits 2 on a perfectly
+  correct tree. A collector that failed on any non-zero result would be red from its first
+  run, and a check that is red when nothing is wrong is ignored within a fortnight. So each
+  check's expected exit lives in `scripts/check-all.baseline.tsv` and the script reports
+  agreement or divergence with it, naming both numbers.
+
+  A check that **could not run** — no consumer projects configured, or no `scripts/tests/`
+  because the script is running from an installed `~/.claude` — is a third state, counted
+  separately and never folded into the matched count. Reporting no scope as a pass is the
+  defect this repository has already fixed twice elsewhere.
+
+  The baseline is a tab-separated file under `scripts/`, deliberately not a `docs/.<name>`
+  dotfile: that prefix means "volatile, gitignored" here, and a baseline the next contributor
+  never receives is not a baseline. It declares expectations only — the catalogue of what to
+  run stays in the script, so the data file can never become a second, executable register.
+
+  It found real drift on its first honest run: adding two shipped files moved six hand-typed
+  inventory pins in four other test modules. Each was re-measured rather than adjusted, and
+  one of them mattered — the exit-status scanner's `bare-needs-exemption` bucket grew by two,
+  and in that module the count *is* the guard, so a blind bump would have waved through two
+  unchecked exit statuses. They turned out to be a `sed | sed` pipeline under
+  `set -euo pipefail` carrying a valid `set-e-sufficient` marker; the reasoning now sits in a
+  comment beside the number.
+
+  Also corrected while documenting it: `CONTRIBUTING.md` claimed the suite collects **1691
+  tests** with `-t .` and 1185 without, across 14 failing modules. Re-measured: **1848 and
+  1339, across 15 modules, 509 tests silently skipped.** All four figures were stale together,
+  which is why the file now says to re-measure them as a set — 1848 on its own says nothing.
+  The same paragraph's claim that `doc-volume-check.sh` "exits 2 on two agent-memory files"
+  was stale as well; it is five critical findings, six warnings and eight info.
+
 - **`agents/*.md` frontmatter is validated for the first time** (open finding #4, first half;
   WI-0128). On 27.08.2026 a shipped agent declared invoking `code-reviewer` MANDATORY in its
   body while its own `tools:` line lacked `Agent` — it could not do what its own instructions

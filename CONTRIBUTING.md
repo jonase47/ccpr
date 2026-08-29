@@ -39,6 +39,31 @@ optional).
 
 ## Quality checks before opening a PR
 
+### Run them all at once
+
+```bash
+bash scripts/check-all.sh .
+```
+
+Runs the seven checks below and compares each against
+`scripts/check-all.baseline.tsv`, the versioned record of what this repository's
+checks are *supposed* to return. Takes about five minutes, most of it the test
+suite.
+
+**It does not compare against exit zero, and neither should you.** Two of the
+seven are non-zero on a correct tree — `memory-lint.sh` exits 1 on long-standing
+warnings, `doc-volume-check.sh` exits 2 on oversized agent-memory files — so a
+collector that failed on any non-zero result would be permanently red, and a
+check that is red when nothing is wrong gets ignored within a fortnight. A check
+that *could not run* (no consumers configured, no `scripts/tests/` because you
+are running from an installed `~/.claude`) is reported as `could-not-run` and
+counted separately: it is neither a pass nor a failure, and it never lands in the
+matched count.
+
+When you change what a check legitimately returns, update the baseline in the
+same commit and say why in the commit body. The sections below stay useful for
+running one check on its own while you work.
+
 ### Run the test suite
 
 CCPR's shipped scripts are covered by a Python test suite under `scripts/tests/`.
@@ -50,17 +75,25 @@ python3 -m unittest discover -s scripts/tests -t .
 
 - **`-t .` is not optional**, and the failure mode is worth knowing because it is
   partly silent. It sets the top-level directory imports resolve against. Measured
-  on the current tree: **with** it, discovery collects **1691 tests, 0 import
-  errors**; **without** it, **1185 tests and 14 modules that fail to import** — the
-  five that use a relative import (`from .test_artifact_gate import …` twice,
-  `from .test_phase_docs_lint import …` three times), plus the entire
-  `scripts/tests/workitems/` subpackage. The run does go red on those 14, so you
-  will notice something — but roughly **510 tests simply never execute**, and
-  nothing in the output says so. That number moves whenever a module gains a
-  relative import: 340 → 350 → 480 → 510 across four commits on 27–28.08.2026. Each
-  jump bought something — the last three came from sharing one parser instead of
-  retyping a shipped list into four test modules (WI-0126) — but the cost lands
-  here, silently, on anyone who forgets the flag.
+  on the current tree (29.08.2026): **with** it, discovery collects **1848 tests, 0
+  import errors**, exit 0; **without** it, **1339 tests and 15 modules that fail to
+  import**, exit 1 — the six that use a relative import
+  (`from .test_phase_docs_lint import …` in four modules,
+  `from .test_artifact_gate import …` in two), plus the nine modules of the
+  `scripts/tests/workitems/` subpackage. The run does go red on those 15, so you
+  will notice something — but **509 tests simply never execute**, and nothing in the
+  output says so.
+
+  That skipped count moves whenever a module gains a relative import:
+  340 → 350 → 480 → 510 across four commits on 27–28.08.2026, and 509 today. Each
+  jump bought something — most came from sharing one parser instead of retyping a
+  shipped list into four test modules (WI-0126) — but the cost lands here, silently,
+  on anyone who forgets the flag.
+
+  **Re-measure these numbers when you change them, rather than adjusting one.** The
+  pair is the point: 1848 alone says nothing, and the four figures above were last
+  found stale together (the file claimed 1691 / 1185 / 14 / ~510 while the tree was
+  at 1848 / 1339 / 15 / 509). Both runs, back to back, take about eight minutes.
 - The full run takes **a couple of minutes**. If you drive it from an agent whose
   tool calls time out, start it in the background and wait for it once rather than
   polling.
@@ -85,9 +118,12 @@ Run the ones relevant to what you touched — each is read-only:
 Two notes on reading their output:
 
 - **A non-zero exit is not automatically your regression.** This repository has a
-  known, stable baseline of findings (`memory-lint.sh` exits 1 on long-standing
-  warnings; `doc-volume-check.sh` exits 2 on two agent-memory files). Compare
-  against a run on `main` before assuming your change caused it.
+  known, stable baseline of findings — `memory-lint.sh` exits 1 on long-standing
+  warnings, and `doc-volume-check.sh` exits 2 on oversized files under
+  `docs/memory/` (5 critical, 6 warning, 8 info as of 29.08.2026). Rather than
+  comparing against a run on `main` by hand, run `scripts/check-all.sh`, which
+  holds those expectations in a versioned baseline and tells you which check
+  diverged from it.
 - **`phase-docs-lint.sh` reports `Files scanned: 0` here** — CCPR has no phase
   folders of its own. A run that scanned nothing is not a pass; it just means that
   check has nothing to say about this repository.

@@ -1,0 +1,29 @@
+# check-all.sh baseline — CCPR's own expected exit code per shipped check.
+#
+# Format: <name>\t<expected-exit>\t<note>  (note is free text, for humans;
+# check-all.sh never parses it). Comment lines (#) and blank lines are
+# ignored. Tab-separated on purpose (readable and diffable without jq;
+# bash 3.2 has no associative arrays, so `IFS=$'\t' read` is the parser).
+#
+# This file declares EXPECTATIONS, never commands — the check catalogue
+# (name -> which script/args run it) lives once, in check-all.sh itself.
+#
+# Two entries are non-zero BY DESIGN, not a regression: memory-lint.sh's 5
+# warnings are long-standing memory-freshness notices, and
+# doc-volume-check.sh's findings are known oversized files pending a split
+# (CONTRIBUTING.md's own "known, stable baseline of findings" paragraph).
+#
+# Re-measure and update this file DELIBERATELY when a check's expected
+# outcome actually changes — the same "re-measure the pair together, never
+# adjust one" discipline CONTRIBUTING.md already asks of the -t . /
+# --without-t measurement (WI-0126 lineage). Do not let this file drift
+# silently out of step with the tree it describes.
+#
+# Measured on this repository's working tree, 29.08.2026 (HEAD 961165f):
+phase-docs-lint	0	0 errors, 0 warnings, 0 info — no phase folders under docs/ (CCPR has none of its own)
+memory-lint	1	0 errors, 5 warnings, 1 info — non-zero by design (long-standing memory-freshness warnings)
+manual-lint	0	0 errors, 0 warnings, 0 info
+doc-volume-check	2	5 critical, 6 warning, 8 info — non-zero by design (known oversized memory/ADR files pending a split)
+artifact-gate	0	313 files scanned, 0 findings, 4 deny name(s) checked
+conformance-run	0	0 CCPR-attributable finding(s), 11 consumer finding(s) (P), 3 consumers covered
+python-tests	0	1848 tests, OK (run with -t ., not optional — see CONTRIBUTING.md)

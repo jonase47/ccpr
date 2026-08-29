@@ -408,7 +408,7 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
             + [REPO_ROOT / "install.sh"]
         )
         files = [f for f in files if f.is_file()]
-        self.assertEqual(25, len(files))
+        self.assertEqual(26, len(files))
         names = {f.relative_to(REPO_ROOT).as_posix() for f in files}
         self.assertIn("scripts/run-tests.sh", names)
         self.assertIn("scripts/baseline.sh", names)

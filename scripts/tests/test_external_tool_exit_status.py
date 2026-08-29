@@ -1138,7 +1138,7 @@ class ExternalToolExitStatusTest(unittest.TestCase):
         by_disposition = {}
         for inv in invocations:
             by_disposition[inv.disposition] = by_disposition.get(inv.disposition, 0) + 1
-        self.assertEqual(149, len(invocations))
+        self.assertEqual(152, len(invocations))
         self.assertEqual(
             {
                 # 28.08.2026, open-findings wave 1a: one invocation moved
@@ -1155,11 +1155,20 @@ class ExternalToolExitStatusTest(unittest.TestCase):
                 # own writer is a new python3 call, and it is checked --
                 # `if python3 ... && [ -s ... ]` -- so the growth lands in
                 # the checked bucket, not the bare one.
-                "checked-condition": 25,
+                # 29.08.2026: +3 total for scripts/check-all.sh. Two are
+                # the `sed | sed` pipeline in its usage() -- exempted
+                # `set-e-sufficient`, correctly: no `$(...)` is involved, the
+                # pipeline stands alone under `set -euo pipefail`, so a
+                # failure aborts. "bare-needs-exemption" is this scanner's
+                # SHAPE label, not a verdict; the marker is honoured and
+                # ExemptionMarkersAreWellFormedTest passes on both. The third
+                # is its python3 suite runner, written `if python3 ...; then
+                # rc=0; else rc=$?; fi`, so it lands in the checked bucket.
+                "checked-condition": 26,
                 "checked-captured": 5,
                 "checked-chain": 14,
                 "discard-needs-exemption": 40,
-                "bare-needs-exemption": 65,
+                "bare-needs-exemption": 67,
             },
             by_disposition,
         )
@@ -1181,6 +1190,7 @@ class ExternalToolExitStatusTest(unittest.TestCase):
                 "artifact-gate.sh",
                 "baseline.sh",
                 "bootstrap.sh",
+                "check-all.sh",
                 "conformance-run.sh",
                 "doc-volume-check.sh",
                 "freeze-phase-docs.sh",
