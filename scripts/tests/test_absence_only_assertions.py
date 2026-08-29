@@ -857,7 +857,7 @@ class NoStaleKnownFindingsTest(unittest.TestCase):
 
 class ClassificationCountsTest(unittest.TestCase):
     def test_classification_counts(self):
-        """Regression pin on the measured baseline: 1017 `test_*` methods
+        """Regression pin on the measured baseline: 1033 `test_*` methods
         across the corpus call something shaped like a subprocess invocation
         and are therefore in scope for this check; 0 of those are currently
         absence-only-needs-exemption -- `KNOWN_FINDINGS` above is empty for
@@ -871,6 +871,24 @@ class ClassificationCountsTest(unittest.TestCase):
         growing paragraph:
 
           in-scope / flagged   when
+          1033 / 0             F10's two follow-ups (29.08.2026): the session
+                               logs get 0700/0600 with the mode re-asserted on
+                               files that already existed, and both writers
+                               carry O_NOFOLLOW -- the log write appends and
+                               then fchmods, so a STALE symlink corrupts and
+                               re-permissions a file with no attacker at all.
+                               +6 in scope over two rounds, flagged unchanged
+                               at 0: the symlink tests assert the canary's
+                               bytes AND its mode, before and after.
+          1027 / 0             WI-0129 finding F10 (29.08.2026): the monitor
+                               hook validates the session id before it
+                               reaches a path, and its loop state moved from
+                               a hardcoded world-readable /tmp to the user's
+                               own TMPDIR at 0600. +10 in scope, each driving
+                               the real hook with crafted stdin; flagged
+                               unchanged at 0 -- they assert on the resolved
+                               path and the mode bits, not on the absence of
+                               an exception. File count 49 -> 50.
           1017 / 0             WI-0129 finding F8 (29.08.2026): the user's
                                test path reaches the vitest/jest/cargo/go
                                runners as one argument again, or as none.
@@ -1160,7 +1178,7 @@ class ClassificationCountsTest(unittest.TestCase):
         count."""
         recs = scan_tree()
         flagged = [r for r in recs if r.disposition in NEEDS_EXEMPTION]
-        self.assertEqual(1017, len(recs))
+        self.assertEqual(1033, len(recs))
         self.assertEqual(0, len(flagged))
 
 
@@ -1209,7 +1227,7 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
         contribution to either number."""
         files = sorted(TESTS_DIR.glob("*.py")) + sorted((TESTS_DIR / "workitems").glob("*.py"))
         names = sorted(f.relative_to(TESTS_DIR).as_posix() for f in files if f.name != "__init__.py")
-        self.assertEqual(49, len(names))
+        self.assertEqual(50, len(names))
         self.assertIn("test_absence_only_assertions.py", names)
         self.assertIn("test_run_tests_heredoc_injection.py", names)
         self.assertIn("test_heredoc_interpolation_scan.py", names)

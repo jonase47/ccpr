@@ -17,13 +17,21 @@ Log files:
 - ~/.claude/logs/performance.jsonl       (aggregated, rotated at 10MB)
 
 Loop state:
-- /tmp/claude-loop-{session_id}.json
+- {tempfile.gettempdir()}/claude-loop-{session_id}.json (honours TMPDIR; on macOS this is
+  a private, mode-700 per-user directory, not the shared /tmp)
+
+session_id is hook-supplied, unvalidated input (see sanitize_session_id below): every path
+built from it -- the session log directory and the loop-state file -- goes through that one
+function first, so a value shaped like a path (a "/" or ".." component) cannot relocate
+either.
 """
 
+import errno
 import json
 import re
 import sys
 import os
+import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -93,10 +101,72 @@ def now_iso():
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+# A hook-supplied session_id is untrusted input (it comes from the harness over stdin, not
+# from this process), and it is used as a filesystem path component in several places below.
+# Only the shapes actually seen are accepted: a UUID4 ("0a954ab5-388e-4954-b5d5-9a037cb0e981")
+# and the literal "no-session" (main()'s own fallback for a payload missing the key) both
+# match [A-Za-z0-9_-]+ with no path separators and no dots. Anything else -- containing "/"
+# or ".." (both of which pathlib and the OS can turn into a real directory traversal once
+# concatenated into a larger path, e.g. SESSION_LOG_BASE / "../evil"), or empty, or not a
+# string at all -- falls back to FALLBACK_SESSION_ID rather than raising: the hook's contract
+# (main()'s blanket except + sys.exit(0)) is that a check must never break a session, and a
+# validator that raises one function away from that guard is not validation, it is a crash
+# the guard happens to catch.
+SAFE_SESSION_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
+FALLBACK_SESSION_ID = "invalid-session"
+
+
+def sanitize_session_id(session_id) -> str:
+    """Returns session_id unchanged if it is safe to use as a path component, else the
+    fixed fallback. Never raises."""
+    if isinstance(session_id, str) and SAFE_SESSION_ID_RE.match(session_id):
+        return session_id
+    return FALLBACK_SESSION_ID
+
+
+def session_log_dir(session_id: str) -> Path:
+    """The per-session log directory, with session_id sanitized first.
+
+    Single source of truth for turning a hook-supplied session_id into a path component
+    under SESSION_LOG_BASE. Every call site that used to build SESSION_LOG_BASE / session_id
+    directly (ensure_dirs' mkdir, the three log_* functions' file paths, and the SessionEnd
+    summary path) now goes through here -- sanitizing only inside ensure_dirs while leaving
+    those other call sites on the raw value would create a directory under the safe name and
+    then try to write the log file at a different, unsafe path, which is not a fix, only a
+    mismatch.
+    """
+    return SESSION_LOG_BASE / sanitize_session_id(session_id)
+
+
 def ensure_dirs(session_id: str):
-    """Creates all required log directories."""
-    (SESSION_LOG_BASE / session_id).mkdir(parents=True, exist_ok=True)
+    """Creates all required log directories, owner-only (0o700).
+
+    Session logs carry prompt text, notification messages, and raw tool input (see the
+    module docstring's Log files list) -- a local user should not be able to read
+    another user's session, the same argument the loop-state file's 0o600 already
+    applies to its counters-only content, applied here to content that matters more.
+
+    mkdir(mode=...) is masked by the umask, AND Path.mkdir(parents=True) does not
+    propagate the requested mode to any intermediate directory it creates along the
+    way -- cpython's own implementation recurses into `self.parent.mkdir(parents=True,
+    exist_ok=True)` without forwarding `mode` at all, so an intermediate dir gets
+    pathlib's own default (0o777, masked by umask) regardless of what was asked for the
+    leaf. Verified empirically: creating SESSION_LOG_BASE/<id> in one call under a
+    stock 022 umask left LOG_BASE (an auto-created parent) at 0o755, not 0o700 --
+    see docs/memory/senior-developer/session-permission-hardening.md.
+
+    The fix is to never trust mkdir's mode argument and chmod every directory in the
+    chain explicitly, on every call -- not only the leaf, and not only when the
+    directory is freshly created (Path.mkdir(exist_ok=True) silently ignores `mode`
+    for a directory that already exists). Re-chmod'ing on every call also tightens a
+    directory that predates this fix (PO decision 29.08.2026: the existing backlog is
+    fixed on its next write, not only for new sessions going forward).
+    """
+    session_dir = session_log_dir(session_id)
+    session_dir.mkdir(parents=True, exist_ok=True)
     LOG_BASE.mkdir(parents=True, exist_ok=True)
+    for directory in (LOG_BASE, SESSION_LOG_BASE, session_dir):
+        os.chmod(directory, 0o700)
 
 
 def rotate_if_needed(filepath: Path):
@@ -116,38 +186,103 @@ def rotate_if_needed(filepath: Path):
     filepath.rename(rotated)
 
 
+def open_owner_only(path: Path, flags: int) -> int:
+    """Opens path with O_CREAT at owner-only mode (0o600), re-asserting that mode via
+    fchmod so a file that already existed -- created before this fix shipped, or by
+    something else -- is tightened on THIS write rather than trusted (mirrors
+    save_loop_state's long-standing os.open + os.fchmod shape; PO decision 29.08.2026
+    extends the same "tighten on next write" discipline from the loop-state file to
+    the session logs, whose content -- prompt text, tool input -- matters more).
+
+    Callers wrap the returned fd in os.fdopen and close it via that context manager.
+    Do not add a second os.close after fdopen has taken ownership of the fd -- this
+    exact shape hit a double-close bug once already (fdopen's __exit__ closing an fd
+    os.close had already closed, on the error path), see
+    docs/memory/senior-developer/session-id-path-hardening.md.
+
+    O_NOFOLLOW here too (M2 follow-up, 29.08.2026 -- corrects the shipped M2 rationale,
+    which argued this from the threat-model axis only: planting a symlink under $HOME
+    needs an attacker who already owns $HOME, so the indirection crosses no privilege
+    boundary M1's fix exists to close. That argument is not wrong, but this call is not
+    a read -- it appends JSON and then fchmod's the target to 0600, and THAT needs no
+    attacker at all: a stale symlink left behind by a backup tool, a sync tool, or an
+    earlier manual experiment is enough to get silently corrupted and have its
+    permissions changed. It is a robustness argument, not a threat-model one, and holds
+    regardless of who can write to $HOME. It also does not cost the legitimate case:
+    O_NOFOLLOW rejects only a symlinked FINAL path component, so a symlinked log
+    DIRECTORY (e.g. ~/.claude/logs -> /elsewhere) still works -- only symlinking an
+    individual .jsonl file fails, which nobody sets up on purpose. When the target IS a
+    symlink, os.open raises OSError (ELOOP); append_log (the sole caller) catches that
+    specifically and reports to stderr instead of letting it propagate, because this
+    helper is invoked twice per event (session log, then the aggregated log) and an
+    uncaught raise here would abort the second, unrelated write along with the first.
+    """
+    fd = os.open(path, flags | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    try:
+        os.fchmod(fd, 0o600)
+    except OSError:
+        os.close(fd)
+        raise
+    return fd
+
+
 def append_log(filepath: Path, entry: dict):
-    """Writes a log entry as a JSON line."""
+    """Writes a log entry as a JSON line, owner-only (0o600, tightened on every write).
+
+    ELOOP (open_owner_only's O_NOFOLLOW rejecting a symlinked filepath) is caught HERE,
+    not left to main()'s blanket except: each log_* function calls this twice (session
+    log, then the aggregated log), so a raise on the first call would silently lose the
+    second, unrelated write too. Reported to stderr -- this file's existing idiom for a
+    non-blocking diagnostic (see e.g. the HANDOVER-size warning above) -- rather than
+    via log_error, which itself calls append_log and could recurse into the very path
+    that just failed.
+    """
     rotate_if_needed(filepath)
-    with open(filepath, "a", encoding="utf-8") as f:
+    try:
+        fd = open_owner_only(filepath, os.O_WRONLY | os.O_APPEND)
+    except OSError as e:
+        if e.errno != errno.ELOOP:
+            raise
+        print(f"agent-monitor: refusing to write through a symlink at {filepath}: {e}",
+              file=sys.stderr)
+        return
+    with os.fdopen(fd, "a", encoding="utf-8") as f:
         f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
 
 def log_activity(session_id: str, entry: dict):
     """Logs to session log and aggregated log."""
     ensure_dirs(session_id)
-    append_log(SESSION_LOG_BASE / session_id / "activity.jsonl", entry)
+    append_log(session_log_dir(session_id) / "activity.jsonl", entry)
     append_log(LOG_BASE / "activity.jsonl", entry)
 
 
 def log_error(session_id: str, entry: dict):
     """Logs errors to session log and aggregated log."""
     ensure_dirs(session_id)
-    append_log(SESSION_LOG_BASE / session_id / "errors.jsonl", entry)
+    append_log(session_log_dir(session_id) / "errors.jsonl", entry)
     append_log(LOG_BASE / "errors.jsonl", entry)
 
 
 def log_performance(session_id: str, entry: dict):
     """Logs performance data to session log and aggregated log."""
     ensure_dirs(session_id)
-    append_log(SESSION_LOG_BASE / session_id / "performance.jsonl", entry)
+    append_log(session_log_dir(session_id) / "performance.jsonl", entry)
     append_log(LOG_BASE / "performance.jsonl", entry)
 
 
 # === Loop detection state ===
 
 def get_loop_state_path(session_id: str) -> Path:
-    return Path(f"/tmp/claude-loop-{session_id}.json")
+    """The per-session loop-state file, under the user's own temp directory.
+
+    tempfile.gettempdir() honours TMPDIR (and TEMP/TMP) before falling back to a
+    platform default -- on macOS that default is a private, mode-700 per-user directory,
+    not the shared, world-writable /tmp a hardcoded path would have used. session_id is
+    sanitized first (see sanitize_session_id), so a malformed value cannot relocate this
+    file outside that directory.
+    """
+    return Path(tempfile.gettempdir()) / f"claude-loop-{sanitize_session_id(session_id)}.json"
 
 
 def load_loop_state(session_id: str) -> dict:
@@ -195,8 +330,43 @@ def load_loop_state(session_id: str) -> dict:
 
 
 def save_loop_state(session_id: str, state: dict):
+    """Writes the loop state, creating the file with owner-only permissions.
+
+    The state contains counters, timestamps, agent ids and an input hash -- no prompt
+    text -- but it is still session metadata a local user should not be able to read off
+    another user's session. os.open's mode is applied atomically at creation (no window
+    where the file exists world-readable before a later chmod call narrows it), and
+    os.fchmod re-asserts 0o600 on every write so a file that happens to already exist
+    with looser permissions (e.g. pre-created by something else) gets tightened rather
+    than trusted.
+
+    O_NOFOLLOW (M1, security-master review of F10, 29.08.2026): O_TRUNC on an existing
+    path does not create a new inode, so without this flag a local user who pre-plants
+    a symlink at the predictable claude-loop-<session_id>.json name -- before this
+    process ever runs -- gets that symlink's TARGET truncated and rewritten with this
+    process's privileges. The 0o600 mode and the fchmod re-assert below are correct as
+    far as they go but do not address symlink-following at all; O_NOFOLLOW does. Not
+    exploitable where TMPDIR is a private per-user directory (macOS default);
+    exploitable on a Linux host falling back to a shared /tmp. When the target IS a
+    symlink, os.open raises OSError (ELOOP) here, before the try/except below even
+    starts -- deliberately NOT caught in this function. It propagates up through the
+    calling handler to main()'s blanket `except Exception: log_error(...); exit(0)`,
+    which is the intended degrade path: the session is never broken (exit 0 either
+    way), but the attempt is filed as a MonitorError with the offending path and errno
+    rather than silently discarded as if the write had succeeded. A rejected create-
+    and-rename dance was explicitly ruled out for this file: it is a regenerable,
+    secret-free cache, not worth the extra complexity.
+    """
     path = get_loop_state_path(session_id)
-    with open(path, "w") as f:
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+    try:
+        os.fchmod(fd, 0o600)
+    except OSError:
+        # fdopen has not taken ownership of fd yet, so this is the only path that
+        # needs to close it manually.
+        os.close(fd)
+        raise
+    with os.fdopen(fd, "w") as f:
         json.dump(state, f)
 
 
@@ -609,10 +779,11 @@ def handle_session_end(data: dict, session_id: str):
             "by_agent": state.get("token_by_agent", {}),
         },
     }
-    summary_path = SESSION_LOG_BASE / session_id / "session-summary.json"
+    summary_path = session_log_dir(session_id) / "session-summary.json"
     try:
         ensure_dirs(session_id)
-        with open(summary_path, "w") as f:
+        fd = open_owner_only(summary_path, os.O_WRONLY | os.O_TRUNC)
+        with os.fdopen(fd, "w") as f:
             json.dump(summary, f, indent=2, ensure_ascii=False)
     except OSError:
         pass  # Summary is best-effort, don't break session end

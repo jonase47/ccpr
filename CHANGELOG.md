@@ -501,6 +501,51 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Fixed
 
+- **The monitor hook validates the session id before it reaches a path, and stops writing session
+  state where every local process can read it** (WI-0129, finding F10). `hooks/agent-monitor.py`
+  is wired into `settings.json` on **ten** events, so it runs on essentially every action in every
+  session — unlike `command-check.py`, which had no programmatic caller at all.
+
+  `session_id` came from the hook payload on stdin and went straight into paths unchecked. That is
+  not an injection finding — the value comes from the harness, not from an attacker — but nothing
+  constrained its shape, and a `/` or `..` in it would have silently relocated a session's logs.
+  The report named two path-building sites; grepping found **six**. All now route through one
+  `session_log_dir()` built on a `sanitize_session_id()` that accepts `[A-Za-z0-9_-]{1,128}` and
+  falls back to a fixed constant rather than raising — the hook's contract is that it never breaks
+  a session.
+
+  The loop state moved out of a hardcoded, world-readable `/tmp` into `tempfile.gettempdir()` at
+  `0600`. On macOS that is a private per-user directory, which removes the shared-directory
+  exposure outright.
+
+  **Two follow-ups from the security review, and the second corrects the premise the first half
+  was written under.** The loop-state file holds only counters, timestamps and an input hash — no
+  content. The *session logs* are a different matter: `prompt_preview` is the first 100 characters
+  of the real prompt, `message` 200 characters of a notification, `input_summary` 500 characters of
+  raw tool input — and they sat at `-rw-r--r--` in a `drwxr-xr-x` directory. The argument made for
+  hardening the loop-state file applied more strongly here and had not been extended. Log
+  directories are now `0700` and log files `0600`, with the mode **re-asserted on files that
+  already exist**, so a backlog written before this change is tightened on its next write rather
+  than only new sessions being covered.
+
+  Both writers now carry `O_NOFOLLOW`. The first draft omitted it on the log path with a careful
+  argument — planting a symlink under `$HOME` needs an attacker who already writes to your home,
+  which crosses no privilege boundary. That reasoning is sound and answers the wrong question: the
+  operation appends JSON and then `fchmod`s the target, so a **stale** symlink left by a backup or
+  a sync tool corrupts a file and changes its permissions with no attacker involved at all. One
+  flag is also cheaper than the paragraph explaining why two writers in one file differ.
+  `O_NOFOLLOW` rejects only a symlinked final component, so a symlinked log *directory* keeps
+  working.
+
+  Verified by driving the real hook: `../../escape`, `a/b` and an empty id all collapse to the
+  fallback and write nothing outside the intended directories; the state file lands under `TMPDIR`
+  at `-rw-------`; a planted symlink leaves its target's bytes *and* mode untouched; every case
+  exits 0.
+
+  Not fixed, recorded: `cleanup_loop_state()` runs only on the `SessionEnd` event, so a killed or
+  crashed session leaves its state file behind — two such files were sitting in `/tmp` when this
+  was measured.
+
 - **Four shipped agents were instructed to do things their own tool list forbids** (WI-0129,
   finding F9). `agents/code-reviewer.md` said "Use `git diff`, `git diff --cached`,
   `git log --oneline -10`" in step 1 of its working method and, eight lines later, "**You have no
