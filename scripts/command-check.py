@@ -12,7 +12,6 @@ import re
 # Add lib to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "lib"))
 
-from next_steps import extract_phase_from_handover
 from gate_checklists import (
     GATE_FILE_PATHS,
     GATE_VERDICT_VOCABULARIES,
@@ -149,6 +148,33 @@ def _read_frontmatter_field(path: str, key: str) -> str:
     return None
 
 
+def _missing_gate_artifact_reason(gate: str, gate_file_rel: str) -> str:
+    """Formats check_gate_passed()'s failure shape (1): the gate's own
+    artifact does not exist yet. Names the missing file and the command
+    that WRITES it -- gate_file_rel's own GATE_FILE_PATHS key IS that
+    writing command's name for seven of the eight gates (gate-p0..p4,
+    p6, p7: each gate-pN.md creates its own GATE_PN.md).
+
+    gate-p5 is the one exception, corrected here after code review
+    (WI-0129, 29.08.2026): /gate-p5 (commands/gate-p5.md, step 1) only
+    READS docs/planning/SPRINT.md's frontmatter `sprint:` field to
+    determine the current sprint number -- it has no branch that creates
+    the file. /p4-sprint (commands/p4-sprint.md:137) is the command that
+    actually writes docs/planning/SPRINT.md; gate-p5 only ever sets the
+    verdict in its `gate:` field once it exists. The reason string is the
+    tool's entire output contract (main() prints it verbatim for a
+    consuming agent to act on), so naming the wrong command here is not
+    cosmetic -- the first version of this fix said "write it with
+    /gate-p5", which sends the agent to a command with no create branch."""
+    if gate_artifact_kind(gate_file_rel) == "SPRINT":
+        return (
+            f"{gate_file_rel} does not exist (create it with /p4-sprint -- "
+            f"gate-p5 then sets its own verdict in SPRINT.md's frontmatter, "
+            f"not a dedicated GATE_P5.md)"
+        )
+    return f"{gate_file_rel} does not exist (write it with /{gate})"
+
+
 def check_gate_passed(gate: str, project_dir: str) -> tuple:
     """Checks whether `gate` has passed. Returns (passed: bool, reason:
     str | None) -- reason is None exactly when passed is True.
@@ -179,55 +205,119 @@ def check_gate_passed(gate: str, project_dir: str) -> tuple:
 
     Fails closed on purpose, with a reason naming exactly which of four
     shapes the failure is:
-      1. the gate's own artifact does not exist yet (falls through to the
-         HANDOVER.md fallback below -- see that comment);
+      1. the gate's own artifact does not exist yet;
       2. the artifact exists but carries no `gate:` field at all;
       3. it carries a `gate:` value outside its artifact's vocabulary;
       4. it carries a valid but non-passing verdict (e.g. `pending`,
          `no_go`, `pivot`, `not_done`).
-    There is no lenient fallback for (2) or (3) -- the previous prose
+    There is no lenient fallback for any of the four -- the previous prose
     scanner's `return True` for "no verdict vocabulary found at all" was
     finding F4, and is not carried forward.
 
-    Out of scope, unchanged from before this fix (WI-0129 finding F5, a
-    separate open decision): when the gate's own artifact file does not
-    exist at all (failure shape 1 above), this falls through to comparing
-    the project's current phase (docs/HANDOVER.md) against the gate's phase
-    number -- a MAPPED gate whose file has simply not been written yet is
-    treated the same as an unmapped one. That branch, and its leniency, are
-    untouched here.
+    WI-0129 finding F5 (PO decision 29.08.2026, fail closed): failure shape
+    (1) used to fall through to comparing the project's current phase
+    (docs/HANDOVER.md) against the gate's phase number -- a MAPPED gate
+    whose file simply had not been written yet was treated the same as an
+    unmapped one. Measured against three real CCPR-using reference
+    projects: two have no `Phase: PN` line at all (the fallback silently
+    never fires), the third's line was four months stale while the project
+    carried gate documents up to P6 (the fallback would have fired
+    *wrong*). A signal absent in two of three projects and wrong in the
+    third cannot lift a gate correctly -- it can only fire where a
+    HANDOVER.md overstates the phase. Removed outright, not narrowed; the
+    `extract_phase_from_handover` import this branch needed went with it.
     """
     gate_file_rel = GATE_FILE_PATHS.get(gate)
-    if gate_file_rel:
-        path = os.path.join(project_dir, gate_file_rel)
-        if os.path.isfile(path):
-            kind = gate_artifact_kind(gate_file_rel)
-            vocabulary = GATE_VERDICT_VOCABULARIES[kind]
-            passing_values = GATE_VERDICT_PASSING_VALUES[kind]
-            verdict = _read_frontmatter_field(path, "gate")
-            if verdict is None:
-                return False, f"{gate_file_rel} has no 'gate:' field in its frontmatter"
-            if verdict not in vocabulary:
-                return False, (
-                    f"{gate_file_rel} gate='{verdict}' is not a valid verdict "
-                    f"(expected one of {sorted(vocabulary)})"
-                )
-            if verdict not in passing_values:
-                return False, f"{gate_file_rel} gate='{verdict}' does not unblock the next phase"
-            return True, None
+    if gate_file_rel is None:
+        return False, f"{gate} has no known gate artifact (not in GATE_FILE_PATHS)"
 
-    # Also check HANDOVER.md for phase completion hints (finding F5,
-    # deliberately unchanged -- see docstring above)
-    if os.path.isfile(os.path.join(project_dir, "docs", "HANDOVER.md")):
-        # Check if current phase is beyond the gate's phase
-        info = extract_phase_from_handover(project_dir)
-        if info["phase"]:
-            current_num = int(info["phase"][1])
-            gate_num = int(gate.replace("gate-p", ""))
-            if current_num > gate_num:
-                return True, None
+    path = os.path.join(project_dir, gate_file_rel)
+    if not os.path.isfile(path):
+        return False, _missing_gate_artifact_reason(gate, gate_file_rel)
 
-    return False, f"{gate} not passed (no gate artifact found, and HANDOVER.md does not show the phase beyond {gate})"
+    kind = gate_artifact_kind(gate_file_rel)
+    vocabulary = GATE_VERDICT_VOCABULARIES[kind]
+    passing_values = GATE_VERDICT_PASSING_VALUES[kind]
+    verdict = _read_frontmatter_field(path, "gate")
+    if verdict is None:
+        return False, f"{gate_file_rel} has no 'gate:' field in its frontmatter"
+    if verdict not in vocabulary:
+        return False, (
+            f"{gate_file_rel} gate='{verdict}' is not a valid verdict "
+            f"(expected one of {sorted(vocabulary)})"
+        )
+    if verdict not in passing_values:
+        return False, f"{gate_file_rel} gate='{verdict}' does not unblock the next phase"
+    return True, None
+
+
+def _shipped_commands_dir() -> str:
+    """The `commands/` directory CCPR ships beside this script -- sibling
+    of `scripts/` both in a repo checkout and in `~/.claude/` after
+    install (same relative position both times)."""
+    return os.path.normpath(
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "commands")
+    )
+
+
+def _project_commands_dir(project_dir: str) -> str:
+    """A project may additionally define its own commands under
+    <project_dir>/.claude/commands/*.md."""
+    return os.path.join(project_dir, ".claude", "commands")
+
+
+def check_command_known(command: str, project_dir: str) -> tuple:
+    """Checks whether `command` names a real CCPR command. Returns
+    (state, reason) -- reason is None exactly when state is "known".
+
+    WI-0129 finding F6: `get_command_phase()` derives a phase from any
+    name matching a bare `pN`/`gate-pN` prefix regardless of whether that
+    name is a real command. A name matching NO prefix (e.g.
+    "voellig-erfunden") fell through with no reasons collected and
+    reported `ready`; a name that merely LOOKS like a real prefix (e.g.
+    "p9-nonexistent") derived a phase and produced a plausible-looking
+    block against a fabricated gate ("gate-p8") that does not exist as a
+    CCPR concept -- CCPR runs gates p0..p7, nothing derives "gate-p8" from
+    a real command.
+
+    Three states, not two:
+      "known"         -- a `<command>.md` file exists in the shipped
+                          commands/ directory (sibling of this script) or
+                          in the project's own .claude/commands/.
+      "unknown"       -- the shipped commands/ directory WAS found, and
+                          `<command>.md` is in neither location.
+      "indeterminate" -- the shipped commands/ directory itself could not
+                          be located at all (e.g. this script copied
+                          somewhere on its own) AND the project's own
+                          .claude/commands/ does not have the file either.
+                          A missing directory is an environment problem,
+                          not evidence the *command* doesn't exist -- it
+                          must not be reported with the same "unknown"
+                          reason a genuine typo gets.
+
+    A project-defined command under .claude/commands/ is never rejected as
+    unknown, even when the shipped directory cannot be found at all.
+    """
+    filename = f"{command}.md"
+    shipped_dir = _shipped_commands_dir()
+    shipped_dir_found = os.path.isdir(shipped_dir)
+    if shipped_dir_found and os.path.isfile(os.path.join(shipped_dir, filename)):
+        return "known", None
+
+    project_dir_commands = _project_commands_dir(project_dir)
+    if os.path.isfile(os.path.join(project_dir_commands, filename)):
+        return "known", None
+
+    if not shipped_dir_found:
+        return "indeterminate", (
+            f"could not determine the known CCPR command set: no commands/ "
+            f"directory found at {shipped_dir} (and no {filename} under "
+            f"{project_dir_commands})"
+        )
+    return "unknown", (
+        f"'{command}' is not a known CCPR command (no {filename} in "
+        f"{shipped_dir} or {project_dir_commands})"
+    )
 
 
 def check_command(command: str, project_dir: str) -> tuple:
@@ -237,6 +327,12 @@ def check_command(command: str, project_dir: str) -> tuple:
     """
     command = command.lstrip("/")
     reasons = []
+
+    # WI-0129 finding F6: reject an unknown command BEFORE any phase is
+    # derived from its name -- see check_command_known()'s own docstring.
+    state, unknown_reason = check_command_known(command, project_dir)
+    if state != "known":
+        return False, [unknown_reason]
 
     # Check specific prerequisites
     prereqs = COMMAND_PREREQUISITES.get(command)

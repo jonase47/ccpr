@@ -463,6 +463,35 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Fixed
 
+- **A gate with no artifact, and a command that does not exist, both stop reporting `ready`**
+  (WI-0129, findings F5 and F6). Two fail-open paths in `scripts/command-check.py`.
+
+  **F5**: when a gate's artifact did not exist, the check compared the project's current phase —
+  parsed out of `docs/HANDOVER.md` prose — against the gate's phase number, and passed the gate if
+  the phase looked further along. A scratch project with **zero** gate documents and the single
+  line `**Phase**: P5` in its handover returned `ready` for `/p1-features`, `/p3-architecture` and
+  `/p4-backlog`.
+
+  What decided it was measuring that input in the field rather than arguing about the policy. Two
+  of the three reference projects have no `Phase: PN` line at all, so the fallback never fired;
+  the third reads `**Phase**: P2`, unchanged since 20.04.2026, while the project carries gate
+  documents up to P6. The lenient path could not lift a gate correctly in any of them — it could
+  only fire where a handover **overstates** the phase. It is removed outright, not narrowed. A
+  missing artifact now blocks and names the file and the command that writes it.
+
+  **F6**: an unknown command returned `ready`, exit 0. Two faces of one defect — a name with no
+  `pN-` prefix collected no checks at all, while an invented `p9-…` name had a phase derived from
+  it and produced a plausible check against `gate-p8`, a gate that does not exist (CCPR has p0
+  through p7). The command set is now derived from the `commands/*.md` files shipped beside the
+  script — the same relative position in a checkout and after install — plus any
+  `<project>/.claude/commands/`. An unknown name is rejected before a phase is derived from it, so
+  a fabricated gate can no longer be the reason. If the shipped directory cannot be found at all,
+  the tool says the command set could not be determined rather than passing or blanket-blocking.
+
+  **Closing both changed no real project's answer.** All 116 shipped commands were run against all
+  three reference projects, before and after: **348 pairs, zero verdict changes.** The leniency
+  these paths provided had never been exercised.
+
 - **The gate verdict is read from a declared field instead of scraped from prose** (WI-0129,
   findings F3/F4). `scripts/command-check.py` decided whether a phase gate had passed by
   searching the document body for the words "Go" and "No-Go". That predicate was wrong three

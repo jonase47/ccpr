@@ -97,7 +97,9 @@ own updated docstring for what replaced that claim.
 """
 
 import importlib.util
+import os
 import re
+import shutil
 import sys
 import tempfile
 import unittest
@@ -209,8 +211,10 @@ def satisfy_gate(project_dir: Path, gate: str) -> None:
 
 def unsatisfy_gate(project_dir: Path, gate: str) -> None:
     """Undoes satisfy_gate() -- removes the gate's own artifact file
-    entirely, so check_gate_passed() falls through to the (out-of-scope,
-    unchanged) HANDOVER.md phase-comparison branch."""
+    entirely, so check_gate_passed() fails closed on failure shape (1)
+    (WI-0129 finding F5: the artifact-missing case used to fall through to
+    a HANDOVER.md phase-comparison branch; that branch is gone, see
+    HandoverPhaseFallbackRemovedTest above)."""
     (project_dir / cc.GATE_FILE_PATHS[gate]).unlink()
 
 
@@ -506,6 +510,23 @@ class CommandPrerequisitesReadyAndBlockedTest(unittest.TestCase):
                 self.assertTrue(any(gate in reason for reason in reasons), reasons)
 
 
+def _is_file_presence_reason(missing: str, reason: str) -> bool:
+    """True iff `reason` is one of check_command()'s own file-presence
+    reason shapes for exactly `missing` -- not merely a string that
+    CONTAINS `missing` as a substring. Needed because a gate's own
+    missing-artifact reason can legitimately embed a directory prefix that
+    collides with an unrelated `files` entry's own path -- e.g.
+    p7-prepare's files entry "docs/quality/" is a substring of gate-p6's
+    own artifact reason "docs/quality/GATE_P6.md does not exist (write it
+    with /gate-p6)" (WI-0129 F5's richer, file-naming gate reasons made
+    this collision real for the first time)."""
+    return (
+        reason == f"{missing} missing (directory not present)"
+        or reason == f"{missing} is empty"
+        or reason.startswith(f"{missing} missing (prerequisite for /")
+    )
+
+
 class CommandPrerequisitesFilesRemovalRedProofTest(unittest.TestCase):
     """The 14 entries whose `files` list is non-empty: removing the entry
     from COMMAND_PREREQUISITES (patch.dict against the real, already-
@@ -538,14 +559,18 @@ class CommandPrerequisitesFilesRemovalRedProofTest(unittest.TestCase):
 
                     before_ready, before_reasons = cc.check_command(command, str(project_dir))
                     self.assertFalse(before_ready)
-                    self.assertTrue(any(missing in r for r in before_reasons))
+                    self.assertTrue(
+                        any(_is_file_presence_reason(missing, r) for r in before_reasons)
+                    )
 
                     with patch.dict(cc.COMMAND_PREREQUISITES):
                         del cc.COMMAND_PREREQUISITES[command]
                         self.assertEqual(len(cc.COMMAND_PREREQUISITES), 15)
 
                         after_ready, after_reasons = cc.check_command(command, str(project_dir))
-                        self.assertFalse(any(missing in r for r in after_reasons))
+                        self.assertFalse(
+                            any(_is_file_presence_reason(missing, r) for r in after_reasons)
+                        )
 
                     # patch.dict restored the deleted entry
                     self.assertIn(command, cc.COMMAND_PREREQUISITES)
@@ -1020,16 +1045,21 @@ class GateP5UsesSprintMdTest(unittest.TestCase):
         passed, reason = cc.check_gate_passed("gate-p5", str(project_dir))
         self.assertFalse(passed)
 
-    def test_gate_p5_still_falls_back_to_handover_when_sprint_md_is_absent(self):
-        """Finding F5 (out of scope for this tranche): when SPRINT.md does
-        not exist at all, gate-p5 falls through to the same HANDOVER.md
-        phase-comparison fallback every other gate uses -- unchanged."""
+    def test_gate_p5_blocks_when_sprint_md_is_absent_even_with_a_favourable_handover_phase(self):
+        """WI-0129 finding F5, PO decision 29.08.2026 (fail closed): the
+        HANDOVER.md phase-comparison fallback is removed outright, gate-p5
+        included. Before this fix this exact fixture (no SPRINT.md, a
+        HANDOVER.md phase beyond gate-p5) returned `passed=True` -- see the
+        superseded docstring this test replaces. SPRINT.md is gate-p5's own
+        artifact (GATE_FILE_PATHS), so its absence must fail closed exactly
+        like every other gate's missing artifact does."""
         project_dir = Path(tempfile.mkdtemp(dir=self.tmp_root))
         docs = project_dir / "docs"
         docs.mkdir(parents=True)
         (docs / "HANDOVER.md").write_text("Phase: P6\n", encoding="utf-8")
         passed, reason = cc.check_gate_passed("gate-p5", str(project_dir))
-        self.assertTrue(passed, reason)
+        self.assertFalse(passed)
+        self.assertIn("docs/planning/SPRINT.md", reason)
 
 
 class GateP5EndToEndTest(unittest.TestCase):
@@ -1070,16 +1100,113 @@ class GateP5EndToEndTest(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
 
 
+class MissingGateArtifactBlocksAndNamesItsOwnFileTest(unittest.TestCase):
+    """WI-0129 finding F5: a gate whose own artifact does not exist yet
+    fails closed, naming that gate's own file. Derived from
+    cc.GATE_FILE_PATHS -- the same production dict -- rather than
+    hand-typing the eight paths a second time, same discipline as
+    GateFilePathsMatchesTheCommandsClaimTest's own drift guard above.
+
+    The scenario where this actually changes behaviour (a HANDOVER.md
+    phase claim that used to override the missing artifact) is pinned
+    separately by HandoverPhaseFallbackRemovedTest below; this class
+    covers the plain case -- no HANDOVER.md at all -- for every gate."""
+
+    def setUp(self):
+        self.tmp_root = tempfile.mkdtemp()
+        self.addCleanup(lambda: shutil.rmtree(self.tmp_root, ignore_errors=True))
+
+    def test_every_gate_with_no_artifact_blocks_and_names_its_own_file(self):
+        for gate, rel_path in cc.GATE_FILE_PATHS.items():
+            with self.subTest(gate=gate, rel_path=rel_path):
+                project_dir = Path(tempfile.mkdtemp(dir=self.tmp_root))
+                passed, reason = cc.check_gate_passed(gate, str(project_dir))
+                self.assertFalse(passed)
+                self.assertIn(rel_path, reason)
+
+    def test_gate_p5s_reason_names_the_command_and_not_a_nonexistent_gate_p5_md(self):
+        """gate-p5 has no dedicated GATE_P5.md of its own -- the briefing
+        asks that its reason be worded so a reader understands the verdict
+        lives in SPRINT.md's own frontmatter, not a GATE_P5.md nothing
+        writes.
+
+        Code review (WI-0129, 29.08.2026) caught that the generic "write it
+        with /{gate}" template is factually wrong for this one case:
+        /gate-p5 (commands/gate-p5.md, step 1) only READS SPRINT.md's
+        frontmatter to determine the sprint number -- it never creates the
+        file. /p4-sprint (commands/p4-sprint.md:137) is the command that
+        writes docs/planning/SPRINT.md. The reason must name /p4-sprint as
+        the creator, not /gate-p5 -- an agent acting on the old wording
+        would invoke /gate-p5 against a project with no SPRINT.md and hit a
+        dead end."""
+        project_dir = Path(tempfile.mkdtemp(dir=self.tmp_root))
+        passed, reason = cc.check_gate_passed("gate-p5", str(project_dir))
+        self.assertFalse(passed)
+        self.assertIn("docs/planning/SPRINT.md", reason)
+        self.assertIn("/p4-sprint", reason)
+        self.assertNotIn("write it with /gate-p5", reason)
+        self.assertNotIn("GATE_P5.md does not exist", reason)
+
+    def test_with_the_gate_artifact_present_and_passing_the_same_gates_are_ready(self):
+        """The discriminating pair for the sweep above: if only the
+        missing-artifact test existed, a change that blocked every gate
+        unconditionally (regardless of artifact state) would still pass
+        it."""
+        for gate, rel_path in cc.GATE_FILE_PATHS.items():
+            with self.subTest(gate=gate, rel_path=rel_path):
+                project_dir = Path(tempfile.mkdtemp(dir=self.tmp_root))
+                satisfy_gate(project_dir, gate)
+                passed, reason = cc.check_gate_passed(gate, str(project_dir))
+                self.assertTrue(passed, reason)
+
+
+class HandoverPhaseFallbackRemovedTest(unittest.TestCase):
+    """WI-0129 finding F5, PO decision 29.08.2026: fail closed. Replaces
+    the pre-fix HandoverPhaseFallbackStillWorksTest, which pinned the
+    lenient fallback this fix removes outright (not narrows) -- a missing
+    gate artifact is no longer lifted by any HANDOVER.md phase claim, no
+    matter how far beyond the gate that claim reads.
+
+    test_same_project_with_the_gate_artifact_present_and_passing_is_ready
+    is the discriminating pair: without it, a change that blocked
+    check_gate_passed unconditionally would still pass the regression test
+    alone."""
+
+    def setUp(self):
+        self.tmp_root = tempfile.mkdtemp()
+        self.addCleanup(lambda: shutil.rmtree(self.tmp_root, ignore_errors=True))
+
+    def test_handover_claiming_a_later_phase_no_longer_unblocks_a_missing_gate(self):
+        """Before this fix (HEAD ae5adf4): `passed=True` -- this exact
+        fixture is the regression F5 names. A HANDOVER.md phase claim can
+        no longer substitute for the gate's own artifact."""
+        project_dir = Path(tempfile.mkdtemp(dir=self.tmp_root))
+        docs = project_dir / "docs"
+        docs.mkdir(parents=True)
+        (docs / "HANDOVER.md").write_text("**Phase**: P5\n", encoding="utf-8")
+        passed, reason = cc.check_gate_passed("gate-p3", str(project_dir))
+        self.assertFalse(passed)
+        self.assertIn(cc.GATE_FILE_PATHS["gate-p3"], reason)
+
+    def test_same_project_with_the_gate_artifact_present_and_passing_is_ready(self):
+        project_dir = Path(tempfile.mkdtemp(dir=self.tmp_root))
+        docs = project_dir / "docs"
+        docs.mkdir(parents=True)
+        (docs / "HANDOVER.md").write_text("**Phase**: P5\n", encoding="utf-8")
+        satisfy_gate(project_dir, "gate-p3")
+        passed, reason = cc.check_gate_passed("gate-p3", str(project_dir))
+        self.assertTrue(passed, reason)
+
+
 class DeadCodeRemovedTest(unittest.TestCase):
-    """Static source-text proofs for the two dead-code findings named in
-    the briefing. Both citations below are to removed code -- they no
-    longer exist in the current file, only at git HEAD (e376348): the
-    unused PHASE_SEQUENCES import (before this change, at the old :15,
-    sole occurrence in the whole repo per `grep -n "PHASE_SEQUENCES"
-    scripts/command-check.py`, measured 28.08.2026) and the unused
-    `content` variable read from HANDOVER.md (before this change, at the
-    old :120-124, shadowed by extract_phase_from_handover's own re-read of
-    the same file two lines later)."""
+    """Static source-text proofs for dead-code findings. The
+    PHASE_SEQUENCES import citation is to code already removed before this
+    tranche (only at git HEAD e376348, WI-0128). The next_steps /
+    extract_phase_from_handover citations are THIS tranche's own removal
+    (WI-0129 finding F5): the HANDOVER.md fallback check_gate_passed used
+    to fall through to is gone, so the import it required goes with it --
+    an unused import left behind after a behavioural fix is exactly the
+    shape CONTRIBUTING.md's own dead-import guidance warns about."""
 
     def setUp(self):
         self.source = SCRIPT_PATH.read_text(encoding="utf-8")
@@ -1087,39 +1214,147 @@ class DeadCodeRemovedTest(unittest.TestCase):
     def test_phase_sequences_import_is_gone(self):
         self.assertNotIn("PHASE_SEQUENCES", self.source)
 
-    def test_extract_phase_from_handover_is_still_imported(self):
-        self.assertRegex(self.source, r"from next_steps import extract_phase_from_handover")
+    def test_next_steps_import_is_gone(self):
+        self.assertNotIn("next_steps", self.source)
 
-    def test_handover_file_is_not_opened_directly_in_check_gate_passed(self):
+    def test_extract_phase_from_handover_is_not_imported(self):
+        """Checks the IMPORT is gone, not every prose mention -- unlike
+        the PHASE_SEQUENCES/next_steps checks above, check_gate_passed's
+        own docstring legitimately names `extract_phase_from_handover` by
+        identifier while explaining F5's removed-fallback history, so a
+        bare `assertNotIn` over the whole file would fail on that
+        historical prose, not on live code."""
+        self.assertNotIn("import extract_phase_from_handover", self.source)
+
+    def test_check_gate_passed_never_mentions_handover_in_its_executable_body(self):
+        """The function's own DOCSTRING explains F5's history using the
+        word "HANDOVER.md" on purpose (see check_gate_passed's docstring);
+        this checks the EXECUTABLE body past that docstring, which must
+        never touch HANDOVER.md again."""
         gate_fn_source = self.source.split("def check_gate_passed")[1].split("\ndef ")[0]
-        self.assertNotIn("open(handover_path", gate_fn_source)
+        parts = gate_fn_source.split('"""')
+        self.assertEqual(len(parts), 3, "expected exactly one docstring block")
+        body = parts[2]
+        self.assertNotIn("HANDOVER", body)
 
 
-class HandoverPhaseFallbackStillWorksTest(unittest.TestCase):
-    """The dead-variable cleanup above must not disturb the still-live
-    behaviour it sits next to: when no GATE_*.md file exists at all,
-    check_gate_passed falls back to comparing the current HANDOVER.md phase
-    against the gate's own phase number (:130-138)."""
+class UnknownCommandTest(unittest.TestCase):
+    """WI-0129 finding F6: a command name matching neither a real shipped
+    commands/*.md file nor a project-defined <project_dir>/.claude/
+    commands/*.md one blocks -- and does so BEFORE any phase is derived
+    from the name, so an invented-but-pN-shaped name (like the
+    'p9-nonexistent' fixture below) is rejected as unknown rather than
+    checked against a gate that does not exist as a CCPR concept
+    (get_command_phase would derive 'gate-p8' from it; CCPR runs gates
+    p0..p7 only).
+
+    Measured against the unfixed tool (HEAD ae5adf4):
+        voellig-erfunden   -> ready,   exit 0
+        p9-nonexistent     -> blocked, "gate-p8 not passed ..."
+    """
 
     def setUp(self):
         self.tmp_root = tempfile.mkdtemp()
-        self.addCleanup(lambda: __import__("shutil").rmtree(self.tmp_root, ignore_errors=True))
+        self.addCleanup(lambda: shutil.rmtree(self.tmp_root, ignore_errors=True))
 
-    def test_current_phase_beyond_the_gate_counts_as_passed(self):
+    def test_a_name_matching_no_known_prefix_is_blocked_as_unknown(self):
         project_dir = Path(tempfile.mkdtemp(dir=self.tmp_root))
-        docs = project_dir / "docs"
-        docs.mkdir(parents=True)
-        (docs / "HANDOVER.md").write_text("Phase: P4\n", encoding="utf-8")
-        passed, reason = cc.check_gate_passed("gate-p3", str(project_dir))
-        self.assertTrue(passed, reason)
+        ready, reasons = cc.check_command("voellig-erfunden", str(project_dir))
+        self.assertFalse(ready)
+        self.assertTrue(any("not a known CCPR command" in r for r in reasons), reasons)
 
-    def test_current_phase_at_or_before_the_gate_is_not_passed(self):
+    def test_an_invented_phase_prefixed_name_is_blocked_as_unknown_not_via_a_fabricated_gate(self):
         project_dir = Path(tempfile.mkdtemp(dir=self.tmp_root))
-        docs = project_dir / "docs"
-        docs.mkdir(parents=True)
-        (docs / "HANDOVER.md").write_text("Phase: P2\n", encoding="utf-8")
-        passed, reason = cc.check_gate_passed("gate-p3", str(project_dir))
-        self.assertFalse(passed)
+        ready, reasons = cc.check_command("p9-nonexistent", str(project_dir))
+        self.assertFalse(ready)
+        self.assertTrue(any("not a known CCPR command" in r for r in reasons), reasons)
+        self.assertFalse(any("gate-p8" in r for r in reasons), reasons)
+
+    def test_a_project_defined_command_is_not_rejected_as_unknown(self):
+        project_dir = Path(tempfile.mkdtemp(dir=self.tmp_root))
+        project_commands = project_dir / ".claude" / "commands"
+        project_commands.mkdir(parents=True)
+        (project_commands / "my-custom-command.md").write_text("# custom\n", encoding="utf-8")
+        state, reason = cc.check_command_known("my-custom-command", str(project_dir))
+        self.assertEqual(state, "known", reason)
+
+    def test_every_shipped_command_name_is_not_rejected_as_unknown(self):
+        """All 116 shipped command names -- derived from the directory, not
+        a hand-picked sample that would miss exactly the case a rename
+        breaks."""
+        commands_dir = REPO_ROOT / "commands"
+        shipped_names = sorted(p.stem for p in commands_dir.glob("*.md"))
+        self.assertEqual(len(shipped_names), 116)
+        project_dir = Path(tempfile.mkdtemp(dir=self.tmp_root))
+        for name in shipped_names:
+            with self.subTest(command=name):
+                state, reason = cc.check_command_known(name, str(project_dir))
+                self.assertEqual(state, "known", reason)
+
+
+class ShippedCommandsDirNotFoundTest(unittest.TestCase):
+    """WI-0129 finding F6, the environment-error shape: when this script
+    is copied somewhere on its own -- no commands/ sibling reachable at
+    all -- the unknown-command check must neither silently pass (an
+    environment problem is not evidence a command exists) nor blanket-
+    block every command with the SAME reason an actually-unknown name
+    gets (that would misdiagnose a broken install as a typo). Reported as
+    a third, honestly-named internal state ('indeterminate', distinct from
+    'known'/'unknown'); check_command() collapses it to blocked at the
+    stdout/exit-code boundary -- see the report for why a third exit code
+    was NOT introduced (no consumer in this repo branches on exit code
+    beyond 0-vs-nonzero, and blocked is the correct fail-closed bucket for
+    "cannot verify").
+
+    Exercised against a SCRATCH COPY of scripts/ (command-check.py plus
+    its lib/ dependency, `shutil.copytree`), never the tracked tree --
+    same discipline as GateFileClaimParserGuardRedProofTest above. The
+    copy is loaded as its own module (a second importlib module distinct
+    from `cc`, sharing nothing) so `_shipped_commands_dir()` resolves
+    relative to the COPY's own path and genuinely finds no `commands/`
+    sibling, rather than patching a constant on the real module."""
+
+    def setUp(self):
+        self.tmp_root = tempfile.mkdtemp()
+        self.addCleanup(lambda: shutil.rmtree(self.tmp_root, ignore_errors=True))
+        scratch_scripts = Path(self.tmp_root) / "scripts"
+        scratch_scripts.mkdir()
+        shutil.copy2(SCRIPT_PATH, scratch_scripts / "command-check.py")
+        shutil.copytree(REPO_ROOT / "scripts" / "lib", scratch_scripts / "lib")
+        # Deliberately no commands/ sibling of scratch_scripts.
+        spec = importlib.util.spec_from_file_location(
+            "ccpr_command_check_no_commands_dir", scratch_scripts / "command-check.py"
+        )
+        self.isolated_cc = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.isolated_cc)
+
+    def test_shipped_commands_dir_is_confirmed_absent_in_this_fixture(self):
+        self.assertFalse(os.path.isdir(self.isolated_cc._shipped_commands_dir()))
+
+    def test_a_real_command_name_is_indeterminate_not_silently_known(self):
+        project_dir = Path(tempfile.mkdtemp(dir=self.tmp_root))
+        state, reason = self.isolated_cc.check_command_known("p5-implement", str(project_dir))
+        self.assertEqual(state, "indeterminate", reason)
+        self.assertIn("could not determine", reason)
+
+    def test_a_real_command_name_is_not_rejected_as_unknown(self):
+        project_dir = Path(tempfile.mkdtemp(dir=self.tmp_root))
+        state, reason = self.isolated_cc.check_command_known("p5-implement", str(project_dir))
+        self.assertNotEqual(state, "unknown")
+
+    def test_a_project_defined_command_is_still_known_even_without_the_shipped_dir(self):
+        project_dir = Path(tempfile.mkdtemp(dir=self.tmp_root))
+        project_commands = project_dir / ".claude" / "commands"
+        project_commands.mkdir(parents=True)
+        (project_commands / "my-custom-command.md").write_text("# custom\n", encoding="utf-8")
+        state, reason = self.isolated_cc.check_command_known("my-custom-command", str(project_dir))
+        self.assertEqual(state, "known", reason)
+
+    def test_check_command_blocks_rather_than_passing_silently(self):
+        project_dir = Path(tempfile.mkdtemp(dir=self.tmp_root))
+        ready, reasons = self.isolated_cc.check_command("p5-implement", str(project_dir))
+        self.assertFalse(ready)
+        self.assertTrue(any("could not determine" in r for r in reasons), reasons)
 
 
 if __name__ == "__main__":

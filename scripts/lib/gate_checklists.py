@@ -132,13 +132,17 @@ GATE_CHECKLISTS = {
 # would trade one incidental-structure bug for another, and nothing pins
 # that insertion order today.
 #
-# "gate-p5" is intentionally absent: /gate-p5 (commands/gate-p5.md) never
-# writes a dedicated gate file -- its sprint verdict lives in
-# docs/planning/SPRINT.md instead, a differently-shaped document (sprint
-# status prose, not a Go/No-Go protocol). Parsing that verdict is out of
-# scope for WI-0129; command-check.py's check_gate_passed() falls back to
-# the HANDOVER.md phase-comparison check for any gate absent from this
-# dict, which is the only mechanism gate-p5 has ever had.
+# "gate-p5" maps to docs/planning/SPRINT.md, not to a GATE_P5.md: /gate-p5
+# writes no dedicated gate file, it records the sprint verdict in SPRINT.md's
+# `gate:` frontmatter field (commands/gate-p5.md, "Create Gate Protocol").
+# That is why gate_artifact_kind() below selects a vocabulary by the
+# ARTIFACT rather than by the gate key -- SPRINT.md answers "is this sprint
+# done?", a GATE_P*.md answers "did this phase pass?".
+#
+# An entry missing from this dict no longer has any fallback: the
+# HANDOVER.md phase comparison check_gate_passed() used to fall back to was
+# removed with WI-0129's finding F5. A gate with no artifact on disk is
+# blocked, named, and told which command writes the file.
 GATE_FILE_PATHS = {
     "gate-p0": "docs/discovery/GATE_P0.md",
     "gate-p1": "docs/concept/GATE_P1.md",
