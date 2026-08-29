@@ -59,11 +59,11 @@ run_pytest() {
             $( [ -n "$(pip show pytest-cov 2>/dev/null)" ] && echo "--cov --cov-report=json:/tmp/pytest-cov.json" || true ) \
             2>&1 || true  # exit-status: exempt test-runner-output-capture
 
-        python3 << PYEOF  # exit-status: exempt set-e-sufficient
-import json, sys
+        RUN_TESTS_TMPFILE="${tmpfile}" RUN_TESTS_TIMESTAMP="${TIMESTAMP}" python3 << 'PYEOF'  # exit-status: exempt set-e-sufficient
+import json, os, sys
 
 try:
-    with open("${tmpfile}") as f:
+    with open(os.environ["RUN_TESTS_TMPFILE"]) as f:
         report = json.load(f)
 except:
     print(json.dumps({"framework": "pytest", "error": "JSON report not readable"}))
@@ -83,7 +83,7 @@ for test in report.get("tests", []):
 
 result = {
     "framework": "pytest",
-    "timestamp": "${TIMESTAMP}",
+    "timestamp": os.environ["RUN_TESTS_TIMESTAMP"],
     "summary": {
         "total": summary.get("total", 0),
         "passed": summary.get("passed", 0),
@@ -113,13 +113,32 @@ print(json.dumps(result, indent=2, ensure_ascii=False))
 PYEOF
     else
         # Fallback: parse raw pytest output
-        local raw
-        raw=$(python3 -m pytest "${test_arg}" --tb=short -q 2>&1 || true)  # exit-status: exempt test-runner-output-capture
+        local raw_tmpfile
+        raw_tmpfile=$(mktemp /tmp/pytest-raw-XXXXXX)
+        # EXIT trap, not a manual `rm -f` after the heredoc below: the
+        # heredoc is `# exit-status: exempt set-e-sufficient` (an uncaught
+        # Python exception there aborts the whole script under `set -e`
+        # BEFORE a manual cleanup line placed after it would ever run),
+        # and this file now holds untrusted test-runner output on disk,
+        # however briefly -- an EXIT trap fires on that abort path too.
+        # DOUBLE-quoted so `${raw_tmpfile}` expands NOW, into the trap's own
+        # command string -- `raw_tmpfile` is `local` to this function and is
+        # gone by the time the trap actually fires (script end); a
+        # single-quoted trap defers the expansion to firing time, when
+        # `set -u` sees an unbound variable and the cleanup itself fails.
+        trap "rm -f '${raw_tmpfile}'" EXIT
+        python3 -m pytest "${test_arg}" --tb=short -q > "${raw_tmpfile}" 2>&1 || true  # exit-status: exempt test-runner-output-capture
 
-        python3 << PYEOF  # exit-status: exempt set-e-sufficient
-import re, json
+        RUN_TESTS_RAW_FILE="${raw_tmpfile}" RUN_TESTS_TIMESTAMP="${TIMESTAMP}" python3 << 'PYEOF'  # exit-status: exempt set-e-sufficient
+import os, re, json
 
-raw = '''${raw}'''
+# `raw` is untrusted test-runner output -- it reaches Python through a file
+# read via an ENVIRONMENT-provided path, never through interpolation into
+# this heredoc's own source text (WI-0129 F7: an unquoted delimiter here
+# used to let a literal ``'''`` in `raw` close this string early and run
+# whatever followed as Python source).
+with open(os.environ["RUN_TESTS_RAW_FILE"], errors="replace") as f:
+    raw = f.read()
 
 # Parse summary line like "5 passed, 2 failed in 1.23s"
 summary_match = re.search(r'(\d+) passed', raw)
@@ -141,7 +160,7 @@ for m in re.finditer(r'FAILED (.+?) - (.+?)(?:\n|$)', raw):
 
 result = {
     "framework": "pytest",
-    "timestamp": "${TIMESTAMP}",
+    "timestamp": os.environ["RUN_TESTS_TIMESTAMP"],
     "summary": {
         "total": passed + failed,
         "passed": passed,
@@ -172,14 +191,16 @@ run_jest_or_vitest() {
         npx jest ${test_arg} --json --outputFile="${tmpfile}" 2>/dev/null || true
     fi
 
-    python3 << PYEOF  # exit-status: exempt set-e-sufficient
-import json, sys
+    RUN_TESTS_TMPFILE="${tmpfile}" RUN_TESTS_RUNNER="${runner}" RUN_TESTS_TIMESTAMP="${TIMESTAMP}" python3 << 'PYEOF'  # exit-status: exempt set-e-sufficient
+import json, os, sys
+
+runner = os.environ["RUN_TESTS_RUNNER"]
 
 try:
-    with open("${tmpfile}") as f:
+    with open(os.environ["RUN_TESTS_TMPFILE"]) as f:
         report = json.load(f)
 except:
-    print(json.dumps({"framework": "${runner}", "error": "JSON report not readable"}))
+    print(json.dumps({"framework": runner, "error": "JSON report not readable"}))
     sys.exit(0)
 
 failures = []
@@ -194,8 +215,8 @@ for suite in report.get("testResults", []):
             })
 
 result = {
-    "framework": "${runner}",
-    "timestamp": "${TIMESTAMP}",
+    "framework": runner,
+    "timestamp": os.environ["RUN_TESTS_TIMESTAMP"],
     "summary": {
         "total": report.get("numTotalTests", 0),
         "passed": report.get("numPassedTests", 0),
@@ -216,13 +237,20 @@ PYEOF
 
 run_cargo() {
     local test_arg="${TEST_PATH:-}"
-    local raw
-    raw=$(cargo test ${test_arg} 2>&1 || true)
+    local raw_tmpfile
+    raw_tmpfile=$(mktemp /tmp/cargo-raw-XXXXXX)
+    # See run_pytest's fallback branch for why this is an EXIT trap, not a
+    # manual `rm -f` placed after the heredoc.
+    trap "rm -f '${raw_tmpfile}'" EXIT
+    cargo test ${test_arg} > "${raw_tmpfile}" 2>&1 || true
 
-    python3 << PYEOF  # exit-status: exempt set-e-sufficient
-import re, json
+    RUN_TESTS_RAW_FILE="${raw_tmpfile}" RUN_TESTS_TIMESTAMP="${TIMESTAMP}" python3 << 'PYEOF'  # exit-status: exempt set-e-sufficient
+import os, re, json
 
-raw = '''${raw}'''
+# See run_pytest's fallback branch for why `raw` reaches Python through a
+# file read via an environment-provided path (WI-0129 F7).
+with open(os.environ["RUN_TESTS_RAW_FILE"], errors="replace") as f:
+    raw = f.read()
 
 # Parse "test result: ok. X passed; Y failed; Z ignored"
 result_match = re.search(r'test result: \w+\. (\d+) passed; (\d+) failed; (\d+) ignored', raw)
@@ -241,7 +269,7 @@ for m in re.finditer(r"---- (.+?) stdout ----\n(.*?)(?=\n---- |\nfailures:)", ra
 
 result = {
     "framework": "cargo",
-    "timestamp": "${TIMESTAMP}",
+    "timestamp": os.environ["RUN_TESTS_TIMESTAMP"],
     "summary": {
         "total": passed + failed + ignored,
         "passed": passed,
@@ -259,13 +287,20 @@ PYEOF
 
 run_go() {
     local test_arg="${TEST_PATH:-./...}"
-    local raw
-    raw=$(go test -v -count=1 ${test_arg} 2>&1 || true)
+    local raw_tmpfile
+    raw_tmpfile=$(mktemp /tmp/go-raw-XXXXXX)
+    # See run_pytest's fallback branch for why this is an EXIT trap, not a
+    # manual `rm -f` placed after the heredoc.
+    trap "rm -f '${raw_tmpfile}'" EXIT
+    go test -v -count=1 ${test_arg} > "${raw_tmpfile}" 2>&1 || true
 
-    python3 << PYEOF  # exit-status: exempt set-e-sufficient
-import re, json
+    RUN_TESTS_RAW_FILE="${raw_tmpfile}" RUN_TESTS_TIMESTAMP="${TIMESTAMP}" python3 << 'PYEOF'  # exit-status: exempt set-e-sufficient
+import os, re, json
 
-raw = '''${raw}'''
+# See run_pytest's fallback branch for why `raw` reaches Python through a
+# file read via an environment-provided path (WI-0129 F7).
+with open(os.environ["RUN_TESTS_RAW_FILE"], errors="replace") as f:
+    raw = f.read()
 
 passed = len(re.findall(r'--- PASS:', raw))
 failed = len(re.findall(r'--- FAIL:', raw))
@@ -284,7 +319,7 @@ duration_match = re.search(r'ok\s+.+?\s+([\d.]+)s', raw)
 
 result = {
     "framework": "go",
-    "timestamp": "${TIMESTAMP}",
+    "timestamp": os.environ["RUN_TESTS_TIMESTAMP"],
     "summary": {
         "total": passed + failed + skipped,
         "passed": passed,

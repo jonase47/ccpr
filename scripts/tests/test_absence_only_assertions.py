@@ -857,7 +857,7 @@ class NoStaleKnownFindingsTest(unittest.TestCase):
 
 class ClassificationCountsTest(unittest.TestCase):
     def test_classification_counts(self):
-        """Regression pin on the measured baseline: 978 `test_*` methods
+        """Regression pin on the measured baseline: 980 `test_*` methods
         across the corpus call something shaped like a subprocess invocation
         and are therefore in scope for this check; 0 of those are currently
         absence-only-needs-exemption -- `KNOWN_FINDINGS` above is empty for
@@ -871,6 +871,21 @@ class ClassificationCountsTest(unittest.TestCase):
         growing paragraph:
 
           in-scope / flagged   when
+          980 / 0              WI-0129 finding F7 (29.08.2026): the two new
+                               `test_run_tests_heredoc_injection.py` methods
+                               entered scope because their shared helper is
+                               named `_run_fake_tool` (matches
+                               `RUN_HELPER_RE` -- an earlier draft named it
+                               `_invoke_fake_tool` specifically to dodge this
+                               scanner, flagged in code review as trading a
+                               one-time pin update for a standing blind spot
+                               on tests guarding a security fix; renamed
+                               back in). Both carry
+                               `self.assertEqual(0, result.returncode, ...)`,
+                               unconditionally recognised as positive via
+                               `_references_returncode` -- classified
+                               `not-flagged`, not `absence-only-needs-
+                               exemption`. Flagged unchanged.
           978 / 0              WI-0128 wave 3 tranche 4 (the last 14
                                KNOWN_FINDINGS entries, spread over 7 files
                                and 7 different tools): manual-lint.sh (5
@@ -1104,7 +1119,7 @@ class ClassificationCountsTest(unittest.TestCase):
         count."""
         recs = scan_tree()
         flagged = [r for r in recs if r.disposition in NEEDS_EXEMPTION]
-        self.assertEqual(978, len(recs))
+        self.assertEqual(980, len(recs))
         self.assertEqual(0, len(flagged))
 
 
@@ -1134,11 +1149,29 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
         and never invoke a subprocess, so none of them is in scope for the
         absence-only rule. Two pins, two different questions: this one asks
         "did the corpus change", that one asks "did the subprocess-shaped
-        population change"."""
+        population change".
+
+        Bumped 45 -> 47, 29.08.2026 (WI-0129 finding F7): added
+        test_run_tests_heredoc_injection.py and
+        test_heredoc_interpolation_scan.py. In-scope count above (978 ->
+        980, see ClassificationCountsTest's own trajectory) moved by +2: the
+        injection test's shared helper is named `_run_fake_tool`, matching
+        `RUN_HELPER_RE`, so both its test methods ARE subprocess-invoking
+        per `_calls_a_subprocess` -- an earlier draft named it
+        `_invoke_fake_tool` specifically to dodge that scanner, reverted
+        after code review flagged it as trading a one-time pin update for a
+        standing blind spot on tests guarding a security fix. Neither
+        method is flagged (0 unchanged): each carries
+        `self.assertEqual(0, result.returncode, ...)`, unconditionally
+        recognised as positive. The scan test calls neither `subprocess.run`
+        nor a `self.<name>(...)` at all -- out of scope entirely, no
+        contribution to either number."""
         files = sorted(TESTS_DIR.glob("*.py")) + sorted((TESTS_DIR / "workitems").glob("*.py"))
         names = sorted(f.relative_to(TESTS_DIR).as_posix() for f in files if f.name != "__init__.py")
-        self.assertEqual(45, len(names))
+        self.assertEqual(47, len(names))
         self.assertIn("test_absence_only_assertions.py", names)
+        self.assertIn("test_run_tests_heredoc_injection.py", names)
+        self.assertIn("test_heredoc_interpolation_scan.py", names)
         self.assertIn("test_phase_docs_lint.py", names)
         self.assertIn("workitems/test_migrate.py", names)
 
