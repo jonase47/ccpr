@@ -71,9 +71,29 @@ so its `if __name__ == "__main__": main()` guard never fires -- same
 technique as `test_handover_size_hook.py`'s `_load_agent_monitor_module`.
 Behavioural per-entry and removal tests call the loaded module's functions
 directly (not subprocess) for precision on the `reasons` list content and
-to patch the real `COMMAND_PREREQUISITES` object; the verdict-discriminator
-class above still goes through the CLI, because that is the one place this
-module tests the tool's actual shipped contract end to end.
+to patch the real `COMMAND_PREREQUISITES` object; the CLI-driven classes
+still go through the CLI, because that is the one place this module tests
+the tool's actual shipped contract end to end.
+
+## Superseded by WI-0129
+
+The prose Go/No-Go discriminator this module was originally written for is
+gone: WI-0129 (findings F3/F4) found it wrong three more times ("Go" inside
+"No-Go" and inside "Go-Live"; every gate command instructing authors to
+*name* "No-Go" in prose) and replaced it with a `gate:` YAML frontmatter
+field, read by `_read_frontmatter_field`. `GateVerdictDiscriminatorTest`
+(the class the "Fixture design" section above describes) was replaced by
+`GateVerdictFrontmatterVocabularyTest`/`GateVerdictCrossVocabularyTest`/
+`GateVerdictMissingFieldTest`/`GateVerdictOutsideVocabularyTest`/
+`GateVerdictFrontmatterRegressionTest` -- the last of those carries WI-0129's
+own regression fixture (a `no_go` frontmatter verdict alongside a "Go-Live"
+prose paragraph) as its direct descendant. `check_gate_passed()` also
+changed shape in the same tranche, from a bare bool to `(passed, reason)`,
+which retired the reasons-text divergence this docstring's "Fixture design"
+section describes (:58-66 above) -- both `check_command()` call sites now
+simply forward the same `reason` string, so the divergence no longer
+exists; see `CommandPrerequisitesEmptyFilesEntriesRemovalStructuralProofTest`'s
+own updated docstring for what replaced that claim.
 """
 
 import importlib.util
@@ -87,6 +107,7 @@ from unittest.mock import patch
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_PATH = REPO_ROOT / "scripts" / "command-check.py"
+PHASE_DOCS_LINT_PATH = REPO_ROOT / "scripts" / "phase-docs-lint.sh"
 
 
 def _load_command_check_module():
@@ -99,10 +120,48 @@ def _load_command_check_module():
 cc = _load_command_check_module()
 
 
-def write_gate_file(project_dir: Path, gate: str, body: str) -> None:
+def read_verdict_enum(varname: str, script_path: Path = PHASE_DOCS_LINT_PATH) -> tuple:
+    """Parses NAME="a b c" (a space-separated shell-string constant) out of
+    a shipped script's own source text -- never retyped here. Same parser
+    shape as scripts/tests/test_phase_docs_lint.py's own `read_enum`
+    (duplicated rather than imported: that module is a subprocess-heavy
+    fixture-generating module in its own right, not meant to be imported by
+    a sibling test module). Used to bind command-check.py's gate-verdict
+    vocabularies to phase-docs-lint.sh's VALID_GATE_VERDICTS/
+    VALID_SPRINT_VERDICTS -- CONTRIBUTING.md's "derive a contract test's
+    expectation from the other artifact, not the code under test" (WI-0129).
+    """
+    text = script_path.read_text(encoding="utf-8")
+    m = re.search(r'^%s="([^"]*)"' % re.escape(varname), text, re.MULTILINE)
+    if m is None:
+        raise AssertionError(f'could not find {varname}="..." in {script_path}')
+    return tuple(m.group(1).split())
+
+
+# The two gate-verdict vocabularies, parsed from phase-docs-lint.sh's own
+# source (never retyped) -- used by GateVerdictVocabularyMatchesTheLint
+# ScriptTest below, and by fixture helpers in this file that need a value
+# known to be OUTSIDE one artifact's vocabulary but valid on the other.
+GATE_P_VOCABULARY = set(read_verdict_enum("VALID_GATE_VERDICTS"))
+SPRINT_VOCABULARY = set(read_verdict_enum("VALID_SPRINT_VERDICTS"))
+
+# The canonical passing/blocking verdict per artifact kind, used by fixture
+# helpers below that need "a verdict that passes" / "a verdict that exists
+# in-vocabulary but blocks" without caring about the exact value.
+_CANONICAL_PASSING_VERDICT = {"GATE_P": "go", "SPRINT": "done"}
+_CANONICAL_BLOCKING_VERDICT = {"GATE_P": "no_go", "SPRINT": "not_done"}
+
+
+def write_gate_file(project_dir: Path, gate: str, verdict: str, body: str = "") -> None:
     """Writes the gate's own protocol file at the path production itself
     reads it from -- `cc.GATE_FILE_PATHS[gate]` (scripts/lib/
-    gate_checklists.py), the same dict check_gate_passed() consults.
+    gate_checklists.py) -- with `verdict` set in its YAML frontmatter
+    `gate:` field, the ONLY place check_gate_passed() reads a verdict from
+    since WI-0129 F3/F4 retired the prose scanner. `body` is optional prose
+    appended after the frontmatter block, for fixtures that need to prove
+    prose is no longer read at all (e.g. a `no_go` verdict alongside a
+    "Go-Live" paragraph in the body -- the exact regression this tranche
+    fixes, see GateVerdictFrontmatterRegressionTest below).
 
     Before this fix (WI-0129, finding F2) this helper hardcoded
     docs/GATE_<PHASE>.md -- the flat legacy path -- so the fixture and the
@@ -110,42 +169,49 @@ def write_gate_file(project_dir: Path, gate: str, body: str) -> None:
     right?" could never be asked; that flat path is never written by any
     real gate-pN.md command (see check_gate_passed()'s own docstring).
 
-    Raises KeyError for any gate absent from GATE_FILE_PATHS (currently
-    only "gate-p5", which has no dedicated gate file at all) -- callers
-    must use satisfy_gate_p5_via_handover()/unsatisfy_gate() for that one.
+    Raises KeyError for any gate absent from GATE_FILE_PATHS. None are,
+    currently: gate-p5 (docs/planning/SPRINT.md) was the last gate this
+    dict omitted, and this tranche gives it an entry too.
     """
     rel_path = cc.GATE_FILE_PATHS[gate]
     full_path = project_dir / rel_path
     full_path.parent.mkdir(parents=True, exist_ok=True)
-    full_path.write_text(body, encoding="utf-8")
+    full_path.write_text(f"---\ngate: {verdict}\n---\n{body}", encoding="utf-8")
 
 
-def satisfy_gate_p5_via_handover(project_dir: Path) -> None:
-    """gate-p5 has no dedicated gate file (GATE_FILE_PATHS omits it) -- the
-    only way check_gate_passed() can report it passed is the HANDOVER.md
-    phase-comparison fallback, so that is what satisfies it here too."""
-    docs = project_dir / "docs"
-    docs.mkdir(parents=True, exist_ok=True)
-    (docs / "HANDOVER.md").write_text("Phase: P6\n", encoding="utf-8")
+def write_gate_file_without_gate_field(project_dir: Path, gate: str, body: str = "Some prose.\n") -> None:
+    """Writes the gate's own artifact WITH a frontmatter block but with no
+    `gate:` field inside it at all -- the "field missing" failure shape
+    check_gate_passed() must report by name (as opposed to "file missing"
+    or "value outside vocabulary")."""
+    rel_path = cc.GATE_FILE_PATHS[gate]
+    full_path = project_dir / rel_path
+    full_path.parent.mkdir(parents=True, exist_ok=True)
+    full_path.write_text(f"---\nphase: P3\n---\n{body}", encoding="utf-8")
+
+
+def _passing_verdict_for(rel_path: str) -> str:
+    return _CANONICAL_PASSING_VERDICT[cc.gate_artifact_kind(rel_path)]
+
+
+def _blocking_verdict_for(rel_path: str) -> str:
+    return _CANONICAL_BLOCKING_VERDICT[cc.gate_artifact_kind(rel_path)]
 
 
 def satisfy_gate(project_dir: Path, gate: str) -> None:
-    """Satisfies `gate` in `project_dir` however that gate is actually
-    checked: its own gate file for the seven phase-folder gates, or the
-    HANDOVER.md fallback for gate-p5."""
-    if gate in cc.GATE_FILE_PATHS:
-        write_gate_file(project_dir, gate, "Verdict: Go")
-    else:
-        satisfy_gate_p5_via_handover(project_dir)
+    """Satisfies `gate` in `project_dir` with a passing verdict on its own
+    artifact -- 'go' for the seven GATE_P*.md gates, 'done' for gate-p5's
+    docs/planning/SPRINT.md (the two vocabularies differ; see
+    gate_checklists.GATE_VERDICT_PASSING_VALUES)."""
+    rel_path = cc.GATE_FILE_PATHS[gate]
+    write_gate_file(project_dir, gate, _passing_verdict_for(rel_path))
 
 
 def unsatisfy_gate(project_dir: Path, gate: str) -> None:
-    """Undoes satisfy_gate() -- removes whichever artefact was used to
-    satisfy `gate`, so a test can observe the gate-not-passed path."""
-    if gate in cc.GATE_FILE_PATHS:
-        (project_dir / cc.GATE_FILE_PATHS[gate]).unlink()
-    else:
-        (project_dir / "docs" / "HANDOVER.md").unlink()
+    """Undoes satisfy_gate() -- removes the gate's own artifact file
+    entirely, so check_gate_passed() falls through to the (out-of-scope,
+    unchanged) HANDOVER.md phase-comparison branch."""
+    (project_dir / cc.GATE_FILE_PATHS[gate]).unlink()
 
 
 def make_satisfied_project_dir(tmp_root: Path, command: str, spec: dict) -> Path:
@@ -167,19 +233,145 @@ def make_satisfied_project_dir(tmp_root: Path, command: str, spec: dict) -> Path
     return project_dir
 
 
-class GateVerdictDiscriminatorTest(unittest.TestCase):
-    """Drives the real CLI against the three verdict shapes from the
-    reproduced-defect table above. p4-backlog's own entry has an empty
-    `files` list (:76-79), so `ready`/`blocked` here is driven by
-    check_gate_passed's Go/No-Go discriminator alone."""
+class GateVerdictFrontmatterVocabularyTest(unittest.TestCase):
+    """Exhaustive per-value coverage of both gate-verdict vocabularies
+    (WI-0129, findings F3/F4): every value in GATE_P_VOCABULARY, on its own
+    GATE_P*.md artifact (gate-p3), and every value in SPRINT_VOCABULARY, on
+    its own SPRINT.md artifact (gate-p5) -- the right pass/block outcome
+    for each, `pending` and `pivot`/`not_done` included (both exist in
+    their vocabulary but must still BLOCK -- only go/conditional_go and
+    done/conditionally_done unblock)."""
 
     def setUp(self):
         self.tmp_root = tempfile.mkdtemp()
         self.addCleanup(lambda: __import__("shutil").rmtree(self.tmp_root, ignore_errors=True))
 
-    def _run(self, gate_body: str):
+    def _check(self, gate: str, verdict: str):
         project_dir = Path(tempfile.mkdtemp(dir=self.tmp_root))
-        write_gate_file(project_dir, "gate-p3", gate_body)
+        write_gate_file(project_dir, gate, verdict)
+        return cc.check_gate_passed(gate, str(project_dir))
+
+    def test_every_gate_p_verdict_has_the_expected_outcome(self):
+        expected_passing = {"go", "conditional_go"}
+        for verdict in GATE_P_VOCABULARY:
+            with self.subTest(verdict=verdict):
+                passed, reason = self._check("gate-p3", verdict)
+                self.assertEqual(passed, verdict in expected_passing, reason)
+                if not passed:
+                    self.assertIsNotNone(reason)
+
+    def test_every_sprint_verdict_has_the_expected_outcome(self):
+        expected_passing = {"done", "conditionally_done"}
+        for verdict in SPRINT_VOCABULARY:
+            with self.subTest(verdict=verdict):
+                passed, reason = self._check("gate-p5", verdict)
+                self.assertEqual(passed, verdict in expected_passing, reason)
+                if not passed:
+                    self.assertIsNotNone(reason)
+
+    def test_pending_blocks_on_both_artifacts(self):
+        self.assertFalse(self._check("gate-p3", "pending")[0])
+        self.assertFalse(self._check("gate-p5", "pending")[0])
+
+    def test_pivot_blocks_on_gate_p(self):
+        self.assertFalse(self._check("gate-p3", "pivot")[0])
+
+
+class GateVerdictCrossVocabularyTest(unittest.TestCase):
+    """The two discriminating cases a SHARED vocabulary would pass: `done`
+    (a SPRINT-only passing value) written on a GATE_P*.md artifact, and
+    `go` (a GATE_P-only passing value) written on SPRINT.md. Both must
+    block -- gate_artifact_kind() selects the vocabulary by the artifact's
+    own path, not by whether the value happens to be a passing token on
+    SOME vocabulary (WI-0129)."""
+
+    def setUp(self):
+        self.tmp_root = tempfile.mkdtemp()
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.tmp_root, ignore_errors=True))
+
+    def test_done_on_a_gate_p_artifact_blocks(self):
+        project_dir = Path(tempfile.mkdtemp(dir=self.tmp_root))
+        write_gate_file(project_dir, "gate-p3", "done")
+        passed, reason = cc.check_gate_passed("gate-p3", str(project_dir))
+        self.assertFalse(passed)
+        self.assertIn("done", reason)
+
+    def test_go_on_sprint_md_blocks(self):
+        project_dir = Path(tempfile.mkdtemp(dir=self.tmp_root))
+        write_gate_file(project_dir, "gate-p5", "go")
+        passed, reason = cc.check_gate_passed("gate-p5", str(project_dir))
+        self.assertFalse(passed)
+        self.assertIn("go", reason)
+
+
+class GateVerdictMissingFieldTest(unittest.TestCase):
+    """A gate artifact that EXISTS but carries no `gate:` field at all --
+    the old prose scanner's lenient `return True` for this exact shape was
+    finding F4. The fixed parser fails closed and names the field in its
+    reason."""
+
+    def setUp(self):
+        self.tmp_root = tempfile.mkdtemp()
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.tmp_root, ignore_errors=True))
+
+    def test_no_gate_field_blocks_and_names_the_field(self):
+        project_dir = Path(tempfile.mkdtemp(dir=self.tmp_root))
+        write_gate_file_without_gate_field(project_dir, "gate-p3")
+        passed, reason = cc.check_gate_passed("gate-p3", str(project_dir))
+        self.assertFalse(passed)
+        self.assertIn("gate:", reason)
+        self.assertIn("docs/architecture/GATE_P3.md", reason)
+
+    def test_no_frontmatter_block_at_all_blocks_and_names_the_field(self):
+        """A gate file that predates the frontmatter schema entirely (no
+        `---` block whatsoever) is a stricter case of the same shape --
+        _read_frontmatter_field returns None for it the same way."""
+        project_dir = Path(tempfile.mkdtemp(dir=self.tmp_root))
+        full_path = project_dir / cc.GATE_FILE_PATHS["gate-p3"]
+        full_path.parent.mkdir(parents=True, exist_ok=True)
+        full_path.write_text("Verdict: Go\n\nNo frontmatter block here.\n", encoding="utf-8")
+        passed, reason = cc.check_gate_passed("gate-p3", str(project_dir))
+        self.assertFalse(passed)
+        self.assertIn("gate:", reason)
+
+
+class GateVerdictOutsideVocabularyTest(unittest.TestCase):
+    """A `gate:` value outside its artifact's closed vocabulary -- using
+    the real prose spelling ("Conditional Go") that motivated this fix in
+    the first place (measured across three CCPR-using projects, seven
+    different prose spellings; none of them is the declared token
+    `conditional_go`). Blocks, naming the offending value."""
+
+    def setUp(self):
+        self.tmp_root = tempfile.mkdtemp()
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.tmp_root, ignore_errors=True))
+
+    def test_prose_spelled_value_blocks_and_names_the_value(self):
+        project_dir = Path(tempfile.mkdtemp(dir=self.tmp_root))
+        write_gate_file(project_dir, "gate-p3", "Conditional Go")
+        passed, reason = cc.check_gate_passed("gate-p3", str(project_dir))
+        self.assertFalse(passed)
+        self.assertIn("Conditional Go", reason)
+
+
+class GateVerdictFrontmatterRegressionTest(unittest.TestCase):
+    """WI-0129's own regression fixture, pinned end to end via the real CLI
+    (p4-backlog's own entry has an empty `files` list, so `ready`/`blocked`
+    here is driven by the gate-verdict check alone, same subprocess-
+    boundary reasoning as the class this replaces): a gate document whose
+    `gate:` frontmatter says `no_go` while its PROSE BODY contains a
+    "Go-Live" paragraph. Under the pre-fix prose scanner this exact
+    document returned `ready`, exit 0 -- the substring "Go" inside
+    "Go-Live" satisfied the old `\\bgo\\b` pattern. The fixed parser never
+    reads the body at all."""
+
+    def setUp(self):
+        self.tmp_root = tempfile.mkdtemp()
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.tmp_root, ignore_errors=True))
+
+    def _run(self, verdict: str, body: str):
+        project_dir = Path(tempfile.mkdtemp(dir=self.tmp_root))
+        write_gate_file(project_dir, "gate-p3", verdict, body)
         result = __import__("subprocess").run(
             [sys.executable, str(SCRIPT_PATH), "p4-backlog", str(project_dir)],
             capture_output=True,
@@ -187,53 +379,55 @@ class GateVerdictDiscriminatorTest(unittest.TestCase):
         )
         return result
 
-    def test_explicit_go_is_ready(self):
-        result = self._run("Verdict: Go")
-        self.assertEqual(result.stdout.strip(), "ready")
-        self.assertEqual(result.returncode, 0)
-
-    def test_explicit_no_go_is_blocked(self):
-        result = self._run("Verdict: No-Go — blocked on three findings")
+    def test_no_go_frontmatter_with_a_go_live_paragraph_is_blocked(self):
+        result = self._run(
+            "no_go",
+            "## Go-Live Checklist\n\nOnce merged, coordinate the Go-Live "
+            "window with the release team.\n",
+        )
         self.assertEqual(result.stdout.strip().splitlines()[0], "blocked")
         self.assertEqual(result.returncode, 1)
 
-    def test_no_verdict_at_all_is_ready(self):
-        """Documented leniency (:125-128): a gate file that uses no
-        Go/No-Go vocabulary at all is not itself a rejection."""
-        result = self._run("Some text without a verdict")
-        self.assertEqual(result.stdout.strip(), "ready")
-        self.assertEqual(result.returncode, 0)
-
-    def test_prose_no_go_mention_before_an_appended_go_verdict_is_ready(self):
-        """Six shipped gate commands instruct writers to name "No-Go" in
-        prose when flagging an Inviolable breach (gate-p0/p1/p2/p3/p4/p6.md
-        all carry language like "treat it as a No-Go signal"). A document
-        that does exactly that but still concludes with an appended
-        'Verdict: Go' must be ready -- this is the WI-0128 finding-#5
-        regression: a "block if no-go appears anywhere" rule returns
-        False here (measured against the pre-fix code: False, i.e.
-        blocked -- the failure this test is written to catch)."""
+    def test_go_frontmatter_with_a_no_go_mention_is_ready(self):
+        """The mirror case: six shipped gate commands instruct writers to
+        name "No-Go" in prose when flagging an Inviolable breach. A
+        document that does exactly that but carries `gate: go` in its
+        frontmatter must still be ready -- the frontmatter field is the
+        only signal read, prose is never consulted either way."""
         result = self._run(
+            "go",
             "Any violation is treated as a No-Go signal per the "
-            "constitution.\n\n## Gate Notes\n\nVerdict: Go\n"
+            "constitution.\n\n## Gate Notes\n\nNo violations found.\n",
         )
         self.assertEqual(result.stdout.strip(), "ready")
         self.assertEqual(result.returncode, 0)
 
-    def test_prose_go_mention_before_an_appended_no_go_verdict_is_blocked(self):
-        """The mirror image of the test above: an early, incidental "go"
-        must not outrank an appended 'Verdict: No-Go'. This falsifies the
-        naive inversion of the fix above ("pass if go appears anywhere,
-        checked first") -- measured against that alternative rule: True,
-        i.e. ready -- not against the shipped pre-fix code, which already
-        returns blocked here because its own no-go check runs first and
-        matches the later "No-Go" token regardless of position."""
-        result = self._run(
-            "The team is a go for the next milestone.\n\n"
-            "## Gate Notes\n\nVerdict: No-Go -- blocked on findings\n"
-        )
-        self.assertEqual(result.stdout.strip().splitlines()[0], "blocked")
-        self.assertEqual(result.returncode, 1)
+
+class GateVerdictVocabularyMatchesTheLintScriptTest(unittest.TestCase):
+    """CONTRIBUTING.md's "derive a contract test's expectation from the
+    other artifact, not the code under test": command-check.py's own
+    gate-verdict sets (scripts/lib/gate_checklists.py's
+    GATE_VERDICT_VOCABULARIES/GATE_VERDICT_PASSING_VALUES) must equal
+    VALID_GATE_VERDICTS/VALID_SPRINT_VERDICTS as parsed straight out of
+    scripts/phase-docs-lint.sh's own source -- the lint script's copy,
+    never this test's own retyped literal. `templates/PHASE_DOC_SCHEMA.md`
+    binds a THIRD copy (the human-readable table) to the same lint-script
+    source via test_phase_docs_lint.py's own GateVerdictVocabulary
+    MatchesSchemaTest -- together the three tests keep all three copies
+    (schema doc, lint enforcement, command-check.py's consumer) from
+    drifting from each other unnoticed."""
+
+    def test_gate_p_vocabulary_matches_the_lint_script(self):
+        self.assertEqual(cc.GATE_VERDICT_VOCABULARIES["GATE_P"], frozenset(GATE_P_VOCABULARY))
+
+    def test_sprint_vocabulary_matches_the_lint_script(self):
+        self.assertEqual(cc.GATE_VERDICT_VOCABULARIES["SPRINT"], frozenset(SPRINT_VOCABULARY))
+
+    def test_the_two_vocabularies_are_not_identical(self):
+        # Guards against a future edit collapsing both sets into one shared
+        # constant -- the whole point of the split is that 'done' and 'go'
+        # are each valid for only ONE artifact.
+        self.assertNotEqual(cc.GATE_VERDICT_VOCABULARIES["GATE_P"], cc.GATE_VERDICT_VOCABULARIES["SPRINT"])
 
 
 class CommandPrerequisitesSchemaTest(unittest.TestCase):
@@ -366,16 +560,21 @@ class CommandPrerequisitesEmptyFilesEntriesRemovalStructuralProofTest(unittest.T
     entry branch and the generic fallback pass the identical gate string
     into check_gate_passed(), so the fallback can never produce a
     different verdict -- that half of the coincidence is real and is what
-    this class proves. The `reasons` *text* is not identical, though: with
-    the gate unsatisfied the two branches format two different strings for
-    the same fact (`"{gate} not passed (gate file missing or no 'Go')"` vs
-    `"{prev_gate} not passed"`) -- proven behaviourally by
-    test_removal_changes_the_reason_text_when_the_gate_is_not_passed below,
-    not here. This class proves only what a behavioural sweep on the
-    satisfied state cannot: the dict's own count and key membership, which
-    a removal cannot fail to change regardless of the reasons-text
-    divergence -- same shape as next_steps.py's own
-    PhaseCountRemovalRedProofTest."""
+    this class proves.
+
+    Before WI-0129, the `reasons` *text* was NOT identical: with the gate
+    unsatisfied the two branches formatted two different strings for the
+    same fact (`"{gate} not passed (gate file missing or no 'Go')"` vs
+    `"{prev_gate} not passed"`), because each branch built its own reason
+    string independently. This tranche moved reason-formatting entirely
+    into check_gate_passed() itself (it now returns `(passed, reason)`),
+    so both call sites simply pass the same reason through -- the wording
+    divergence is gone by construction, not by coincidence.
+    test_reason_text_is_identical_via_both_branches_when_the_gate_is_not_
+    passed below proves that directly. This class proves only what a
+    behavioural sweep on the satisfied state cannot: the dict's own count
+    and key membership, which a removal cannot fail to change -- same
+    shape as next_steps.py's own PhaseCountRemovalRedProofTest."""
 
     def setUp(self):
         self.tmp_root = tempfile.mkdtemp()
@@ -411,22 +610,14 @@ class CommandPrerequisitesEmptyFilesEntriesRemovalStructuralProofTest(unittest.T
 
                 self.assertIn(command, cc.COMMAND_PREREQUISITES)
 
-    def test_removal_changes_the_reason_text_when_the_gate_is_not_passed(self):
-        """The structural proof above only shows that the `ready` boolean
-        is identical for this removal -- it does NOT show "ZERO observable
-        check_command() difference", which an earlier version of this
-        class's docstring wrongly claimed. That claim was only ever tested
-        in the satisfied state (make_satisfied_project_dir always writes
-        'Verdict: Go'), where both branches trivially return
-        `reasons == []`. With the gate unsatisfied the two branches
-        disagree on the reason wording (measured 28.08.2026, current
-        code):
-
-            p4-backlog:  with entry  -> "gate-p3 not passed (gate file missing or no 'Go')"
-                         without entry -> "gate-p3 not passed"
-            p3-architecture: with entry -> "gate-p2 not passed (gate file missing or no 'Go')"
-                             without entry -> "gate-p2 not passed"
-        """
+    def test_reason_text_is_identical_via_both_branches_when_the_gate_is_not_passed(self):
+        """Before WI-0129, removing the entry changed the reason WORDING
+        even though `ready` stayed the same (the explicit-entry branch and
+        the generic fallback each formatted their own string). Since both
+        branches now simply forward check_gate_passed()'s own `reason`
+        unchanged, the reason text is identical whether the entry is
+        present or removed -- proving the removal is now a TRUE no-op for
+        this pair, not the partial one the pre-fix docstring described."""
         for command in ("p4-backlog", "p3-architecture"):
             with self.subTest(command=command):
                 spec = cc.COMMAND_PREREQUISITES[command]
@@ -436,46 +627,55 @@ class CommandPrerequisitesEmptyFilesEntriesRemovalStructuralProofTest(unittest.T
 
                 before_ready, before_reasons = cc.check_command(command, str(project_dir))
                 self.assertFalse(before_ready)
-                self.assertEqual(
-                    before_reasons,
-                    [f"{gate} not passed (gate file missing or no 'Go')"],
-                )
+                self.assertEqual(len(before_reasons), 1)
+                self.assertIn(gate, before_reasons[0])
 
                 with patch.dict(cc.COMMAND_PREREQUISITES):
                     del cc.COMMAND_PREREQUISITES[command]
 
                     after_ready, after_reasons = cc.check_command(command, str(project_dir))
                     self.assertFalse(after_ready)
-                    self.assertEqual(after_reasons, [f"{gate} not passed"])
-                    self.assertNotEqual(before_reasons, after_reasons)
+                    self.assertEqual(before_reasons, after_reasons)
 
                 self.assertIn(command, cc.COMMAND_PREREQUISITES)
 
 
 GATE_FILE_CLAIM_RE = re.compile(r"^Create \*\*`(docs/[^`]+/GATE_P(\d)\.md)`\*\*", re.MULTILINE)
 
-# The one top-level gate-pN.md command that writes no dedicated gate file at
-# all -- see GateFileClaimsStructuralTest.test_gate_p5_makes_no_such_claim.
-# Any OTHER gate-pN.md producing no claim match is a defect (its claim
-# sentence changed shape and the regex no longer recognises it, or it is a
-# genuinely new no-claim gate nobody registered here) -- not a silent skip.
-KNOWN_NO_CLAIM_GATES = {"gate-p5"}
+# gate-p5 claims a different-SHAPED artifact than the other seven: not "this
+# command creates its own GATE_P5.md" (it has none), but "this command sets
+# the `gate:` frontmatter field on docs/planning/SPRINT.md" (WI-0129).
+# Anchored on the exact sentence commands/gate-p5.md's "### 3. Create Gate
+# Protocol" section carries -- a differently-shaped bold lead-in than
+# GATE_FILE_CLAIM_RE's "Create **`...`**", which is exactly why it needs its
+# own pattern rather than a tweak to that one.
+SPRINT_GATE_FIELD_CLAIM_RE = re.compile(
+    r"\*\*Set `(docs/planning/SPRINT\.md)`'s frontmatter field `gate:`\*\*"
+)
 
 
 def _parse_gate_file_claims(commands_dir: Optional[Path] = None) -> dict:
-    """Parses each top-level `commands/gate-p<N>.md`'s own "Create
-    **`docs/<folder>/GATE_P<N>.md`**" statement -- the file's own claim
-    about what it writes -- into `{"gate-p<N>": "docs/<folder>/GATE_P<N>.md"}`.
+    """Parses each top-level `commands/gate-p<N>.md`'s own claim about what
+    gate artifact it writes into `{"gate-p<N>": "<claimed path>"}`. Seven of
+    the eight (gate-p0/1/2/3/4/6/7) claim their own dedicated "Create
+    **`docs/<folder>/GATE_P<N>.md`**" file (GATE_FILE_CLAIM_RE); gate-p5
+    claims a differently-shaped artifact instead -- setting the `gate:`
+    frontmatter field on the shared docs/planning/SPRINT.md
+    (SPRINT_GATE_FIELD_CLAIM_RE) -- because it has no dedicated gate file of
+    its own (WI-0129: SPRINT.md *is* gate-p5's gate artifact).
 
     `commands_dir` defaults to the real, tracked `commands/` tree
-    (`REPO_ROOT / "commands"`); tests that need to exercise the two guards
+    (`REPO_ROOT / "commands"`); tests that need to exercise the guards
     below without mutating a tracked file pass a scratch copy instead --
     see `GateFileClaimParserGuardRedProofTest`.
 
     Keyed off each file's own FILENAME (`path.stem`, e.g. "gate-p3"), never
-    off the digit captured out of the matched claim text -- code review
-    found two failure shapes in the version that keyed off the captured
-    digit alone, both now guarded:
+    off a digit captured out of the matched claim text -- code review found
+    two failure shapes in an earlier version that keyed off the captured
+    digit alone, both still guarded here for the GATE_FILE_CLAIM_RE shape
+    (the SPRINT_GATE_FIELD_CLAIM_RE shape carries no digit to misattribute,
+    so it is instead guarded by requiring the match come from "gate-p5"
+    specifically -- see below):
 
     * Misattribution: if `gate-p3.md` ever typo'd its own claim to name
       `GATE_P4.md`, keying off the captured digit would file the claim
@@ -486,12 +686,20 @@ def _parse_gate_file_claims(commands_dir: Optional[Path] = None) -> dict:
       filename's own digit, or this raises loudly instead of filing the
       claim under the wrong key.
     * Silent absence: a top-level `gate-pN.md` whose claim sentence has a
-      different shape (different verb, no bold, wrapped across two lines)
-      produces no regex match. The prior `if match:` with no `else` let
-      that pass through as a silently missing dict entry -- indistinguishable
-      from gate-p5's genuine, documented no-claim case. Guarded: any
-      no-match gate other than the ones named in KNOWN_NO_CLAIM_GATES
-      raises loudly instead of vanishing from the result.
+      different shape than BOTH patterns above (different verb, no bold,
+      wrapped across two lines) produces no regex match at all. This raises
+      loudly instead of vanishing from the result -- there is no longer an
+      exemption list a genuinely new no-claim gate could quietly hide
+      behind (gate-p5 no longer needs one: it makes a claim too, just a
+      differently-shaped one).
+    * Cross-shape misattribution: if some OTHER gate-pN.md's claim sentence
+      ever happened to match SPRINT_GATE_FIELD_CLAIM_RE (e.g. a future gate
+      also documented as setting a shared living document's frontmatter),
+      filing it under that gate's own key would be correct on its face but
+      is exactly the kind of claim shape this parser has not been taught to
+      generalise -- guarded by requiring gate-p5 specifically for this
+      pattern; any other gate matching it raises loudly rather than being
+      silently accepted as "another SPRINT-shaped gate".
 
     Deliberately does not read the four `gate-p6-qa.md` / `gate-p6-
     security.md` / `gate-p7-business.md` / `gate-p7-tech.md` sub-gate files
@@ -510,25 +718,40 @@ def _parse_gate_file_claims(commands_dir: Optional[Path] = None) -> dict:
         gate = path.stem
         content = path.read_text(encoding="utf-8")
         match = GATE_FILE_CLAIM_RE.search(content)
-        if match is None:
-            if gate in KNOWN_NO_CLAIM_GATES:
-                continue
-            raise AssertionError(
-                f"{path.name} makes no 'Create **`docs/.../GATE_P<N>.md`**' "
-                f"claim, and is not in KNOWN_NO_CLAIM_GATES -- either its "
-                f"claim sentence changed shape (update GATE_FILE_CLAIM_RE) "
-                f"or this is a genuinely new no-claim gate (add it to "
-                f"KNOWN_NO_CLAIM_GATES with a reason)."
-            )
-        claimed_gate = f"gate-p{match.group(2)}"
-        if claimed_gate != gate:
-            raise AssertionError(
-                f"{path.name} claims to write a GATE_P{match.group(2)}.md "
-                f"file -- that digit disagrees with the file's own name "
-                f"({gate}). Fix the claim sentence or the filename; this "
-                f"parser refuses to guess which one is right."
-            )
-        claims[gate] = match.group(1)
+        if match is not None:
+            claimed_gate = f"gate-p{match.group(2)}"
+            if claimed_gate != gate:
+                raise AssertionError(
+                    f"{path.name} claims to write a GATE_P{match.group(2)}.md "
+                    f"file -- that digit disagrees with the file's own name "
+                    f"({gate}). Fix the claim sentence or the filename; this "
+                    f"parser refuses to guess which one is right."
+                )
+            claims[gate] = match.group(1)
+            continue
+
+        sprint_match = SPRINT_GATE_FIELD_CLAIM_RE.search(content)
+        if sprint_match is not None:
+            if gate != "gate-p5":
+                raise AssertionError(
+                    f"{path.name} matches the SPRINT.md frontmatter-field "
+                    f"claim shape, but only gate-p5 is known to make that "
+                    f"kind of claim -- either this is a genuinely new "
+                    f"SPRINT-shaped gate (extend this guard deliberately) "
+                    f"or {path.name}'s prose accidentally matches a pattern "
+                    f"meant for a different file."
+                )
+            claims[gate] = sprint_match.group(1)
+            continue
+
+        raise AssertionError(
+            f"{path.name} makes no recognised gate-file claim -- neither "
+            f"'Create **`docs/.../GATE_P<N>.md`**' (GATE_FILE_CLAIM_RE) nor "
+            f"gate-p5's SPRINT.md frontmatter-field claim "
+            f"(SPRINT_GATE_FIELD_CLAIM_RE). Its claim sentence changed shape "
+            f"(update the matching pattern) or this is a genuinely new "
+            f"no-claim or differently-shaped gate."
+        )
     return claims
 
 
@@ -600,9 +823,12 @@ class GateFileClaimParserGuardRedProofTest(unittest.TestCase):
 
     def test_unrecognised_claim_sentence_shape_raises_instead_of_vanishing(self):
         """gate-p3.md's claim sentence reworded to drop the recognised
-        "Create **`...`**" shape entirely. Before this fix: no exception,
-        "gate-p3" silently absent from the result -- indistinguishable from
-        gate-p5's genuine, documented no-claim case."""
+        "Create **`...`**" shape entirely, and not accidentally matching
+        the SPRINT_GATE_FIELD_CLAIM_RE shape either. Before the F1/F2 fix:
+        no exception, "gate-p3" silently absent from the result --
+        indistinguishable from a genuine no-claim gate. There is no longer
+        an exemption list a case like this could quietly hide behind, so
+        it must raise, not vanish."""
         self._mutate_gate_p3(
             "Create **`docs/architecture/GATE_P3.md`** with:",
             "Write the architecture gate file with:",
@@ -610,33 +836,49 @@ class GateFileClaimParserGuardRedProofTest(unittest.TestCase):
         with self.assertRaises(AssertionError) as ctx:
             _parse_gate_file_claims(self.commands_copy)
         self.assertIn("gate-p3.md", str(ctx.exception))
-        self.assertIn("KNOWN_NO_CLAIM_GATES", str(ctx.exception))
+        self.assertIn("no recognised gate-file claim", str(ctx.exception))
+
+    def test_gate_p3_accidentally_matching_the_sprint_shape_raises(self):
+        """If gate-p3.md's claim sentence were ever reworded to accidentally
+        match SPRINT_GATE_FIELD_CLAIM_RE (the shape reserved for gate-p5's
+        differently-structured SPRINT.md claim), the cross-shape
+        misattribution guard must raise rather than silently filing gate-p3
+        under a claim pattern meant for a different gate."""
+        self._mutate_gate_p3(
+            "Create **`docs/architecture/GATE_P3.md`** with:",
+            "**Set `docs/planning/SPRINT.md`'s frontmatter field `gate:`** with:",
+        )
+        with self.assertRaises(AssertionError) as ctx:
+            _parse_gate_file_claims(self.commands_copy)
+        self.assertIn("gate-p3.md", str(ctx.exception))
+        self.assertIn("only gate-p5", str(ctx.exception))
 
 
 class GateFileClaimsStructuralTest(unittest.TestCase):
-    """Pins which top-level `gate-pN.md` commands claim to write their own
-    `GATE_PN.md`, parsed straight from each file's own statement -- not
-    from a hand-maintained table. (The PO's own first attempt at this
-    table, done by grepping every `docs/<phase>/GATE_PX.md` mention,
-    mis-classified gate-p7 as ambiguous by conflating `gate-p7-tech.md`'s
-    *read*-reference to `docs/quality/GATE_P6.md` with a *write* claim --
-    this parser only matches the literal "Create **`...`**" sentence, so
-    it does not repeat that mistake.)"""
+    """Pins which top-level `gate-pN.md` commands claim to write, and what,
+    parsed straight from each file's own statement -- not from a
+    hand-maintained table. (The PO's own first attempt at this table, done
+    by grepping every `docs/<phase>/GATE_PX.md` mention, mis-classified
+    gate-p7 as ambiguous by conflating `gate-p7-tech.md`'s *read*-reference
+    to `docs/quality/GATE_P6.md` with a *write* claim -- this parser only
+    matches the literal claim sentences, so it does not repeat that
+    mistake.)"""
 
-    def test_seven_gates_claim_a_phase_folder_gate_file(self):
+    def test_all_eight_gates_claim_an_artifact(self):
         claims = _parse_gate_file_claims()
         self.assertEqual(
             set(claims),
-            {"gate-p0", "gate-p1", "gate-p2", "gate-p3", "gate-p4", "gate-p6", "gate-p7"},
+            {"gate-p0", "gate-p1", "gate-p2", "gate-p3", "gate-p4", "gate-p5", "gate-p6", "gate-p7"},
         )
 
-    def test_gate_p5_makes_no_such_claim(self):
+    def test_gate_p5_claims_sprint_md_not_a_phase_folder_gate_file(self):
         """/gate-p5 (commands/gate-p5.md) never writes a dedicated gate
-        file at all -- its sprint verdict lives in docs/planning/SPRINT.md
-        instead (a different document shape; parsing it is out of scope
-        here, see command-check.py's check_gate_passed())."""
+        file of its own -- its claim names docs/planning/SPRINT.md's own
+        `gate:` frontmatter field instead (WI-0129: SPRINT.md *is* its gate
+        artifact), a differently-shaped claim than the other seven's
+        "Create **`docs/<folder>/GATE_P<N>.md`**"."""
         claims = _parse_gate_file_claims()
-        self.assertNotIn("gate-p5", claims)
+        self.assertEqual(claims["gate-p5"], "docs/planning/SPRINT.md")
 
     def test_claimed_paths_match_the_phase_folder_convention(self):
         claims = _parse_gate_file_claims()
@@ -648,6 +890,7 @@ class GateFileClaimsStructuralTest(unittest.TestCase):
                 "gate-p2": "docs/validation/GATE_P2.md",
                 "gate-p3": "docs/architecture/GATE_P3.md",
                 "gate-p4": "docs/planning/GATE_P4.md",
+                "gate-p5": "docs/planning/SPRINT.md",
                 "gate-p6": "docs/quality/GATE_P6.md",
                 "gate-p7": "docs/launch/GATE_P7.md",
             },
@@ -698,8 +941,11 @@ class CheckGatePassedProbesThePhaseFolderPathTest(unittest.TestCase):
                 project_dir = Path(tempfile.mkdtemp(dir=self.tmp_root))
                 full_path = project_dir / rel_path
                 full_path.parent.mkdir(parents=True, exist_ok=True)
-                full_path.write_text("Verdict: Go", encoding="utf-8")
-                self.assertTrue(cc.check_gate_passed(gate, str(project_dir)))
+                full_path.write_text(
+                    f"---\ngate: {_passing_verdict_for(rel_path)}\n---\n", encoding="utf-8"
+                )
+                passed, reason = cc.check_gate_passed(gate, str(project_dir))
+                self.assertTrue(passed, reason)
 
     def test_no_go_verdict_at_the_claimed_path_is_not_passed(self):
         for gate, rel_path in _parse_gate_file_claims().items():
@@ -707,8 +953,11 @@ class CheckGatePassedProbesThePhaseFolderPathTest(unittest.TestCase):
                 project_dir = Path(tempfile.mkdtemp(dir=self.tmp_root))
                 full_path = project_dir / rel_path
                 full_path.parent.mkdir(parents=True, exist_ok=True)
-                full_path.write_text("Verdict: No-Go -- blocked", encoding="utf-8")
-                self.assertFalse(cc.check_gate_passed(gate, str(project_dir)))
+                full_path.write_text(
+                    f"---\ngate: {_blocking_verdict_for(rel_path)}\n---\n", encoding="utf-8"
+                )
+                passed, reason = cc.check_gate_passed(gate, str(project_dir))
+                self.assertFalse(passed)
 
     def test_the_three_legacy_flat_paths_are_no_longer_probed(self):
         """The three pre-fix candidate paths are dropped outright (no
@@ -719,45 +968,106 @@ class CheckGatePassedProbesThePhaseFolderPathTest(unittest.TestCase):
         exercised just `docs/GATE_P<N>.md` while its own docstring claimed
         all three, which would have missed a fix that dropped only that
         one shape and left the other two reachable by accident."""
-        for gate in _parse_gate_file_claims():
+        for gate, rel_path in _parse_gate_file_claims().items():
             phase = gate.replace("gate-", "").upper()  # "gate-p3" -> "P3"
             for legacy_filename in (f"GATE_{phase}.md", f"GATE-{phase}.md", f"{gate}.md"):
                 with self.subTest(gate=gate, legacy_filename=legacy_filename):
                     project_dir = Path(tempfile.mkdtemp(dir=self.tmp_root))
                     docs = project_dir / "docs"
                     docs.mkdir(parents=True, exist_ok=True)
-                    (docs / legacy_filename).write_text("Verdict: Go", encoding="utf-8")
-                    self.assertFalse(cc.check_gate_passed(gate, str(project_dir)))
+                    (docs / legacy_filename).write_text(
+                        f"---\ngate: {_passing_verdict_for(rel_path)}\n---\n", encoding="utf-8"
+                    )
+                    passed, reason = cc.check_gate_passed(gate, str(project_dir))
+                    self.assertFalse(passed)
 
 
-class GateP5HasNoFileProbeTest(unittest.TestCase):
-    """gate-p5 is the one gate `GATE_FILE_PATHS` deliberately omits (see
-    `GateFileClaimsStructuralTest.test_gate_p5_makes_no_such_claim`).
-    `check_gate_passed("gate-p5", ...)` must not silently invent a
-    phase-folder guess for it (e.g. `docs/planning/GATE_P5.md`, the folder
-    its GATE_CHECKLISTS['p5'] entries happen to share) -- a hand-authored
-    file at that path is not a real gate-p5 artefact and must not pass."""
+class GateP5UsesSprintMdTest(unittest.TestCase):
+    """WI-0129 gives gate-p5 an entry in GATE_FILE_PATHS for the first time
+    -- `docs/planning/SPRINT.md`, the one gate artifact that is not its own
+    dedicated `GATE_P*.md` file. This replaces the pre-fix class that
+    pinned gate-p5's ABSENCE from the mapping; that absence is exactly what
+    this tranche changes."""
 
     def setUp(self):
         self.tmp_root = tempfile.mkdtemp()
         self.addCleanup(lambda: __import__("shutil").rmtree(self.tmp_root, ignore_errors=True))
 
-    def test_gate_p5_is_absent_from_the_production_mapping(self):
-        self.assertNotIn("gate-p5", cc.GATE_FILE_PATHS)
+    def test_gate_p5_is_mapped_to_sprint_md(self):
+        self.assertEqual(cc.GATE_FILE_PATHS["gate-p5"], "docs/planning/SPRINT.md")
 
-    def test_a_phantom_planning_gate_file_does_not_satisfy_gate_p5(self):
+    def test_a_phantom_gate_p5_md_at_the_old_guessed_path_does_not_satisfy_gate_p5(self):
+        """A hand-authored `docs/planning/GATE_P5.md` (the naming pattern
+        every other gate uses, and the guess the pre-fix code explicitly
+        refused to make) is not gate-p5's real artifact -- only
+        docs/planning/SPRINT.md's own `gate:` field is read."""
         project_dir = Path(tempfile.mkdtemp(dir=self.tmp_root))
         planning = project_dir / "docs" / "planning"
         planning.mkdir(parents=True)
-        (planning / "GATE_P5.md").write_text("Verdict: Go", encoding="utf-8")
-        self.assertFalse(cc.check_gate_passed("gate-p5", str(project_dir)))
+        (planning / "GATE_P5.md").write_text("---\ngate: go\n---\n", encoding="utf-8")
+        passed, reason = cc.check_gate_passed("gate-p5", str(project_dir))
+        self.assertFalse(passed)
 
-    def test_gate_p5_still_passes_via_the_handover_fallback(self):
+    def test_sprint_md_with_gate_done_unblocks_gate_p5(self):
+        project_dir = Path(tempfile.mkdtemp(dir=self.tmp_root))
+        write_gate_file(project_dir, "gate-p5", "done")
+        passed, reason = cc.check_gate_passed("gate-p5", str(project_dir))
+        self.assertTrue(passed, reason)
+
+    def test_sprint_md_with_gate_not_done_blocks_gate_p5(self):
+        project_dir = Path(tempfile.mkdtemp(dir=self.tmp_root))
+        write_gate_file(project_dir, "gate-p5", "not_done")
+        passed, reason = cc.check_gate_passed("gate-p5", str(project_dir))
+        self.assertFalse(passed)
+
+    def test_gate_p5_still_falls_back_to_handover_when_sprint_md_is_absent(self):
+        """Finding F5 (out of scope for this tranche): when SPRINT.md does
+        not exist at all, gate-p5 falls through to the same HANDOVER.md
+        phase-comparison fallback every other gate uses -- unchanged."""
         project_dir = Path(tempfile.mkdtemp(dir=self.tmp_root))
         docs = project_dir / "docs"
         docs.mkdir(parents=True)
         (docs / "HANDOVER.md").write_text("Phase: P6\n", encoding="utf-8")
-        self.assertTrue(cc.check_gate_passed("gate-p5", str(project_dir)))
+        passed, reason = cc.check_gate_passed("gate-p5", str(project_dir))
+        self.assertTrue(passed, reason)
+
+
+class GateP5EndToEndTest(unittest.TestCase):
+    """gate-p5 end to end, through the real CLI: docs/planning/SPRINT.md's
+    `gate:` field unblocks/blocks /p6-functional exactly like every other
+    gate unblocks/blocks its own successor commands."""
+
+    def setUp(self):
+        self.tmp_root = tempfile.mkdtemp()
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.tmp_root, ignore_errors=True))
+
+    def _run(self, verdict: str):
+        project_dir = Path(tempfile.mkdtemp(dir=self.tmp_root))
+        for f in cc.COMMAND_PREREQUISITES["p6-functional"]["files"]:
+            full = project_dir / f
+            if f.endswith("/"):
+                full.mkdir(parents=True, exist_ok=True)
+                (full / ".keep").write_text("x", encoding="utf-8")
+            else:
+                full.parent.mkdir(parents=True, exist_ok=True)
+                full.write_text("x", encoding="utf-8")
+        write_gate_file(project_dir, "gate-p5", verdict)
+        result = __import__("subprocess").run(
+            [sys.executable, str(SCRIPT_PATH), "p6-functional", str(project_dir)],
+            capture_output=True,
+            text=True,
+        )
+        return result
+
+    def test_sprint_gate_done_unblocks_p6_functional(self):
+        result = self._run("done")
+        self.assertEqual(result.stdout.strip(), "ready")
+        self.assertEqual(result.returncode, 0)
+
+    def test_sprint_gate_not_done_blocks_p6_functional(self):
+        result = self._run("not_done")
+        self.assertEqual(result.stdout.strip().splitlines()[0], "blocked")
+        self.assertEqual(result.returncode, 1)
 
 
 class DeadCodeRemovedTest(unittest.TestCase):
@@ -800,14 +1110,16 @@ class HandoverPhaseFallbackStillWorksTest(unittest.TestCase):
         docs = project_dir / "docs"
         docs.mkdir(parents=True)
         (docs / "HANDOVER.md").write_text("Phase: P4\n", encoding="utf-8")
-        self.assertTrue(cc.check_gate_passed("gate-p3", str(project_dir)))
+        passed, reason = cc.check_gate_passed("gate-p3", str(project_dir))
+        self.assertTrue(passed, reason)
 
     def test_current_phase_at_or_before_the_gate_is_not_passed(self):
         project_dir = Path(tempfile.mkdtemp(dir=self.tmp_root))
         docs = project_dir / "docs"
         docs.mkdir(parents=True)
         (docs / "HANDOVER.md").write_text("Phase: P2\n", encoding="utf-8")
-        self.assertFalse(cc.check_gate_passed("gate-p3", str(project_dir)))
+        passed, reason = cc.check_gate_passed("gate-p3", str(project_dir))
+        self.assertFalse(passed)
 
 
 if __name__ == "__main__":

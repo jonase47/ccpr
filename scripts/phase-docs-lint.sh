@@ -62,6 +62,15 @@ PHASE_FOLDERS=(discovery concept validation architecture planning quality launch
 LIVING_FILES="HANDOVER.md BASELINE.md BACKLOG.md SPRINT.md MEMORY.md instincts.md"
 VALID_STATUS="skeleton draft active frozen archived living"
 VALID_PHASES="P0 P1 P2 P3 P4 P5 P6 P7 P8"
+# VALID_GATE_VERDICTS / VALID_SPRINT_VERDICTS — the two closed vocabularies
+# for the declared `gate:` frontmatter field (WI-0129, findings F3/F4;
+# templates/PHASE_DOC_SCHEMA.md "Gate verdict" section is the source of
+# truth these two strings mirror). A GATE_P*.md answers a phase-gate
+# question, SPRINT.md answers a sprint question — the two sets are
+# deliberately NOT unified: "done" is a real SPRINT.md value that must be
+# rejected on a GATE_P*.md, and "go" the other way round (check (k) below).
+VALID_GATE_VERDICTS="pending go conditional_go no_go pivot"
+VALID_SPRINT_VERDICTS="pending done conditionally_done not_done"
 # PLACEHOLDER_NAMES — the vcs-emptiness-marker convention check (h) treats
 # as "reserved, not built" rather than real content (WI-0122). Named list
 # (AC4 of that work item), not inlined into the predicate below, so a
@@ -125,6 +134,22 @@ is_valid_phase() {
     return 1
 }
 
+is_valid_gate_verdict() {
+    local g="$1"
+    for v in $VALID_GATE_VERDICTS; do
+        [[ "$g" == "$v" ]] && return 0
+    done
+    return 1
+}
+
+is_valid_sprint_verdict() {
+    local g="$1"
+    for v in $VALID_SPRINT_VERDICTS; do
+        [[ "$g" == "$v" ]] && return 0
+    done
+    return 1
+}
+
 # is_empty_dir — the question is not "does this directory contain any
 # entry" but "does it cover any actual file": a tree consisting solely of
 # nested empty subdirectories must still count as empty. `find -type f
@@ -160,6 +185,32 @@ is_placeholder_name() {
 # failure with no output — a placeholder alongside real content means the
 # directory is not "reserved, not built", it is built, and must stay
 # silent (AC3).
+# check_gate_verdict — (k) Gate verdict (WI-0129, findings F3/F4): a
+# GATE_P*.md must declare a `gate:` field from its own closed vocabulary.
+# Extracted into a function (WI-0129 follow-up) so it can be invoked from
+# TWO sites in the main loop: its original position after the frontmatter
+# checks, AND from inside check (a)'s no-frontmatter branch, right before
+# that branch's `continue`. A document with no frontmatter at all has no
+# `gate:` field either -- that absence is exactly what this check reports,
+# so it must not be skipped just because the frontmatter block itself is
+# missing. Matched by basename, not by doc_profile_for's full/reviews
+# split, because a gate document's shape has nothing to do with the
+# reviews genre. See the call sites below for the no-frontmatter rationale.
+check_gate_verdict() {
+    local file="$1" rel="$2" bn="$3"
+    case "$bn" in
+        GATE_P*.md)
+            local gate_val
+            gate_val="$(fm_field "$file" gate || true)"
+            if [[ -z "$gate_val" ]]; then
+                err "$rel — required field missing: gate (see PHASE_DOC_SCHEMA.md 'Gate verdict')"
+            elif ! is_valid_gate_verdict "$gate_val"; then
+                err "$rel — gate='$gate_val' is not in {$VALID_GATE_VERDICTS} (GATE_P*.md vocabulary)"
+            fi
+            ;;
+    esac
+}
+
 is_placeholder_only_dir() {
     local d="$1" f bn first=""
     while IFS= read -r f; do
@@ -228,8 +279,32 @@ for file in ${FILES[@]+"${FILES[@]}"}; do
     rel="${file#$PROJECT_DIR/}"
     bn="$(basename "$file")"
 
-    # Living files skip — they follow their own header convention
+    # Living files skip — they follow their own header convention. SPRINT.md
+    # is the one named exception (PHASE_DOC_SCHEMA.md's "Gate verdict"
+    # section, WI-0129): it stays a living file for every other purpose, but
+    # check (k) below still runs against it, because /gate-p5 records the
+    # sprint's own verdict in SPRINT.md's frontmatter and no other document
+    # carries it. Every other living file (HANDOVER.md, BASELINE.md,
+    # BACKLOG.md, MEMORY.md, instincts.md) keeps skipping everything,
+    # unchanged (see LivingFilesSkipTest).
+    #
+    # Matched by BASENAME, not by the full path docs/planning/SPRINT.md
+    # that GATE_FILE_PATHS names -- deliberate, and the same choice check
+    # (k) makes for GATE_P*.md below. A gate document in the wrong folder
+    # is exactly the document most likely to be wrong, and demanding the
+    # field there costs an author one frontmatter line while never causing
+    # a false pass (this lint reports; it does not unblock anything).
+    # Measured: one reference project carries docs/planning/GATE_P1.md and
+    # docs/planning/GATE_P6.md, neither in its canonical phase folder.
     if is_living_file "$bn"; then
+        if [[ "$bn" == "SPRINT.md" ]]; then
+            gate_val="$(fm_field "$file" gate || true)"
+            if [[ -z "$gate_val" ]]; then
+                err "$rel — required field missing: gate (see PHASE_DOC_SCHEMA.md 'Gate verdict')"
+            elif ! is_valid_sprint_verdict "$gate_val"; then
+                err "$rel — gate='$gate_val' is not in {$VALID_SPRINT_VERDICTS} (SPRINT.md vocabulary)"
+            fi
+        fi
         continue
     fi
 
@@ -243,6 +318,15 @@ for file in ${FILES[@]+"${FILES[@]}"}; do
         # (a) Frontmatter present?
         if ! fm_has "$file"; then
             warn "$rel — no YAML frontmatter (--- block at start). Migration to PHASE_DOC_SCHEMA recommended."
+            # check (k) still runs here (WI-0129 follow-up, see
+            # check_gate_verdict's own comment): a GATE_P*.md with no
+            # frontmatter at all has no `gate:` field, which is the error
+            # this check exists to report, not something the migration
+            # warning above should stand in for. The warning above stays,
+            # unchanged, for every document, gate or not -- this only adds
+            # a second, more specific finding on top of it for the gate
+            # case.
+            check_gate_verdict "$file" "$rel" "$bn"
             continue
         fi
 
@@ -297,6 +381,14 @@ for file in ${FILES[@]+"${FILES[@]}"}; do
             fi
         fi
     fi
+
+    # (k) Gate verdict (WI-0129, findings F3/F4) — the frontmatter-present
+    # path. See check_gate_verdict's own comment above for the full
+    # rationale (including why "Go"/"No-Go" prose-scraping was replaced)
+    # and for the OTHER call site, inside check (a)'s no-frontmatter
+    # branch above, which covers the document that never reaches this line
+    # at all because it `continue`d first.
+    check_gate_verdict "$file" "$rel" "$bn"
 
     # (d) status enum — runs in every profile, but only fires when status:
     # is actually set (fm_field returns empty on a file without frontmatter

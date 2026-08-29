@@ -13,7 +13,12 @@ import re
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "lib"))
 
 from next_steps import extract_phase_from_handover
-from gate_checklists import GATE_FILE_PATHS
+from gate_checklists import (
+    GATE_FILE_PATHS,
+    GATE_VERDICT_VOCABULARIES,
+    GATE_VERDICT_PASSING_VALUES,
+    gate_artifact_kind,
+)
 
 # Command -> phase mapping (derived from command prefix)
 def get_command_phase(command: str) -> str:
@@ -97,71 +102,122 @@ COMMAND_PREREQUISITES = {
 }
 
 
-def check_gate_passed(gate: str, project_dir: str) -> bool:
-    """Check if a gate has been passed (its own GATE_PX.md exists with 'Go').
+def _read_frontmatter_field(path: str, key: str) -> str:
+    """Returns the value of a flat top-level `key:` from a document's YAML
+    frontmatter block (the `---`-delimited block at the very start of the
+    file), or None if the file has no such block or the key is absent
+    inside it. First match wins; surrounding quotes are stripped. No list
+    support needed here -- `gate:` is never a list.
+
+    Deliberately NOT described as a mirror of scripts/lib/frontmatter.sh's
+    `fm_field`: measured 29.08.2026, the two disagree on a CRLF-terminated
+    file. Python's text-mode open() translates \r\n before any line is
+    inspected, so this function reads `gate: go` correctly; awk's `$0 ==
+    "---"` in `fm_has`/`fm_extract` sees "---\r" and reports the whole
+    frontmatter block as absent, so phase-docs-lint.sh calls the same file
+    "required field missing: gate". Direction matters: the lint is the
+    strict one and this parser the lenient one. The root cause is
+    pre-existing in frontmatter.sh and affects every check built on it, not
+    just this field -- scripts/memory-lint.sh already paid for the same
+    lesson once (WI-0086, `sub(/\r$/, "")`, four regression tests in
+    test_memory_lint.py). Not fixed here: it is a separate defect with a
+    four-lint blast radius, and no CRLF document currently sits inside any
+    phase folder in the three reference projects. Recorded so the next
+    reader does not have to re-measure it.
+    """
+    with open(path, "r", encoding="utf-8", errors="ignore") as f:
+        lines = f.readlines()
+    if not lines or lines[0].strip() != "---":
+        return None
+    body = []
+    closed = False
+    for line in lines[1:]:
+        if line.strip() == "---":
+            closed = True
+            break
+        body.append(line)
+    if not closed:
+        return None
+    pattern = re.compile(r"^%s:\s*(.*?)\s*$" % re.escape(key))
+    for line in body:
+        match = pattern.match(line)
+        if match:
+            value = match.group(1)
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+                value = value[1:-1]
+            return value
+    return None
+
+
+def check_gate_passed(gate: str, project_dir: str) -> tuple:
+    """Checks whether `gate` has passed. Returns (passed: bool, reason:
+    str | None) -- reason is None exactly when passed is True.
+
+    The verdict is read from the gate artifact's own `gate:` YAML
+    frontmatter field (templates/PHASE_DOC_SCHEMA.md, "## Gate verdict"),
+    never from prose. A prose scan was tried and found wrong three times in
+    three consecutive attempts (WI-0129, findings F3/F4): the substring
+    "Go" also occurs inside "No-Go" and inside "Go-Live", and every gate
+    command instructs authors to *name* "No-Go" in prose when flagging an
+    Inviolable breach -- no ordering or regex heuristic over the body text
+    can tell a real verdict from a mention of one, and 18 real gate
+    documents across three CCPR-using projects were found to use seven
+    different prose spellings of their verdict.
 
     The path probed comes from GATE_FILE_PATHS (scripts/lib/
-    gate_checklists.py) -- the phase-folder path each gate-pN.md command
-    itself claims to write (e.g. docs/planning/GATE_P4.md), not the three
-    flat legacy paths (docs/GATE_P4.md, docs/GATE-P4.md, docs/gate-p4.md)
-    probed before this fix. No command, script, template or doc in this
-    repo ever wrote to any of those three shapes -- dropped outright
-    (WI-0129, finding F1).
+    gate_checklists.py) -- the artifact each gate-pN.md command itself
+    claims to write. `gate-p5` maps to docs/planning/SPRINT.md, the one
+    gate with no dedicated GATE_P5.md of its own.
 
-    "gate-p5" has no entry in GATE_FILE_PATHS: /gate-p5 never writes a
-    dedicated gate file at all (its sprint verdict lives in
-    docs/planning/SPRINT.md, a differently-shaped document; parsing it is
-    out of scope here). For any gate absent from GATE_FILE_PATHS, this
-    function skips the file probe entirely and falls straight through to
-    the HANDOVER.md phase-comparison check below.
+    The accepted vocabulary is selected by the ARTIFACT the path names, not
+    by the gate key (gate_artifact_kind(), scripts/lib/gate_checklists.py):
+    docs/planning/SPRINT.md accepts pending/done/conditionally_done/
+    not_done, every docs/<phase>/GATE_P*.md accepts pending/go/
+    conditional_go/no_go/pivot. A value valid on one artifact is rejected
+    on the other -- `gate: done` on a GATE_P*.md file, or `gate: go` on
+    SPRINT.md, both fail closed.
 
-    That fallback is not gate-p5-only, though: a MAPPED gate (one with an
-    entry in GATE_FILE_PATHS -- all seven of gate-p0/1/2/3/4/6/7) whose
-    phase-folder file simply does not yet exist on disk falls through to
-    the exact same HANDOVER.md comparison -- the `if os.path.isfile(path):`
-    check below has no `else`, so a missing file is not itself a "blocked"
-    verdict. This is pre-existing behaviour, unchanged by this fix.
+    Fails closed on purpose, with a reason naming exactly which of four
+    shapes the failure is:
+      1. the gate's own artifact does not exist yet (falls through to the
+         HANDOVER.md fallback below -- see that comment);
+      2. the artifact exists but carries no `gate:` field at all;
+      3. it carries a `gate:` value outside its artifact's vocabulary;
+      4. it carries a valid but non-passing verdict (e.g. `pending`,
+         `no_go`, `pivot`, `not_done`).
+    There is no lenient fallback for (2) or (3) -- the previous prose
+    scanner's `return True` for "no verdict vocabulary found at all" was
+    finding F4, and is not carried forward.
 
-    WI-0129's F5 ("HANDOVER phase claim overrides any gate, verdict never
-    read", docs/workitems/WI-0129.md) named this same symptom under the
-    pre-fix probe, where it was unconditional: none of the three flat
-    candidate paths was ever a real write target (finding F1), so no gate
-    file could ever be found and this fallback ran for every gate, every
-    time, regardless of what verdict a project had actually written.
-    Post-fix, an existing gate file at its claimed path IS found and IS
-    read -- the fallback now only runs while that file has not yet been
-    written, a narrower window than what F5 described. Whether staying
-    lenient even for that narrower window is still the right call for all
-    seven mapped gates is a separate, currently untracked open question --
-    NOT the same thing as finding 20 in docs/.handover-archive/2026-08-28-
-    open-findings.md, which is about gate-p5 specifically (a gate with no
-    file at all, by design, so it can ONLY ever pass through this fallback
-    -- a different mechanism from a mapped gate's file being merely not
-    yet written). Not decided or scoped here either way.
+    Out of scope, unchanged from before this fix (WI-0129 finding F5, a
+    separate open decision): when the gate's own artifact file does not
+    exist at all (failure shape 1 above), this falls through to comparing
+    the project's current phase (docs/HANDOVER.md) against the gate's phase
+    number -- a MAPPED gate whose file has simply not been written yet is
+    treated the same as an unmapped one. That branch, and its leniency, are
+    untouched here.
     """
     gate_file_rel = GATE_FILE_PATHS.get(gate)
     if gate_file_rel:
         path = os.path.join(project_dir, gate_file_rel)
         if os.path.isfile(path):
-            with open(path, "r", encoding="utf-8", errors="ignore") as f:
-                content = f.read().lower()
-            # No gate command prescribes a verdict-line syntax -- all of
-            # them only say to append the verdict under "Gate Notes". Since
-            # it is appended, the LAST Go/No-Go token in the document is the
-            # actual conclusion, not an earlier one: several gate commands
-            # instruct writers to name "No-Go" in prose when flagging an
-            # Inviolable breach, and that prose mention must not override a
-            # later "Verdict: Go" (WI-0128, finding #5 follow-up).
-            verdict_matches = list(re.finditer(r"\b(no.go)\b|\b(go)\b", content))
-            if verdict_matches:
-                # group(1) set -> the match was "no-go"; group(2) set -> "go"
-                return verdict_matches[-1].group(1) is None
-            # Lenient fallback: the file exists but uses no Go/No-Go
-            # vocabulary at all (some projects may not use that format).
-            # Absence of any verdict language is not itself a rejection.
-            return True
+            kind = gate_artifact_kind(gate_file_rel)
+            vocabulary = GATE_VERDICT_VOCABULARIES[kind]
+            passing_values = GATE_VERDICT_PASSING_VALUES[kind]
+            verdict = _read_frontmatter_field(path, "gate")
+            if verdict is None:
+                return False, f"{gate_file_rel} has no 'gate:' field in its frontmatter"
+            if verdict not in vocabulary:
+                return False, (
+                    f"{gate_file_rel} gate='{verdict}' is not a valid verdict "
+                    f"(expected one of {sorted(vocabulary)})"
+                )
+            if verdict not in passing_values:
+                return False, f"{gate_file_rel} gate='{verdict}' does not unblock the next phase"
+            return True, None
 
-    # Also check HANDOVER.md for phase completion hints
+    # Also check HANDOVER.md for phase completion hints (finding F5,
+    # deliberately unchanged -- see docstring above)
     if os.path.isfile(os.path.join(project_dir, "docs", "HANDOVER.md")):
         # Check if current phase is beyond the gate's phase
         info = extract_phase_from_handover(project_dir)
@@ -169,9 +225,9 @@ def check_gate_passed(gate: str, project_dir: str) -> bool:
             current_num = int(info["phase"][1])
             gate_num = int(gate.replace("gate-p", ""))
             if current_num > gate_num:
-                return True
+                return True, None
 
-    return False
+    return False, f"{gate} not passed (no gate artifact found, and HANDOVER.md does not show the phase beyond {gate})"
 
 
 def check_command(command: str, project_dir: str) -> tuple:
@@ -200,8 +256,10 @@ def check_command(command: str, project_dir: str) -> tuple:
 
         # Check gate
         gate = prereqs.get("gate")
-        if gate and not check_gate_passed(gate, project_dir):
-            reasons.append(f"{gate} not passed (gate file missing or no 'Go')")
+        if gate:
+            passed, reason = check_gate_passed(gate, project_dir)
+            if not passed:
+                reasons.append(reason)
 
     else:
         # Generic phase-based check
@@ -210,8 +268,9 @@ def check_command(command: str, project_dir: str) -> tuple:
             phase_num = int(phase[1])
             if phase_num > 0:
                 prev_gate = f"gate-p{phase_num - 1}"
-                if not check_gate_passed(prev_gate, project_dir):
-                    reasons.append(f"{prev_gate} not passed")
+                passed, reason = check_gate_passed(prev_gate, project_dir)
+                if not passed:
+                    reasons.append(reason)
 
     return len(reasons) == 0, reasons
 

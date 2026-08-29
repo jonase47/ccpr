@@ -103,6 +103,15 @@ Delegate the sprint gate check to the **project-planner** agent with a focused p
 Add the gate result to **SPRINT.md** (sprint review and retrospective — this stays prose narrative,
 not item state, per Manual/WORKITEMS.md §10).
 
+**Set `docs/planning/SPRINT.md`'s frontmatter field `gate:`** to this sprint's verdict —
+`done` / `conditionally_done` / `not_done`, or `pending` while the gate is still being written.
+P5 is the one gate with no `GATE_P5.md`: `SPRINT.md` *is* its gate artifact, which is why the
+field lives there and why its vocabulary is the sprint's, not the phase gates'. That field, not
+the prose narrative above, is what `scripts/command-check.py` reads to decide whether
+`/p6-functional`, `/p6-audit` and `/p6-pentest` are unblocked, and `scripts/phase-docs-lint.sh`
+reports a missing or misspelled value as an error. `SPRINT.md` is a living document and is
+otherwise exempt from `PHASE_DOC_SCHEMA.md` — `gate:` is its single required field.
+
 Using the guard result from step 0a:
 - Structured store: apply the per-story verdict table from step 2 — `workitems set-status <id>
   "Done"` for every row marked Done; `workitems set-status <id> "Backlog"` for every row marked

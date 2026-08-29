@@ -145,9 +145,50 @@ GATE_FILE_PATHS = {
     "gate-p2": "docs/validation/GATE_P2.md",
     "gate-p3": "docs/architecture/GATE_P3.md",
     "gate-p4": "docs/planning/GATE_P4.md",
+    "gate-p5": "docs/planning/SPRINT.md",
     "gate-p6": "docs/quality/GATE_P6.md",
     "gate-p7": "docs/launch/GATE_P7.md",
 }
+
+
+# Gate-verdict vocabularies (WI-0129, findings F3/F4): the `gate:` frontmatter
+# field's accepted values depend on the ARTIFACT, not on the gate name --
+# docs/planning/SPRINT.md (gate-p5's own artifact, since it has no dedicated
+# GATE_P5.md) answers a different question ("is this sprint done?") than a
+# docs/<phase>/GATE_P*.md ("did this phase pass?"), so it gets its own token
+# set. Both sets, and which values UNBLOCK the next phase, mirror
+# templates/PHASE_DOC_SCHEMA.md's "## Gate verdict" table exactly --
+# scripts/tests/test_command_check.py binds them to scripts/phase-docs-
+# lint.sh's own VALID_GATE_VERDICTS/VALID_SPRINT_VERDICTS source text (the
+# lint's enforcement copy) so neither of the three copies can drift from the
+# other two unnoticed.
+GATE_VERDICT_VOCABULARIES = {
+    "GATE_P": frozenset({"pending", "go", "conditional_go", "no_go", "pivot"}),
+    "SPRINT": frozenset({"pending", "done", "conditionally_done", "not_done"}),
+}
+
+# The subset of each vocabulary above that unblocks the next phase/command.
+# `conditional_go` / `conditionally_done` unblock deliberately -- every gate
+# command's own Possible Outcomes table routes a conditional verdict into the
+# next phase with its conditions tracked as C-IDs, not back into the current
+# one. `pending` never unblocks: it is the value a gate document carries
+# while still being written.
+GATE_VERDICT_PASSING_VALUES = {
+    "GATE_P": frozenset({"go", "conditional_go"}),
+    "SPRINT": frozenset({"done", "conditionally_done"}),
+}
+
+
+def gate_artifact_kind(gate_file_rel: str) -> str:
+    """Selects a gate-verdict vocabulary by the ARTIFACT a path names, not
+    by the gate key that led to it -- "SPRINT" for docs/planning/SPRINT.md
+    (currently only gate-p5's own artifact), "GATE_P" for every other
+    GATE_FILE_PATHS entry (a docs/<phase>/GATE_P*.md). A value valid for
+    one artifact must be rejected on the other (WI-0129) -- this is the
+    single place that decision is made, so check_gate_passed() and any
+    caller/test asking the same question stay in agreement by construction.
+    """
+    return "SPRINT" if os.path.basename(gate_file_rel) == "SPRINT.md" else "GATE_P"
 
 
 # Content patterns for deeper mechanical checks per gate

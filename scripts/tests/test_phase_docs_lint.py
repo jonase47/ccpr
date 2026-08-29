@@ -35,6 +35,11 @@ from pathlib import Path
 
 SCRIPT_PATH = Path(__file__).resolve().parents[1] / "phase-docs-lint.sh"
 FRONTMATTER_LIB = Path(__file__).resolve().parents[1] / "lib" / "frontmatter.sh"
+# WI-0129: templates/PHASE_DOC_SCHEMA.md's "Gate verdict" vocabulary table
+# is the contract GateVerdictVocabularyMatchesSchemaTest binds
+# VALID_GATE_VERDICTS/VALID_SPRINT_VERDICTS to -- never retyped by hand,
+# same reasoning as read_enum() above.
+SCHEMA_PATH = Path(__file__).resolve().parents[2] / "templates" / "PHASE_DOC_SCHEMA.md"
 
 
 def read_phase_folders(script_path=SCRIPT_PATH):
@@ -89,6 +94,16 @@ VALID_PHASES = read_enum("VALID_PHASES")
 
 # The exact literal the (d) error message embeds ($VALID_STATUS, space-joined).
 VALID_STATUS_LITERAL = " ".join(VALID_STATUSES)
+
+# The two gate-verdict vocabularies (WI-0129, check (k)), parsed from source
+# -- same shrink/grow reasoning as VALID_STATUSES/VALID_PHASES above.
+# Enumerated individually in CheckKGateVerdictTest's own per-value
+# acceptance tests, whose count-pin catches a narrowing a parse alone would
+# not; both are ALSO bound to templates/PHASE_DOC_SCHEMA.md's own
+# vocabulary table by GateVerdictVocabularyMatchesSchemaTest, so a change on
+# either side of that contract shows up there too.
+VALID_GATE_VERDICTS_ENUM = read_enum("VALID_GATE_VERDICTS")
+VALID_SPRINT_VERDICTS_ENUM = read_enum("VALID_SPRINT_VERDICTS")
 
 VALID_DATE = "04.05.2026"
 DATE_WITH_NOTE = "04.05.2026 (cross-phase update)"
@@ -1265,6 +1280,328 @@ class CheckHCoversEmptyDirectoryDetectionTest(PhaseDocsLintTestBase):
         )
 
 
+def _split_markdown_table_row(line):
+    """Splits one `| cell | cell | cell |` markdown table row into its
+    cells, on a pipe NOT preceded by a backslash -- the "Accepted values"
+    column of PHASE_DOC_SCHEMA.md's Gate-verdict table separates its own
+    alternatives with an escaped `\\|` (so the cell renders as `a` | `b`
+    without breaking the table), which looks identical to a real cell
+    boundary except for that leading backslash. Assumes the row is already
+    stripped and starts/ends with `|` (true of every real table row; the
+    caller filters non-table lines out before calling this)."""
+    inner = line.strip()[1:-1]
+    return [cell.strip() for cell in re.split(r"(?<!\\)\|", inner)]
+
+
+def _read_schema_gate_vocabulary():
+    """Parses the two vocabulary rows out of
+    templates/PHASE_DOC_SCHEMA.md's own '## Gate verdict' table --
+    returns {'GATE_P*.md': {token, ...}, 'SPRINT.md': {token, ...}},
+    read from the "Accepted values" column's backtick-quoted tokens.
+    Never a hand-typed copy: this is the schema's own text, read fresh
+    every run (mirrors _valid_phases()/_valid_status() in
+    test_frontmatter_examples_match_the_lint.py, one directory over)."""
+    vocab = {}
+    for line in SCHEMA_PATH.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not (stripped.startswith("|") and stripped.endswith("|")):
+            continue
+        if "`docs/<phase>/GATE_P*.md`" not in stripped and "`docs/planning/SPRINT.md`" not in stripped:
+            continue
+        cells = _split_markdown_table_row(stripped)
+        artifact_cell, accepted_cell = cells[0], cells[1]
+        tokens = set(re.findall(r"`([^`]+)`", accepted_cell))
+        key = "GATE_P*.md" if "GATE_P*.md" in artifact_cell else "SPRINT.md"
+        vocab[key] = tokens
+    return vocab
+
+
+class GateVerdictVocabularyMatchesSchemaTest(unittest.TestCase):
+    """A check whose subject is a contract between two artifacts must
+    derive its expectation from the OTHER artifact, never from the code
+    under test (CONTRIBUTING.md). Here: the two token sets
+    templates/PHASE_DOC_SCHEMA.md's 'Gate verdict' table names for
+    GATE_P*.md and SPRINT.md must be exactly VALID_GATE_VERDICTS /
+    VALID_SPRINT_VERDICTS as parsed out of phase-docs-lint.sh's own
+    source. Neither side is retyped by hand in this test."""
+
+    def test_gate_p_vocabulary_matches_the_schema_table(self):
+        schema_vocab = _read_schema_gate_vocabulary()
+        script_vocab = set(read_enum("VALID_GATE_VERDICTS"))
+        self.assertEqual(schema_vocab["GATE_P*.md"], script_vocab)
+
+    def test_sprint_vocabulary_matches_the_schema_table(self):
+        schema_vocab = _read_schema_gate_vocabulary()
+        script_vocab = set(read_enum("VALID_SPRINT_VERDICTS"))
+        self.assertEqual(schema_vocab["SPRINT.md"], script_vocab)
+
+    def test_the_two_vocabularies_are_not_identical(self):
+        # Guards against a future edit collapsing both enums into one
+        # shared constant -- the whole point of the split (WI-0129) is
+        # that 'done' and 'go' are each valid for only ONE artifact.
+        schema_vocab = _read_schema_gate_vocabulary()
+        self.assertNotEqual(schema_vocab["GATE_P*.md"], schema_vocab["SPRINT.md"])
+
+
+class CheckKGateVerdictTest(PhaseDocsLintTestBase):
+    """(k) gate: verdict (WI-0129, findings F3/F4). GATE_P*.md and
+    SPRINT.md each require a `gate:` field from their own closed
+    vocabulary; the vocabularies themselves are pinned against
+    templates/PHASE_DOC_SCHEMA.md by GateVerdictVocabularyMatchesSchemaTest
+    above, not retyped here."""
+
+    @staticmethod
+    def _sprint_doc(extra_lines):
+        return "---\n" + "\n".join(extra_lines) + "\n---\n\n# Sprint\n\nBody.\n"
+
+    # --- full-enum coverage (catches a single dropped token; a single
+    # representative value like the 'go'/'done' tests below would not) ---
+
+    def test_valid_gate_verdicts_count_is_pinned_at_five(self):
+        self.assertEqual(5, len(VALID_GATE_VERDICTS_ENUM))
+
+    def test_valid_sprint_verdicts_count_is_pinned_at_four(self):
+        self.assertEqual(4, len(VALID_SPRINT_VERDICTS_ENUM))
+
+    def test_every_valid_gate_verdict_value_is_accepted_on_gate_p(self):
+        for verdict in VALID_GATE_VERDICTS_ENUM:
+            with self.subTest(verdict=verdict):
+                rel = f"architecture/GATE_P3-{verdict}.md"
+                self.write_doc(rel, doc_text(extra_lines=[f"gate: {verdict}"]))
+
+                result = self.run_lint()
+
+                errors = self.findings(result.stdout, "Errors")
+                self.assertFalse(
+                    any(rel in e and "gate=" in e for e in errors), (verdict, errors)
+                )
+                self.assertEqual(self.files_scanned(result.stdout), 1, (verdict, result.stdout))
+                (self.docs_dir / rel).unlink()
+
+    def test_every_valid_sprint_verdict_value_is_accepted_on_sprint(self):
+        # The (k) carve-out fires only for the LITERAL basename "SPRINT.md"
+        # (it is a living file, not a globbed pattern like GATE_P*.md above)
+        # -- so this sweep reuses the same path sequentially instead of one
+        # distinct filename per verdict.
+        rel = "planning/SPRINT.md"
+        for verdict in VALID_SPRINT_VERDICTS_ENUM:
+            with self.subTest(verdict=verdict):
+                self.write_doc(rel, self._sprint_doc([f"gate: {verdict}"]))
+
+                result = self.run_lint()
+
+                errors = self.findings(result.stdout, "Errors")
+                self.assertFalse(
+                    any(rel in e and "gate=" in e for e in errors), (verdict, errors)
+                )
+                self.assertEqual(self.files_scanned(result.stdout), 1, (verdict, result.stdout))
+                (self.docs_dir / rel).unlink()
+
+    # --- GATE_P*.md ---------------------------------------------------
+
+    def test_gate_p_with_valid_verdict_produces_no_finding(self):
+        self.write_doc("architecture/GATE_P3.md", doc_text(extra_lines=["gate: go"]))
+
+        result = self.run_lint()
+
+        self.assertEqual(self.findings(result.stdout, "Errors"), [], result.stdout)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(self.files_scanned(result.stdout), 1)
+
+    def test_gate_p_without_gate_field_is_a_missing_field_error(self):
+        self.write_doc("architecture/GATE_P3.md", doc_text())
+
+        result = self.run_lint()
+
+        errors = self.findings(result.stdout, "Errors")
+        self.assertTrue(
+            any("GATE_P3.md" in e and "required field missing: gate" in e for e in errors),
+            errors,
+        )
+        self.assertEqual(result.returncode, 2, result.stdout)
+
+    def test_gate_p_with_real_prose_spelling_is_reported_by_value(self):
+        # 'Conditional Go' is the real prose spelling gate commands write
+        # in the document BODY -- nothing normalises spelling for the
+        # frontmatter field, and the lint must say so by naming the value.
+        self.write_doc(
+            "architecture/GATE_P3.md", doc_text(extra_lines=["gate: Conditional Go"])
+        )
+
+        result = self.run_lint()
+
+        errors = self.findings(result.stdout, "Errors")
+        self.assertTrue(
+            any("GATE_P3.md" in e and "gate='Conditional Go'" in e for e in errors), errors
+        )
+        self.assertEqual(result.returncode, 2, result.stdout)
+
+    def test_gate_p_rejects_a_sprint_only_value(self):
+        # Discriminating case: 'done' is a real, valid SPRINT.md value. A
+        # single shared vocabulary would let it pass here too.
+        self.write_doc("architecture/GATE_P3.md", doc_text(extra_lines=["gate: done"]))
+
+        result = self.run_lint()
+
+        errors = self.findings(result.stdout, "Errors")
+        self.assertTrue(
+            any("GATE_P3.md" in e and "gate='done'" in e for e in errors), errors
+        )
+        self.assertEqual(result.returncode, 2, result.stdout)
+
+    # --- no frontmatter at all (WI-0129 follow-up) -----------------------
+    #
+    # Check (a) `continue`s the moment a document has no `---` block at
+    # all, which used to skip check (k) entirely for a GATE_P*.md in that
+    # state -- the document has no `gate:` field either, and that silence
+    # was the defect: exit 1 (warning-only) instead of exit 2. A document
+    # with no frontmatter has no `gate:` field, full stop; that is the
+    # missing-field error, not a suggestion to migrate.
+
+    def test_gate_p_with_no_frontmatter_at_all_is_a_missing_field_error(self):
+        self.write_doc("architecture/GATE_P3.md", "# Gate P3\n\nNo frontmatter here.\n")
+
+        result = self.run_lint()
+
+        errors = self.findings(result.stdout, "Errors")
+        self.assertTrue(
+            any("GATE_P3.md" in e and "required field missing: gate" in e for e in errors),
+            errors,
+        )
+        self.assertEqual(result.returncode, 2, result.stdout)
+        # The pre-existing no-frontmatter warning must still fire alongside
+        # the new error, unchanged in wording -- it is asserted elsewhere
+        # in the suite (CheckAFrontmatterPresenceTest) and this fix must
+        # not narrow it away from a gate document.
+        warnings = self.findings(result.stdout, "Warnings")
+        self.assertTrue(
+            any("GATE_P3.md" in w and "no YAML frontmatter" in w for w in warnings), warnings
+        )
+
+    def test_gate_p_with_frontmatter_but_no_gate_field_stays_the_error(self):
+        # Regression pin: this exact shape (frontmatter present, `gate:`
+        # absent) already worked before the no-frontmatter fix above and
+        # must keep working identically -- a fix that only adds a new
+        # code path must not disturb this one.
+        self.write_doc("architecture/GATE_P3.md", doc_text())
+
+        result = self.run_lint()
+
+        errors = self.findings(result.stdout, "Errors")
+        self.assertTrue(
+            any("GATE_P3.md" in e and "required field missing: gate" in e for e in errors),
+            errors,
+        )
+        self.assertEqual(result.returncode, 2, result.stdout)
+
+    def test_non_gate_document_with_no_frontmatter_stays_warning_only(self):
+        # Discriminating case: a fix that simply drops the `continue` after
+        # check (a) would run every other check against a document with no
+        # frontmatter too -- this document must stay on the warning-only
+        # path check (a) already gives every non-gate document.
+        self.write_doc("architecture/NFR.md", "# NFR\n\nNo frontmatter here.\n")
+
+        result = self.run_lint()
+
+        errors = self.findings(result.stdout, "Errors")
+        self.assertEqual(errors, [], errors)
+        warnings = self.findings(result.stdout, "Warnings")
+        self.assertTrue(
+            any("NFR.md" in w and "no YAML frontmatter" in w for w in warnings), warnings
+        )
+        self.assertEqual(result.returncode, 1, result.stdout)
+
+    # --- SPRINT.md ------------------------------------------------------
+
+    def test_sprint_with_valid_verdict_produces_no_finding(self):
+        self.write_doc(
+            "planning/SPRINT.md", self._sprint_doc(["gate: conditionally_done"])
+        )
+
+        result = self.run_lint()
+
+        self.assertEqual(self.findings(result.stdout, "Errors"), [], result.stdout)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_sprint_rejects_a_gate_p_only_value(self):
+        # Mirror of the discriminating case above: 'go' is a real, valid
+        # GATE_P*.md value that must not pass on SPRINT.md.
+        self.write_doc("planning/SPRINT.md", self._sprint_doc(["gate: go"]))
+
+        result = self.run_lint()
+
+        errors = self.findings(result.stdout, "Errors")
+        self.assertTrue(any("SPRINT.md" in e and "gate='go'" in e for e in errors), errors)
+        self.assertEqual(result.returncode, 2, result.stdout)
+
+    def test_sprint_without_gate_field_is_a_missing_field_error(self):
+        self.write_doc("planning/SPRINT.md", self._sprint_doc(["status: active"]))
+
+        result = self.run_lint()
+
+        errors = self.findings(result.stdout, "Errors")
+        self.assertTrue(
+            any("SPRINT.md" in e and "required field missing: gate" in e for e in errors),
+            errors,
+        )
+        self.assertEqual(result.returncode, 2, result.stdout)
+
+    def test_sprint_still_skips_every_other_check(self):
+        # SPRINT.md is a living file for every check EXCEPT (k) -- broken
+        # status:/last_updated: and a missing required field (subskill,
+        # never set at all here) must stay completely silent; only the
+        # gate finding (itself deliberately broken here too) may surface.
+        doc = (
+            "---\n"
+            "status: not-a-real-status\n"
+            "last_updated: not-a-date\n"
+            "gate: not_a_real_verdict\n"
+            "---\n\n# Sprint\n\nBody.\n"
+        )
+        self.write_doc("planning/SPRINT.md", doc)
+
+        result = self.run_lint()
+
+        errors = self.findings(result.stdout, "Errors")
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("gate='not_a_real_verdict'", errors[0])
+        self.assertNotIn("status=", errors[0])
+        self.assertNotIn("last_updated=", errors[0])
+
+    # --- other living files stay untouched ------------------------------
+
+    def test_other_living_files_stay_silent_with_broken_frontmatter_and_no_gate(self):
+        for name in ("HANDOVER.md", "BACKLOG.md"):
+            self.write_doc(f"architecture/{name}", "Not a frontmatter document at all.\n")
+
+        result = self.run_lint()
+
+        self.assertEqual(self.findings(result.stdout, "Errors"), [], result.stdout)
+        self.assertEqual(self.findings(result.stdout, "Warnings"), [], result.stdout)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+    # --- check (k) does not spread to non-gate documents -----------------
+
+    def test_non_gate_phase_document_ignores_a_missing_gate_field(self):
+        self.write_doc("architecture/NFR.md", doc_text())
+
+        result = self.run_lint()
+
+        self.assertEqual(self.findings(result.stdout, "Errors"), [], result.stdout)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_non_gate_phase_document_ignores_a_nonsense_gate_value(self):
+        self.write_doc(
+            "architecture/NFR.md", doc_text(extra_lines=["gate: this-is-not-a-real-value"])
+        )
+
+        result = self.run_lint()
+
+        errors = self.findings(result.stdout, "Errors")
+        self.assertFalse(any("gate=" in e for e in errors), errors)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+
 class CommitAnchorFamilyTest(PhaseDocsLintTestBase):
     """New check for the commit-anchor family: base_commit, reviewed_head,
     reviewed_base -- CCPR-generated commit-SHA pointers (/p4-sprint sets
@@ -1517,7 +1854,16 @@ class GitCheckableGuardTest(PhaseDocsLintTestBase):
 class LivingFilesSkipTest(PhaseDocsLintTestBase):
     """LIVING_FILES are skipped entirely, before check (a) even runs -- a
     living file with completely broken/missing frontmatter must still
-    produce zero findings, for all six documented names at once."""
+    produce zero findings, for all six documented names at once.
+
+    SPRINT.md is the one named exception (WI-0129, PHASE_DOC_SCHEMA.md's
+    "Gate verdict" section): it stays a living file for every OTHER check,
+    but check (k) below still looks at it. This class therefore pins the
+    "everything else skips" intent against the remaining five names; the
+    SPRINT.md carve-out itself is covered in CheckKGateVerdictTest below
+    (CheckKGateVerdictTest.test_sprint_still_skips_every_other_check pins
+    that broken status:/last_updated:/missing fields stay silent on
+    SPRINT.md -- only check (k) sees it)."""
 
     def test_living_file_names_count_is_pinned_at_six(self):
         # WI-0126 tranche 5: LIVING_FILE_NAMES is now parsed from source
@@ -1526,8 +1872,12 @@ class LivingFilesSkipTest(PhaseDocsLintTestBase):
         # blind spot.
         self.assertEqual(6, len(LIVING_FILE_NAMES))
 
-    def test_all_six_living_filenames_are_skipped_even_with_broken_frontmatter(self):
-        for name in LIVING_FILE_NAMES:
+    def test_other_living_filenames_are_skipped_even_with_broken_frontmatter(self):
+        non_sprint_names = [n for n in LIVING_FILE_NAMES if n != "SPRINT.md"]
+        # SPRINT.md carries its own carve-out (check (k)) -- excluding it
+        # here must not silently shrink this test to fewer than five names.
+        self.assertEqual(5, len(non_sprint_names))
+        for name in non_sprint_names:
             # No leading "---" at all -- would trip check (a) if not skipped.
             self.write_doc(f"architecture/{name}", "Not a frontmatter document at all.\n")
 
@@ -1537,7 +1887,7 @@ class LivingFilesSkipTest(PhaseDocsLintTestBase):
         self.assertEqual(self.findings(result.stdout, "Warnings"), [], result.stdout)
         self.assertEqual(result.returncode, 0, result.stdout)
         # Still counted in the scan total -- only the per-file checks are skipped.
-        self.assertEqual(self.files_scanned(result.stdout), len(LIVING_FILE_NAMES))
+        self.assertEqual(self.files_scanned(result.stdout), len(non_sprint_names))
 
 
 class ExitCodePrecedenceTest(PhaseDocsLintTestBase):

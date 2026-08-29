@@ -56,6 +56,7 @@ Delegate the gate check to the **konzeptor** agent with a focused prompt:
 ### 3. Create Gate Protocol
 
 Create **`docs/discovery/GATE_P0.md`** with:
+- YAML frontmatter per `~/.claude/templates/PHASE_DOC_SCHEMA.md`, including the **required `gate:` field** — `pending` while the document is being written, then the verdict as one of `go` / `conditional_go` / `no_go` / `pivot`. This field, not the prose below it, is what `scripts/command-check.py` reads to decide whether P1's commands are unblocked, and `scripts/phase-docs-lint.sh` reports a missing or misspelled value as an error. The prose stays free — write the verdict in the body however this document reads best.
 - Result of the mechanical preflight checks (table taken from report)
 - Content evaluation by the konzeptor (5 points)
 - List of open points with concrete next steps

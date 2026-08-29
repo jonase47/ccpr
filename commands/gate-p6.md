@@ -32,6 +32,7 @@ If `docs/CONSTITUTION.md` is missing on a Full-Track project: stop the gate and 
 Read `docs/quality/QA.md` (phase index) first to get the status of all sub-indexes (`A11Y.md`, `AUDIT.md`, `FUNCTIONAL.md`, `PENTEST.md`) and direct detail files (`EXPLORATORY.md`, `BUGFIX.md`). Open the sub-indexes only when their status row indicates `needs-rework` or open Critical risks.
 
 Create **`docs/quality/GATE_P6.md`** with:
+- YAML frontmatter per `~/.claude/templates/PHASE_DOC_SCHEMA.md`, including the **required `gate:` field** — `pending` while the document is being written, then the verdict as one of `go` / `conditional_go` / `no_go` / `pivot` (`pivot` is available even though this gate's own outcome table does not offer it) — this gate's own wording maps onto that vocabulary: Go-Live → `go`, Conditional Go-Live → `conditional_go`, No Go-Live → `no_go`. This field, not the prose below it, is what `scripts/command-check.py` reads to decide whether P7's commands are unblocked, and `scripts/phase-docs-lint.sh` reports a missing or misspelled value as an error. The prose stays free — write the verdict in the body however this document reads best.
 - QA approval section (consumes the GATE_P6_QA result from `gate-p6-qa`)
 - Security approval section (consumes the GATE_P6_SECURITY result from `gate-p6-security`)
 - **Release tag set?** (`git tag vX.Y.Z` + `chore: release vX.Y.Z`)

@@ -89,6 +89,7 @@ Delegate the gate check to the **project-planner** agent with a focused prompt:
 ### 3. Create Gate Protocol
 
 Create **`docs/planning/GATE_P4.md`** with:
+- YAML frontmatter per `~/.claude/templates/PHASE_DOC_SCHEMA.md`, including the **required `gate:` field** — `pending` while the document is being written, then the verdict as one of `go` / `conditional_go` / `no_go` / `pivot` (`pivot` is available even though this gate's own outcome table does not offer it). This field, not the prose below it, is what `scripts/command-check.py` reads to decide whether P5's commands are unblocked, and `scripts/phase-docs-lint.sh` reports a missing or misspelled value as an error. The prose stays free — write the verdict in the body however this document reads best.
 - Result of the mechanical preflight checks (copy table from report)
 - Content evaluation by the project-planner (6 points)
 - List of open points with concrete next steps

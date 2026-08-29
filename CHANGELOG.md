@@ -463,6 +463,47 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Fixed
 
+- **The gate verdict is read from a declared field instead of scraped from prose** (WI-0129,
+  findings F3/F4). `scripts/command-check.py` decided whether a phase gate had passed by
+  searching the document body for the words "Go" and "No-Go". That predicate was wrong three
+  times in three consecutive attempts, each fix creating the next: the substring `Go` also
+  occurs inside `No-Go` and inside `Go-**Live**`, and every gate command instructs authors to
+  *name* "No-Go" in prose when flagging an Inviolable breach. The last measured failure: a
+  document reading `Verdict: No-Go` followed by a Go-Live paragraph returned `ready`, exit 0.
+  A document saying `Pivot`, and a document with no verdict vocabulary at all, both passed
+  through a lenient `return True`.
+
+  The verdict now lives in the frontmatter field `gate:` — **a field
+  `templates/PHASE_DOC_SCHEMA.md` has documented since the beginning and nothing ever read.**
+  No script, no hook, no command consumed it, and no `gate-p*.md` ever asked an author to write
+  it; one of the three reference projects nevertheless carries it in seven gate documents,
+  written purely by following the schema. The defect was never a missing machine-readable
+  verdict — CCPR shipped one, ignored it, and parsed prose instead.
+
+  The body is no longer read at all, in any language or spelling: measured across three real
+  CCPR-using projects, 18 gate documents used **seven different prose spellings** of their
+  verdict. Two closed vocabularies now apply, chosen by artifact — `pending | go |
+  conditional_go | no_go | pivot` for a `GATE_P*.md`, and `pending | done | conditionally_done |
+  not_done` for `docs/planning/SPRINT.md`, which is `gate-p5`'s own gate artifact (P5 is the one
+  gate with no `GATE_P5.md`; three P6 commands named it as a prerequisite and it had never been
+  checkable). A value valid on one artifact is rejected on the other. `conditional_go` and
+  `conditionally_done` unblock, matching every gate command's own outcome table; `pending`,
+  `no_go`, `pivot` and `not_done` do not.
+
+  Fail-closed, and the reason now says which of four things went wrong — artifact missing, field
+  missing, value outside the vocabulary, or a real negative verdict — instead of the single
+  sentence `gate file missing or no 'Go'`, which was printed even for `gate-p5`, a gate that has
+  no file by design. `scripts/phase-docs-lint.sh` enforces the field's presence and vocabulary
+  as an error, so a project finds every affected document in one run. There is deliberately no
+  alias and no transitional fallback: accepting a second spelling is what made the previous
+  parser unfalsifiable.
+
+  **Verified against consumers, because it cannot be verified here.** CCPR has no phase folders
+  of its own, so this rule cannot fire against this repository at all. Predicted before running
+  and then measured against the three reference projects: 6 / 6 / 1 lint errors, and the one
+  project whose documents already carry the field stays `ready` for `/p4-sprint` and
+  `/p5-implement` while the other two now block, naming the exact file and field to add.
+
 - **The shipped ADR prompt told adopters to write ADRs this project's own linter rejects**
   (open finding #9; WI-0128). `commands/` ships to every adopter. An ADR written exactly as
   `commands/p3-arch-adr.md` prescribed, placed where `commands/cross-check.md` looks for it,

@@ -857,7 +857,7 @@ class NoStaleKnownFindingsTest(unittest.TestCase):
 
 class ClassificationCountsTest(unittest.TestCase):
     def test_classification_counts(self):
-        """Regression pin on the measured baseline: 980 `test_*` methods
+        """Regression pin on the measured baseline: 995 `test_*` methods
         across the corpus call something shaped like a subprocess invocation
         and are therefore in scope for this check; 0 of those are currently
         absence-only-needs-exemption -- `KNOWN_FINDINGS` above is empty for
@@ -871,6 +871,19 @@ class ClassificationCountsTest(unittest.TestCase):
         growing paragraph:
 
           in-scope / flagged   when
+          995 / 0              WI-0129 findings F3/F4 + the gate-p5 decision
+                               (29.08.2026): the gate verdict moved from a
+                               prose scan to the declared `gate:` frontmatter
+                               field. +15 in scope across two modules --
+                               test_command_check (32 -> 46) and
+                               test_phase_docs_lint (84 -> 105); the rest of
+                               those 35 new methods are in-process and
+                               correctly out of this scanner's reach. Flagged
+                               unchanged at 0: every one of the 15 asserts on
+                               a returncode or on named output. Measured with
+                               scan_tree() directly, not derived from the
+                               suite delta -- deriving it from the delta is
+                               how this pin was set wrong once before.
           980 / 0              WI-0129 finding F7 (29.08.2026): the two new
                                `test_run_tests_heredoc_injection.py` methods
                                entered scope because their shared helper is
@@ -1119,7 +1132,7 @@ class ClassificationCountsTest(unittest.TestCase):
         count."""
         recs = scan_tree()
         flagged = [r for r in recs if r.disposition in NEEDS_EXEMPTION]
-        self.assertEqual(980, len(recs))
+        self.assertEqual(995, len(recs))
         self.assertEqual(0, len(flagged))
 
 
