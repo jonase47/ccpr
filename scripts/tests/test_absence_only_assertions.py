@@ -1594,10 +1594,25 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
         instrument is backwards, and the standing decision on findings
         #7/#11/#16 is to name this scanner's blind spots narrowly rather
         than widen rules whose counts nobody has re-measured. Recorded
-        here so the gap is a known one."""
+        here so the gap is a known one.
+
+        Bumped 58 -> 59, 30.08.2026 (R1): added test_live_status_claims.py,
+        which refuses a docstring claiming its own check is failing RIGHT
+        NOW while the suite is green. Proven an addition rather than a swap
+        by `git status --porcelain scripts/tests` -- one `??` line, nothing
+        modified or deleted.
+
+        In-scope count above did NOT move, for the same pre-existing reason
+        as test_bsd_gnu_portability.py and test_agent_frontmatter.py, which
+        both measure 0 in scope: `_calls_a_subprocess` sees only
+        `subprocess.run(...)` or a `self.run*()` helper, and these modules
+        reach git through a module-level function. THREE modules now sit
+        outside this scanner for that one documented blind spot -- reported
+        here rather than worked around, because the workaround would be to
+        reshape test code to please a measuring instrument."""
         files = sorted(TESTS_DIR.glob("*.py")) + sorted((TESTS_DIR / "workitems").glob("*.py"))
         names = sorted(f.relative_to(TESTS_DIR).as_posix() for f in files if f.name != "__init__.py")
-        self.assertEqual(58, len(names))
+        self.assertEqual(59, len(names))
         self.assertIn("test_absence_only_assertions.py", names)
         self.assertIn("test_run_tests_heredoc_injection.py", names)
         self.assertIn("test_heredoc_interpolation_scan.py", names)

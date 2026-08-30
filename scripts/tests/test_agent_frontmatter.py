@@ -100,21 +100,31 @@ which this wave does not attempt.
 
 ## Rule 5, measured against today's tree
 
-Rule 5 does NOT report zero findings against the current tree, contrary to
-this wave's starting assumption. It finds three agents whose body
-affirmatively names the Bash tool while `tools:` lacks it -- none of them
-among F9's original four, none of them touched by this wave's write
-boundary: `konzeptor.md` ("**Bash**: As needed for file operations or
-research in the project directory"), `system-architekt.md` (three
-mentions -- "using available tools (Read, Grep, Glob, Bash)", "You have
-access to Read, Write, Edit, Bash, Grep, and Glob tools", "**Bash**: Run
-commands to inspect infrastructure configs..."), and `tech-writer.md`'s
-OTHER Bash mention, distinct from the one F9 already fixed ("Use the
-available tools (Read, Grep, Glob, Bash) to thoroughly understand...").
-AgentBashToolRequiredTest asserts zero violations per this wave's
-specification and is RED today for exactly these three reasons -- a real,
-reported finding, not a detector defect; fixing agents/*.md is outside this
-wave's write boundary.
+Rule 5 reports zero findings, and has done since `961165f` -- the commit that
+introduced this module and corrected the agents in the same change.
+
+The wave's starting assumption was that the rule would be clean from the
+outset; it was not. Run against `961165f^` it flags FOUR agents whose body
+affirmatively names the Bash tool while `tools:` lacks it: `konzeptor.md`
+("**Bash**: As needed for file operations or research in the project
+directory"), `system-architekt.md` (three mentions -- "using available tools
+(Read, Grep, Glob, Bash)", "You have access to Read, Write, Edit, Bash,
+Grep, and Glob tools", "**Bash**: Run commands to inspect infrastructure
+configs..."), `tech-writer.md`'s OTHER Bash mention, distinct from the one
+F9 already fixed ("Use the available tools (Read, Grep, Glob, Bash) to
+thoroughly understand..."), and `security-master.md`.
+
+F9 resolved all four in `961165f` (29.08.2026), by two different routes: the
+first three had the incidental prose corrected, while `security-master.md`
+GAINED the tool it names (PO decision -- dependency auditing is in its
+brief). Only the prose route is visible as a body change, which is why an
+earlier revision of this section counted three.
+
+Until 30.08.2026 this section and AgentBashToolRequiredTest's own docstring
+both reported the test as failing for those three reasons. That was never
+true of any committed state -- the fix and the claim landed together, so the
+register was stale from its first line. `test_live_status_claims.py` scans
+prose for exactly this shape.
 """
 
 import re
@@ -585,13 +595,11 @@ class BashToolMentionInBodyTest(unittest.TestCase):
 class AgentBashToolRequiredTest(unittest.TestCase):
     """Rule 5, applied to the current tree: any agent whose body
     affirmatively names the Bash tool must carry `Bash` in its own tools:.
-    UNLIKE Rule 4 (clean today), this IS red against the real tree -- see
-    the module docstring's "Rule 5, measured against today's tree". Three
-    agents untouched by the F9 fix (konzeptor.md, system-architekt.md,
-    tech-writer.md's second Bash mention) make the same claim
-    security-master.md made before its fix. This is a real, reported
-    finding, not a detector defect -- fixing agents/*.md is outside this
-    wave's write boundary."""
+    Like Rule 4, it holds against the tree as shipped. Run against
+    `961165f^` it flags four agents (konzeptor.md, system-architekt.md,
+    tech-writer.md's second Bash mention, and security-master.md); all four
+    were resolved in `961165f`, the commit that also introduced this module
+    -- see the module docstring's "Rule 5, measured against today's tree"."""
 
     def test_every_body_bash_mention_is_covered_by_tools(self):
         violations = []

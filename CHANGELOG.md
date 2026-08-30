@@ -8,6 +8,57 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Added
 
+- **A mechanism against register drift, instead of a seventh sweep** (R1). A *register* is
+  any place that records a claim about the state of something else — a docstring about its
+  own test's outcome, a file header about its data rows, a list about open findings. Six
+  instances in a fortnight: nine ADR follow-ups that outlived their answers, a module
+  docstring claiming "red" against a green tree, a findings list that counted eleven and
+  omitted one, the baseline note counts (four times in three days), `check-all.sh`'s header
+  against its own baseline, and four closed findings still listed as open. Every other defect
+  class in this repository has been given a procedure; this one had been given six sweeps and
+  no mechanism.
+
+  **The inventory came first, and it narrowed the answer sharply.** Of every claim kind a
+  register carries, exactly one is derivable with no measurement at all: *a check in this
+  repository, as it ships, is failing right now*. A green suite refutes that outright, so it
+  is generated rather than stored. Note counts, work-item status and open-findings lists each
+  need their own generator and are **not** covered — and, decisively, all three of those
+  registers (`docs/HANDOVER.md`, `docs/.handover-archive/`, `docs/workitems/`) are
+  **gitignored**, so a shipped test cannot reach them in an adopter's repo at all.
+
+  `scripts/tests/test_live_status_claims.py` requires **four** conditions together: a
+  *now-anchor* (`today`, `the real tree`, `at HEAD`); a *present-indicative failure predicate*
+  (`is`/`are` immediately before `red|failing|broken`); quoted and emphasised spans stripped,
+  since a sentence in quotation marks is being *shown* rather than made; and a self-referential
+  subject somewhere ahead of the copula. Dated history is let through **structurally** rather
+  than by exemption — a dated sentence anchors to its date and never satisfies the now-anchor.
+  A date-pattern exemption was written first, **measured unreachable, and deleted**: a branch
+  that never executes is not a guard, it is decoration that will be trusted later.
+
+  **The last two conditions were not in the design; they were forced by the check's first
+  contact with new prose.** Written with the first two alone, it went red on three sentences
+  written within the hour — all three describing or quoting the check itself, none asserting
+  anything. So the normal act of documenting the mechanism violated it. Neither remaining
+  condition was sufficient alone, measured against all five real instances: subject-anchoring
+  alone still caught the sentence whose *quoted example* contains its own self-reference, and
+  quote-stripping alone still caught the docstring that describes the rule in plain words.
+  Narrowing them was not free and the cost is written down: a named but non-self-referential
+  subject — "the conformance check is broken today" — is no longer caught.
+
+  Red-proven in **both** directions against the real tree, not fixtures. Caught: two sentences
+  in `test_agent_frontmatter.py` claiming that module's Rule 5 check "is RED today" while it
+  ran 26 tests green — the drift was live and tracked at the moment the check was written. Let
+  through: three real sentences elsewhere in the suite, each first asserted to be a genuine
+  candidate, so the pass is attributed rather than merely observed. Five mutations, each
+  proven landed by occurrence count; dropping the now-anchor turns all three history fixtures
+  into false positives.
+
+  Correcting the drifted docstrings surfaced a second, smaller one: the original said F9
+  touched **three** agents. Run across the fix boundary it was **four** —
+  `security-master.md` was resolved by *gaining* the tool rather than by losing the prose, so
+  it left no body change to notice. A replacement register is a new claim and was measured
+  like one.
+
 - **A scanner for BSD/GNU coreutils divergence** (WI-0130). Three instances of one class
   turned up in a single week: `mktemp` with a suffix after `XXXXXX` (BSD substitutes only a
   *trailing* run of X's and returns the template literally), `find -printf` (GNU-only), and
