@@ -55,6 +55,28 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "scripts" / "quality-scan.sh"
 
 
+def _resolved_bash_major_minor():
+    """The interpreter `subprocess.run(["bash", ...])` actually resolves via
+    PATH -- not necessarily /bin/bash (a Homebrew bash ahead of /bin on PATH
+    would change this). Mirrors test_memory_sync_promote.py's
+    `_bash_major_minor()`, but resolved by the SAME PATH lookup this
+    module's own subprocess calls use, rather than a hardcoded path,
+    because it is that resolved interpreter -- not "whatever macOS ships in
+    /bin" -- whose parsing behaviour the mutation tests below depend on."""
+    found = shutil.which("bash")
+    if found is None:
+        return None
+    try:
+        out = subprocess.run([found, "--version"], capture_output=True, text=True).stdout
+    except OSError:
+        return None
+    m = re.search(r"version (\d+)\.(\d+)", out)
+    return (int(m.group(1)), int(m.group(2))) if m else None
+
+
+RESOLVED_BASH_VERSION = _resolved_bash_major_minor()
+
+
 class QualityScanTestBase(unittest.TestCase):
     def setUp(self):
         self.project = Path(tempfile.mkdtemp(prefix="ccpr-quality-scan-project-"))
@@ -849,6 +871,20 @@ PYEOF
         mutant.write_text(content, encoding="utf-8")
         return mutant
 
+    # WI-0129 F<n>: this construct's parse failure is a bash-3.2 parser bug
+    # (a heredoc nested inside a `$(...)` command substitution whose body
+    # carries an odd number of apostrophes) -- GNU bash 4+ parses the exact
+    # same bytes without error, so on a machine whose resolved `bash` is 4+
+    # (Ubuntu's system bash is 5.x) the mutation reproduces nothing to
+    # assert against. The PO approved this as a platform-conditional skip
+    # (ADR-0011 decision 4: CI jobs deliberately cover different subsets),
+    # following the identical pattern already established in
+    # test_memory_sync_promote.py's UsageHintOnBash32Test.
+    @unittest.skipUnless(
+        (RESOLVED_BASH_VERSION or (99, 0))[0] < 4,
+        "resolved bash is not 3.x — the bash-3.2 parser bug this mutation "
+        "reproduces cannot be measured here",
+    )
     def test_the_gate_goes_red_on_the_reintroduced_construct(self):
         with tempfile.TemporaryDirectory(prefix="ccpr-quality-scan-quoting-mutant-") as tmp:
             mutant = self.make_mutant(tmp)
@@ -856,6 +892,11 @@ PYEOF
             self.assertNotEqual(0, r.returncode, "mutation did not reproduce a parse failure")
             self.assertIn("syntax error", r.stderr)
 
+    @unittest.skipUnless(
+        (RESOLVED_BASH_VERSION or (99, 0))[0] < 4,
+        "resolved bash is not 3.x — the bash-3.2 parser bug this mutation "
+        "reproduces cannot be measured here",
+    )
     def test_the_reintroduced_construct_reproduces_the_measured_pre_fix_symptom(self):
         with tempfile.TemporaryDirectory(prefix="ccpr-quality-scan-quoting-mutant-") as tmp:
             mutant = self.make_mutant(tmp)

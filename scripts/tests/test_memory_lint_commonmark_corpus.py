@@ -43,6 +43,7 @@ a different bug appears), the assertion below fails and says so.
 
 import hashlib
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -54,6 +55,14 @@ from pathlib import Path
 SCRIPT_PATH = Path(__file__).resolve().parents[1] / "memory-lint.sh"
 FIXTURE_PATH = Path(__file__).resolve().parent / "fixtures" / "commonmark_corpus.json"
 GENERATOR_PATH = Path(__file__).resolve().parent / "fixtures" / "generate_commonmark_corpus.py"
+
+# WI-0129 Teil 1: a RECORDED double of the real `commonmark` package (see
+# fixtures/commonmark_double/commonmark.py's own docstring for why this is a
+# double, not a skip and not a declared dependency). Placed on PYTHONPATH
+# ONLY for `_run_generator_copy()`'s subprocess below -- no other test in
+# this module, and no real generate_commonmark_corpus.py invocation, ever
+# sees it.
+COMMONMARK_DOUBLE_DIR = Path(__file__).resolve().parent / "fixtures" / "commonmark_double"
 
 FINDING_RE = re.compile(r"link target '([^']*)' does not exist")
 
@@ -1034,6 +1043,18 @@ class GeneratorDocumentedIntentValidationTest(unittest.TestCase):
     silently (exit 0, a fixture gets written) instead of being refused
     (exit 1) — mutation of the generator's own logic, not a removed
     assertion.
+
+    Each COPY still does `import commonmark` (unchanged from the real
+    generator — WI-0129 Teil 1) because computing `actually_diverges` for a
+    synthetic entry genuinely needs it; that import is NOT deferrable past
+    validation, since the oracle comparison IS part of validation (measured
+    by moving the import into `reference_hrefs()` and observing the exact
+    same crash, just at a different line). `_run_generator_copy()` below
+    points the subprocess's PYTHONPATH at
+    fixtures/commonmark_double/commonmark.py — a RECORDED double (see that
+    module's own docstring for why a recording, not a hand-written stub,
+    and what it does not prove) — so these three tests need neither the
+    real package installed nor a skip.
     """
 
     _CORPUS_BLOCK_RE = re.compile(r"^CORPUS = \[.*?^\]\n", re.S | re.M)
@@ -1127,7 +1148,13 @@ class GeneratorDocumentedIntentValidationTest(unittest.TestCase):
         deep so the copy's own `parents[3]`-based REPO_ROOT/SCRIPT_PATH
         resolution still lands on a real `memory-lint.sh` + `lib/`), and
         runs it with the SAME Python interpreter this test suite runs
-        under."""
+        under -- with COMMONMARK_DOUBLE_DIR prepended to PYTHONPATH so the
+        subprocess's `import commonmark` resolves to the RECORDED double
+        (fixtures/commonmark_double/commonmark.py) rather than needing the
+        real package installed. This is the ONLY place in this module that
+        sets PYTHONPATH -- every other test here, and any real,
+        manually-run generate_commonmark_corpus.py invocation, never sees
+        the double."""
         corpus_source = f"CORPUS = {corpus_entries!r}\n"
         mutated = self._CORPUS_BLOCK_RE.sub(lambda m: corpus_source, generator_source, count=1)
 
@@ -1139,9 +1166,18 @@ class GeneratorDocumentedIntentValidationTest(unittest.TestCase):
             shutil.copytree(SCRIPT_PATH.parent / "lib", scratch_root / "scripts" / "lib")
             generator_copy = fixtures_dir / "generate_commonmark_corpus.py"
             generator_copy.write_text(mutated, encoding="utf-8")
+
+            env = dict(os.environ)
+            existing_pythonpath = env.get("PYTHONPATH", "")
+            env["PYTHONPATH"] = (
+                str(COMMONMARK_DOUBLE_DIR) + os.pathsep + existing_pythonpath
+                if existing_pythonpath else str(COMMONMARK_DOUBLE_DIR)
+            )
+
             return subprocess.run(
                 [sys.executable, str(generator_copy)],
                 capture_output=True, text=True,
+                env=env,
             )
 
     def _assert_generator_disk_copy_untouched(self, original_source, original_md5):

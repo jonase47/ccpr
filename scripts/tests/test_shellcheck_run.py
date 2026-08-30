@@ -29,6 +29,7 @@ a stub standing in for it -- the exact "not the real thing" gap G-127 warns
 against.
 """
 
+import atexit
 import os
 import shutil
 import subprocess
@@ -38,7 +39,6 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WRAPPER = REPO_ROOT / "scripts" / "shellcheck-run.sh"
-SANDBOXED_PATH = "/usr/bin:/bin:/usr/sbin:/sbin"
 
 
 def _real_shellcheck_dir():
@@ -51,6 +51,40 @@ def _real_shellcheck_dir():
 
 
 REAL_SHELLCHECK_DIR = _real_shellcheck_dir()
+
+# Every external tool scripts/shellcheck-run.sh calls by name (`command -v`,
+# `mktemp`, `cat`, `rm`, `grep`, `date`, plus `sed` for its own `usage()`).
+# `cd`, `pwd -P`, `printf` and `command` are bash builtins and need nothing
+# on PATH.
+_REQUIRED_SANDBOX_TOOLS = ("bash", "sed", "mktemp", "cat", "rm", "grep", "date")
+
+
+def _build_sandboxed_path_without_shellcheck(search_path=None):
+    """Builds a scratch directory holding a symlink to each of
+    `_REQUIRED_SANDBOX_TOOLS`'s REAL binaries, resolved from `search_path`
+    (the unsandboxed PATH by default) -- and, by construction, nothing named
+    `shellcheck`.
+
+    Why not the old `"/usr/bin:/bin:/usr/sbin:/sbin"` literal: that sandbox
+    happened to exclude this maintainer's Homebrew shellcheck
+    (/opt/homebrew/bin), but on Ubuntu `apt install shellcheck` puts the
+    binary in /usr/bin -- the SAME directory `/bin` symlinks to under
+    usrmerge, alongside the very coreutils this sandbox must keep reachable.
+    A sandbox built from a directory LIST cannot exclude one binary from a
+    directory without excluding everything else that lives beside it; a
+    sandbox built by naming individual TOOLS can, regardless of which
+    directory a platform's package manager happens to use."""
+    search_path = search_path if search_path is not None else os.environ.get("PATH", "")
+    sandbox_dir = tempfile.mkdtemp(prefix="ccpr-shellcheck-sandbox-")
+    for tool in _REQUIRED_SANDBOX_TOOLS:
+        found = shutil.which(tool, path=search_path)
+        if found is not None:
+            os.symlink(found, os.path.join(sandbox_dir, tool))
+    return sandbox_dir
+
+
+SANDBOXED_PATH = _build_sandboxed_path_without_shellcheck()
+atexit.register(shutil.rmtree, SANDBOXED_PATH, ignore_errors=True)
 
 
 def _rmtree(p):
@@ -77,6 +111,54 @@ class ShellcheckRunTestBase(unittest.TestCase):
             capture_output=True, text=True,
             env={"PATH": path},
         )
+
+
+class SandboxPathExcludesShellcheckByConstructionTest(unittest.TestCase):
+    """WI-0129: proves the sandbox construction survives the exact shape
+    that broke it on Ubuntu -- shellcheck sharing a directory with the
+    coreutils this test suite still needs. Simulates that by putting every
+    required tool AND a fake `shellcheck` into ONE source directory (the
+    `/usr/bin` == `/bin` usrmerge shape), the way the old
+    `"/usr/bin:/bin:/usr/sbin:/sbin"` literal could never be tested against
+    without actually running on such a machine."""
+
+    def test_sandbox_omits_shellcheck_even_when_it_shares_a_directory_with_required_tools(self):
+        with tempfile.TemporaryDirectory() as combined:
+            for name in (*_REQUIRED_SANDBOX_TOOLS, "shellcheck"):
+                target = Path(combined) / name
+                target.write_text("#!/usr/bin/env bash\necho fake\n", encoding="utf-8")
+                target.chmod(0o755)
+
+            sandbox_dir = _build_sandboxed_path_without_shellcheck(search_path=combined)
+            self.addCleanup(shutil.rmtree, sandbox_dir, ignore_errors=True)
+
+            self.assertIsNone(
+                shutil.which("shellcheck", path=sandbox_dir),
+                "shellcheck must never be reachable from the constructed sandbox",
+            )
+            for tool in _REQUIRED_SANDBOX_TOOLS:
+                self.assertIsNotNone(
+                    shutil.which(tool, path=sandbox_dir),
+                    f"{tool} must remain reachable even though it shared a "
+                    f"source directory with shellcheck",
+                )
+
+    def test_a_directory_list_sandbox_would_have_failed_this_same_scenario(self):
+        # The mutation proof: the OLD sandbox strategy (name directories,
+        # not tools) cannot pass the scenario above -- if `combined` were
+        # simply appended to PATH wholesale (what "/usr/bin:/bin:..." did),
+        # shellcheck would be reachable right alongside every coreutil.
+        with tempfile.TemporaryDirectory() as combined:
+            for name in (*_REQUIRED_SANDBOX_TOOLS, "shellcheck"):
+                target = Path(combined) / name
+                target.write_text("#!/usr/bin/env bash\necho fake\n", encoding="utf-8")
+                target.chmod(0o755)
+
+            self.assertIsNotNone(
+                shutil.which("shellcheck", path=combined),
+                "sanity check: the fixture must reproduce shellcheck being "
+                "colocated with the required tools",
+            )
 
 
 class ShellcheckNotInstalledTest(ShellcheckRunTestBase):
@@ -211,6 +293,30 @@ class EmptyScopeTest(ShellcheckRunTestBase):
         self.assertEqual(0, r.returncode, r.stdout + r.stderr)
         self.assertIn("the shellcheck check DID NOT RUN", r.stdout)
         self.assertIn("no scripts/*.sh", r.stdout)
+
+
+class BothCouldNotRunCausesTest(ShellcheckRunTestBase):
+    """Both could-not-run causes can hold at once: shellcheck missing on
+    PATH (e.g. a macOS runner without Homebrew) AND an empty scope. The
+    wrapper's two `if` branches used to be mutually exclusive by control
+    flow -- the shellcheck-missing branch returns before the scope check is
+    ever reached, so on a machine that hits both, only the FIRST cause was
+    ever named and the second silently disappeared. Uses the default
+    (shellcheck-excluded) sandbox on an empty project directory."""
+
+    def test_both_causes_are_named_when_both_apply(self):
+        (self.project / "docs").mkdir()
+        r = self.run_wrapper(str(self.project))
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertIn("the shellcheck check DID NOT RUN", r.stdout)
+        self.assertIn(
+            "shellcheck not installed on PATH", r.stdout,
+            f"the shellcheck-missing cause must still be named: {r.stdout!r}",
+        )
+        self.assertIn(
+            "no scripts/*.sh", r.stdout,
+            f"the empty-scope cause must not be hidden by the other cause: {r.stdout!r}",
+        )
 
 
 class BadUsageTest(ShellcheckRunTestBase):

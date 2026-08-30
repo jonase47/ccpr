@@ -1,0 +1,23 @@
+{
+  "commonmark_version": "0.9.2",
+  "captured_on": "30.08.2026",
+  "captured_by": "scripts/tests/fixtures/record_commonmark_double.py",
+  "captured_from": "/opt/homebrew/lib/python3.14/site-packages/commonmark/__init__.py",
+  "entries": [
+    {
+      "name": "synthetic_intent_agrees",
+      "markdown": "[x](dead-agree-test.md)\n",
+      "html": "<p><a href=\"dead-agree-test.md\">x</a></p>\n"
+    },
+    {
+      "name": "synthetic_both_blocks",
+      "markdown": "[x](dead-both&num;3.md) — named entity in destination\n",
+      "html": "<p><a href=\"dead-both#3.md\">x</a> — named entity in destination</p>\n"
+    },
+    {
+      "name": "synthetic_neither_block",
+      "markdown": "[x](dead-newgap&num;3.md)\n",
+      "html": "<p><a href=\"dead-newgap#3.md\">x</a></p>\n"
+    }
+  ]
+}

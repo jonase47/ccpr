@@ -857,7 +857,7 @@ class NoStaleKnownFindingsTest(unittest.TestCase):
 
 class ClassificationCountsTest(unittest.TestCase):
     def test_classification_counts(self):
-        """Regression pin on the measured baseline: 1069 `test_*` methods
+        """Regression pin on the measured baseline: 1070 `test_*` methods
         across the corpus call something shaped like a subprocess invocation
         and are therefore in scope for this check; 0 of those are currently
         absence-only-needs-exemption -- `KNOWN_FINDINGS` above is empty for
@@ -871,6 +871,23 @@ class ClassificationCountsTest(unittest.TestCase):
         growing paragraph:
 
           in-scope / flagged   when
+          1070 / 0             WI-0129 CI-hardening (30.08.2026):
+                               test_shellcheck_run.py's new
+                               BothCouldNotRunCausesTest.test_both_causes_
+                               are_named_when_both_apply calls
+                               `self.run_wrapper(...)` (matches
+                               `RUN_HELPER_RE`) to prove both could-not-run
+                               causes are named when they overlap. Not
+                               flagged: asserts three specific positive
+                               substrings (the "DID NOT RUN" marker, the
+                               "shellcheck not installed on PATH" cause, the
+                               "no scripts/*.sh" cause), never an absence
+                               alone. The sandbox-construction test class
+                               added alongside it
+                               (SandboxPathExcludesShellcheckByConstruction
+                               Test, 2 methods) calls no subprocess/helper
+                               at all -- out of this scanner's scope. +1 in
+                               scope, 0 newly flagged.
           1069 / 0             WI-0129 D2 (ShellCheck adoption, 30.08.2026):
                                test_shellcheck_run.py's 16 in-scope methods,
                                all built on a shared `self.run_wrapper(...)`
@@ -1348,7 +1365,7 @@ class ClassificationCountsTest(unittest.TestCase):
         count."""
         recs = scan_tree()
         flagged = [r for r in recs if r.disposition in NEEDS_EXEMPTION]
-        self.assertEqual(1069, len(recs))
+        self.assertEqual(1070, len(recs))
         self.assertEqual(0, len(flagged))
 
 
@@ -1442,10 +1459,22 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
         ClassificationCountsTest) moved by +16 -- see that test's own entry
         for the per-method reasoning; every method there calls
         `subprocess.run`, directly or via the shared `run_wrapper` helper,
-        and none is flagged."""
+        and none is flagged.
+
+        Bumped 56 -> 57, 30.08.2026 (WI-0129 CI-hardening): added
+        test_platform_conditional_skip_budget.py, pinning the number of
+        platform/toolchain-conditional test skips. In-scope count above did
+        NOT move (see ClassificationCountsTest's +1 entry, which is
+        test_shellcheck_run.py's new BothCouldNotRunCausesTest method, not
+        this file): its two test methods call module-level helpers
+        (`skipped_test_ids()`, `files_with_skip_decorators()`) and
+        `unittest.TestLoader().loadTestsFromModule(...)`, never
+        `subprocess.run` nor a `self.<name>(...)` matching `RUN_HELPER_RE`
+        -- the same "out of scope entirely" shape test_ci_workflow.py's own
+        entry above already is."""
         files = sorted(TESTS_DIR.glob("*.py")) + sorted((TESTS_DIR / "workitems").glob("*.py"))
         names = sorted(f.relative_to(TESTS_DIR).as_posix() for f in files if f.name != "__init__.py")
-        self.assertEqual(56, len(names))
+        self.assertEqual(57, len(names))
         self.assertIn("test_absence_only_assertions.py", names)
         self.assertIn("test_run_tests_heredoc_injection.py", names)
         self.assertIn("test_heredoc_interpolation_scan.py", names)

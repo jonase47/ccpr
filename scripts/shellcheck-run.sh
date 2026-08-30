@@ -116,25 +116,26 @@ _report_header() {
   echo
 }
 
-if ! command -v shellcheck >/dev/null 2>&1; then
-  _report_header
-  echo "**Scope:** $FILE_COUNT file(s) matched — the shellcheck check DID NOT RUN (shellcheck not installed on PATH)"
-  echo
-  echo "## Findings"
-  echo
-  echo "_not evaluated — see Scope above_"
-  echo
-  echo "---"
-  echo
-  echo "**Summary:** 0 file(s) scanned, 0 finding(s) — could-not-run"
-  echo "**Exit:** 0"
-  warn "$PROG: could-not-run — shellcheck is not installed on PATH"
-  exit 0
-fi
+# Two independent could-not-run causes -- both are checked and both are
+# named when both apply. The causes used to be two separate early-exit `if`
+# blocks; the first one (shellcheck missing) returned before the second
+# (empty scope) was ever reached, so a machine hitting both only ever saw
+# the first cause and the second silently disappeared from the report.
+COULD_NOT_RUN_REASONS=()
+command -v shellcheck >/dev/null 2>&1 || COULD_NOT_RUN_REASONS+=("shellcheck not installed on PATH")
+[ "$FILE_COUNT" -eq 0 ] && COULD_NOT_RUN_REASONS+=("no scripts/*.sh, scripts/lib/*.sh, or install.sh found under $PROJECT_DIR")
 
-if [ "$FILE_COUNT" -eq 0 ]; then
+if [ "${#COULD_NOT_RUN_REASONS[@]}" -gt 0 ]; then
+  reasons_joined=""
+  for reason in "${COULD_NOT_RUN_REASONS[@]}"; do
+    if [ -z "$reasons_joined" ]; then
+      reasons_joined="$reason"
+    else
+      reasons_joined="$reasons_joined; $reason"
+    fi
+  done
   _report_header
-  echo "**Scope:** 0 file(s) matched — the shellcheck check DID NOT RUN (no scripts/*.sh, scripts/lib/*.sh, or install.sh found under $PROJECT_DIR)"
+  echo "**Scope:** $FILE_COUNT file(s) matched — the shellcheck check DID NOT RUN ($reasons_joined)"
   echo
   echo "## Findings"
   echo
@@ -144,7 +145,7 @@ if [ "$FILE_COUNT" -eq 0 ]; then
   echo
   echo "**Summary:** 0 file(s) scanned, 0 finding(s) — could-not-run"
   echo "**Exit:** 0"
-  warn "$PROG: could-not-run — no scripts/*.sh, scripts/lib/*.sh, or install.sh found under $PROJECT_DIR"
+  warn "$PROG: could-not-run — $reasons_joined"
   exit 0
 fi
 
