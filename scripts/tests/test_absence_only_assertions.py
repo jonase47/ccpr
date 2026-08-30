@@ -1387,14 +1387,27 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
         ClassificationCountsTest's own trajectory entry for the per-method
         breakdown, including which siblings in the new files fall into the
         pre-existing module-level-helper blind spot (not a new one, and not
-        a rename-to-dodge attempt)."""
+        a rename-to-dodge attempt).
+
+        Bumped 53 -> 54, 30.08.2026 (first-CI work item): added
+        test_ci_workflow.py, the structural reader/linter for the new
+        .github/workflows/ci.yml. In-scope count above (1051, see
+        ClassificationCountsTest) did NOT move: every one of its test
+        methods reads and regex-parses a YAML file in-process -- none
+        calls `subprocess.run` or a `self.<name>(...)` matching
+        `RUN_HELPER_RE` (the module never shells out; even its
+        `_write_scratch` helper only calls `Path.write_text`) -- so the
+        whole file sits entirely outside this scanner's scope, the same
+        "out of scope entirely" shape the scan test itself already is,
+        named two paragraphs up."""
         files = sorted(TESTS_DIR.glob("*.py")) + sorted((TESTS_DIR / "workitems").glob("*.py"))
         names = sorted(f.relative_to(TESTS_DIR).as_posix() for f in files if f.name != "__init__.py")
-        self.assertEqual(53, len(names))
+        self.assertEqual(54, len(names))
         self.assertIn("test_absence_only_assertions.py", names)
         self.assertIn("test_run_tests_heredoc_injection.py", names)
         self.assertIn("test_heredoc_interpolation_scan.py", names)
         self.assertIn("test_phase_docs_lint.py", names)
+        self.assertIn("test_ci_workflow.py", names)
         self.assertIn("workitems/test_migrate.py", names)
 
 

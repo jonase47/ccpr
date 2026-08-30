@@ -1,0 +1,137 @@
+name: CI
+
+# Two jobs, deliberately NOT one a superset of the other -- see
+# docs/adr/ADR-0011-bash-3-2-floor.md, decision 4.
+# `python-tests` (ubuntu-latest) runs the bash-4-shaped tests in
+# scripts/tests/test_memory_sync_promote.py that macOS's /bin/bash (3.2)
+# skips. `check-all-macos` (macos-latest) is the only place the bash-3.2
+# floor AND BSD-vs-GNU userland differences are ever actually exercised --
+# one of the latter had already surfaced before this CI existed (BSD
+# `mktemp` returning a template's trailing `XXXXXX` literally when a suffix
+# follows it, a real defect fixed in scripts/run-tests.sh).
+#
+# No `continue-on-error` and no bare `|| true` anywhere in this file: a
+# check's actual exit code -- scripts/check-all.sh's own comparison against
+# scripts/check-all.baseline.tsv, or unittest's own exit code -- IS the
+# result of the job it runs in, never swallowed. Both are guarded by
+# scripts/tests/test_ci_workflow.py.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  python-tests:
+    name: Python test suite (Ubuntu)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          # scripts/tests/test_agent_frontmatter.py:154 pins
+          # PRE_FIX_COMMIT = "7af990d" and reads it via `git show
+          # <sha>:<path>` (read_git_show, :235-246) with check=True. That
+          # commit sits well over 40 commits behind HEAD. actions/checkout
+          # defaults to fetch-depth: 1 (HEAD only) -- with that default,
+          # `git show` cannot find the commit and the test ERRORS rather
+          # than merely failing an assertion. Full history is required for
+          # this job to even attempt that test.
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          # 3.11: scripts/tests/test_memory_lint.py imports the stdlib
+          # `zoneinfo` module (available since 3.9, not declared anywhere
+          # in this repo -- there is no requirements.txt/pyproject.toml,
+          # see CONTRIBUTING.md). 3.11 sits comfortably above that floor
+          # and is pinned explicitly so this job's Python version does not
+          # silently drift with a runner-image update, rather than
+          # inheriting whatever python3 the image happens to default to.
+          python-version: "3.11"
+
+      - name: Run Python test suite
+        run: |
+          # -t . is NOT optional: CONTRIBUTING.md's own measurement shows
+          # 1923 tests, 0 import errors WITH it; several hundred fewer,
+          # silently, without it -- a handful of modules use a relative
+          # import that only resolves with the repo root as the top-level
+          # directory, and the run still exits non-zero on those, but
+          # nothing in the output says how many tests never even attempted
+          # to run.
+          python3 -m unittest discover -s scripts/tests -t .
+
+  check-all-macos:
+    name: check-all.sh (macOS)
+    runs-on: macos-latest
+    steps:
+      # ADR-0011: the shebang does NOT carry the bash-3.2 floor. All shipped
+      # scripts start with `#!/usr/bin/env bash`, and `env` resolves to the
+      # FIRST bash on PATH -- Apple ships /bin/bash as 3.2 and will not
+      # update it (GPLv3 licensing), but a Homebrew-installed bash 5.x, if
+      # one is ahead of /bin on this runner's PATH, would be resolved
+      # instead, silently testing a floor this repository does not target.
+      # These two steps make the actually-resolved interpreter a measured
+      # fact on every run rather than an assumption: forcing /bin to the
+      # front of PATH is correct whether or not a newer bash actually sits
+      # ahead of it today, and the assert step catches it either way if a
+      # future runner image changes that.
+      - name: Force PATH so unqualified "bash" resolves to /bin/bash, not a newer one
+        run: echo "/bin" >> "$GITHUB_PATH"
+
+      - name: Assert the resolved bash is 3.2.x (ADR-0011 floor)
+        run: |
+          RESOLVED="$(command -v bash)"
+          VERSION="$(bash -c 'echo "$BASH_VERSION"')"
+          echo "resolved bash binary:  $RESOLVED"
+          echo "resolved bash version: $VERSION"
+          case "$VERSION" in
+            3.2*)
+              echo "OK: bash 3.2.x confirmed -- ADR-0011's floor holds on this runner"
+              ;;
+            *)
+              echo "::error::expected bash 3.2.x per ADR-0011 (docs/adr/ADR-0011-bash-3-2-floor.md), got '$VERSION' at '$RESOLVED'. The shebang does not carry this floor -- PATH resolution does, and it just resolved to something else on this runner image." >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          # See the python-tests job's identical comment on this key: the
+          # python-tests check inside check-all.sh below runs the exact
+          # same scripts/tests/test_agent_frontmatter.py, which needs full
+          # history to `git show` PRE_FIX_COMMIT.
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          # See the python-tests job's identical comment: pinned so this
+          # job's Python version does not silently drift, and stays above
+          # the zoneinfo/3.9 floor.
+          python-version: "3.11"
+
+      - name: Run check-all.sh
+        run: |
+          # Runs all seven catalogued checks, INCLUDING the python suite
+          # (see scripts/check-all.sh's own header) -- its exit code IS
+          # this job's result, compared against
+          # scripts/check-all.baseline.tsv inside the script itself.
+          #
+          # Measured locally in a fresh clone with an empty HOME
+          # (30.08.2026): 7 catalogued, 5 matched, 0 divergent, 2
+          # could-not-run, exit 0 -- memory-lint and conformance-run
+          # correctly report their own targets/consumers absent on a
+          # runner rather than diverging, and doc-volume-check scans only
+          # git-tracked files. A macOS CI run reporting 7/7 matched
+          # instead of 5/2 would itself be the surprising result, not the
+          # expected one.
+          #
+          # /bin/bash explicit here too, on top of the PATH-forcing above:
+          # this top-level invocation does not need PATH resolution to hit
+          # the right interpreter, but check-all.sh's OWN internal calls to
+          # its six sibling scripts ("bash $script_path", not an absolute
+          # path) do -- that is what the PATH-forcing step actually buys.
+          /bin/bash scripts/check-all.sh .
