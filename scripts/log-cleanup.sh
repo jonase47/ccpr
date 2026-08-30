@@ -85,7 +85,14 @@ if [ -d "${SESSION_DIR}" ]; then
             if [ -f "${session}session-summary.json" ]; then
                 ARCHIVE_DIR="${LOG_DIR}/session-archive"
                 if ! $DRY_RUN; then
+                    # WI-0129/F10 hardened everything else under
+                    # ${LOG_DIR} to 0700/0600; this directory was missed
+                    # because that fix touched hooks/agent-monitor.py, not
+                    # this script. Never trust mkdir's mode argument alone
+                    # (same reasoning as that fix) -- chmod explicitly so
+                    # the result is independent of the executing umask.
                     mkdir -p "${ARCHIVE_DIR}"
+                    chmod 700 "${ARCHIVE_DIR}"
                     cp "${session}session-summary.json" "${ARCHIVE_DIR}/${session_id}.json" 2>/dev/null || true
                 fi
             fi

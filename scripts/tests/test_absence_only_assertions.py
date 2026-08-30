@@ -857,7 +857,7 @@ class NoStaleKnownFindingsTest(unittest.TestCase):
 
 class ClassificationCountsTest(unittest.TestCase):
     def test_classification_counts(self):
-        """Regression pin on the measured baseline: 1033 `test_*` methods
+        """Regression pin on the measured baseline: 1036 `test_*` methods
         across the corpus call something shaped like a subprocess invocation
         and are therefore in scope for this check; 0 of those are currently
         absence-only-needs-exemption -- `KNOWN_FINDINGS` above is empty for
@@ -871,6 +871,69 @@ class ClassificationCountsTest(unittest.TestCase):
         growing paragraph:
 
           in-scope / flagged   when
+          1036 / 0             CCPR CI prep, three independent cycles
+                               (30.08.2026): +3, one new in-scope method per
+                               cycle. `test_log_cleanup_behavior.py`'s
+                               ArchiveDirectoryPermissionsTest gained a
+                               `run_with_umask` helper -- matches
+                               `RUN_HELPER_RE` the same way F7's
+                               `_run_fake_tool` did, so its one test method
+                               entered scope; it carries
+                               `self.assertEqual(0, r.returncode, ...)`,
+                               recognised positive, not flagged.
+                               `test_run_tests_mktemp_templates.py` (new
+                               file) has one in-scope method,
+                               `test_mktemp_templates_do_not_collide_on_
+                               repeated_calls`, calling `subprocess.run(...)`
+                               directly twice; both calls are asserted on by
+                               `.returncode` and the two resulting paths are
+                               asserted unequal -- not flagged. Its sibling
+                               methods in the same file
+                               (`test_all_mktemp_calls_end_in_a_bare_
+                               placeholder_run`, `test_no_hardcoded_pytest_
+                               cov_json_path_remains`) never invoke a
+                               subprocess at all -- pure file-content checks,
+                               correctly out of scope, not a blind spot.
+                               `test_gitattributes_crlf_guard.py` (new file)
+                               has one in-scope method,
+                               `test_representative_text_file_resolves_to_
+                               lf`, which calls `subprocess.run(...)`
+                               inline; three of its four siblings
+                               (`test_logo_pngs_are_declared_binary`,
+                               `test_no_tracked_text_file_has_crlf_line_
+                               endings`, `test_detector_flags_a_genuine_
+                               crlf_text_file`) route their subprocess calls
+                               through module-level helpers
+                               (`is_declared_binary`, `crlf_violations`) or a
+                               non-run-shaped self-method (`self._git`,
+                               matches neither `RUN_HELPER_RE` nor
+                               `subprocess.run`) -- the SAME module-level-
+                               helper blind spot already named in this
+                               module's own docstring (`_calls_a_subprocess`
+                               only matches `ast.Call(func=ast.Attribute)`)
+                               and in this test's own "boundary" section
+                               below, not a new gap and not a rename-to-dodge
+                               attempt: the helpers are named for what they
+                               do (`crlf_violations`, `is_declared_binary`),
+                               unchanged from how they were written before
+                               this pin was ever measured. None of the three
+                               is actually blind in the dangerous sense this
+                               scanner targets: `crlf_violations` calls
+                               `subprocess.run(..., check=True)`, so a dead
+                               `git` raises and fails the test outright
+                               rather than collapsing to an empty result;
+                               `is_declared_binary` returns `False` on empty
+                               stdout, which pushes affected paths TOWARD
+                               being flagged as CRLF violations, not away
+                               from it -- the fail-open direction is safe
+                               here, unlike the bug shape this check exists
+                               to catch. Fourth sibling
+                               (`test_gitattributes_normalizes_text_to_lf`)
+                               reads the `.gitattributes` file directly, no
+                               subprocess at all, correctly out of scope.
+                               File count 51 -> 53 (see
+                               ScannedFilesCoverTheShippedScopeTest for that
+                               side).
           1033 / 0             F10's two follow-ups (29.08.2026): the session
                                logs get 0700/0600 with the mode re-asserted on
                                files that already existed, and both writers
@@ -1178,7 +1241,7 @@ class ClassificationCountsTest(unittest.TestCase):
         count."""
         recs = scan_tree()
         flagged = [r for r in recs if r.disposition in NEEDS_EXEMPTION]
-        self.assertEqual(1033, len(recs))
+        self.assertEqual(1036, len(recs))
         self.assertEqual(0, len(flagged))
 
 
@@ -1224,10 +1287,26 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
         `self.assertEqual(0, result.returncode, ...)`, unconditionally
         recognised as positive. The scan test calls neither `subprocess.run`
         nor a `self.<name>(...)` at all -- out of scope entirely, no
-        contribution to either number."""
+        contribution to either number.
+
+        Bumped 51 -> 53, 30.08.2026 (CCPR CI prep, three independent
+        cycles): added test_run_tests_mktemp_templates.py and
+        test_gitattributes_crlf_guard.py. In-scope count above (1033 ->
+        1036, see ClassificationCountsTest's own trajectory) moved by +3,
+        not +2 -- one of the three new in-scope methods lives in neither new
+        file, it is a new method (`ArchiveDirectoryPermissionsTest.test_
+        archive_dir_is_0700_regardless_of_permissive_umask`) added to the
+        ALREADY-counted test_log_cleanup_behavior.py, so it moves the method
+        pin here without moving this file-count pin -- the same "two pins,
+        two different questions" split this docstring's tranche-2 paragraph
+        above already establishes. Flagged unchanged at 0: see
+        ClassificationCountsTest's own trajectory entry for the per-method
+        breakdown, including which siblings in the new files fall into the
+        pre-existing module-level-helper blind spot (not a new one, and not
+        a rename-to-dodge attempt)."""
         files = sorted(TESTS_DIR.glob("*.py")) + sorted((TESTS_DIR / "workitems").glob("*.py"))
         names = sorted(f.relative_to(TESTS_DIR).as_posix() for f in files if f.name != "__init__.py")
-        self.assertEqual(51, len(names))
+        self.assertEqual(53, len(names))
         self.assertIn("test_absence_only_assertions.py", names)
         self.assertIn("test_run_tests_heredoc_injection.py", names)
         self.assertIn("test_heredoc_interpolation_scan.py", names)

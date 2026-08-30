@@ -49,17 +49,26 @@ TIMESTAMP=$(date -u "+%Y-%m-%dT%H:%M:%S")
 
 run_pytest() {
     local test_arg="${TEST_PATH:-.}"
-    local tmpfile
-    tmpfile=$(mktemp /tmp/pytest-report-XXXXXX.json)
+    local tmpfile cov_tmpfile
+    # No suffix after the XXXXXX run in either template -- BSD mktemp (the
+    # macOS floor platform) only substitutes a TRAILING run of X's; a
+    # literal suffix after it is returned unsubstituted on the first call
+    # and collides (`mkstemp failed: File exists`) on any call that follows
+    # while that same literal path still exists (WI-0129). The extension is
+    # not load-bearing: `--json-report-file=`/`--cov-report=json:` and the
+    # Python heredoc below all open these paths explicitly, none infer a
+    # format from the file suffix.
+    tmpfile=$(mktemp /tmp/pytest-report-XXXXXX)
+    cov_tmpfile=$(mktemp /tmp/pytest-cov-XXXXXX)
 
     # Run pytest with JSON report if plugin available
     if python3 -c "import pytest_json_report" 2>/dev/null; then
         python3 -m pytest "${test_arg}" --tb=short -q \
             --json-report --json-report-file="${tmpfile}" \
-            $( [ -n "$(pip show pytest-cov 2>/dev/null)" ] && echo "--cov --cov-report=json:/tmp/pytest-cov.json" || true ) \
+            $( [ -n "$(pip show pytest-cov 2>/dev/null)" ] && echo "--cov --cov-report=json:${cov_tmpfile}" || true ) \
             2>&1 || true  # exit-status: exempt test-runner-output-capture
 
-        RUN_TESTS_TMPFILE="${tmpfile}" RUN_TESTS_TIMESTAMP="${TIMESTAMP}" python3 << 'PYEOF'  # exit-status: exempt set-e-sufficient
+        RUN_TESTS_TMPFILE="${tmpfile}" RUN_TESTS_COV_FILE="${cov_tmpfile}" RUN_TESTS_TIMESTAMP="${TIMESTAMP}" python3 << 'PYEOF'  # exit-status: exempt set-e-sufficient
 import json, os, sys
 
 try:
@@ -97,7 +106,7 @@ result = {
 
 # Try to read coverage
 try:
-    with open("/tmp/pytest-cov.json") as f:
+    with open(os.environ["RUN_TESTS_COV_FILE"]) as f:
         cov = json.load(f)
     result["coverage"] = {
         "total_pct": cov.get("totals", {}).get("percent_covered", 0),
@@ -176,14 +185,16 @@ print(json.dumps(result, indent=2, ensure_ascii=False))
 PYEOF
     fi
 
-    rm -f "${tmpfile}" /tmp/pytest-cov.json
+    rm -f "${tmpfile}" "${cov_tmpfile}"
 }
 
 run_jest_or_vitest() {
     local runner="$1"
     local test_arg="${TEST_PATH:-}"
     local tmpfile
-    tmpfile=$(mktemp /tmp/jest-report-XXXXXX.json)
+    # Same reasoning as run_pytest()'s tmpfile above: no suffix after
+    # XXXXXX, so BSD mktemp actually randomizes it.
+    tmpfile=$(mktemp /tmp/jest-report-XXXXXX)
 
     # `test_arg` may be empty (no TEST_PATH given) -- an unconditional
     # `"${test_arg}"` would then pass a literal empty-string argument to

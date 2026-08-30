@@ -55,6 +55,7 @@ import shutil
 import stat
 import subprocess
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -271,6 +272,59 @@ done
         # crashed bash before this point at all (which would print its own,
         # non-empty stderr and already fail the assertion above).
         self.assertNotEqual(0, r.returncode, r.stdout + r.stderr)
+
+
+class ArchiveDirectoryPermissionsTest(LogCleanupTestBase):
+    """WI-0129/F10 hardened everything under ~/.claude/logs to 0700/0600
+    (hooks/agent-monitor.py), but scripts/log-cleanup.sh's own archive-dir
+    creation (the `mkdir -p "${ARCHIVE_DIR}"` in the session-sweep loop) was
+    never touched by that fix -- it ships with no `-m`/`chmod` hardening at
+    all, so it lands wherever the executing process's umask happens to put
+    it. Measured on a real machine: after a log-cleanup.sh run under a
+    permissive umask, the archive directory sits at the umask-masked default
+    (e.g. 0755) while its freshly-hardened siblings sit at 0700.
+
+    The test sets the subprocess's OWN umask explicitly (umask is shell-
+    process state, not something `env=` can carry) via a `bash -c` wrapper,
+    rather than relying on whatever umask the test-running machine happens
+    to have -- a restrictive dev/CI umask (e.g. 077) would make even the
+    unfixed script pass by accident and prove nothing.
+    """
+
+    def run_with_umask(self, umask, *args, **extra_env):
+        return subprocess.run(
+            ["bash", "-c", 'umask "$1"; shift; exec bash "$0" "$@"',
+             str(SCRIPT), umask, *args],
+            capture_output=True, text=True, env=self.env(**extra_env),
+        )
+
+    def make_old_session(self, session_id="old-session"):
+        session_dir = self.log_dir / "sessions" / session_id
+        session_dir.mkdir(parents=True)
+        (session_dir / "session-summary.json").write_text("{}\n", encoding="utf-8")
+        # Backdate the session directory itself (not just the file inside
+        # it): with only a session-summary.json present -- no *.jsonl --
+        # the script's own age-detection falls through both its `find
+        # -printf` (GNU-only, fails on BSD/macOS find) and its `stat -f '%m'
+        # *.jsonl` fallback (no match) to its final fallback, the session
+        # DIRECTORY's own mtime.
+        old_time = time.time() - 4000 * 86400
+        os.utime(session_dir, (old_time, old_time))
+        return session_dir
+
+    def test_archive_dir_is_0700_regardless_of_permissive_umask(self):
+        session_dir = self.make_old_session()
+        r = self.run_with_umask("022", "--days", "1")
+
+        # Sanity: the archive branch actually ran (session was swept), not
+        # just "the directory happened to pre-exist from somewhere else".
+        self.assertFalse(session_dir.exists(), r.stdout + r.stderr)
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+
+        archive_dir = self.log_dir / "session-archive"
+        self.assertTrue(archive_dir.is_dir(), r.stdout + r.stderr)
+        mode = stat.S_IMODE(os.stat(archive_dir).st_mode)
+        self.assertEqual(0o700, mode, oct(mode))
 
 
 if __name__ == "__main__":

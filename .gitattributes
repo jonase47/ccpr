@@ -1,0 +1,20 @@
+# Normalize tracked text files to LF on checkin/checkout. Prevents CRLF
+# from entering version control -- several of this repo's own frontmatter
+# parsers are CRLF-blind (see scripts/tests/test_gitattributes_crlf_guard.py
+# for the measured detail), so the safest posture is to never let CRLF land
+# in the index in the first place, rather than trust every contributor's
+# editor/OS/git config to agree.
+* text=auto eol=lf
+
+# Binary assets: exempt from the text/EOL normalization above. Both are
+# PNGs and, like any compressed binary data, incidentally contain byte
+# sequences that look like "\r\n" -- `text=auto`'s own binary heuristic
+# would likely catch these anyway, but an explicit declaration is
+# authoritative and doesn't depend on git's heuristic guessing right.
+#
+# scripts/tests/test_gitattributes_crlf_guard.py's real-repo guard trusts
+# THIS file (via `git check-attr binary`), not a content sniff -- so any
+# NEW binary asset added anywhere in this repo needs its own `binary` line
+# here too, or that guard will false-positive on it (it will look like a
+# CRLF violation when it is really just an unrelated binary byte pattern).
+docs/logo/*.png binary
