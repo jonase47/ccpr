@@ -8,6 +8,77 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Added
 
+- **This repository has CI** (WI-0129, finding F11 — the last one that was open). Until now
+  nothing but a person ran the test suite: `.github/` held only issue templates, `.git/hooks/`
+  only samples, and there had been **zero** workflow runs. With a second person working on the
+  repo, the runner is the only instance both can measure against without "it works on mine"
+  ending the discussion.
+
+  Two jobs, and deliberately neither a superset of the other (ADR-0011, decision 4).
+  `ubuntu-latest` runs the bash-4-shaped tests in `test_memory_sync_promote.py` that macOS's
+  `/bin/bash` 3.2 skips; `macos-latest` is the only place the 3.2 floor and BSD-vs-GNU userland
+  differences are exercised at all. One of the latter had already cost a real defect before this
+  CI existed — BSD `mktemp` returning a suffixed template literally.
+
+  Two things in here are easy to lose to a later tidy-up, so both are asserted rather than
+  commented. **`fetch-depth: 0`**: `test_agent_frontmatter.py` pins a commit 45 behind `HEAD` and
+  reads it through `git show` with `check=True`; `actions/checkout`'s default of 1 makes that
+  test *error*, not merely fail. **The bash version**: the shebang does not carry the floor —
+  every script starts `#!/usr/bin/env bash`, so `PATH` decides, and a runner image with a newer
+  bash ahead of `/bin` would silently verify bash 5 behind a green badge. The job forces `/bin`
+  to the front of `PATH`, calls `/bin/bash` explicitly, and its **first** step prints the
+  resolved interpreter and fails unless it starts with `3.2`. The PATH forcing is not redundant
+  with the explicit call: `check-all.sh` invokes its sibling scripts as `bash $script_path`,
+  which is what actually needs the resolution.
+
+  `test_ci_workflow.py` guards all of it by **mutation**, not by presence: `fetch-depth` weakened
+  to 1, removed, or stripped of its justifying comment; the assert step missing, softened to
+  `exit 0`, or moved after checkout; `continue-on-error` or a bare `|| true` anywhere; the two
+  jobs drifting to different Python versions. Its own first red run is worth keeping: the
+  workflow header explains the no-swallowed-failures rule *by naming* `continue-on-error` and
+  `|| true`, and the checker flagged its own explanation. It now reads operative lines only.
+
+  What only a real run can settle is recorded in the file so it gets read rather than assumed:
+  whether a Homebrew bash actually precedes `/bin` there, whether `GITHUB_PATH` behaves as
+  expected, and whether `check-all.sh` reports the 5-matched/2-could-not-run shape measured
+  locally. A macOS run reporting 8/8 would be the surprising result, not the expected one.
+
+- **ShellCheck is the eighth catalogued check** (WI-0129). It ran nowhere, although ten sites in
+  this repo already carry `# shellcheck` directives, and it would have reported F8's unquoted
+  arguments on its own instead of leaving them to an external review.
+
+  The threshold decided the shape. `check-all.sh` compares **exit codes only**, so a baseline of
+  1 would be blind to the next finding — 62 and 63 sites both exit 1 and both count as "match".
+  Only a baseline of **0** catches anything. Hence `--severity=warning` with the 30 findings
+  cleared, rather than `--severity=error` (zero findings today, but that level catches neither
+  the `install.sh` find below nor the F8 class).
+
+  Each disposition was decided, not batch-silenced: seven genuinely dead variables removed; the
+  14 `SC2088` in `memory-lint.sh` suppressed **individually** rather than file-wide, because
+  they sit in human-facing message text where the tilde is deliberate and a file-wide directive
+  would also hide a future real one; and one real find — `install.sh:346`'s
+  `rm -rf "$DEST/$p"`, in an installer, now `${DEST:?}` with a test proving it aborts on an empty
+  variable instead of deleting.
+
+  `scripts/shellcheck-run.sh` wraps the external binary, because the catalogue invokes sibling
+  scripts rather than tools, and it reports its own missing scope the way `memory-lint`,
+  `conformance-run` and `artifact-gate` now do: on a machine without ShellCheck the check is
+  could-not-run, never exit 0. Not hypothetical — it was not installed here until this work, and
+  is not on any clone.
+
+- **ADR-0011 records that bash 3.2 stays the floor.** The constraint was real and enforced —
+  a static guard test finds zero bash-4 constructs in the shipped scripts, and a dozen inline
+  comments name it where it costs something — but it had never been written down as a decision.
+  A CI forces the question, because choosing only `ubuntu-latest` would have made bash 5 the
+  de-facto floor by omission.
+
+  Writing it down turned up something that changes the reasoning: **the shebang does not carry
+  the floor.** All 26 scripts use `#!/usr/bin/env bash`, so `env` takes the first bash on `PATH`.
+  On the maintainer's machine that happens to be `/bin/bash` 3.2.57 — the floor holds by accident
+  of environment, not by construction. So the floor is a promise about which language *features*
+  the scripts use, not about which interpreter runs them; the static guard is the enforcement,
+  and the CI has to measure the interpreter it actually got.
+
 - **The instinct sampler and the shipped index are now checked against each other** (WI-0129,
   finding F14, the part that stayed open). CCPR ships its starter instincts in two shapes —
   `instincts.md`, the 45-entry split-layout index, and `templates/STARTER_INSTINCTS.md`, a flat
@@ -523,6 +594,60 @@ All notable changes to this project are documented in this file. The format is b
   first, then the fixture.
 
 ### Fixed
+
+- **Three checks were divergent on every machine but the maintainer's, because none of them
+  reported its own scope** (WI-0129, groundwork for F11). A fresh clone with an empty `HOME` —
+  which is what a CI runner is — produced `memory-lint: exit 0 (expected 1)`,
+  `doc-volume-check: exit 0 (expected 2)` and `artifact-gate: exit 1 (expected 0)`. All three
+  harmless, all three permanent.
+
+  `check-all.sh`'s own header argues that a check which is red when nothing is wrong gets ignored
+  within two weeks. That is the state this would have shipped into — and the diagnosis would have
+  been wrong on top: "expected 1, got 0" reads as *the warnings are fixed*, not as *there was
+  nothing to check*.
+
+  The common cause is that all three depend on state only one machine has: untracked working
+  files, or personal non-distributed config (ADR-0010). And all three **already announced their
+  missing scope in plain text**. `check-all.sh` reads such a self-report today — but only for
+  `conformance-run`. The mechanism did not need inventing, only applying consistently, which is
+  also `CONTRIBUTING.md`'s rule about deriving an expectation from the other artifact.
+
+  `memory-lint.sh` now prints `**Targets:** N of 4 present`. An earlier draft had `check-all.sh`
+  match on `0 of 4 present` and was changed in review: that would have coupled the detector to
+  the target count and broken silently at a fifth target. `doc-volume-check.sh` scans only
+  git-tracked files inside a work tree — measured, the 5 critical and 6 warning findings were
+  100% untracked working state, the 3 info are tracked. `check-all.sh` passes
+  `--require-denylist` only where a deny-list exists, reading the same library `artifact-gate.sh`
+  sources rather than re-deriving the lookup, and states the decision either way.
+
+  That last part exposed a third state worth naming: `gate_load_config()` has an `exit 2` path
+  that used to be contained in a subprocess and now sits in `check-all.sh`'s own process, before
+  any check runs. A crash there would have bypassed the very rule this script enforces —
+  "NOTHING WAS VERIFIED … This is not a pass" would never execute, and one check's broken config
+  would suppress all eight. It now runs in a command substitution, and a broken detection is
+  reported as **broken** rather than as merely absent: the two call for different actions.
+
+  Fresh clone, empty `HOME`: 3 divergent / exit 1 → **0 divergent, 2 could-not-run, exit 0**.
+
+- **Three defects that a fresh machine reproduced on every run** (findings #26, #19, #22). A CI
+  runner is a fresh machine each time, so each of these is a defect a local hand-correction
+  cannot hold.
+
+  `log-cleanup.sh` created `${LOG_DIR}/session-archive` without a mode, so it landed on the
+  executing umask — observed at `drwxr-xr-x` while WI-0129/F10 had put the rest of that tree on
+  `drwx------`. Fixed with an explicit `chmod` rather than `mkdir -m`: `-m` does not touch an
+  already existing directory, `chmod` does.
+
+  Two `mktemp` templates in `run-tests.sh` carried a suffix after `XXXXXX`. BSD `mktemp`
+  substitutes only a **trailing** run of X's, so both returned a literal, predictable path in
+  shared `/tmp` and collided on any following call. Wider than recorded: `/tmp/pytest-cov.json`
+  was hardcoded outright at three more sites. The new test asserts the rule over every `mktemp`
+  call in the file, so the next line added is covered too.
+
+  No `.gitattributes` existed. Four awk frontmatter parsers here are CRLF-blind while three
+  Python ones are not, and the lint is the strict side — a valid `gate: go` reads as missing
+  while the gate passes it silently. With a second person now committing, `* text=auto eol=lf`
+  closes the door. Measured before writing: 0 of 321 tracked files carried CRLF, 2 are binary.
 
 - **The shipped `CLAUDE.md` presented two instinct-adoption paths as equivalent when one carries
   a third of the other** (WI-0129, finding F14). It offered "Two ways to adopt the starter
