@@ -469,6 +469,22 @@ def _classify_assert_call(call, stdout_names, result_names, findings_names):
         return "neutral"
     if _references_returncode(call):
         return "positive"
+    # THIRD measured limitation, and the only one that is an inconsistency
+    # INSIDE this function (finding #16, 28.08.2026; closed 30.08.2026 without
+    # a fix). This branch asks "does it reference the result?" via
+    # `_is_stdout_like(args[1], ...)`, which inspects ONE argument node and
+    # recognises only a direct `.stdout` or a name bound to one. The
+    # `assertTrue` branch above asks the same question via
+    # `_references_the_result`, which walks the WHOLE call. So
+    # `assertIn("#2", r.stdout + r.stderr)` -- a BinOp -- is invisible here
+    # while the identical expression under `assertTrue` is seen. Found because
+    # one test was baselined as blind and was not.
+    # Deliberately NOT widened: the PO decision on findings #7/#11 was to name
+    # this scanner's blind spots narrowly and honestly rather than change its
+    # rules, because widening moves pinned counts nobody has re-measured. If
+    # the rules are ever widened, this is the strongest of the three
+    # candidates -- the other two are gaps between functions, this one is a
+    # contradiction within one.
     if method == "assertIn" and len(args) >= 2 and _is_stdout_like(args[1], output_names):
         return "positive"
     if method == "assertEqual" and len(args) >= 2:
