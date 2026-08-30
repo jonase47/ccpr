@@ -31,7 +31,7 @@ phase-docs-lint	0	0 errors, 0 warnings, 0 info — no phase folders under docs/ 
 memory-lint	1	4 of 4 targets present; 0 errors, 5 warnings, 1 info — non-zero by design (long-standing memory-freshness warnings)
 manual-lint	0	0 errors, 0 warnings, 0 info
 doc-volume-check	0	14 tracked files scanned, 188 untracked skipped; 0 critical, 0 warning, 3 info (PROJECT_PHASES.md, ADR-0002, ADR-0009)
-artifact-gate	0	328 files scanned, 0 findings; deny-list active (source: config), 4 name(s) checked
+artifact-gate	0	332 files scanned, 0 findings; deny-list active (source: config), 4 name(s) checked
 conformance-run	0	0 CCPR-attributable finding(s), 11 consumer finding(s) (P), 3 consumers covered
 python-tests	0	1965 tests, OK (run with -t ., not optional — see CONTRIBUTING.md)
 shellcheck	0	22 file(s) scanned, 0 finding(s) at --severity=warning

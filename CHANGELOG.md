@@ -595,6 +595,53 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Fixed
 
+- **Two defects that only exist on Linux, and were therefore never seen.** Both predate this
+  work; the CI found them on its first run, because nobody had ever executed these scripts on
+  Linux.
+
+  `memory-sync.sh`'s home masking was a **no-op on bash 4+**. The line read
+  `${msg//$HOME/~}`, and bash tilde-expands an *unquoted* replacement word starting with `~`
+  — to the value of `$HOME`, not to a tilde character. So `$HOME` was substituted back in for
+  itself. bash 3.2 does not do this, which is why a Mac never showed it. Measured on the
+  identical line: bash 3.2 → `"xx~yy"`, bash 5.3.15 → `"xx/rootyy"`. This is a product defect,
+  not a test artefact: the masking exists so error messages do not leak a home path, and on any
+  Linux machine a real user saw the unmasked path. The obvious fix, `${msg//$HOME/"~"}`, was
+  measured and rejected — it prints literal quotes on bash 3.2.
+
+  Widening the sweep from "the same line" to "any replacement whose right-hand side starts with
+  an unquoted tilde" found a **second site with no test at all**, `ensure_memory_pointer()`.
+  It has one now, seen red against the original under real bash 5.
+
+  `log-cleanup.sh` **removed nothing on Linux**. `find -printf` had no `-name '*.jsonl'` filter,
+  so GNU find matched every file including the just-written `session-summary.json`, making old
+  sessions look fresh — invisible on macOS, where BSD find rejects `-printf` outright and a
+  fallback covers it. And that fallback used `stat -f '%m'`, BSD syntax; GNU's `-f` means
+  *filesystem* status, a different mode that does not fail but returns a multi-line block, so the
+  comparison after it failed silently. Measured in Docker with the real script:
+  `Sessions: 0 removed, 1 kept`. Fixed with the `uname` branch this repo already uses twice.
+
+- **Four platform assumptions in the test infrastructure**, repaired before the two defects above
+  — deliberately in that order, because verifying a bash-5 fix requires a working Ubuntu job.
+
+  Three tests broke on an absent `commonmark`. They do **not** test CommonMark conformance; they
+  test the fixture generator's refusal branches, while the 46 real conformance tests run against
+  the frozen fixture without the package. They now use a **recorded** oracle double: a manual
+  script reads the markdown out of the test classes' own attributes, calls the real commonmark
+  0.9.2, and stores the outputs with version and capture date. The double raises loudly on an
+  unrecorded input rather than guessing, and carries a "What this module does NOT prove" section
+  naming the gap it accepts.
+
+  `SANDBOXED_PATH` was `/usr/bin:/bin:/usr/sbin:/sbin` — which is where apt puts shellcheck, so
+  the sandbox contained the tool it existed to exclude. It builds itself from individual tool
+  symlinks now. Two `could-not-run` causes were mutually exclusive by control flow, so when both
+  applied the second was invisible; all applicable causes are reported now — could-not-run has
+  been load-bearing since `check-all.sh`, and two causes indistinguishable behind it make the
+  diagnosis soft exactly where it is relied on. And the bash-3.2 quoting mutation test, which has
+  nothing to reproduce on bash 5, got the skip guard this repo already uses — plus a **skip
+  budget**: counts pinned per source, multiplied by the same condition the original module uses,
+  and a second test that walks the whole tree for unregistered skip decorators. A skip is a check
+  that does not happen; without a counter such a set grows unnoticed.
+
 - **Three checks were divergent on every machine but the maintainer's, because none of them
   reported its own scope** (WI-0129, groundwork for F11). A fresh clone with an empty `HOME` —
   which is what a CI runner is — produced `memory-lint: exit 0 (expected 1)`,
