@@ -1572,10 +1572,32 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
         `unittest.TestLoader().loadTestsFromModule(...)`, never
         `subprocess.run` nor a `self.<name>(...)` matching `RUN_HELPER_RE`
         -- the same "out of scope entirely" shape test_ci_workflow.py's own
-        entry above already is."""
+        entry above already is.
+
+        Bumped 57 -> 58, 30.08.2026 (WI-0130): added
+        test_bsd_gnu_portability.py, the BSD/GNU coreutils divergence
+        scanner. Proven an addition rather than a swap by
+        `git status --porcelain scripts/tests`, which showed exactly one
+        `??` line and nothing modified or deleted -- a count delta of +1
+        alone cannot tell "one added" from "one added, one gone".
+
+        In-scope count above did NOT move, and that is worth stating
+        plainly rather than leaving to be rediscovered: the new module
+        drives `git show` through `subprocess.run`, but does so from a
+        module-level `_read_git_show` helper, which is exactly the first
+        blind spot this scanner's own docstring documents
+        (`_calls_a_subprocess` matches only `ast.Call(func=ast.Attribute)`).
+        So none of its 38 methods are guarded by the absence-only check.
+        The helper was NOT introduced to hold this number still -- three
+        test methods share it -- and it is deliberately left where it is:
+        restructuring production or test code to please a measuring
+        instrument is backwards, and the standing decision on findings
+        #7/#11/#16 is to name this scanner's blind spots narrowly rather
+        than widen rules whose counts nobody has re-measured. Recorded
+        here so the gap is a known one."""
         files = sorted(TESTS_DIR.glob("*.py")) + sorted((TESTS_DIR / "workitems").glob("*.py"))
         names = sorted(f.relative_to(TESTS_DIR).as_posix() for f in files if f.name != "__init__.py")
-        self.assertEqual(57, len(names))
+        self.assertEqual(58, len(names))
         self.assertIn("test_absence_only_assertions.py", names)
         self.assertIn("test_run_tests_heredoc_injection.py", names)
         self.assertIn("test_heredoc_interpolation_scan.py", names)

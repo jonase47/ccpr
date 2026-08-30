@@ -8,6 +8,43 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Added
 
+- **A scanner for BSD/GNU coreutils divergence** (WI-0130). Three instances of one class
+  turned up in a single week: `mktemp` with a suffix after `XXXXXX` (BSD substitutes only a
+  *trailing* run of X's and returns the template literally), `find -printf` (GNU-only), and
+  `stat -f` (on GNU an entirely different mode — it does not fail, it silently returns
+  nonsense). The third shape is the dangerous one: a failure wearing the costume of a success.
+
+  **The justification is measured, not assumed.** ShellCheck ran clean at `--severity=warning`
+  over all 22 shipped scripts *while two defects of this class were live*. The eighth check
+  does not cover it. And the correct `uname` pattern already existed twice in the tree — a
+  pattern applied by hand in several places with one place forgotten is what a scanner closes
+  and a fix does not.
+
+  Eleven constructs adopted, each recorded with **which side is silent**; six rejected with
+  reasons, because a list that names only its hits hides its own shape. `xargs -r` is the
+  instructive rejection: the divergence lives in the flag's *absence*, so a rule matching `-r`
+  would flag the compatible spelling and miss the incompatible one.
+
+  "In sight" of a `uname` guard is the enclosing function body, or ten lines at top level with
+  function bodies subtracted — the boundary both correct shipped instances already respect. A
+  `||` fallback chain is explicitly **not** an exemption, and that is measured rather than
+  stylistic: the founding defect *was* such a chain, and a chain only guards constructs that
+  fail loudly, which half this list does not.
+
+  Red-proven against the real history rather than against rebuilt examples: the pre-fix
+  `log-cleanup.sh` and `run-tests.sh` are reported at exactly the defective lines, and the
+  three *correct* `mktemp` calls in the same file are asserted **not** reported — the sharper
+  half, since it shows the rule matches the shape and not the word.
+
+  Twelve structural mutants, of which **one initially survived** although a test named for
+  exactly that property existed and passed: its fixture could not discriminate, because the
+  paired rule had only one flag to key on. The test named the right thing and proved nothing.
+  Recorded because that is what a mutation battery is for.
+
+  It reports **nine findings on today's tree, deliberately not repaired** — each needs its own
+  round and its own red proof. Two of them work today only through luck of an exit status,
+  which the scanner cannot check and a reader should not have to infer.
+
 - **The project template's document tree now names every file a command writes** (finding
   #18). `templates/PROJECT_CLAUDE_TEMPLATE.md`'s `docs/` tree is what a new project copies to
   learn its own layout, and it omitted six documents that shipped commands produce:
