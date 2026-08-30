@@ -1133,12 +1133,31 @@ class ExternalToolExitStatusTest(unittest.TestCase):
         148 invocations total across the 18 shipped files, split as below.
         A change in these numbers means either a script changed shape or
         the scanner's own logic changed -- worth a deliberate look either
-        way, not a silent drift."""
+        way, not a silent drift.
+
+        Updated 30.08.2026 (WI-0129 Paket B, cycle B2): +3 for
+        scripts/doc-volume-check.sh's new tracked-only scope. One `git -C
+        "$DOCS_ROOT" rev-parse --show-toplevel >/dev/null 2>&1` is tested
+        directly by its own `if` condition (`checked-condition` +1). A
+        `git -C "$DOCS_ROOT" ls-files -z ... | while ...; done >
+        "$TRACKED_LIST_FILE"` pipeline stands alone under `set -euo
+        pipefail`, no `$(...)` involved -- exempted `set-e-sufficient`, the
+        same shape artifact-gate.sh's own `git ls-files -z | while ...`
+        sweep already uses (`bare-needs-exemption` +1). The `LC_ALL=C grep
+        -qxF -- "$rel" "$TRACKED_LIST_FILE"` inside `is_tracked()` is the
+        tail statement of a small predicate function whose own exit status
+        IS the function's return by design, checked by every CALLER via
+        `if ! is_tracked ...` -- the identical documented shape as
+        conformance-run.sh's `_conformance_read_config()` and
+        lib/discipline_gate.sh's `_gate_unicode_py`, marked
+        `propagates-as-function-return` (`bare-needs-exemption` +1). 155
+        invocations total: `checked-condition` +1, `bare-needs-exemption`
+        +2, everything else unchanged."""
         invocations = scan_tree()
         by_disposition = {}
         for inv in invocations:
             by_disposition[inv.disposition] = by_disposition.get(inv.disposition, 0) + 1
-        self.assertEqual(152, len(invocations))
+        self.assertEqual(155, len(invocations))
         self.assertEqual(
             {
                 # 28.08.2026, open-findings wave 1a: one invocation moved
@@ -1164,11 +1183,11 @@ class ExternalToolExitStatusTest(unittest.TestCase):
                 # ExemptionMarkersAreWellFormedTest passes on both. The third
                 # is its python3 suite runner, written `if python3 ...; then
                 # rc=0; else rc=$?; fi`, so it lands in the checked bucket.
-                "checked-condition": 26,
+                "checked-condition": 27,
                 "checked-captured": 5,
                 "checked-chain": 14,
                 "discard-needs-exemption": 40,
-                "bare-needs-exemption": 67,
+                "bare-needs-exemption": 69,
             },
             by_disposition,
         )

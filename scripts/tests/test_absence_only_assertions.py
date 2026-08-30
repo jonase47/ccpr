@@ -857,7 +857,7 @@ class NoStaleKnownFindingsTest(unittest.TestCase):
 
 class ClassificationCountsTest(unittest.TestCase):
     def test_classification_counts(self):
-        """Regression pin on the measured baseline: 1036 `test_*` methods
+        """Regression pin on the measured baseline: 1051 `test_*` methods
         across the corpus call something shaped like a subprocess invocation
         and are therefore in scope for this check; 0 of those are currently
         absence-only-needs-exemption -- `KNOWN_FINDINGS` above is empty for
@@ -871,6 +871,90 @@ class ClassificationCountsTest(unittest.TestCase):
         growing paragraph:
 
           in-scope / flagged   when
+          1051 / 0             WI-0129 Paket B, PO decision follow-up on the
+                               code-review's second Important finding
+                               (30.08.2026): gate_load_config()'s own
+                               internal `exit 2` used to run at
+                               check-all.sh's own top level, killing the
+                               whole process before any of the seven checks
+                               were attempted -- fixed to run inside a
+                               command substitution (`exit 2` inside `$(...)`
+                               only ends that subshell) with a third
+                               GATE_DENY_STATE value ("error", distinct from
+                               "configured"/"none") named in the report. +2
+                               in scope in the new
+                               ArtifactGateDenylistDetectionCrashTest, both
+                               driving `self.run_check_all`: one proves all
+                               seven checks still run and the report names
+                               the broken state distinctly from "NOT
+                               configured"; the other is the RED proof,
+                               mutating a SCRATCH copy back to the pre-fix
+                               single unguarded `gate_load_config` call and
+                               showing the crash-before-any-report failure
+                               directly (G-107/G-109 precedent -- neither
+                               test asserts an absence alone). Not flagged:
+                               both assert on the exact **Checks**/report
+                               text or the crash's own returncode/stderr.
+                               File count unchanged at 53.
+          1049 / 0             WI-0129 Paket B, code-review follow-up
+                               (30.08.2026): the reviewer found that
+                               check-all.sh's memory-lint no-scope detector
+                               matched on "0 of 4 present" AND "DID NOT RUN"
+                               together, coupling it to memory-lint.sh's
+                               CURRENT target total -- unlike
+                               conformance-run's "0 configured, 0 covered"
+                               (safe by construction), a future change to
+                               that total would silently break the match.
+                               Fixed to match on the "DID NOT RUN" phrase
+                               alone; +1 in scope
+                               (test_the_no_scope_detection_does_not_depend_
+                               on_the_target_count_literal, driving
+                               `self.run_check_all` with a stub reporting
+                               "0 of 6 present" to prove the count text is
+                               irrelevant to the match). Not flagged: it
+                               asserts on the exact **Summary** line. File
+                               count unchanged at 53.
+          1048 / 0             WI-0129 Paket B, cycle B3 (30.08.2026):
+                               check-all.sh's own --require-denylist
+                               decision (only pass it to artifact-gate.sh
+                               when a deny-list is actually configured, read
+                               from lib/discipline_gate.sh's own
+                               gate_load_config rather than re-derived) gets
+                               three new tests in
+                               ArtifactGateRequireDenylistTest, all driving
+                               `self.run_check_all` and asserting on the
+                               captured argv file plus the named report
+                               line -- none absence-only. +3 in scope, 0
+                               newly flagged. File count unchanged at 53:
+                               all three methods landed in the
+                               already-counted test_check_all.py.
+          1045 / 0             WI-0129 Paket B, cycles B1+B2 (30.08.2026): a
+                               CI runner's own empty $HOME and untracked-doc
+                               shapes (memory-lint.sh's four targets all
+                               absent; doc-volume-check.sh's oversized files
+                               all untracked) both need check-all.sh to read
+                               a could-not-run/tracked-scope report
+                               substring rather than a bare exit code. +9 in
+                               scope: 2 in test_check_all.py (both drive
+                               `self.run_check_all`, asserting named summary
+                               lines), 4 in test_doc_volume_check.py's new
+                               TrackedOnlyScopeTest (all drive
+                               `self.run_check`, asserting the exact bullet
+                               list and/or the "Untracked skipped" count), 3
+                               in test_memory_lint.py's new
+                               NoScopeReportedForCheckAllTest (all drive
+                               `self.run_lint`). Flagged unchanged at 0: one
+                               of the nine
+                               (`test_only_a_global_target_present_is_also_
+                               a_normal_run`) was genuinely absence-only on
+                               first write -- two `assertNotIn` calls with no
+                               positive claim -- and was fixed here, not
+                               exempted, with a precise `assertIn("**Targets:**
+                               1 of 4 present", ...)` pinning the one target
+                               this fixture actually leaves present. File
+                               count unchanged at 53 (see
+                               ScannedFilesCoverTheShippedScopeTest) -- all
+                               nine methods landed in already-counted files.
           1036 / 0             CCPR CI prep, three independent cycles
                                (30.08.2026): +3, one new in-scope method per
                                cycle. `test_log_cleanup_behavior.py`'s
@@ -1241,7 +1325,7 @@ class ClassificationCountsTest(unittest.TestCase):
         count."""
         recs = scan_tree()
         flagged = [r for r in recs if r.disposition in NEEDS_EXEMPTION]
-        self.assertEqual(1036, len(recs))
+        self.assertEqual(1051, len(recs))
         self.assertEqual(0, len(flagged))
 
 

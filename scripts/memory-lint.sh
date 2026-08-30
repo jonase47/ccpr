@@ -182,6 +182,37 @@ fi
 
 FILES_TOTAL=${#FILES[@]}
 
+# Scope report for check-all.sh (WI-0129 Paket B, cycle B1): this script has
+# FOUR independent targets — <project-dir>/docs/memory, ~/.claude/
+# instincts.md, ~/.claude/instincts/, ~/.claude/memory/ — and a CI runner
+# (empty $HOME, a checkout that never ships docs/memory/ because it is
+# working state, not a shipped artifact — see gitignore) reproduces ALL FOUR
+# absent at once. This script still exits 0 in that case: an absent target
+# produces no error or warning of its own, only the "project-scope checks
+# skipped" info above. check-all.sh compares exit codes against a baseline
+# that expects a specific non-zero value here, so a bare "exit 0" would be
+# misread as "ran clean" rather than "had nothing to check" — the same
+# exit-code-invisible shape conformance-run.sh's own "0 configured, 0
+# covered" state already has, one target class over.
+#
+# The boundary is deliberately ALL FOUR, not "the project-local one is
+# missing": running memory-lint.sh against a foreign project from a machine
+# with a real ~/.claude is the ORDINARY case (project-local absent, globals
+# present) and must be compared against the baseline like any other run —
+# only the degenerate case where NOTHING at all is present has nothing to
+# report.
+TARGETS_TOTAL=4
+TARGETS_PRESENT=0
+[[ -d "$MEMORY_DIR" ]] && TARGETS_PRESENT=$((TARGETS_PRESENT + 1))
+[[ -f "$TIER1_GLOBAL_FILE" ]] && TARGETS_PRESENT=$((TARGETS_PRESENT + 1))
+[[ -d "$TIER1_GLOBAL_TOPIC_DIR" ]] && TARGETS_PRESENT=$((TARGETS_PRESENT + 1))
+[[ -d "$TIER2_GLOBAL_DIR" ]] && TARGETS_PRESENT=$((TARGETS_PRESENT + 1))
+
+TARGETS_SUFFIX=""
+if (( TARGETS_PRESENT == 0 )); then
+    TARGETS_SUFFIX=" — the memory-lint check DID NOT RUN (no docs/memory/, no ~/.claude/instincts.md, no ~/.claude/instincts/, no ~/.claude/memory/)"
+fi
+
 for file in "${FILES[@]:-}"; do
     [[ -n "$file" ]] || continue
     rel="${file#$PROJECT_DIR/}"
@@ -2174,6 +2205,7 @@ echo "# Memory Lint Report"
 echo
 echo "**Scope:** $PROJECT_DIR/docs/memory/**"
 echo "**Run:** $NOW"
+echo "**Targets:** $TARGETS_PRESENT of $TARGETS_TOTAL present$TARGETS_SUFFIX"
 echo "**Files scanned:** $FILES_TOTAL"
 echo
 

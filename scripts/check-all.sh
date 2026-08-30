@@ -96,6 +96,17 @@
 # -t <project-dir>`), so a test simply points <project-dir> at a scratch
 # directory carrying a tiny, fast, real test package instead of this
 # repository's own ~1850-test, several-minutes suite.
+#
+# One check also SOURCES a shared library under the same directory, not just
+# invokes a sibling as a subprocess: before running artifact-gate.sh, this
+# script sources "$CHECK_SCRIPT_DIR/lib/discipline_gate.sh" and calls its
+# gate_load_config() to decide whether --require-denylist is warranted (see
+# the GATE_DENY_STATE block below) — reading artifact-gate.sh's OWN
+# deny-list detection rather than re-deriving the same ~/.claude/
+# memory-sync.json / CCPR_GATE_DENY_NAMES lookup a second time here. A test
+# exercises this the same way: CCPR_CHECK_ALL_SCRIPT_DIR's scratch directory
+# gets its own minimal lib/discipline_gate.sh stub next to the sibling-script
+# stubs, defining just gate_load_config().
 
 set -euo pipefail
 
@@ -239,6 +250,82 @@ while [ "$bi" -lt "$bn" ]; do
   bi=$((bi + 1))
 done
 
+# --- artifact-gate's --require-denylist: conditional on configuration ------
+# (WI-0129 Paket B, cycle B3)
+#
+# artifact-gate.sh's own header documents --require-denylist's purpose: turn
+# a missing, personal, non-distributed deny-list into a FINDING for CI,
+# rather than the NOTICE it is by default. A CI runner with no
+# ~/.claude/memory-sync.json and no CCPR_GATE_DENY_NAMES reproduces "no
+# deny-list configured" on every single run, by construction — passing
+# --require-denylist unconditionally there is not stricter checking, it is a
+# guaranteed exit 1 unrelated to any artifact this repository actually
+# ships, on every clean checkout everywhere but the machine that configured
+# a deny-list.
+#
+# Read from artifact-gate.sh's OWN detection (gate_load_config /
+# $GATE_DENY_SOURCE in lib/discipline_gate.sh, the single source of truth it
+# already sources) rather than re-deriving the same ~/.claude/
+# memory-sync.json / CCPR_GATE_DENY_NAMES lookup a second time here — a
+# second implementation of "is a deny-list configured" is a second place for
+# the two to drift apart.
+#
+# A missing or unreadable lib/discipline_gate.sh (a partial or broken
+# installation) takes the SAME default as "not configured": omit the flag.
+# artifact-gate.sh's own default already treats a missing deny-list as a
+# notice, not a failure — this mirrors that default rather than escalating a
+# detection failure into a stricter run.
+#
+# THREE states, not two, once the library IS found (PO decision on a
+# code-review finding, WI-0129 Paket B, 30.08.2026): gate_load_config()
+# itself has an internal `exit 2` (lib/discipline_gate.sh:294, reachable
+# when CCPR_GATE_DENY_NAMES is set and malformed enough to crash its own
+# grep-based classification — CI is exactly where that env var is meant to
+# be used, so this is not a purely theoretical corner). Calling it directly
+# here — as a first version of this fix did — meant that crash killed this
+# entire process, at the top, BEFORE any of the seven checks ran and before
+# RAN_COUNT is ever counted: the "NOTHING WAS VERIFIED — this is not a
+# pass" diagnosis a few dozen lines down never gets to fire, and a config
+# problem in ONE check (artifact-gate's deny-list) silently prevented all
+# seven from being attempted. Fail-loud here bypasses the very rule this
+# script exists to enforce. The opposite extreme — silently falling back to
+# "not configured" on ANY failure — is equally wrong, and for the reason B3
+# itself already names: a strictness that vanishes because its own
+# configuration is broken is the fail-open class WI-0129 was built to
+# close. "nobody configured a deny-list" and "the configuration is broken"
+# are two different findings; only the second calls for attention.
+#
+# So: run gate_load_config() inside a command substitution. `exit 2` inside
+# a `$(...)` only terminates that subshell (bash forks one for every
+# command substitution) — the calling script is never touched, and the
+# subshell's exit status becomes the substitution's own. `_gate_deny_source`
+# is what actually needs to leave the subshell; nothing else
+# gate_load_config sets (GATE_DENY_NAMES, GATE_IP_ALLOWLIST,
+# GATE_DENY_UNUSABLE) is read anywhere in this script, so losing those to
+# the subshell boundary costs nothing here. `>/dev/null 2>&1` on the
+# function call discards its own output (the crash path writes one
+# diagnostic line to stderr, lib/discipline_gate.sh:293) so only the
+# `printf` after `&&` — which never runs if the function already
+# exited — contributes to what this command substitution captures. The
+# trailing `|| _gate_deny_source="error"` is the same "checked assignment"
+# shape already used throughout this codebase's `set -euo pipefail` scripts
+# (e.g. the `out="$(_gate_checked ...)" || rc=$?` calls inside
+# lib/discipline_gate.sh itself): the LEFT side of an `||` never trips
+# `set -e`, so a nonzero exit from the substitution assigns the fallback
+# instead of aborting the script.
+GATE_DENY_STATE="none"
+_gate_lib="$CHECK_SCRIPT_DIR/lib/discipline_gate.sh"
+if [ -r "$_gate_lib" ]; then
+  # shellcheck source=lib/discipline_gate.sh
+  . "$_gate_lib"
+  _gate_deny_source="$(gate_load_config >/dev/null 2>&1 && printf '%s' "${GATE_DENY_SOURCE:-none}")" || _gate_deny_source="error"
+  if [ "$_gate_deny_source" = "error" ]; then
+    GATE_DENY_STATE="error"
+  elif [ "$_gate_deny_source" != "none" ]; then
+    GATE_DENY_STATE="configured"
+  fi
+fi
+
 # --- run every catalogued check that has a baseline entry -------------------
 
 RESULTS_TEXT=""
@@ -302,7 +389,16 @@ while [ "$ci" -lt "$CHECK_COUNT" ]; do
           phase-docs-lint|memory-lint) invoke_args=("$PROJECT_DIR") ;;
           manual-lint)                 invoke_args=("$PROJECT_DIR/Manual") ;;
           doc-volume-check)            invoke_args=("$PROJECT_DIR/docs") ;;
-          artifact-gate)               invoke_args=(--repo "$PROJECT_DIR" --require-denylist) ;;
+          artifact-gate)
+            if [ "$GATE_DENY_STATE" = "configured" ]; then
+              invoke_args=(--repo "$PROJECT_DIR" --require-denylist)
+            else
+              # "none" and "error" both omit the flag — see the
+              # GATE_DENY_STATE block above. Which of the two it was is
+              # named in the report note below, not decided here.
+              invoke_args=(--repo "$PROJECT_DIR")
+            fi
+            ;;
           conformance-run)             invoke_args=() ;;
         esac
         # bash 3.2: "${arr[@]}" on a zero-element array is safe under
@@ -344,6 +440,35 @@ while [ "$ci" -lt "$CHECK_COUNT" ]; do
       esac
     fi
 
+    # memory-lint.sh's own no-scope state is exit-code-invisible the same
+    # way: all four of ITS targets (<project-dir>/docs/memory,
+    # ~/.claude/instincts.md, ~/.claude/instincts/, ~/.claude/memory/) can be
+    # absent — a bare CI checkout with an empty $HOME reproduces exactly
+    # this — and the script still exits 0, because there is nothing to warn
+    # or error about. Detected from its own report substring, same
+    # discipline as the conformance-run branch just above.
+    #
+    # Matched on "the memory-lint check DID NOT RUN" ALONE, not also on "0
+    # of 4 present" — that count bakes memory-lint.sh's CURRENT target total
+    # into a literal here. Unlike conformance-run's "0 configured, 0
+    # covered" (safe by construction: COVERED can never exceed CONFIGURED,
+    # so both zeros move together), memory-lint.sh's "N of 4" would silently
+    # stop matching the moment a target is added or removed there, and this
+    # detector would go back to misreading a genuine no-scope exit-0 run as
+    # a real divergence — the exact defect this branch exists to fix,
+    # reintroduced by its own coupling (code review finding, WI-0129 Paket
+    # B). memory-lint.sh guarantees the DID NOT RUN suffix is present
+    # precisely when, and only when, its scope is empty; the count is for a
+    # human reader, not for this match.
+    if [ "$name" = "memory-lint" ]; then
+      case "$stdout_text" in
+        *"the memory-lint check DID NOT RUN"*)
+          state="could-not-run"
+          reason="no targets present (no docs/memory/, no ~/.claude instincts/memory files) — nothing to compare against a baseline exit code"
+          ;;
+      esac
+    fi
+
     if [ -z "$state" ]; then
       rc_str="$rc"
       if [ "$rc_str" = "$expected" ]; then
@@ -378,6 +503,31 @@ while [ "$ci" -lt "$CHECK_COUNT" ]; do
 "
       ;;
   esac
+
+  # Name the --require-denylist decision (see the GATE_DENY_STATE block
+  # above) — only once artifact-gate actually ran with it, never for a
+  # could-not-run (the flag was never acted on then). Three distinct
+  # wordings for three distinct findings: "configured" enforces the flag;
+  # "NOT configured" is the ordinary, supported case (nobody has set one
+  # up); "detection FAILED" is deliberately worded differently from both —
+  # it is not the same finding as "NOT configured" and must not read like
+  # it, even though the resulting invoke_args are identical (see above).
+  if [ "$name" = "artifact-gate" ] && [ "$state" != "could-not-run" ]; then
+    case "$GATE_DENY_STATE" in
+      configured)
+        RESULTS_TEXT="${RESULTS_TEXT}  artifact-gate: deny-list configured — --require-denylist enforced
+"
+        ;;
+      error)
+        RESULTS_TEXT="${RESULTS_TEXT}  artifact-gate: deny-list detection FAILED (broken config, not merely absent — see lib/discipline_gate.sh's gate_load_config) — running WITHOUT --require-denylist
+"
+        ;;
+      *)
+        RESULTS_TEXT="${RESULTS_TEXT}  artifact-gate: deny-list NOT configured — running WITHOUT --require-denylist
+"
+        ;;
+    esac
+  fi
 
   ci=$((ci + 1))
 done

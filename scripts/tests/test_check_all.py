@@ -221,6 +221,62 @@ class CheckAllTestBase(unittest.TestCase):
         if path.exists():
             path.unlink()
 
+    def write_argv_capturing_stub(self, script_filename, exit_code, capture_path):
+        """Like write_stub, but the stub records its OWN argv (one per line)
+        to capture_path before exiting -- used to pin exactly which flags
+        check-all.sh passed it, not just its exit code."""
+        path = self.stub_dir / script_filename
+        path.write_text(
+            "#!/usr/bin/env bash\n"
+            "printf '%s\\n' \"$@\" > '{capture}'\n"
+            "exit {code}\n".format(capture=capture_path, code=exit_code),
+            encoding="utf-8",
+        )
+        path.chmod(0o755)
+
+    def write_fake_discipline_gate_lib(self, deny_source):
+        """Installs a minimal scratch lib/discipline_gate.sh under
+        self.stub_dir -- the same seam CCPR_CHECK_ALL_SCRIPT_DIR already
+        gives the six sibling-script stubs, extended to this shared
+        library. Exercises the actual integration point (check-all.sh
+        sources this file and calls gate_load_config, then reads
+        $GATE_DENY_SOURCE) without needing the real, ~900-line pattern
+        library or a real ~/.claude/memory-sync.json."""
+        lib_dir = self.stub_dir / "lib"
+        lib_dir.mkdir(exist_ok=True)
+        (lib_dir / "discipline_gate.sh").write_text(
+            "#!/usr/bin/env bash\n"
+            "gate_load_config() {\n"
+            "  GATE_DENY_NAMES=\"\"\n"
+            "  GATE_DENY_SOURCE=\"%s\"\n"
+            "}\n" % deny_source,
+            encoding="utf-8",
+        )
+
+    def write_crashing_discipline_gate_lib(self):
+        """Installs a scratch lib/discipline_gate.sh whose gate_load_config()
+        exits 2 -- the shape a genuinely broken deny-list detection has (e.g.
+        a malformed CCPR_GATE_DENY_NAMES that crashes the real library's
+        internal grep classification, scripts/lib/discipline_gate.sh:287-298).
+        Measured directly against the PRE-fix check-all.sh (30.08.2026):
+        sourcing this and calling gate_load_config() at top level killed the
+        whole process with exit 2 BEFORE any of the seven checks ran -- no
+        report, no "NOTHING WAS VERIFIED" diagnosis, just a bare stderr line
+        and a process exit. A crash in ONE check's configuration must never
+        prevent the other six from being attempted, and must never look like
+        the ordinary "not configured" case either -- see
+        ArtifactGateDenylistDetectionCrashTest below."""
+        lib_dir = self.stub_dir / "lib"
+        lib_dir.mkdir(exist_ok=True)
+        (lib_dir / "discipline_gate.sh").write_text(
+            "#!/usr/bin/env bash\n"
+            "gate_load_config() {\n"
+            "  echo 'gate: something crashed' >&2\n"
+            "  exit 2\n"
+            "}\n",
+            encoding="utf-8",
+        )
+
     def write_baseline(self, mapping, extra_lines=None):
         lines = ["# scratch baseline for test_check_all.py"]
         for name, exit_code in mapping.items():
@@ -330,6 +386,271 @@ class CouldNotRunIsNeverCountedAsPassTest(CheckAllTestBase):
             r.stdout, self.output(r),
         )
 
+    def test_memory_lints_own_no_targets_shape_is_could_not_run_not_a_match(self):
+        # memory-lint.sh's own no-scope state (all four of its targets absent:
+        # <project-dir>/docs/memory, ~/.claude/instincts.md,
+        # ~/.claude/instincts/, ~/.claude/memory/) is exit-code-invisible by
+        # the same design conformance-run.sh already uses — memory-lint.sh
+        # still exits 0 there (nothing to warn or error about), so
+        # check-all.sh must read its report substring, not just its exit
+        # code, to tell "ran and found nothing" apart from "had nothing to
+        # run against". Baseline expects 1 (this repository's own by-design
+        # memory-freshness warnings) so an exit-0 stub would otherwise be
+        # read as a genuine DIVERGENT, not could-not-run.
+        self.write_stub(
+            "memory-lint.sh", 0,
+            stdout_text="# Memory Lint Report\n\n"
+                        "**Targets:** 0 of 4 present"
+                        " — the memory-lint check DID NOT RUN"
+                        " (no docs/memory/, no ~/.claude/instincts.md,"
+                        " no ~/.claude/instincts/, no ~/.claude/memory/)\n"
+                        "**Files scanned:** 0\n\n"
+                        "**Exit:** 0\n",
+        )
+        mapping = {name: 0 for name in CATALOGUE_NAMES}
+        mapping["memory-lint"] = 1
+        self.write_baseline(mapping)
+        r = self.run_check_all()
+        self.assertIn("memory-lint: could-not-run", r.stdout, self.output(r))
+        self.assertNotIn("memory-lint: exit 0 (expected 1) — DIVERGENT", r.stdout, self.output(r))
+        self.assertIn(
+            "**Summary:** 7 catalogued, 6 matched, 0 divergent, 1 could-not-run, 0 mismatched",
+            r.stdout, self.output(r),
+        )
+
+    def test_memory_lint_with_a_present_target_still_runs_normally(self):
+        # Gegenprobe (counter-proof): a stub that reports at least one
+        # present target must be compared against the baseline as usual —
+        # without this half, a fix that unconditionally reported
+        # could-not-run for memory-lint would pass the test above too.
+        self.write_stub(
+            "memory-lint.sh", 1,
+            stdout_text="# Memory Lint Report\n\n"
+                        "**Targets:** 1 of 4 present\n"
+                        "**Files scanned:** 3\n\n"
+                        "**Exit:** 1\n",
+        )
+        mapping = {name: 0 for name in CATALOGUE_NAMES}
+        mapping["memory-lint"] = 1
+        self.write_baseline(mapping)
+        r = self.run_check_all()
+        self.assertIn("memory-lint: exit 1 (expected 1) — match", r.stdout, self.output(r))
+        self.assertNotIn("memory-lint: could-not-run", r.stdout, self.output(r))
+
+    def test_the_no_scope_detection_does_not_depend_on_the_target_count_literal(self):
+        # Code-review finding (WI-0129 Paket B): matching on "0 of 4
+        # present" AND "DID NOT RUN" together coupled this detector to
+        # memory-lint.sh's CURRENT target total. If memory-lint.sh ever
+        # gains or loses a target, "0 of 4" stops appearing and this
+        # detector silently regresses to reading a genuine no-scope exit-0
+        # run as a real divergence again -- unlike conformance-run's "0
+        # configured, 0 covered" (safe by construction: COVERED can never
+        # exceed CONFIGURED), memory-lint's "N of TOTAL" has no such
+        # built-in invariant. This stub reports a DIFFERENT total (6, not
+        # 4) to prove the detector reacts to the "DID NOT RUN" phrase
+        # alone, not to the specific count text.
+        self.write_stub(
+            "memory-lint.sh", 0,
+            stdout_text="# Memory Lint Report\n\n"
+                        "**Targets:** 0 of 6 present"
+                        " — the memory-lint check DID NOT RUN"
+                        " (a future target set, hypothetically larger)\n"
+                        "**Files scanned:** 0\n\n"
+                        "**Exit:** 0\n",
+        )
+        mapping = {name: 0 for name in CATALOGUE_NAMES}
+        mapping["memory-lint"] = 1
+        self.write_baseline(mapping)
+        r = self.run_check_all()
+        self.assertIn("memory-lint: could-not-run", r.stdout, self.output(r))
+        self.assertNotIn("memory-lint: exit 0 (expected 1) — DIVERGENT", r.stdout, self.output(r))
+        self.assertIn(
+            "**Summary:** 7 catalogued, 6 matched, 0 divergent, 1 could-not-run, 0 mismatched",
+            r.stdout, self.output(r),
+        )
+
+
+# ---------------------------------------------------------------------------
+# artifact-gate's --require-denylist is conditional, and the decision is
+# named in the report (WI-0129 Paket B, cycle B3)
+# ---------------------------------------------------------------------------
+class ArtifactGateRequireDenylistTest(CheckAllTestBase):
+    """Measured directly (30.08.2026): a fresh clone with an empty $HOME has
+    no gate.denyNames configured anywhere, so artifact-gate.sh --repo .
+    --require-denylist exits 1 ("--require-denylist was given but no
+    deny-list is configured") while the SAME invocation without the flag
+    exits 0. check-all.sh used to pass --require-denylist unconditionally
+    (a fixed literal at its own invoke_args assignment), which is exactly
+    the fail-open-by-omission shape WI-0129 was built to catch: a CI runner
+    with no personal, non-distributed deny-list config reproduces this
+    divergence on every single run, not as a regression but by construction.
+
+    The fix reads artifact-gate.sh's OWN deny-list detection
+    (`gate_load_config` in scripts/lib/discipline_gate.sh, the single
+    source of truth artifact-gate.sh itself sources) rather than
+    re-implementing the ~/.claude/memory-sync.json / CCPR_GATE_DENY_NAMES
+    lookup a second time in check-all.sh. `write_fake_discipline_gate_lib`
+    substitutes a minimal scratch copy of that ONE function
+    (`gate_load_config`) under the same CCPR_CHECK_ALL_SCRIPT_DIR seam the
+    six sibling-script stubs already use -- proving the INTEGRATION (source
+    the lib, read $GATE_DENY_SOURCE, decide the flag) without needing the
+    real ~900-line pattern library.
+    """
+
+    def test_require_denylist_is_omitted_when_no_deny_names_are_configured(self):
+        self.write_fake_discipline_gate_lib(deny_source="none")
+        capture_path = self.tmp / "artifact-gate.argv"
+        self.write_argv_capturing_stub("artifact-gate.sh", 0, capture_path)
+
+        r = self.run_check_all()
+
+        self.assertTrue(capture_path.exists(), self.output(r))
+        argv = capture_path.read_text(encoding="utf-8").splitlines()
+        self.assertNotIn("--require-denylist", argv, argv)
+        self.assertIn("--repo", argv, argv)
+        # The decision is named in the report, not just silently taken --
+        # the same "say what was NOT covered" discipline artifact-gate.sh's
+        # own summary line already applies to itself.
+        self.assertIn(
+            "artifact-gate: deny-list NOT configured — running WITHOUT --require-denylist",
+            r.stdout, self.output(r),
+        )
+
+    def test_require_denylist_is_passed_when_deny_names_are_configured(self):
+        self.write_fake_discipline_gate_lib(deny_source="config")
+        capture_path = self.tmp / "artifact-gate.argv"
+        self.write_argv_capturing_stub("artifact-gate.sh", 0, capture_path)
+
+        r = self.run_check_all()
+
+        self.assertTrue(capture_path.exists(), self.output(r))
+        argv = capture_path.read_text(encoding="utf-8").splitlines()
+        self.assertIn("--require-denylist", argv, argv)
+        self.assertIn("--repo", argv, argv)
+        self.assertIn(
+            "artifact-gate: deny-list configured — --require-denylist enforced",
+            r.stdout, self.output(r),
+        )
+
+    def test_missing_discipline_gate_lib_falls_back_to_omitting_the_flag(self):
+        # No lib/discipline_gate.sh under the stub dir at all -- the shape a
+        # genuinely broken or partial installation has. check-all.sh must
+        # not crash, and must take the same safe default as "not
+        # configured": no --require-denylist.
+        capture_path = self.tmp / "artifact-gate.argv"
+        self.write_argv_capturing_stub("artifact-gate.sh", 0, capture_path)
+
+        r = self.run_check_all()
+
+        self.assertTrue(capture_path.exists(), self.output(r))
+        argv = capture_path.read_text(encoding="utf-8").splitlines()
+        self.assertNotIn("--require-denylist", argv, argv)
+        self.assertIn(
+            "artifact-gate: deny-list NOT configured — running WITHOUT --require-denylist",
+            r.stdout, self.output(r),
+        )
+
+
+# ---------------------------------------------------------------------------
+# A crashing deny-list detection must not abort the whole run, and must not
+# look like the ordinary "not configured" case either (PO decision on the
+# code-review Important finding, WI-0129 Paket B, 30.08.2026)
+# ---------------------------------------------------------------------------
+class ArtifactGateDenylistDetectionCrashTest(CheckAllTestBase):
+    """Three states, not two: `gate_load_config` can report a deny-list is
+    `configured`, report `none` (nobody configured one -- the ordinary,
+    supported case on a fresh machine), or -- new here -- CRASH while
+    trying to find out. Fail-loud (letting the crash propagate, as the
+    pre-fix code did) is wrong because it bypasses the exact rule
+    check-all.sh exists to enforce: the crash happens at check-all.sh's own
+    top level, BEFORE any of the seven checks run and before RAN_COUNT is
+    ever counted, so "NOTHING WAS VERIFIED -- this is not a pass" never
+    fires and the other six checks are never attempted over a config
+    problem in ONE of them. A silent fallback to "not configured" is
+    equally wrong (the exact fail-open class B3 itself was built to close)
+    -- "nobody configured a deny-list" and "the configuration is broken"
+    are two different findings, and only the second demands action.
+
+    `test_the_pre_fix_shape_would_have_aborted_before_any_check_ran` is the
+    RED proof: it demonstrates the OLD behaviour (measured directly,
+    30.08.2026) by running check-all.sh with a needle-based mutation that
+    restores the pre-fix single unguarded `gate_load_config` call, so this
+    module has a red witness for the very crash it now protects against,
+    not just an assertion about a code shape.
+    """
+
+    def test_a_crashing_deny_list_detection_does_not_abort_the_whole_run(self):
+        self.write_crashing_discipline_gate_lib()
+        capture_path = self.tmp / "artifact-gate.argv"
+        self.write_argv_capturing_stub("artifact-gate.sh", 0, capture_path)
+
+        r = self.run_check_all()
+
+        # (a) all seven checks still ran, not just artifact-gate.
+        self.assertIn(
+            "**Checks:** 7 catalogued, 7 ran, 0 could-not-run, 0 mismatched",
+            r.stdout, self.output(r),
+        )
+        self.assertEqual(0, r.returncode, self.output(r))
+
+        # (b) the report names the broken state, in wording distinct from
+        # the ordinary "NOT configured" case -- the whole point of the
+        # third state.
+        self.assertIn("artifact-gate: deny-list detection FAILED", r.stdout, self.output(r))
+        self.assertNotIn(
+            "artifact-gate: deny-list NOT configured — running WITHOUT --require-denylist",
+            r.stdout, self.output(r),
+        )
+
+        # (c) --require-denylist was not passed -- a broken detection must
+        # not silently escalate to a stricter run either.
+        self.assertTrue(capture_path.exists(), self.output(r))
+        argv = capture_path.read_text(encoding="utf-8").splitlines()
+        self.assertNotIn("--require-denylist", argv, argv)
+
+    def test_the_pre_fix_shape_would_have_aborted_before_any_check_ran(self):
+        # RED proof (G-107/G-109 precedent): mutates a SCRATCH copy back to
+        # the pre-fix shape -- a single unguarded `gate_load_config` call,
+        # not wrapped in a command substitution -- and shows the exact
+        # crash-before-any-check-runs failure this class's other test now
+        # guards against. The shipped scripts/check-all.sh is asserted
+        # byte-for-byte unchanged afterwards (G-143).
+        original = SCRIPT_PATH.read_text(encoding="utf-8")
+        needle = (
+            '  . "$_gate_lib"\n'
+            '  _gate_deny_source="$(gate_load_config >/dev/null 2>&1 '
+            "&& printf '%s' \"${GATE_DENY_SOURCE:-none}\")\" || _gate_deny_source=\"error\"\n"
+        )
+        self.assertIn(
+            needle, original,
+            "check-all.sh's own gate_load_config invocation shape changed -- update this test",
+        )
+        mutated_source = original.replace(
+            needle,
+            '  . "$_gate_lib"\n'
+            '  gate_load_config\n'
+            '  _gate_deny_source="${GATE_DENY_SOURCE:-none}"\n',
+            1,
+        )
+        self.assertNotEqual(original, mutated_source)
+
+        scratch_dir = Path(tempfile.mkdtemp(prefix="ccpr-check-all-redproof-gatecrash-"))
+        self.addCleanup(shutil.rmtree, scratch_dir, ignore_errors=True)
+        scratch = scratch_dir / "check-all.sh"
+        scratch.write_text(mutated_source, encoding="utf-8")
+        scratch.chmod(0o755)
+
+        self.write_crashing_discipline_gate_lib()
+        r = self.run_check_all(script_path=scratch)
+
+        # The pre-fix shape: the whole process dies with the crashing
+        # function's own exit code, before any report is produced at all.
+        self.assertEqual(2, r.returncode, self.output(r))
+        self.assertNotIn("**Checks:**", r.stdout, self.output(r))
+        self.assertIn("gate: something crashed", r.stderr, self.output(r))
+
+        self.assertEqual(original, SCRIPT_PATH.read_text(encoding="utf-8"), "shipped file content changed")
+
 
 # ---------------------------------------------------------------------------
 # Catalogue <-> baseline mismatch: both directions must be loud
@@ -415,7 +736,7 @@ class BaselineCatalogueContractTest(unittest.TestCase):
 # is untrustworthy until it has been SEEN red)
 # ---------------------------------------------------------------------------
 class CouldNotRunCountsAsPassRedProofTest(CheckAllTestBase):
-    """check-all.sh's three could-not-run branches all assign the literal
+    """check-all.sh's four could-not-run branches all assign the literal
     `state="could-not-run"`. Flipping that literal to `state="match"` in a
     scratch copy simulates a defect where an unavailable check is silently
     folded into the pass count. Both CouldNotRunIsNeverCountedAsPassTest's
@@ -431,7 +752,7 @@ class CouldNotRunCountsAsPassRedProofTest(CheckAllTestBase):
         needle = 'state="could-not-run"'
         occurrences = original.count(needle)
         self.assertEqual(
-            3, occurrences,
+            4, occurrences,
             "check-all.sh's own could-not-run assignment literal changed -- update this test",
         )
         match_before = original.count('state="match"')

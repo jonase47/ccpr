@@ -8,22 +8,29 @@
 # This file declares EXPECTATIONS, never commands — the check catalogue
 # (name -> which script/args run it) lives once, in check-all.sh itself.
 #
-# Two entries are non-zero BY DESIGN, not a regression: memory-lint.sh's 5
-# warnings are long-standing memory-freshness notices, and
-# doc-volume-check.sh's findings are known oversized files pending a split
-# (CONTRIBUTING.md's own "known, stable baseline of findings" paragraph).
+# ONE entry is non-zero BY DESIGN, not a regression: memory-lint.sh's 5
+# warnings are long-standing memory-freshness notices. It was two until
+# 30.08.2026 -- doc-volume-check.sh now scans only git-tracked files, so the
+# oversized files it used to report (all of them untracked working state
+# under docs/memory/) are out of its scope and its expected exit is 0.
 #
 # Re-measure and update this file DELIBERATELY when a check's expected
-# outcome actually changes — the same "re-measure the pair together, never
+# outcome actually changes -- the same "re-measure the pair together, never
 # adjust one" discipline CONTRIBUTING.md already asks of the -t . /
 # --without-t measurement (WI-0126 lineage). Do not let this file drift
 # silently out of step with the tree it describes.
 #
-# Measured on this repository's working tree, 29.08.2026 (HEAD 961165f):
+# Measured 30.08.2026 on the working tree of HEAD 364d9b2 plus the three
+# check changes this line ships with. Two of these entries are now
+# environment-independent by construction rather than by luck: memory-lint
+# and conformance-run report their own scope, so a machine without those
+# targets gets could-not-run instead of a divergence, and doc-volume-check
+# measures only what git tracks. Verified in a fresh clone with an empty
+# HOME: 0 divergent, 2 could-not-run, everything else match.
 phase-docs-lint	0	0 errors, 0 warnings, 0 info — no phase folders under docs/ (CCPR has none of its own)
-memory-lint	1	0 errors, 5 warnings, 1 info — non-zero by design (long-standing memory-freshness warnings)
+memory-lint	1	4 of 4 targets present; 0 errors, 5 warnings, 1 info — non-zero by design (long-standing memory-freshness warnings)
 manual-lint	0	0 errors, 0 warnings, 0 info
-doc-volume-check	2	5 critical, 6 warning, 8 info — non-zero by design (known oversized memory/ADR files pending a split)
-artifact-gate	0	313 files scanned, 0 findings, 4 deny name(s) checked
+doc-volume-check	0	14 tracked files scanned, 188 untracked skipped; 0 critical, 0 warning, 3 info (PROJECT_PHASES.md, ADR-0002, ADR-0009)
+artifact-gate	0	323 files scanned, 0 findings; deny-list active (source: config), 4 name(s) checked
 conformance-run	0	0 CCPR-attributable finding(s), 11 consumer finding(s) (P), 3 consumers covered
-python-tests	0	1848 tests, OK (run with -t ., not optional — see CONTRIBUTING.md)
+python-tests	0	1923 tests, OK (run with -t ., not optional — see CONTRIBUTING.md)

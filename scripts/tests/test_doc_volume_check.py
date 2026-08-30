@@ -313,5 +313,114 @@ class MixedScanTest(DocVolumeCheckTestBase):
         )
 
 
+class TrackedOnlyScopeTest(DocVolumeCheckTestBase):
+    """WI-0129 Paket B, cycle B2: this check exists to flag oversized SHIPPED
+    documentation pending a split (CONTRIBUTING.md's "known, stable baseline
+    of findings"), not an adopter's own untracked working state -- drafts,
+    persona memory silos (docs/memory/**, gitignored in this repository),
+    generated reports. Measured directly on this repository's own working
+    tree (30.08.2026): of 19 findings, all 5 critical and all 6 warning were
+    untracked; only 3 of 8 info findings were tracked. When <docs-root> sits
+    inside a git working tree, only TRACKED files are scanned.
+
+    The counter-proof (`test_outside_a_git_repo_every_file_is_still_scanned`)
+    matters as much as the positive case: a fix that unconditionally
+    restricted to git-tracked files, with no fallback, would break every
+    other test in this module (none of their docs roots are git repos) --
+    and would silently stop scanning any non-git project entirely, which
+    doc-volume-check.sh has always supported (it takes a bare docs-root, no
+    project-identity assumption).
+    """
+
+    def fresh_git_docs_root(self):
+        repo_root = Path(tempfile.mkdtemp(prefix="ccpr-doc-volume-git-"))
+        self.addCleanup(shutil.rmtree, repo_root, ignore_errors=True)
+        subprocess.run(["git", "init", "-q"], cwd=repo_root, check=True)
+        subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repo_root, check=True)
+        subprocess.run(["git", "config", "user.name", "Test"], cwd=repo_root, check=True)
+        docs_root = repo_root / "docs"
+        docs_root.mkdir()
+        return repo_root, docs_root
+
+    @staticmethod
+    def commit(repo_root, *rel_paths):
+        subprocess.run(["git", "add", *rel_paths], cwd=repo_root, check=True)
+        subprocess.run(["git", "commit", "-q", "-m", "fixture"], cwd=repo_root, check=True)
+
+    def test_an_untracked_oversized_file_is_not_reported(self):
+        repo_root, docs_root = self.fresh_git_docs_root()
+        tracked = self.write_doc("tracked.md", doc_without_h2(INFO_BYTES), docs_root)
+        self.commit(repo_root, "docs/tracked.md")
+        # Never committed -- an ERROR-band file that must NOT surface.
+        self.write_doc("untracked.md", doc_without_h2(ERROR_BYTES), docs_root)
+
+        result = self.run_check(docs_root)
+
+        self.assertEqual("", result.stderr, result.stderr)
+        self.assertEqual(1, self.files_scanned(result.stdout), result.stdout)
+        self.assertEqual(
+            [
+                f"tracked.md ({self.reported_kb(tracked)} KB) → "
+                "no obvious splitting point (0 H2 sections) — review content"
+            ],
+            self.bullets(result.stdout),
+        )
+        self.assertEqual(0, result.returncode, result.stdout)
+
+    def test_outside_a_git_repo_every_file_is_still_scanned(self):
+        # Clean fallback: self.docs_root (DocVolumeCheckTestBase.setUp) is a
+        # bare tempdir, never a git repo -- an oversized file there must
+        # still be reported exactly as before this cycle.
+        path = self.write_doc("plain.md", doc_without_h2(ERROR_BYTES))
+        result = self.run_check()
+        self.assertEqual("", result.stderr, result.stderr)
+        self.assertEqual(1, self.files_scanned(result.stdout), result.stdout)
+        self.assertEqual(
+            [
+                f"plain.md ({self.reported_kb(path)} KB) → "
+                "no obvious splitting point (0 H2 sections) — review content"
+            ],
+            self.bullets(result.stdout),
+        )
+        self.assertEqual(2, result.returncode, result.stdout)
+
+    def test_untracked_skip_count_is_named_in_the_report(self):
+        # The behaviour change (fewer findings for an adopter with real,
+        # untracked docs) must not pass silently -- the report says how many
+        # files were skipped as untracked, the same "name what was NOT
+        # covered" discipline artifact-gate.sh already applies to its own
+        # binary/symlink skips.
+        repo_root, docs_root = self.fresh_git_docs_root()
+        self.write_doc("tracked.md", "# Title\n\nsmall, tracked.\n", docs_root)
+        self.commit(repo_root, "docs/tracked.md")
+        self.write_doc("draft-one.md", "# Draft\n\nnever committed.\n", docs_root)
+        self.write_doc("draft-two.md", "# Draft\n\nalso never committed.\n", docs_root)
+
+        result = self.run_check(docs_root)
+
+        self.assertIn("**Untracked skipped:** 2 file(s)", result.stdout, result.stdout)
+
+    def test_a_docs_root_one_level_below_the_git_root_still_resolves_scope(self):
+        # doc-volume-check.sh is always invoked with the DOCS root
+        # (<project>/docs), not the project/repository root -- the git
+        # top-level sits one directory above. git itself walks up to find
+        # .git, but this pins that this script's own detection does too.
+        repo_root, docs_root = self.fresh_git_docs_root()
+        tracked = self.write_doc("nested/tracked.md", doc_without_h2(INFO_BYTES), docs_root)
+        self.commit(repo_root, "docs/nested/tracked.md")
+        self.write_doc("nested/untracked.md", doc_without_h2(ERROR_BYTES), docs_root)
+
+        result = self.run_check(docs_root)
+
+        self.assertEqual(1, self.files_scanned(result.stdout), result.stdout)
+        self.assertEqual(
+            [
+                f"nested/tracked.md ({self.reported_kb(tracked)} KB) → "
+                "no obvious splitting point (0 H2 sections) — review content"
+            ],
+            self.bullets(result.stdout),
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

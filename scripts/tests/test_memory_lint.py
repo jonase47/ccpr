@@ -6195,6 +6195,74 @@ class DecayHintGracePeriodTest(MemoryLintFixture, unittest.TestCase):
         )
 
 
+class NoScopeReportedForCheckAllTest(MemoryLintFixture, unittest.TestCase):
+    """memory-lint.sh reads from four independent targets: <project-dir>/
+    docs/memory, ~/.claude/instincts.md, ~/.claude/instincts/, and
+    ~/.claude/memory/. A CI runner reproduces every run against an empty
+    $HOME and a checkout that never ships docs/memory/ (it is working
+    state, gitignored, not a shipped artifact) -- all four absent at once.
+    memory-lint.sh still exits 0 there (nothing to warn or error about), so
+    check-all.sh needs a report substring, not the exit code, to tell that
+    apart from "ran and found nothing" (WI-0129 Paket B, cycle B1).
+
+    The counter-proof matters as much as the positive case: a fix that
+    unconditionally reports "0 of 4 present" regardless of what actually
+    exists would make BOTH tests below pass if only the no-scope shape were
+    tested. `test_a_present_target_is_reported_and_the_run_is_normal`
+    exercises the opposite input (a real, non-empty target) and pins that
+    the run is NOT reported as no-scope.
+    """
+
+    def test_all_four_targets_absent_is_reported_as_no_scope(self):
+        empty_project_dir = Path(tempfile.mkdtemp(prefix="ccpr-memory-lint-no-scope-"))
+        self.addCleanup(shutil.rmtree, empty_project_dir, ignore_errors=True)
+        # fake_home (MemoryLintFixture.setUp) is a fresh, empty tmpdir: no
+        # .claude/instincts.md, no .claude/instincts/, no .claude/memory/.
+
+        result = self.run_lint(project_dir=empty_project_dir)
+
+        self.assertIn("**Targets:** 0 of 4 present", result.stdout, result.stdout)
+        self.assertIn("the memory-lint check DID NOT RUN", result.stdout, result.stdout)
+        # Still exit 0 — an absent scope produces no error or warning of its
+        # own; check-all.sh, not this script's own exit code, is what turns
+        # this into "could-not-run".
+        self.assertEqual(0, result.returncode, result.stdout)
+
+    def test_a_present_target_is_reported_and_the_run_is_normal(self):
+        # self.project_dir (MemoryLintFixture.setUp) already ships a real
+        # docs/memory/ with content — one of the four targets is present,
+        # so this must NOT read as no-scope, regardless of the other three.
+        result = self.run_lint()
+
+        self.assertNotIn("**Targets:** 0 of 4 present", result.stdout, result.stdout)
+        self.assertNotIn("the memory-lint check DID NOT RUN", result.stdout, result.stdout)
+        self.assertIn("**Targets:**", result.stdout, result.stdout)
+
+    def test_only_a_global_target_present_is_also_a_normal_run(self):
+        # The reverse split: project-local docs/memory absent, but a global
+        # target present (the ordinary shape of running CCPR against a
+        # foreign project from a machine with a real ~/.claude). This must
+        # run normally too -- "could-not-run" is reserved for ALL FOUR
+        # targets missing, not merely the project-local one.
+        empty_project_dir = Path(tempfile.mkdtemp(prefix="ccpr-memory-lint-global-only-"))
+        self.addCleanup(shutil.rmtree, empty_project_dir, ignore_errors=True)
+        claude_dir = self.fake_home / ".claude"
+        claude_dir.mkdir(parents=True)
+        (claude_dir / "instincts.md").write_text("# index\n", encoding="utf-8")
+
+        result = self.run_lint(project_dir=empty_project_dir)
+
+        # Positive liveness proof, not just the two negatives below: exactly
+        # ONE of the four targets is present here (~/.claude/instincts.md),
+        # so the report must name that count precisely -- a script that
+        # unconditionally reported "not no-scope" for any input would pass
+        # the two assertNotIn calls alone without ever having counted
+        # anything.
+        self.assertIn("**Targets:** 1 of 4 present", result.stdout, result.stdout)
+        self.assertNotIn("**Targets:** 0 of 4 present", result.stdout, result.stdout)
+        self.assertNotIn("the memory-lint check DID NOT RUN", result.stdout, result.stdout)
+
+
 class IndexFrontmatterOptionalTest(MemoryLintFixture, unittest.TestCase):
     """docs/memory/MEMORY.md and docs/memory/{agent}/MEMORY.md carry frontmatter only
     when someone chose to write it (WI-0108). Before this fix, memory-lint.sh excluded
