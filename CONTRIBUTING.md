@@ -83,25 +83,27 @@ python3 -m unittest discover -s scripts/tests -t .
 
 - **`-t .` is not optional**, and the failure mode is worth knowing because it is
   partly silent. It sets the top-level directory imports resolve against. Measured
-  on the current tree (29.08.2026): **with** it, discovery collects **1848 tests, 0
-  import errors**, exit 0; **without** it, **1339 tests and 15 modules that fail to
-  import**, exit 1 — the six that use a relative import
+  on the current tree (30.08.2026): **with** it, discovery collects **1987 tests, 0
+  import errors**, exit 0; **without** it, **1477 tests and 16 modules that fail to
+  import**, exit 1 — the seven that use a relative import
   (`from .test_phase_docs_lint import …` in four modules,
-  `from .test_artifact_gate import …` in two), plus the nine modules of the
-  `scripts/tests/workitems/` subpackage. The run does go red on those 15, so you
-  will notice something — but **509 tests simply never execute**, and nothing in the
-  output says so.
+  `from .test_artifact_gate import …` in two, and
+  `from . import …` of four sibling modules in the skip budget), plus the nine
+  modules of the `scripts/tests/workitems/` subpackage. The run does go red on those
+  16, so you will notice something — but **510 tests simply never execute**, and
+  nothing in the output says so.
 
   That skipped count moves whenever a module gains a relative import:
-  340 → 350 → 480 → 510 across four commits on 27–28.08.2026, and 509 today. Each
-  jump bought something — most came from sharing one parser instead of retyping a
-  shipped list into four test modules (WI-0126) — but the cost lands here, silently,
-  on anyone who forgets the flag.
+  340 → 350 → 480 → 510 across four commits on 27–28.08.2026, 509 on 29.08., and
+  510 today. Each jump bought something — most came from sharing one parser instead
+  of retyping a shipped list into four test modules (WI-0126) — but the cost lands
+  here, silently, on anyone who forgets the flag.
 
   **Re-measure these numbers when you change them, rather than adjusting one.** The
-  pair is the point: 1848 alone says nothing, and the four figures above were last
-  found stale together (the file claimed 1691 / 1185 / 14 / ~510 while the tree was
-  at 1848 / 1339 / 15 / 509). Both runs, back to back, take about eight minutes.
+  pair is the point: 1987 alone says nothing, and the four figures have twice been
+  found stale together — the file claimed 1691 / 1185 / 14 / ~510 against a tree at
+  1848 / 1339 / 15 / 509, and then 1848 / 1339 / 15 / 509 against a tree at
+  1987 / 1477 / 16 / 510. Both runs, back to back, take about eight minutes.
 - The full run takes **a couple of minutes**. If you drive it from an agent whose
   tool calls time out, start it in the background and wait for it once rather than
   polling.
@@ -154,8 +156,10 @@ conformance check DID NOT RUN` — so a clean machine is never blocked, and a ru
 that checked nothing never reads as a pass. Use `--require-consumers` when you
 want the unconfigured case to fail instead.
 
-Measured: three consumers, fifteen checks, **about 30 seconds**. Use
-`--consumer <id>` for a single one.
+Every configured consumer is put through the same check set, so both the
+invoked-check count and the wall-clock time scale with *your* consumer list — the
+run reports both, and that report is current by construction in a way a number
+written down here would not be. Use `--consumer <id>` for a single one.
 
 A finding about a consumer's own documents never fails the run; only a check
 disagreeing with its own contract, a zero-scope run over a non-empty target, or

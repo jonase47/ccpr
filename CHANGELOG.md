@@ -1177,6 +1177,56 @@ All notable changes to this project are documented in this file. The format is b
 ## [v0.3.0-beta] – 26.08.2026
 
 ### Changed
+- **The check baseline's note column states reasons, not measurements.** All eight notes in
+  `scripts/check-all.baseline.tsv` carried a quantity — `332 files scanned`, `1965 tests`,
+  `14 tracked / 188 untracked`, `3 consumers covered`. None had a reader: `check-all.sh` never
+  parses that column, nothing re-derives the figures, nothing goes red when they are wrong.
+  They only aged, and were corrected by hand each time — artifact-gate's count went
+  313 → 323 → 328 → 332 in three days.
+
+  Three were worse than stale. `4 of 4 targets present`, `deny-list active (source: config)`
+  and `3 consumers covered` describe the maintainer's own `~/.claude`; on a CI runner those
+  three checks report could-not-run. A versioned expectation file was documenting one private
+  machine.
+
+  **The provenance line is gone rather than corrected.** It read "Measured on the working tree
+  of HEAD `666e8e6`" while `1965 tests` arrived three commits later and `332 files scanned`
+  five — measured with `git log -S`, not assumed. An unchecked freshness claim goes stale
+  exactly like the counts it vouches for, and this one sat in a header asking for deliberate
+  re-measurement. With the measurements gone, nothing in the file is bound to a point in time.
+  A note may now be empty; `check-all.sh` is untouched, its reader takes a two-field line
+  unchanged.
+
+  Two durable phrases had to survive the new guard, and both are traps: `none` contains `one`,
+  and `\bzero\b` matches inside `non-zero` because a hyphen **is** a word boundary. Beyond
+  the synthetic mutation, the detector was proven against the real prior state — it fires on
+  8 of 8 notes of the pre-change file.
+
+- **Four figures in `CONTRIBUTING.md` re-measured as a set, and two machine-local ones
+  removed.** The `-t .` pair was 1848 / 1339 / 15 / 509 against a tree at
+  **1987 / 1477 / 16 / 510** — the second time all four were found stale together, which is
+  why the file asks for them to be re-measured as a set rather than adjusted one at a time.
+  Separately, the conformance paragraph read "Measured: three consumers, fifteen checks, about
+  30 seconds": every one of those numbers describes the maintainer's own consumer list (one
+  consumer invokes five checks, three invoke fifteen — measured both ways). Replaced by the
+  durable statement that the counts scale with *your* list and that the run reports them,
+  where they are current by construction.
+
+  Also corrected: within this same `[Unreleased]` block, the `check-all.sh` entry stated as a
+  present-tense measurement that `doc-volume-check.sh` exits 2 on a correct tree, while a
+  later entry in the same block records its scoping to git-tracked files and an expected exit
+  of 0. The historical sentence is kept and marked as of-its-time rather than rewritten.
+
+- **The scanner limitation in `test_absence_only_assertions.py` is documented where it lives.**
+  `_classify_assert_call` asks "does this reference the result?" two different ways inside one
+  function — `_references_the_result` walks the whole call for `assertTrue`,
+  `_is_stdout_like` inspects a single argument node for `assertIn` — so
+  `assertIn("#2", r.stdout + r.stderr)` is invisible on one branch and seen on the other.
+  Deliberately not widened: the decision on the two sibling blind spots was to name them
+  narrowly rather than change rules whose counts are pinned. The note sits at the `assertIn`
+  branch, not in the module docstring where the other two are, because reading the docstring
+  is not how anyone arrives at this one.
+
 - **The chapter that calls itself "the full script catalogue" was missing half the scripts,
   and three shipped scripts were documented nowhere at all.** Measured across `Manual/` and
   `README.md` while preparing this release: `Manual/system/monitoring-scripts.md` — which
