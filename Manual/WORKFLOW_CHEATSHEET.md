@@ -246,7 +246,7 @@ Save tokens: run mechanical tasks locally, Claude focuses on content.
 | **logs-summary.py** | `~/.claude/scripts/logs-summary.py [focus] [period]` | Analyze session logs. Focus: errors, performance, agents, loops, all. Period: today, week, all |
 | **setup-ollama.sh** | `~/.claude/scripts/setup-ollama.sh` | Install Ollama + gemma3:4b, create wrapper scripts for local LLM |
 | **instinct-check.sh** | `~/.claude/scripts/instinct-check.sh` | Check instinct decay (age, count, warnings). No LLM needed |
-| **log-cleanup.sh** | `~/.claude/scripts/log-cleanup.sh [--days N] [--dry-run]` | Trim old session logs + aggregated logs (default: 7 days) |
+| **log-cleanup.sh** | `~/.claude/scripts/log-cleanup.sh [--days N] [--dry-run]` | Trim old session logs + aggregated logs (default: 7 days). Runs itself once a day at SessionStart — call it by hand only for a different `--days` or a `--dry-run` |
 | **install-git-hook.sh** | `~/.claude/scripts/local-llm/install-git-hook.sh <projectdir>` | Install prepare-commit-msg hook (LLM suggestion, editable in editor) |
 
 ### Local LLM (Ollama)

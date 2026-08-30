@@ -601,7 +601,7 @@ info 25–40 KB, warning 40–50, error ≥50) and `instinct-check.sh` (decay, n
 (`<version>` required, writes `docs/.baseline-prep.md`) · `workitems.py` (CLI dispatcher,
 ADR-0002, default backend `local` — see [WORKITEMS.md](WORKITEMS.md)) ·
 `migrate-review-headers.sh` (one-off, idempotent header backfill) · `log-cleanup.sh`
-(trims `~/.claude/logs/`, default 7 days) · `artifact-gate.sh` (secret / personal-data /
+(trims `~/.claude/logs/`, default 7 days; triggered at `SessionStart`, once a day) · `artifact-gate.sh` (secret / personal-data /
 deny-list sweep over tracked files, Constitution Inviolable — shipped since
 **`v0.3.0-beta`**, details: [system/discipline-gate.md](system/discipline-gate.md)).
 

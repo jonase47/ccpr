@@ -50,14 +50,36 @@ The tests are grouped by the question they answer:
 * **Does the hook still never break a session?** -- the pre-existing fail-safe contract
   (malformed/empty stdin, an unknown event) pinned so a later change cannot quietly
   remove it.
+
+## Second subject, added 30.08.2026: the two cleanups nothing ever triggered
+
+Findings #27 and #25 put two housekeeping jobs into handle_session_start -- a
+once-per-day run of scripts/log-cleanup.sh, and an age-based sweep of loop-state files
+left behind by terminations that raise no SessionEnd. They share this file because they
+share the fixture: a throwaway HOME, a throwaway TMPDIR, and the real entry point driven
+as a subprocess.
+
+They also share the defect class, which is what the tests below are actually about: a
+mechanism that is never triggered looks exactly like a mechanism that had nothing to do.
+So the assertions come in pairs -- second start on the same day does NOT run it / first
+start the next day DOES; a run that removed nothing files a record / a throttled start
+files none. A single-sided test here would survive every broken throttle there is.
+
+One documented exception to this file's subprocess-only rule: LogCleanupTimeoutTest and
+LogCleanupClockTest drive the functions in-process via module_with_home, because a
+timeout measured in tens of seconds and a UTC day boundary cannot be reached from
+outside. Both are inputs to the functions for exactly that reason.
 """
 
+import contextlib
+import datetime
 import importlib.util
 import json
 import os
 import stat
 import subprocess
 import tempfile
+import time
 import unittest
 import uuid
 from pathlib import Path
@@ -92,6 +114,63 @@ AGENT_MONITOR = _load_agent_monitor_module()
 # literal default is main()'s own fallback for a payload missing the key entirely.
 REAL_UUID_SESSION_ID = "0a954ab5-388e-4954-b5d5-9a037cb0e981"
 LITERAL_DEFAULT_SESSION_ID = "no-session"
+
+# Stub bodies for the planted log-cleanup script. Both reproduce the real script's
+# "=== Result ===" summary block verbatim in shape (scripts/log-cleanup.sh:237-244) --
+# that block is the only machine-readable account the script gives of what it did, and
+# the hook parses it to tell "removed something" from "had nothing to do".
+CLEANUP_STUB_REMOVED_SOMETHING = """\
+echo "=== Log cleanup (keeping last 7 days) ==="
+echo "Cutoff: 2026-08-23T00:00:00"
+echo ""
+echo "Sessions: 4 removed, 19 kept"
+echo ""
+echo "=== Result ==="
+echo "Sessions: 4 removed, 19 kept"
+echo "Log lines: 100 -> 40 (60 removed)"
+"""
+
+CLEANUP_STUB_FOUND_NOTHING = """\
+echo "=== Log cleanup (keeping last 7 days) ==="
+echo ""
+echo "=== Result ==="
+echo "Sessions: 0 removed, 23 kept"
+echo "Log lines: 40 -> 40 (0 removed)"
+"""
+
+
+@contextlib.contextmanager
+def module_with_home(home: Path, tmpdir: Path = None):
+    """Re-imports the hook with HOME pointed at `home`, for the few assertions that
+    cannot be made through the subprocess entry point.
+
+    Three things need this: the cleanup subprocess timeout and the UTC day boundary
+    (both production values an end-to-end run cannot reach -- a timeout in tens of
+    seconds, a date change at midnight), and fault injection into the sweep. Every
+    OTHER assertion in this file still drives the real entry point (see the module
+    docstring); this is the documented exception, not a second style.
+
+    `tmpdir` is NOT optional decoration for any caller that reaches
+    sweep_stale_loop_state: that function DELETES files, and in-process it would
+    otherwise resolve `tempfile.gettempdir()` to the developer's REAL temp directory --
+    this process has already called mkdtemp in setUp, so tempfile's module-level cache
+    is populated and no amount of setting TMPDIR in os.environ would redirect it. The
+    cache is overridden directly and restored on the way out.
+    """
+    old_home = os.environ.get("HOME")
+    old_tempdir = tempfile.tempdir
+    os.environ["HOME"] = str(home)
+    if tmpdir is not None:
+        tempfile.tempdir = str(tmpdir)
+    try:
+        yield _load_agent_monitor_module()
+    finally:
+        tempfile.tempdir = old_tempdir
+        if old_home is None:
+            os.environ.pop("HOME", None)
+        else:
+            os.environ["HOME"] = old_home
+
 
 # Malformed shapes the finding calls out by name. Each must fall back to the same fixed,
 # safe name rather than reaching the filesystem as-is.
@@ -165,6 +244,71 @@ class AgentMonitorHookTestCase(unittest.TestCase):
             return []
         return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()
                 if line.strip()]
+
+    # --- log-cleanup / stale-state fixture helpers --------------------------------
+
+    def cleanup_script_path(self) -> Path:
+        """Where the hook looks for the cleanup script -- inside the throwaway HOME."""
+        return self.home / ".claude" / "scripts" / "log-cleanup.sh"
+
+    def cleanup_stamp_path(self) -> Path:
+        return self.home / ".claude" / "logs" / ".log-cleanup-last-run"
+
+    def cleanup_invocations_path(self) -> Path:
+        return self.home / "cleanup-invocations.log"
+
+    def install_cleanup_stub(self, body: str = CLEANUP_STUB_REMOVED_SOMETHING) -> Path:
+        """Plants a stand-in for scripts/log-cleanup.sh inside the throwaway HOME.
+
+        The REAL script is deliberately not used here: these tests are about WHEN and
+        HOW OFTEN a session start triggers a cleanup and how the result is reported,
+        not about what the cleanup itself deletes -- that is
+        test_log_cleanup_behavior.py's subject, against the real script. A stub
+        records every invocation in a file the test can count, and can be told to
+        fail, hang, or print any summary shape the parsing side is being probed with.
+        """
+        script = self.cleanup_script_path()
+        script.parent.mkdir(parents=True, exist_ok=True)
+        script.write_text(
+            "#!/usr/bin/env bash\n"
+            + f'echo "invoked $*" >> "{self.cleanup_invocations_path()}"\n'
+            + body,
+            encoding="utf-8",
+        )
+        script.chmod(0o700)
+        return script
+
+    def cleanup_invocation_count(self) -> int:
+        path = self.cleanup_invocations_path()
+        if not path.exists():
+            return 0
+        return len([line for line in path.read_text(encoding="utf-8").splitlines()
+                    if line.strip()])
+
+    def today_stamp(self) -> str:
+        return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
+
+    def write_stamp(self, text: str) -> Path:
+        stamp = self.cleanup_stamp_path()
+        stamp.parent.mkdir(parents=True, exist_ok=True)
+        stamp.write_text(text, encoding="utf-8")
+        return stamp
+
+    def activity_events(self, session_id: str, event: str) -> list:
+        entries = self.read_jsonl(self.sessions_dir() / session_id / "activity.jsonl")
+        return [e for e in entries if e.get("event") == event]
+
+    def error_events(self, session_id: str, event: str) -> list:
+        entries = self.read_jsonl(self.sessions_dir() / session_id / "errors.jsonl")
+        return [e for e in entries if e.get("event") == event]
+
+    def plant_loop_state_file(self, name: str, age_s: float) -> Path:
+        """A foreign claude-loop-*.json in the scratch TMPDIR, aged by mtime."""
+        path = self.scratch_tmpdir / name
+        path.write_text('{"total_tool_calls": 1}', encoding="utf-8")
+        when = time.time() - age_s
+        os.utime(path, (when, when))
+        return path
 
 
 # === Does the state file land in the right place? ================================
@@ -492,6 +636,510 @@ class FailSafeContractTest(AgentMonitorHookTestCase):
         errors_log = self.sessions_dir() / REAL_UUID_SESSION_ID / "errors.jsonl"
         self.assertEqual([], self.read_jsonl(errors_log),
                          "an unrecognised (not malformed) event name is not an error")
+
+
+# === Does anything ever TRIGGER the log cleanup? (#27, 30.08.2026) =================
+#
+# scripts/log-cleanup.sh implements a 7-day retention policy correctly and nothing
+# called it: no hook, no cron entry, no settings line. Measured on 30.08.2026, the
+# first run ever took 285 session directories down to 23 and 144 MB down to 24 MB.
+# The defect is not the accumulated rubbish -- it is that "the cleanup ran and found
+# nothing" and "the cleanup never ran" looked identical from the outside.
+#
+# The trigger is a once-per-day-throttled call from handle_session_start (PO decision
+# 30.08.2026: the only trigger that needs no installation step on the adopter's
+# machine). The throttle is a date stamp under ~/.claude/logs, and BOTH of its sides
+# are pinned below -- a test that only proves "the first start runs it" survives every
+# broken throttle there is.
+
+
+class LogCleanupTriggerTest(AgentMonitorHookTestCase):
+
+    def test_a_first_session_start_runs_the_log_cleanup(self):
+        self.install_cleanup_stub()
+        result = self.run_hook("SessionStart", session_id=self.session_id,
+                               source="startup")
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(1, self.cleanup_invocation_count(),
+                         f"stderr was: {result.stderr}")
+        self.assertEqual(self.today_stamp(),
+                         self.cleanup_stamp_path().read_text(encoding="utf-8").strip())
+
+    def test_a_session_start_without_the_script_installed_runs_nothing_and_still_succeeds(self):
+        """No stub planted: the hook must not invent a run, and must not fail the
+        session start over a missing script either."""
+        result = self.run_hook("SessionStart", session_id=self.session_id,
+                               source="startup")
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(0, self.cleanup_invocation_count())
+        events = self.activity_events(self.session_id, "LogCleanup")
+        self.assertEqual(1, len(events), events)
+        self.assertFalse(events[0]["ran"], events[0])
+        self.assertEqual("script-not-found", events[0]["reason"], events[0])
+
+
+class LogCleanupThrottleTest(AgentMonitorHookTestCase):
+    """Both sides of the once-per-day throttle. Structure, not presence: a throttle
+    that never fires and a throttle that never releases are each caught by exactly one
+    of these two tests, and neither test alone can see the other's failure."""
+
+    def test_a_second_session_start_on_the_same_day_does_not_run_it_again(self):
+        self.install_cleanup_stub()
+        first = self.run_hook("SessionStart", session_id=self.session_id, source="startup")
+        self.assertEqual(1, self.cleanup_invocation_count(), first.stderr)
+
+        second = self.run_hook("SessionStart", session_id=self.session_id, source="resume")
+        self.assertEqual(0, second.returncode, second.stderr)
+        self.assertEqual(1, self.cleanup_invocation_count(),
+                         "the second start on the same day must not run the cleanup again")
+
+    def test_a_third_session_start_on_the_same_day_from_a_different_session_is_throttled_too(self):
+        """The stamp is per machine, not per session: a fresh session_id must not
+        re-arm the throttle."""
+        self.install_cleanup_stub()
+        self.run_hook("SessionStart", session_id=self.session_id, source="startup")
+        self.run_hook("SessionStart", session_id=f"other-{uuid.uuid4().hex[:8]}",
+                      source="startup")
+        self.assertEqual(1, self.cleanup_invocation_count())
+
+    def test_a_second_same_day_start_does_not_re_log_a_missing_script(self):
+        """The script-not-found notice sits behind the same stamp as a real run, so it
+        cannot turn into a per-session-start nag. No stub is installed here."""
+        first = self.run_hook("SessionStart", session_id=self.session_id, source="startup")
+        self.assertEqual(1, len(self.activity_events(self.session_id, "LogCleanup")),
+                         first.stderr)
+        second_id = f"second-{uuid.uuid4().hex[:8]}"
+        self.run_hook("SessionStart", session_id=second_id, source="resume")
+        self.assertEqual([], self.activity_events(second_id, "LogCleanup"))
+
+    def test_a_session_start_on_a_later_day_runs_it_again(self):
+        self.install_cleanup_stub()
+        yesterday = (datetime.datetime.now(datetime.timezone.utc)
+                     - datetime.timedelta(days=1)).strftime("%Y-%m-%d")
+        self.write_stamp(yesterday + "\n")
+
+        result = self.run_hook("SessionStart", session_id=self.session_id, source="startup")
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(1, self.cleanup_invocation_count(),
+                         "a stamp from a previous day must release the throttle")
+        self.assertEqual(self.today_stamp(),
+                         self.cleanup_stamp_path().read_text(encoding="utf-8").strip())
+
+
+class LogCleanupStampFailureModesTest(AgentMonitorHookTestCase):
+    """A stamp that is missing, unreadable, or garbage must fail OPEN -- run the
+    cleanup and repair the stamp -- and must never fail the session start. A throttle
+    file is a convenience; it must not become a way to switch the cleanup off forever."""
+
+    def test_a_missing_stamp_runs_the_cleanup(self):
+        self.install_cleanup_stub()
+        self.assertFalse(self.cleanup_stamp_path().exists(), "fixture sanity check")
+        result = self.run_hook("SessionStart", session_id=self.session_id, source="startup")
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(1, self.cleanup_invocation_count())
+
+    def test_an_unreadable_stamp_runs_the_cleanup_and_is_replaced(self):
+        # House idiom, from test_artifact_gate.py's UnreadableFileTest: root ignores
+        # the mode bits, so under root this fixture is not "unreadable" at all -- the
+        # stamp would read back as today's date and the assertions below would measure
+        # the throttle instead of the failure mode they name.
+        if os.geteuid() == 0:
+            self.skipTest("root reads every file regardless of mode")
+        self.install_cleanup_stub()
+        stamp = self.write_stamp(self.today_stamp() + "\n")
+        stamp.chmod(0o000)
+        self.addCleanup(lambda: stamp.exists() and stamp.chmod(0o600))
+
+        result = self.run_hook("SessionStart", session_id=self.session_id, source="startup")
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(1, self.cleanup_invocation_count(),
+                         "an unreadable stamp must not silence the cleanup for good")
+        self.assertEqual(self.today_stamp(),
+                         self.cleanup_stamp_path().read_text(encoding="utf-8").strip())
+
+    def test_a_garbage_stamp_runs_the_cleanup_and_is_replaced(self):
+        """Undecodable bytes, not merely a wrong-looking string: a plain read_text
+        raises UnicodeDecodeError on these, and an uncaught one would be swallowed by
+        the outer guard, leaving the cleanup silently skipped -- which is the exact
+        state this fix exists to remove."""
+        self.install_cleanup_stub()
+        stamp = self.cleanup_stamp_path()
+        stamp.parent.mkdir(parents=True, exist_ok=True)
+        stamp.write_bytes(b"\xff\xfe not a date at all\nsecond line\n")
+
+        result = self.run_hook("SessionStart", session_id=self.session_id, source="startup")
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(1, self.cleanup_invocation_count())
+        self.assertEqual(self.today_stamp(),
+                         self.cleanup_stamp_path().read_text(encoding="utf-8").strip())
+
+    def test_a_stamp_that_is_a_directory_does_not_fail_the_session_start(self):
+        """The one shape that cannot be repaired by an atomic replace. It must degrade
+        to "no cleanup this time", never to a broken session start."""
+        self.install_cleanup_stub()
+        stamp = self.cleanup_stamp_path()
+        stamp.parent.mkdir(parents=True, exist_ok=True)
+        stamp.mkdir()
+
+        result = self.run_hook("SessionStart", session_id=self.session_id, source="startup")
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertTrue(stamp.is_dir(), "the obstruction is left as found, not deleted")
+        activity = self.activity_events(self.session_id, "SessionStart")
+        self.assertEqual(1, len(activity),
+                         "the rest of SessionStart must still have happened")
+        # ...and it must SAY it could not run. Degrading to silence here would put the
+        # mechanism straight back into the state this fix exists to leave behind.
+        errors = self.error_events(self.session_id, "LogCleanup")
+        self.assertEqual(1, len(errors), errors)
+        self.assertEqual("stamp-unwritable", errors[0]["reason"], errors[0])
+        self.assertEqual(0, self.cleanup_invocation_count(),
+                         "a cleanup that cannot be throttled must not run unthrottled")
+
+
+class LogCleanupStampDirectoryPermissionsTest(AgentMonitorHookTestCase):
+    """~/.claude/logs holds prompt text and tool input and is 0700 by contract
+    (ensure_dirs). write_log_cleanup_stamp creates that directory too, so it owes the
+    same chmod -- Path.mkdir's mode argument is silently narrowed by the umask and is
+    ignored outright for a directory that already exists, which is why ensure_dirs
+    chmods on every call rather than trusting mkdir once.
+
+    Driven in-process on purpose: through SessionStart the directory is always created
+    by log_activity first, so the end-to-end path cannot distinguish a correct chmod
+    here from a missing one. Called on its own, it can.
+    """
+
+    def test_the_logs_directory_is_owner_only_when_the_stamp_creates_it(self):
+        old_umask = os.umask(0o022)   # the stock umask a missing chmod hides behind
+        try:
+            with module_with_home(self.home) as module:
+                self.assertTrue(module.write_log_cleanup_stamp("2026-03-01"))
+        finally:
+            os.umask(old_umask)
+
+        logs = self.home / ".claude" / "logs"
+        self.assertEqual(0o700, stat.S_IMODE(logs.stat().st_mode),
+                         f"expected 0o700, got {oct(stat.S_IMODE(logs.stat().st_mode))}")
+        self.assertEqual(0o600, stat.S_IMODE(
+            (logs / ".log-cleanup-last-run").stat().st_mode))
+
+
+class LogCleanupVisibilityTest(AgentMonitorHookTestCase):
+    """The PO's condition, verbatim: "the run must be visible. A cleanup that silently
+    does nothing has the same problem as before." A run that removed nothing and a run
+    that never happened must be told apart from the outside."""
+
+    def test_a_run_that_removed_something_reports_what_it_removed(self):
+        self.install_cleanup_stub(CLEANUP_STUB_REMOVED_SOMETHING)
+        result = self.run_hook("SessionStart", session_id=self.session_id, source="startup")
+        self.assertEqual(0, result.returncode, result.stderr)
+
+        events = self.activity_events(self.session_id, "LogCleanup")
+        self.assertEqual(1, len(events), events)
+        event = events[0]
+        self.assertTrue(event["ran"], event)
+        self.assertEqual(0, event["exit_code"], event)
+        self.assertEqual(4, event["sessions_removed"], event)
+        self.assertEqual(19, event["sessions_kept"], event)
+        self.assertEqual(60, event["lines_removed"], event)
+        # The rendered clause, not a bare "4" -- that would also be satisfied by a
+        # duration like "0.4 s" and would pass on a report of the wrong number.
+        self.assertIn("4 session dir(s) removed, 19 kept", result.stderr)
+        self.assertIn("60 log line(s) trimmed", result.stderr)
+
+    def test_a_run_that_found_nothing_is_still_reported_as_a_run(self):
+        self.install_cleanup_stub(CLEANUP_STUB_FOUND_NOTHING)
+        result = self.run_hook("SessionStart", session_id=self.session_id, source="startup")
+        self.assertEqual(0, result.returncode, result.stderr)
+
+        events = self.activity_events(self.session_id, "LogCleanup")
+        self.assertEqual(1, len(events), events)
+        event = events[0]
+        self.assertTrue(event["ran"], event)
+        self.assertEqual(0, event["sessions_removed"], event)
+        self.assertEqual(23, event["sessions_kept"], event)
+        self.assertEqual(0, event["lines_removed"], event)
+        self.assertIn("log cleanup", result.stderr)
+
+    def test_a_run_that_did_not_happen_leaves_no_run_record(self):
+        """The discriminator the two tests above are worth nothing without: the
+        THROTTLED start must not produce the same record as a no-op run."""
+        self.install_cleanup_stub(CLEANUP_STUB_FOUND_NOTHING)
+        self.run_hook("SessionStart", session_id=self.session_id, source="startup")
+        self.assertEqual(1, len(self.activity_events(self.session_id, "LogCleanup")))
+
+        second_id = f"second-{uuid.uuid4().hex[:8]}"
+        second = self.run_hook("SessionStart", session_id=second_id, source="resume")
+        self.assertEqual(0, second.returncode, second.stderr)
+        self.assertEqual([], self.activity_events(second_id, "LogCleanup"),
+                         "a throttled start must be distinguishable from a run that "
+                         "found nothing -- no LogCleanup record at all")
+        self.assertEqual(1, len(self.activity_events(second_id, "SessionStart")),
+                         "...while the start itself is still recorded as usual")
+
+    def test_an_unparseable_summary_is_still_reported_as_a_run(self):
+        """The script's summary block is plain text, not a machine interface. If it
+        ever changes shape, the hook must report "ran, could not read the numbers" --
+        not fall back to silence, which is the very state this fix removes."""
+        self.install_cleanup_stub('echo "cleanup done, no numbers here"\n')
+        result = self.run_hook("SessionStart", session_id=self.session_id, source="startup")
+        self.assertEqual(0, result.returncode, result.stderr)
+
+        events = self.activity_events(self.session_id, "LogCleanup")
+        self.assertEqual(1, len(events), events)
+        self.assertTrue(events[0]["ran"], events[0])
+        self.assertIsNone(events[0]["sessions_removed"], events[0])
+        self.assertIn("log cleanup", result.stderr)
+
+    def test_a_failing_cleanup_script_is_reported_as_an_error_and_the_session_survives(self):
+        self.install_cleanup_stub('echo "boom" >&2\nexit 3\n')
+        result = self.run_hook("SessionStart", session_id=self.session_id, source="startup")
+        self.assertEqual(0, result.returncode,
+                         "a failing cleanup must never fail the session start")
+
+        errors = self.error_events(self.session_id, "LogCleanup")
+        self.assertEqual(1, len(errors), errors)
+        self.assertEqual(3, errors[0]["exit_code"], errors[0])
+        self.assertEqual(1, len(self.activity_events(self.session_id, "SessionStart")),
+                         "the rest of SessionStart must still have happened")
+
+
+class LogCleanupTimeoutTest(AgentMonitorHookTestCase):
+    """The timeout is the one thing the subprocess entry point cannot show: it is a
+    production constant in the tens of seconds. Injected as an argument here -- the
+    same treatment the throttle gives the clock -- and driven in-process. Documented
+    exception to this file's subprocess-only rule; see module_with_home."""
+
+    def test_a_hanging_cleanup_script_is_abandoned_and_reported(self):
+        self.install_cleanup_stub("sleep 30\n")
+        session = "timeout-session"
+        with module_with_home(self.home) as module:
+            started = time.time()
+            module.maybe_run_log_cleanup(session, timeout=0.5)
+            elapsed = time.time() - started
+
+        self.assertLess(elapsed, 10, "the hook waited for the full sleep")
+        errors = self.error_events(session, "LogCleanup")
+        self.assertEqual(1, len(errors), errors)
+        self.assertEqual("timeout", errors[0]["reason"], errors[0])
+        self.assertEqual(self.today_stamp(),
+                         self.cleanup_stamp_path().read_text(encoding="utf-8").strip(),
+                         "a hanging script must not be retried on every session start")
+
+    def test_the_shipped_timeout_is_generous_enough_for_a_real_run(self):
+        """Measured 30.08.2026: a dry run over 24 session directories took 0.43 s, and
+        the real first run (285 directories, 144 MB) completed well inside a second.
+        The shipped ceiling exists to bound a pathological case, not to cut short a
+        normal one."""
+        with module_with_home(self.home) as module:
+            self.assertGreaterEqual(module.LOG_CLEANUP_TIMEOUT_S, 30)
+
+
+class LogCleanupClockTest(AgentMonitorHookTestCase):
+    """The throttle's day boundary is an injected input, not the wall clock. Same
+    pattern as scripts/lib/workitems/sweep.py's `clock` parameter, and for the same
+    reason: a daily throttle that can only be tested by waiting for midnight is not
+    tested at all."""
+
+    def test_the_stamp_is_the_utc_date_of_the_injected_clock(self):
+        self.install_cleanup_stub()
+        fixed = datetime.datetime(2026, 3, 1, 12, 0, tzinfo=datetime.timezone.utc)
+        with module_with_home(self.home) as module:
+            module.maybe_run_log_cleanup("clock-session", clock=lambda: fixed)
+        self.assertEqual("2026-03-01",
+                         self.cleanup_stamp_path().read_text(encoding="utf-8").strip())
+        self.assertEqual(1, self.cleanup_invocation_count())
+
+    def test_a_non_utc_clock_is_normalised_before_the_date_is_taken(self):
+        """23:30 on 01.03. in a +02:00 zone is 21:30 UTC on the SAME day; 01:30 on
+        02.03. in that zone is 23:30 UTC on the 1st. Taking the local date would put
+        those two starts on different days and run the cleanup twice."""
+        self.install_cleanup_stub()
+        plus_two = datetime.timezone(datetime.timedelta(hours=2))
+        late = datetime.datetime(2026, 3, 2, 1, 30, tzinfo=plus_two)
+        with module_with_home(self.home) as module:
+            module.maybe_run_log_cleanup("tz-session", clock=lambda: late)
+        self.assertEqual("2026-03-01",
+                         self.cleanup_stamp_path().read_text(encoding="utf-8").strip())
+
+
+# === Are orphaned loop-state files ever cleaned up? (#25, 30.08.2026) =============
+#
+# cleanup_loop_state() is correct and was called from exactly one place:
+# handle_session_end. Any termination that does not raise SessionEnd -- a killed
+# process, a crash, possibly some compact/restart paths -- leaves its state file in
+# TMPDIR forever. Measured live on 30.08.2026: two files from 10:00 still sitting
+# there while their sessions were long gone. The content is harmless (counters and
+# hashes, 0600, in the user's own TMPDIR) -- this is litter, not disclosure -- so the
+# fix is an age-based sweep at session start, not a stricter SessionEnd.
+
+
+class StaleLoopStateSweepTest(AgentMonitorHookTestCase):
+
+    def test_a_state_file_left_behind_without_a_session_end_is_swept_at_the_next_start(self):
+        """The red proof for #25, in the shape the defect actually takes: a session
+        starts, writes its state, and never reaches SessionEnd."""
+        abandoned_id = f"abandoned-{uuid.uuid4().hex[:8]}"
+        first = self.run_hook("SessionStart", session_id=abandoned_id, source="startup")
+        self.assertEqual(0, first.returncode, first.stderr)
+        abandoned = self.scratch_tmpdir / f"claude-loop-{abandoned_id}.json"
+        self.assertTrue(abandoned.is_file(), "fixture sanity check: the file exists")
+
+        # No SessionEnd. Age it past the sweep threshold and start the next session.
+        old = time.time() - 3 * 24 * 3600
+        os.utime(abandoned, (old, old))
+
+        second_id = f"next-{uuid.uuid4().hex[:8]}"
+        second = self.run_hook("SessionStart", session_id=second_id, source="startup")
+        self.assertEqual(0, second.returncode, second.stderr)
+        self.assertFalse(abandoned.exists(), "the orphan survived the next session start")
+        self.assertTrue((self.scratch_tmpdir / f"claude-loop-{second_id}.json").is_file(),
+                        "...and the new session's own state file must still be there")
+
+    def test_a_recent_foreign_state_file_survives_the_sweep(self):
+        """Age-based, not "delete everything that is not mine": a concurrently running
+        second session must keep its counters."""
+        recent = self.plant_loop_state_file("claude-loop-concurrent.json", age_s=3600)
+        result = self.run_hook("SessionStart", session_id=self.session_id, source="startup")
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertTrue(recent.is_file(),
+                        "an hour-old state file belongs to a live session")
+
+    def test_a_file_exactly_at_the_threshold_is_kept_and_one_past_it_is_swept(self):
+        """The boundary itself, from both sides -- an off-by-one in either direction
+        shows up here and nowhere else."""
+        with module_with_home(self.home) as module:
+            max_age = module.LOOP_STATE_MAX_AGE_S
+        keep = self.plant_loop_state_file("claude-loop-at-threshold.json",
+                                          age_s=max_age - 60)
+        sweep = self.plant_loop_state_file("claude-loop-past-threshold.json",
+                                           age_s=max_age + 60)
+
+        result = self.run_hook("SessionStart", session_id=self.session_id, source="startup")
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertTrue(keep.is_file(), "a file just inside the window must be kept")
+        self.assertFalse(sweep.exists(), "a file just outside the window must go")
+
+    def test_unrelated_files_in_the_temp_directory_are_left_alone(self):
+        """The sweep is bounded by the claude-loop-*.json name, not by "old files in
+        TMPDIR" -- TMPDIR is shared with everything else the user runs."""
+        stranger = self.scratch_tmpdir / "some-other-tool.json"
+        stranger.write_text("{}", encoding="utf-8")
+        old = time.time() - 30 * 24 * 3600
+        os.utime(stranger, (old, old))
+
+        result = self.run_hook("SessionStart", session_id=self.session_id, source="startup")
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertTrue(stranger.is_file(), "a foreign file must not be touched")
+
+    def test_a_stale_symlink_is_removed_without_following_it(self):
+        """A symlink planted at the predictable name must be judged and removed by its
+        OWN age -- lstat, not stat -- and its target must survive untouched. "No
+        exception raised" proves nothing here; the canary's content does."""
+        canary = self.tmp / "sweep-canary.txt"
+        canary_content = "do-not-touch-me\n"
+        canary.write_text(canary_content, encoding="utf-8")
+
+        link = self.scratch_tmpdir / "claude-loop-symlinked.json"
+        link.symlink_to(canary)
+        old = time.time() - 5 * 24 * 3600
+        os.utime(link, (old, old), follow_symlinks=False)
+
+        result = self.run_hook("SessionStart", session_id=self.session_id, source="startup")
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertFalse(link.is_symlink(), "the stale symlink itself must be removed")
+        self.assertTrue(canary.is_file(), "the target must not be deleted")
+        self.assertEqual(canary_content, canary.read_text(encoding="utf-8"))
+
+    def test_a_directory_at_a_state_file_name_does_not_fail_the_session_start(self):
+        """An unremovable entry must cost the sweep that one entry, not the session
+        start -- and not the rest of the sweep either."""
+        obstruction = self.scratch_tmpdir / "claude-loop-obstruction.json"
+        obstruction.mkdir()
+        old = time.time() - 5 * 24 * 3600
+        os.utime(obstruction, (old, old))
+        sweepable = self.plant_loop_state_file("claude-loop-sweepable.json",
+                                               age_s=5 * 24 * 3600)
+
+        result = self.run_hook("SessionStart", session_id=self.session_id, source="startup")
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertTrue(obstruction.is_dir(), "left as found")
+        self.assertFalse(sweepable.exists(),
+                         "one unremovable entry must not abort the whole sweep")
+        self.assertEqual(1, len(self.activity_events(self.session_id, "SessionStart")))
+
+    def test_the_sweep_is_reported_when_it_removed_something(self):
+        """Same visibility rule as the log cleanup: a sweep that removed files says so,
+        and a sweep with nothing to do stays quiet rather than logging a non-event."""
+        self.plant_loop_state_file("claude-loop-orphan-a.json", age_s=5 * 24 * 3600)
+        self.plant_loop_state_file("claude-loop-orphan-b.json", age_s=5 * 24 * 3600)
+
+        result = self.run_hook("SessionStart", session_id=self.session_id, source="startup")
+        self.assertEqual(0, result.returncode, result.stderr)
+        events = self.activity_events(self.session_id, "StaleLoopStateSwept")
+        self.assertEqual(1, len(events), events)
+        self.assertEqual(2, events[0]["removed"], events[0])
+
+    def test_a_sweep_with_nothing_to_remove_logs_no_event(self):
+        result = self.run_hook("SessionStart", session_id=self.session_id, source="startup")
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual([], self.activity_events(self.session_id, "StaleLoopStateSwept"))
+        self.assertEqual(1, len(self.activity_events(self.session_id, "SessionStart")),
+                         "...but the start itself is still recorded")
+
+    def test_a_partial_sweep_still_reports_what_it_already_removed(self):
+        """An unexpected (non-OSError) failure part-way through must not swallow the
+        record of the files already deleted. Code review finding, 30.08.2026: the
+        function returned early from its `except Exception`, which sits BEFORE the
+        reporting block -- so a partial sweep was indistinguishable from a sweep that
+        found nothing, the exact confusion this change exists to end.
+
+        In-process with fault injection, because no hook payload can make os.unlink
+        raise something other than OSError. `tmpdir=` is mandatory here: this code
+        path DELETES files, and tempfile's cached tempdir would otherwise point at the
+        developer's real temp directory.
+        """
+        first = self.plant_loop_state_file("claude-loop-aaa-removable.json",
+                                           age_s=5 * 24 * 3600)
+        second = self.plant_loop_state_file("claude-loop-bbb-explodes.json",
+                                            age_s=5 * 24 * 3600)
+
+        real_unlink = os.unlink
+
+        def exploding_unlink(path, *args, **kwargs):
+            if str(path).endswith("claude-loop-bbb-explodes.json"):
+                raise RuntimeError("injected non-OSError failure mid-sweep")
+            return real_unlink(path, *args, **kwargs)
+
+        with module_with_home(self.home, tmpdir=self.scratch_tmpdir) as module:
+            # Guard before anything destructive runs: if the module resolved a
+            # different temp directory, this test would be deleting real files.
+            self.assertEqual(str(self.scratch_tmpdir), tempfile.gettempdir(),
+                             "refusing to run a deleting sweep outside the fixture")
+            os.unlink = exploding_unlink
+            try:
+                removed = module.sweep_stale_loop_state("partial-sweep-session")
+            finally:
+                os.unlink = real_unlink
+
+        self.assertEqual(1, removed)
+        self.assertFalse(first.exists(), "the first file was removed")
+        self.assertTrue(second.exists(), "the injected failure stopped the second")
+        events = self.activity_events("partial-sweep-session", "StaleLoopStateSwept")
+        self.assertEqual(1, len(events),
+                         "a partial sweep must still report what it removed")
+        self.assertEqual(1, events[0]["removed"], events[0])
+
+    def test_the_sweep_is_not_throttled_by_the_log_cleanup_stamp(self):
+        """The two mechanisms share a trigger point, not a throttle. The sweep costs a
+        glob, so gating it on the daily stamp would let an orphan outlive its session
+        by up to a day for no gain."""
+        self.write_stamp(self.today_stamp() + "\n")   # log cleanup already ran today
+        orphan = self.plant_loop_state_file("claude-loop-orphan.json", age_s=5 * 24 * 3600)
+
+        result = self.run_hook("SessionStart", session_id=self.session_id, source="startup")
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertFalse(orphan.exists(),
+                         "the sweep must run even on a start where the cleanup is throttled")
 
 
 if __name__ == "__main__":

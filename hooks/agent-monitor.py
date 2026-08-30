@@ -19,6 +19,14 @@ Log files:
 Loop state:
 - {tempfile.gettempdir()}/claude-loop-{session_id}.json (honours TMPDIR; on macOS this is
   a private, mode-700 per-user directory, not the shared /tmp)
+- Removed on SessionEnd, and -- for the terminations that raise no SessionEnd -- swept by
+  age at the next SessionStart (see sweep_stale_loop_state).
+
+Housekeeping triggered from SessionStart:
+- ~/.claude/logs/.log-cleanup-last-run -- date stamp throttling scripts/log-cleanup.sh to
+  at most one run per calendar day (see maybe_run_log_cleanup). Neither job can fail a
+  session start, and both report what they did -- a run that found nothing is recorded,
+  a run that did not happen is not.
 
 session_id is hook-supplied, unvalidated input (see sanitize_session_id below): every path
 built from it -- the session log directory and the loop-state file -- goes through that one
@@ -29,6 +37,7 @@ either.
 import errno
 import json
 import re
+import subprocess
 import sys
 import os
 import tempfile
@@ -77,6 +86,33 @@ HANDOVER_CAP_HEADER_LINES = 20          # only the header may declare a per-file
 HANDOVER_WARN_PCT = 80
 # Tools that can change the file's size. A Read does not, so it must not trigger a re-check.
 HANDOVER_WRITE_TOOLS = {"Write", "Edit", "MultiEdit", "NotebookEdit"}
+
+# Log cleanup trigger (SessionStart, throttled to at most one run per calendar day)
+# --------------------------------------------------------------------------------
+# scripts/log-cleanup.sh has always implemented the retention policy correctly and
+# nothing ever called it: no hook, no cron entry, no settings line (#27, measured
+# 30.08.2026 -- the first run ever took 285 session directories to 23, 144 MB to
+# 24 MB). SessionStart is the only trigger that needs no installation step on the
+# adopter's machine, which is the whole point: a cron line an adopter skips
+# reproduces the defect exactly.
+LOG_CLEANUP_SCRIPT = Path.home() / ".claude" / "scripts" / "log-cleanup.sh"
+# Deliberately NOT named *.jsonl and not matching log-cleanup.sh's own
+# "${LOG_DIR}"/*.*.jsonl rotation glob -- the throttle must not be deleted by the
+# very run it throttles.
+LOG_CLEANUP_STAMP = LOG_BASE / ".log-cleanup-last-run"
+# A bound on a pathological case, not a budget for the normal one: measured
+# 30.08.2026, a dry run over 24 session directories cost 0.43 s and the real 285-
+# directory run finished well inside a second. Latency is not why the throttle
+# exists -- twenty runs a day simply add nothing.
+LOG_CLEANUP_TIMEOUT_S = 120
+
+# Orphaned loop-state sweep (#25). cleanup_loop_state() is called from exactly one
+# place, handle_session_end -- so every termination that raises no SessionEnd (a
+# killed process, a crash, possibly some compact/restart paths) leaks its state file.
+# 24 h is chosen against what the file IS: a regenerable cache of counters and
+# hashes, rewritten on essentially every tool call, so a live session's file is
+# never a day old. The cost of a wrong sweep is a reset counter, not lost data.
+LOOP_STATE_MAX_AGE_S = 24 * 3600
 
 # Token tracking (approximate values)
 CHARS_PER_TOKEN = 4               # Rough average for DE/EN text
@@ -694,6 +730,266 @@ def check_handover_size(session_id: str, source_event: str):
         pass
 
 
+def default_clock():
+    """The wall clock, as an injectable input.
+
+    Same shape and same reason as scripts/lib/workitems/sweep.py's `clock`: a
+    once-per-day throttle whose day boundary can only be reached by waiting for
+    midnight is not testable at all. Every caller may pass its own.
+    """
+    return datetime.now(timezone.utc)
+
+
+# The "=== Result ===" block scripts/log-cleanup.sh prints at the end of every run is
+# the only account it gives of what it did. It is plain prose, not a machine
+# interface (the script has no --json and no structured exit status) -- so
+# a failure to read it is reported as such (all three numbers None) rather than
+# guessed at or, worse, silently turned back into the silence this fix removes.
+LOG_CLEANUP_SESSIONS_RE = re.compile(r"^Sessions:\s+(\d+) removed,\s+(\d+) kept\s*$",
+                                     re.MULTILINE)
+LOG_CLEANUP_LINES_RE = re.compile(r"^Log lines:\s+\d+ -> \d+ \((-?\d+) removed\)\s*$",
+                                  re.MULTILINE)
+
+
+def parse_log_cleanup_summary(stdout: str) -> dict:
+    """Reads the run's own numbers out of the script's summary block.
+
+    All-or-nothing on purpose: the two lines are printed together by one code path,
+    so half a parse means the output shape changed, and a half-filled report reads
+    like a measurement while being a guess. The "Sessions:" line appears twice in a
+    real run (a progress line and the summary); the LAST match is the summary.
+    """
+    empty = {"sessions_removed": None, "sessions_kept": None, "lines_removed": None}
+    sessions = LOG_CLEANUP_SESSIONS_RE.findall(stdout or "")
+    lines = LOG_CLEANUP_LINES_RE.findall(stdout or "")
+    if not sessions or not lines:
+        return empty
+    removed, kept = sessions[-1]
+    return {
+        "sessions_removed": int(removed),
+        "sessions_kept": int(kept),
+        "lines_removed": int(lines[-1]),
+    }
+
+
+def read_log_cleanup_stamp() -> str:
+    """The stamp's content, or "" for missing, unreadable, or malformed.
+
+    Every unreadable shape collapses to "" -- i.e. "not today" -- so the throttle
+    fails OPEN. A stamp file is a convenience; it must never become a way to switch
+    the cleanup off permanently, which is what failing closed would make of a
+    chmod 000 left behind by anything. Undecodable bytes are ValueError, not OSError
+    (UnicodeDecodeError), and are caught for the same reason.
+
+    No shape validation on the returned string: the caller compares it for equality
+    with today's date, so "2026-08-30 plus junk" and "" lead to the identical
+    decision. A regex here was measured to change no outcome on any input -- a check
+    that cannot fail is not a check.
+    """
+    try:
+        raw = LOG_CLEANUP_STAMP.read_text(encoding="utf-8")
+    except (OSError, ValueError):
+        return ""
+    stripped = raw.strip()
+    return stripped.splitlines()[0].strip() if stripped else ""
+
+
+def write_log_cleanup_stamp(stamp_date: str) -> bool:
+    """Replaces the stamp atomically. Returns False if it could not be written.
+
+    Write-then-rename rather than an in-place open: os.replace needs write permission
+    on the DIRECTORY, not on the existing file, so a stamp left behind at mode 000
+    (read_log_cleanup_stamp's "unreadable" case) is repaired by the next run instead
+    of blocking it forever. mkstemp already creates at 0600; no chmod is added on top
+    of that, unlike the log files, because this file is created fresh every time and
+    never appended to an inherited inode.
+    """
+    try:
+        LOG_BASE.mkdir(parents=True, exist_ok=True)
+        # Never trust mkdir's mode argument -- the same rule ensure_dirs states at
+        # length and scripts/log-cleanup.sh repeats for its archive directory. In the
+        # SessionStart path this is already 0700 (log_activity runs first), so this
+        # chmod is a no-op there; it is not a no-op when this function is called on
+        # its own, which is exactly when a fresh LOG_BASE lands on 0755 under a stock
+        # 022 umask. Measured 30.08.2026: 0o755 without this line.
+        os.chmod(LOG_BASE, 0o700)
+        fd, tmp_name = tempfile.mkstemp(dir=str(LOG_BASE),
+                                        prefix=".log-cleanup-last-run.", suffix=".tmp")
+    except OSError:
+        return False
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(stamp_date + "\n")
+        os.replace(tmp_name, LOG_CLEANUP_STAMP)
+        return True
+    except OSError:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        return False
+
+
+def report_log_cleanup(session_id: str, message: str, as_error: bool = False, **fields):
+    """One place where a cleanup outcome becomes visible: an event plus a stderr line.
+
+    Every outcome goes through here -- ran, throttled away by a missing script, timed
+    out, failed. The PO's condition on this work is that a run and a non-run must be
+    distinguishable, and that only holds if no branch can quietly report nothing;
+    routing them all through one function is what makes that checkable by reading.
+    """
+    record = {"ts": now_iso(), "event": "LogCleanup", "session": session_id}
+    record.update(fields)
+    (log_error if as_error else log_activity)(session_id, record)
+    print(f"log cleanup: {message}", file=sys.stderr)
+
+
+def maybe_run_log_cleanup(session_id: str, clock=None, timeout=None):
+    """Runs scripts/log-cleanup.sh at most once per calendar day (UTC).
+
+    Sibling of check_handover_size and bound by the same contract: logs an event and
+    prints to stderr, NEVER blocks (no exit(2)), and cannot fail a session start --
+    the body is wrapped so that no filesystem or subprocess failure escapes.
+
+    Visibility is the actual requirement, not the deleted bytes (PO, 30.08.2026: "the
+    run must be visible. A cleanup that silently does nothing has the same problem as
+    before."). Hence: every run that HAPPENS files a LogCleanup record with its
+    numbers -- including a run that removed nothing -- and a throttled start files
+    nothing at all. That asymmetry is the whole point: "ran, found nothing" and "never
+    ran" are the two states this code exists to tell apart.
+
+    The stamp is written BEFORE the script is spawned, not after a successful run. A
+    script that hangs or crashes therefore costs one run per day, not one per session
+    start; the alternative turns a broken cleanup into a per-start retry loop. The
+    price is that a run interrupted halfway is not retried until tomorrow, which is
+    acceptable for a retention sweep that is idempotent by nature.
+
+    `clock` and `timeout` are inputs rather than ambient state so both can be driven
+    from a test -- see default_clock.
+    """
+    try:
+        today = (clock or default_clock)().astimezone(timezone.utc).strftime("%Y-%m-%d")
+        if read_log_cleanup_stamp() == today:
+            return
+
+        if not write_log_cleanup_stamp(today):
+            # Cannot honour "at most once per day", so do not run at all: an
+            # unthrottled cleanup on every session start is the more surprising
+            # failure. Reported every time, deliberately -- unlike every other branch
+            # here this one is not self-limiting, and it should be noticed.
+            report_log_cleanup(
+                session_id,
+                f"skipped, cannot write its throttle stamp at {LOG_CLEANUP_STAMP}",
+                as_error=True, ran=False, reason="stamp-unwritable",
+                stamp=str(LOG_CLEANUP_STAMP))
+            return
+
+        if not LOG_CLEANUP_SCRIPT.is_file():
+            report_log_cleanup(
+                session_id, f"skipped, {LOG_CLEANUP_SCRIPT} not found",
+                ran=False, reason="script-not-found", script=str(LOG_CLEANUP_SCRIPT))
+            return
+
+        limit = LOG_CLEANUP_TIMEOUT_S if timeout is None else timeout
+        started = time.time()
+        try:
+            # Explicit `bash`, not the shebang: the script's executable bit is an
+            # installation artefact, and this must not depend on it surviving.
+            proc = subprocess.run(["bash", str(LOG_CLEANUP_SCRIPT)],
+                                  capture_output=True, text=True, timeout=limit)
+        except subprocess.TimeoutExpired:
+            report_log_cleanup(
+                session_id, "abandoned after its timeout; the retry is tomorrow",
+                as_error=True, ran=True, reason="timeout", timeout_s=limit,
+                duration_s=round(time.time() - started, 2))
+            return
+        except OSError as e:
+            report_log_cleanup(session_id, f"could not be started: {e}",
+                               as_error=True, ran=False, reason="spawn-failed",
+                               error=str(e))
+            return
+
+        duration_s = round(time.time() - started, 2)
+        summary = parse_log_cleanup_summary(proc.stdout)
+        if summary["sessions_removed"] is None:
+            message = (f"ran (exit {proc.returncode}, {duration_s} s) but its summary "
+                       f"could not be read")
+        else:
+            message = (f"{summary['sessions_removed']} session dir(s) removed, "
+                       f"{summary['sessions_kept']} kept, {summary['lines_removed']} "
+                       f"log line(s) trimmed ({duration_s} s)")
+            if summary["sessions_removed"] == 0 and summary["lines_removed"] == 0:
+                message += " - nothing to remove"
+        report_log_cleanup(session_id, message, ran=True,
+                           exit_code=proc.returncode, duration_s=duration_s, **summary)
+
+        if proc.returncode != 0:
+            report_log_cleanup(
+                session_id, f"the script exited {proc.returncode}",
+                as_error=True, ran=True, reason="nonzero-exit",
+                exit_code=proc.returncode, stderr_tail=(proc.stderr or "")[-500:])
+    except Exception:
+        # Never break a session start over a housekeeping task.
+        pass
+
+
+def sweep_stale_loop_state(session_id: str, now=None) -> int:
+    """Removes loop-state files older than LOOP_STATE_MAX_AGE_S. Returns the count.
+
+    cleanup_loop_state() only ever runs on SessionEnd, so every termination that does
+    not raise that event leaks its file (#25). Age-based rather than
+    liveness-based: there is no portable way to ask whether the session that owns a
+    given file still exists, and an hour-old file plausibly belongs to a session
+    running right now.
+
+    Deliberately NOT sharing the log cleanup's daily throttle even though it shares
+    its trigger point: this costs one glob and a stat per entry, no subprocess, so
+    gating it would let an orphan outlive its session by up to a day and buy nothing.
+
+    os.lstat, not stat: a symlink planted at the predictable claude-loop-<id>.json
+    name is judged on its OWN age and removed as the link it is -- following it would
+    both misjudge the age (the target's mtime) and, on unlink, still only remove the
+    link, so reading through it is pure downside. Every per-entry failure is skipped
+    rather than raised: one unremovable entry must cost that entry, not the sweep.
+    """
+    removed = 0
+    try:
+        tmpdir = Path(tempfile.gettempdir())
+        current = get_loop_state_path(session_id)
+        cutoff = (time.time() if now is None else now) - LOOP_STATE_MAX_AGE_S
+        for path in sorted(tmpdir.glob("claude-loop-*.json")):
+            if path == current:
+                continue
+            try:
+                if os.lstat(path).st_mtime >= cutoff:
+                    continue
+                os.unlink(path)
+            except OSError:
+                continue
+            removed += 1
+    except Exception:
+        # Fall through to the report rather than returning: an unexpected failure
+        # part-way through must not also swallow the record of what was ALREADY
+        # removed. An early return here would make a partial sweep look like a sweep
+        # that found nothing -- the precise confusion this whole change exists to end.
+        pass
+
+    if removed:
+        try:
+            log_activity(session_id, {
+                "ts": now_iso(),
+                "event": "StaleLoopStateSwept",
+                "removed": removed,
+                "max_age_s": LOOP_STATE_MAX_AGE_S,
+                "session": session_id,
+            })
+            print(f"loop-state sweep: removed {removed} orphaned state file(s) older "
+                  f"than {LOOP_STATE_MAX_AGE_S // 3600} h", file=sys.stderr)
+        except Exception:
+            pass
+    return removed
+
+
 def handle_session_start(data: dict, session_id: str):
     source = data.get("source", "unknown")
     log_activity(session_id, {
@@ -710,6 +1006,12 @@ def handle_session_start(data: dict, session_id: str):
     # Size cap before the writing starts: at session start the warning is still actionable
     # (run /cleanup first), at session end it would arrive after the fact.
     check_handover_size(session_id, "SessionStart")
+
+    # Two housekeeping jobs that existed and were never triggered (#27, #25). Both run
+    # after the state above is written, so this session's own file is never a sweep
+    # candidate, and both are contained: neither can fail a session start.
+    sweep_stale_loop_state(session_id)
+    maybe_run_log_cleanup(session_id)
 
 
 def handle_session_end(data: dict, session_id: str):

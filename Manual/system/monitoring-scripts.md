@@ -15,8 +15,12 @@ A central Python script (`~/.claude/hooks/agent-monitor.py`) processes all hook 
 
 | Event | When | What the monitor does |
 |---|---|---|
-| `SessionStart` | Claude session starts | Create fresh loop state, start logging |
+| `SessionStart` | Claude session starts | Create fresh loop state, start logging, sweep stale loop-state files, run `log-cleanup.sh` at most once a day |
 | `SessionEnd` | Session ends | Write summary, log incomplete agents, clean up state |
+
+`SessionEnd` is not guaranteed to arrive — a killed process or a crash skips it. That is why
+both cleanups also run at `SessionStart`, where an interrupted session's leftovers are still
+there to find.
 | `PreToolUse` | Before every tool call | Loop detection, tool count, stagnation check |
 | `PostToolUse` | After every tool call | Performance tracking (duration) |
 | `SubagentStart` | Agent is started | Record start time, duplicate batch detection |
@@ -74,7 +78,7 @@ Certain tool inputs are validated before execution:
         +-- session-summary.json  # Summary at SessionEnd
 ```
 
-**Loop state:** `/tmp/claude-loop-{session_id}.json` (temporary, deleted at SessionEnd)
+**Loop state:** `/tmp/claude-loop-{session_id}.json` (temporary, deleted at SessionEnd, and swept by age at the next SessionStart for the sessions that never emitted one)
 
 ## Log Analysis
 
@@ -151,7 +155,7 @@ header for its exact exit-code contract.
 | `baseline.sh` | `~/.claude/scripts/baseline.sh <version> [projectdir]` | Mechanical preparation for a release baseline cut. Writes `docs/.baseline-prep.md` (a volatile report, not `BASELINE.md` itself) for `/release-baseline` to work from. **`<version>` is required**, not optional. |
 | `workitems.py` | `~/.claude/scripts/workitems.py <subcommand>` | Work-item CLI dispatcher (ADR-0002). Reads `workitems.provider` from **`.claude/settings.json`** — not a repo-root settings file — and dispatches to `lib/workitems/<provider>.py`. Default and reference backend is `local`: no server, no token, structured Markdown under `docs/workitems/`. Full reference: [../WORKITEMS.md](../WORKITEMS.md) |
 | `migrate-review-headers.sh` | `~/.claude/scripts/migrate-review-headers.sh [projectdir]` | One-off backfill of `kind: review` + `sprint` + the commit-anchor family onto `docs/reviews/SPRINT-<N>-review.md` files that predate the header schema. Idempotent; a no-op once migrated. |
-| `log-cleanup.sh` | `~/.claude/scripts/log-cleanup.sh [--days N] [--dry-run]` | Trims session and aggregated logs under `~/.claude/logs/`. Default: everything older than **7 days**. |
+| `log-cleanup.sh` | `~/.claude/scripts/log-cleanup.sh [--days N] [--dry-run]` | Trims session and aggregated logs under `~/.claude/logs/`. Default: everything older than **7 days**. Runs automatically at `SessionStart`, throttled to once a day; call it by hand for a different `--days` or a `--dry-run`. |
 | `artifact-gate.sh` | `~/.claude/scripts/artifact-gate.sh [--repo <dir>] [--require-denylist] [<file> ...]` | Sweeps a repository's tracked files for secrets, personal data and configured tenant/project names (Constitution Inviolable enforcement). Shipped since **`v0.3.0-beta`**. Details: [discipline-gate.md](discipline-gate.md) |
 
 ### Shared Libraries

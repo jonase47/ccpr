@@ -622,6 +622,38 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Fixed
 
+- **Two cleanup mechanisms that existed, were correct, and never ran** (findings #27 and #25).
+  `log-cleanup.sh` has had a retention rule since it was written — 7 days by default,
+  `--days N`, `--dry-run` — and nothing ever called it: no hook, no cron entry, no settings
+  line. Its first run ever, on 30.08.2026, took the log tree from 285 session directories and
+  144 MB to 23 and 24 MB. And `cleanup_loop_state()` was called from exactly one place, inside
+  `handle_session_end()`, so any termination that never emits that event — a killed process, a
+  crash — left its state file behind.
+
+  Both now run at `SessionStart`, where an interrupted session's leftovers are still there to
+  find. The log cleanup is throttled to once a day by a stamp file; the state sweep is **not**,
+  because it is a glob plus a stat per entry with no subprocess, and throttling it would let an
+  orphan outlive its session by up to a day for nothing. That asymmetry is pinned by a test.
+
+  **The point is visibility, not disk space.** A cleanup that quietly does nothing is
+  indistinguishable from one that never ran — which is the defect being fixed, not a detail of
+  it. So a run that happens files a record with its numbers *including all zeros*, plus a
+  stderr line; a throttled start files nothing at all. The mutant "a no-op run files no record"
+  turns three tests red.
+
+  The hook can never fail a session start. A missing stamp, an unreadable one, one containing
+  undecodable bytes, or a directory where the stamp should be: each runs the cleanup and
+  replaces the stamp, and none can switch the cleanup off permanently. The unreadable case
+  needs `os.replace` rather than an in-place open — permission on the directory, not on the
+  file the fail-open path exists to recover from.
+
+  Deliberately **not** capped: the sweep walks every entry in the temp directory. Measured at
+  0 / 1 000 / 10 000 / 50 000 files → 28 / 32 / 78 / 340 ms, about 6 µs per entry, so a
+  five-second session start would need roughly 750 000 files. A cap would mean a legitimately
+  large backlog never finishes being cleaned — the same defect class one layer down.
+
+  Cost on a throttled start: **+3 ms** (25 → 28 ms). The one run per day: ~680 ms.
+
 - **Two defects that only exist on Linux, and were therefore never seen.** Both predate this
   work; the CI found them on its first run, because nobody had ever executed these scripts on
   Linux.

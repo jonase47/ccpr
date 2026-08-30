@@ -873,7 +873,7 @@ class NoStaleKnownFindingsTest(unittest.TestCase):
 
 class ClassificationCountsTest(unittest.TestCase):
     def test_classification_counts(self):
-        """Regression pin on the measured baseline: 1075 `test_*` methods
+        """Regression pin on the measured baseline: 1099 `test_*` methods
         across the corpus call something shaped like a subprocess invocation
         and are therefore in scope for this check; 0 of those are currently
         absence-only-needs-exemption -- `KNOWN_FINDINGS` above is empty for
@@ -887,6 +887,29 @@ class ClassificationCountsTest(unittest.TestCase):
         growing paragraph:
 
           in-scope / flagged   when
+          1099 / 0             Findings #27 + #25 (30.08.2026): the
+                               SessionStart hook now triggers
+                               log-cleanup.sh once a day and sweeps stale
+                               loop-state files. 30 new methods in
+                               test_agent_monitor.py, 24 of them in scope
+                               (they drive the hook through
+                               `subprocess.run`); none flagged -- each
+                               asserts a positive fact about what the run
+                               reported or removed, never merely that
+                               nothing crashed. The other 6 call
+                               `module.<fn>(...)` on the imported module,
+                               an ast.Attribute whose value.id is neither
+                               `self` nor `subprocess`, so this scanner's
+                               first documented blind spot does not see
+                               them. That shape was forced by the timeout
+                               constant, the UTC day boundary and fault
+                               injection -- not chosen to hold this number
+                               still, which would make the pin lie.
+                               +24 in scope, 0 newly flagged.
+
+                               Proven a move, not a swap: the in-scope SET
+                               at da1e299 and here differ by exactly those
+                               24 entries, with nothing removed.
           1075 / 0             Finding #18 (30.08.2026): added
                                test_command_check.py's ResultSectionTree
                                ContractRedProofTest.test_historical_red_the
@@ -1443,7 +1466,7 @@ class ClassificationCountsTest(unittest.TestCase):
         count."""
         recs = scan_tree()
         flagged = [r for r in recs if r.disposition in NEEDS_EXEMPTION]
-        self.assertEqual(1075, len(recs))
+        self.assertEqual(1099, len(recs))
         self.assertEqual(0, len(flagged))
 
 
