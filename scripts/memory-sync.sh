@@ -273,7 +273,8 @@ ensure_index_block() {
   # undelimited pointer block in place.
   [[ -f "$INSTINCTS_INDEX" ]] || return 0
   [[ -f "$INSTINCTS_TARGET" ]] || return 0
-  local rel="instincts/$(basename "$INSTINCTS_TARGET")"
+  local rel
+  rel="instincts/$(basename "$INSTINCTS_TARGET")"
   python3 - "$INSTINCTS_INDEX" "$INSTINCTS_TARGET" "$rel" "$INDEX_BLOCK_TITLE" "$REPO_URL" "$NS" <<'PY'  # exit-status: exempt set-e-sufficient
 import sys, re
 index_path, topic_path, rel, title, repo, ns = sys.argv[1:7]

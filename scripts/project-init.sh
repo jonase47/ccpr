@@ -5,7 +5,9 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# WI-0129 D1: SCRIPT_DIR used to be computed here (ShellCheck SC2034) but
+# was never read -- TEMPLATES_DIR/WORKSPACE below both resolve from $HOME,
+# not from this script's own location.
 TEMPLATES_DIR="${HOME}/.claude/templates"
 WORKSPACE="${HOME}/Workspace"
 

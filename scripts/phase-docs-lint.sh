@@ -236,7 +236,11 @@ FILES=()
 FOLDERS_FOUND=()
 if [[ -n "$SCOPE_GLOB" ]]; then
     while IFS= read -r p; do
-        # Bash [[ ... == pattern ]] supports *, ?, [...] (no ** globstar required)
+        # Bash [[ ... == pattern ]] supports *, ?, [...] (no ** globstar required).
+        # $SCOPE_GLOB deliberately UNQUOTED (WI-0129 D1, ShellCheck SC2053):
+        # quoting it would turn this into a literal string comparison and
+        # break the whole point of --scope accepting a glob.
+        # shellcheck disable=SC2053
         if [[ "$p" == $SCOPE_GLOB ]]; then
             FILES+=("$DOCS_DIR/$p")
         fi

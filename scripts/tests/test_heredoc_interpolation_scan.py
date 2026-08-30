@@ -109,8 +109,13 @@ only):
     the least "this script's own" of the values interpolated here, though
     the heredoc's consumer is `cat` writing a markdown file, not a
     reparsed-as-code sink.
-  * project-init.sh:47 (`cat > ".../DISCOVERY.md" <<EOF`) -- body carries
-    one `${TODAY}` (this script's own `date` output).
+  * project-init.sh:49 (`cat > ".../DISCOVERY.md" <<EOF`) -- body carries
+    one `${TODAY}` (this script's own `date` output). Line moved 47 -> 49,
+    30.08.2026 (WI-0129 D1): removing project-init.sh's dead `SCRIPT_DIR`
+    assignment (ShellCheck SC2034) and replacing it with a three-line
+    comment shifted every line below it down by +2 -- same heredoc,
+    verified byte-for-byte identical body against the pre-fix commit,
+    not a new or vanished finding.
 
 `KNOWN_FINDINGS` below records exactly these two, keyed the same way
 test_absence_only_assertions.py's own registry is (module-relative path,
@@ -246,7 +251,7 @@ def scan_tree(scripts_dir=SCRIPTS_DIR, repo_root=REPO_ROOT):
 # (path relative to REPO_ROOT, line, delimiter).
 KNOWN_FINDINGS = {
     ("scripts/baseline.sh", 123, "PREP_EOF"),
-    ("scripts/project-init.sh", 47, "EOF"),
+    ("scripts/project-init.sh", 49, "EOF"),  # was 47 -- see the module docstring's WI-0129 D1 line-shift note
 }
 
 
@@ -400,7 +405,12 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
         """Pins the file-enumeration side, mirroring
         test_external_tool_exit_status.py's identically-named test: 25
         files at write time (scripts/*.sh: 17, scripts/lib/*.sh: 2,
-        scripts/local-llm/*.sh: 5, install.sh: 1)."""
+        scripts/local-llm/*.sh: 5, install.sh: 1).
+
+        Bumped 26 -> 27, 30.08.2026 (WI-0129 D2, ShellCheck adoption): added
+        scripts/shellcheck-run.sh under scripts/*.sh. It carries no heredoc
+        of its own (zero `<<` occurrences), so ClassificationCountsTest's 41
+        openers / 2 findings are unchanged by this file-count bump alone."""
         files = (
             sorted(SCRIPTS_DIR.glob("*.sh"))
             + sorted((SCRIPTS_DIR / "lib").glob("*.sh"))
@@ -408,7 +418,7 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
             + [REPO_ROOT / "install.sh"]
         )
         files = [f for f in files if f.is_file()]
-        self.assertEqual(26, len(files))
+        self.assertEqual(27, len(files))
         names = {f.relative_to(REPO_ROOT).as_posix() for f in files}
         self.assertIn("scripts/run-tests.sh", names)
         self.assertIn("scripts/baseline.sh", names)

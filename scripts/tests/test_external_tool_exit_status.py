@@ -1152,12 +1152,27 @@ class ExternalToolExitStatusTest(unittest.TestCase):
         lib/discipline_gate.sh's `_gate_unicode_py`, marked
         `propagates-as-function-return` (`bare-needs-exemption` +1). 155
         invocations total: `checked-condition` +1, `bare-needs-exemption`
-        +2, everything else unchanged."""
+        +2, everything else unchanged.
+
+        Updated once more 30.08.2026 (WI-0129 D2, ShellCheck adoption):
+        scripts/shellcheck-run.sh, a new 21st shipped file, added three
+        invocations of its own. Two are a `sed -n '2,/^$/p' ... | sed
+        's/^# \\{0,1\\}//'` usage()-extraction pipeline -- the EXACT same
+        shape check-all.sh's own usage() already carries (see the
+        29.08.2026 entry above), marked `set-e-sufficient` for the
+        identical reason: no `$(...)` involved, the pipeline stands alone
+        under `set -euo pipefail` (`bare-needs-exemption` +2). The third is
+        a `grep -c ': .*\\[SC[0-9]*\\]' || true` finding-count extraction
+        inside a `$(...)` assignment -- an intentionally tolerated empty
+        result (0 findings greps to nothing, exit 1, not a crash), marked
+        `grep-empty-is-valid` (`discard-needs-exemption` +1). 158
+        invocations total: `discard-needs-exemption` +1,
+        `bare-needs-exemption` +2, everything else unchanged."""
         invocations = scan_tree()
         by_disposition = {}
         for inv in invocations:
             by_disposition[inv.disposition] = by_disposition.get(inv.disposition, 0) + 1
-        self.assertEqual(155, len(invocations))
+        self.assertEqual(158, len(invocations))
         self.assertEqual(
             {
                 # 28.08.2026, open-findings wave 1a: one invocation moved
@@ -1183,11 +1198,14 @@ class ExternalToolExitStatusTest(unittest.TestCase):
                 # ExemptionMarkersAreWellFormedTest passes on both. The third
                 # is its python3 suite runner, written `if python3 ...; then
                 # rc=0; else rc=$?; fi`, so it lands in the checked bucket.
+                # 30.08.2026: +3 total for scripts/shellcheck-run.sh (WI-0129
+                # D2) -- see this test's own docstring entry immediately
+                # above for the per-invocation breakdown.
                 "checked-condition": 27,
                 "checked-captured": 5,
                 "checked-chain": 14,
-                "discard-needs-exemption": 40,
-                "bare-needs-exemption": 69,
+                "discard-needs-exemption": 41,
+                "bare-needs-exemption": 71,
             },
             by_disposition,
         )
@@ -1200,7 +1218,8 @@ class ExternalToolExitStatusTest(unittest.TestCase):
         (updated 21.08.2026 when WI-0021 added scripts/anchor.sh; updated
         again 22.08.2026 when WI-0072 added scripts/migrate-review-headers.sh;
         updated again 27.08.2026 when WI-0124 wave 1 added
-        scripts/conformance-run.sh)."""
+        scripts/conformance-run.sh; updated again 30.08.2026 when WI-0129 D2
+        added scripts/shellcheck-run.sh)."""
         files = sorted(SCRIPTS_DIR.glob("*.sh")) + sorted((SCRIPTS_DIR / "lib").glob("*.sh"))
         names = sorted(f.relative_to(SCRIPTS_DIR).as_posix() for f in files)
         self.assertEqual(
@@ -1225,6 +1244,7 @@ class ExternalToolExitStatusTest(unittest.TestCase):
                 "project-init.sh",
                 "quality-scan.sh",
                 "run-tests.sh",
+                "shellcheck-run.sh",
             ],
             names,
         )

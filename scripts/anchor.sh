@@ -198,7 +198,6 @@ scopes_found_summary() {
 
 # --- git state (the six edge cases named in the work item) ----------------
 
-GIT_CHECKABLE=0
 IS_SHALLOW=0
 HAS_COMMITS=0
 DIRTY_TREE=0
@@ -215,7 +214,6 @@ require_git_repo() {
     if [[ ! -e "$project_dir/.git" ]] || ! command -v git >/dev/null 2>&1; then
         die "not a git repository (or git not on PATH): $project_dir"
     fi
-    GIT_CHECKABLE=1
 }
 
 require_docs_dir() {
@@ -277,17 +275,24 @@ find_last_prod_commit() {
 # --- scope / document anchor resolution ------------------------------------
 
 # doc_effective_anchor <file> <index-file-or-empty>
-# Sets ANCH_COMMIT / ANCH_DATE / ANCH_SOURCE ("own" / "index" / "none").
-# Resolution per ADR-0009 Addendum 2: the document's own anchor_commit if
-# present, else its phase index's. No third tier.
+# Sets ANCH_COMMIT / ANCH_SOURCE ("own" / "index" / "none"). Resolution per
+# ADR-0009 Addendum 2: the document's own anchor_commit if present, else its
+# phase index's. No third tier.
+#
+# Does NOT set an ANCH_DATE global (WI-0129 D1, ShellCheck SC2034): an
+# earlier version did, but its only caller (below) never read it -- the
+# "own" case already has its own independent anchor_date lookup where a
+# date is actually displayed (own_date, further down this file), and the
+# "index" case's date was never surfaced anywhere. Re-add a documented
+# ANCH_DATE output if a caller needs the index-sourced date; carrying it
+# unread was dead state, not a kept contract.
 doc_effective_anchor() {
     local file="$1" index_file="$2"
-    local own_c own_d idx_c idx_d
+    local own_c idx_c
 
     own_c="$(fm_field "$file" anchor_commit || true)"
     if [[ -n "$own_c" ]]; then
         ANCH_COMMIT="$own_c"
-        ANCH_DATE="$(fm_field "$file" anchor_date || true)"
         ANCH_SOURCE="own"
         return 0
     fi
@@ -296,14 +301,12 @@ doc_effective_anchor() {
         idx_c="$(fm_field "$index_file" anchor_commit || true)"
         if [[ -n "$idx_c" ]]; then
             ANCH_COMMIT="$idx_c"
-            ANCH_DATE="$(fm_field "$index_file" anchor_date || true)"
             ANCH_SOURCE="index"
             return 0
         fi
     fi
 
     ANCH_COMMIT=""
-    ANCH_DATE=""
     ANCH_SOURCE="none"
     return 1
 }

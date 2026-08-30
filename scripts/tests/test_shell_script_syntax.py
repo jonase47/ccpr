@@ -178,6 +178,7 @@ class ShellScriptSyntaxTest(unittest.TestCase):
                 "project-init.sh",
                 "quality-scan.sh",
                 "run-tests.sh",
+                "shellcheck-run.sh",
             ],
             names,
         )

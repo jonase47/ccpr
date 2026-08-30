@@ -61,11 +61,26 @@ run_pytest() {
     tmpfile=$(mktemp /tmp/pytest-report-XXXXXX)
     cov_tmpfile=$(mktemp /tmp/pytest-cov-XXXXXX)
 
+    # `cov_args` built conditionally (WI-0129 D1, ShellCheck SC2046: the
+    # prior unquoted `$( ... )` here relied on word-splitting to turn one
+    # string into two argv words) -- same conditionally-populated-array
+    # shape run_jest_or_vitest's `runner_args` already uses a few functions
+    # down, for the identical reason: an unconditional quoted string would
+    # pass pytest-cov's two flags as ONE malformed argument when the plugin
+    # IS installed, and quoting away the split is the wrong fix when a
+    # bash-3.2-safe array does the same job without relying on splitting at
+    # all. `${cov_args[@]+"${cov_args[@]}"}` guards the empty-array case
+    # under `set -u` (see run_jest_or_vitest's own comment on this idiom).
+    local cov_args=()
+    if [ -n "$(pip show pytest-cov 2>/dev/null)" ]; then
+        cov_args=("--cov" "--cov-report=json:${cov_tmpfile}")
+    fi
+
     # Run pytest with JSON report if plugin available
     if python3 -c "import pytest_json_report" 2>/dev/null; then
         python3 -m pytest "${test_arg}" --tb=short -q \
             --json-report --json-report-file="${tmpfile}" \
-            $( [ -n "$(pip show pytest-cov 2>/dev/null)" ] && echo "--cov --cov-report=json:${cov_tmpfile}" || true ) \
+            ${cov_args[@]+"${cov_args[@]}"} \
             2>&1 || true  # exit-status: exempt test-runner-output-capture
 
         RUN_TESTS_TMPFILE="${tmpfile}" RUN_TESTS_COV_FILE="${cov_tmpfile}" RUN_TESTS_TIMESTAMP="${TIMESTAMP}" python3 << 'PYEOF'  # exit-status: exempt set-e-sufficient
@@ -135,6 +150,7 @@ PYEOF
         # gone by the time the trap actually fires (script end); a
         # single-quoted trap defers the expansion to firing time, when
         # `set -u` sees an unbound variable and the cleanup itself fails.
+        # shellcheck disable=SC2064
         trap "rm -f '${raw_tmpfile}'" EXIT
         python3 -m pytest "${test_arg}" --tb=short -q > "${raw_tmpfile}" 2>&1 || true  # exit-status: exempt test-runner-output-capture
 
@@ -266,6 +282,7 @@ run_cargo() {
     raw_tmpfile=$(mktemp /tmp/cargo-raw-XXXXXX)
     # See run_pytest's fallback branch for why this is an EXIT trap, not a
     # manual `rm -f` placed after the heredoc.
+    # shellcheck disable=SC2064
     trap "rm -f '${raw_tmpfile}'" EXIT
     # See run_jest_or_vitest for why `test_arg` is passed via a
     # conditionally-populated array rather than a bare `"${test_arg}"`:
@@ -324,6 +341,7 @@ run_go() {
     raw_tmpfile=$(mktemp /tmp/go-raw-XXXXXX)
     # See run_pytest's fallback branch for why this is an EXIT trap, not a
     # manual `rm -f` placed after the heredoc.
+    # shellcheck disable=SC2064
     trap "rm -f '${raw_tmpfile}'" EXIT
     # `test_arg` defaults to `./...` here, never empty, so a plain quote is
     # sufficient and correct -- same shape as the pytest sites above. No

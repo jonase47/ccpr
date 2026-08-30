@@ -419,14 +419,25 @@ if [[ -f "$TIER1_INDEX" && $FILES_TOTAL -gt 0 ]]; then
     done
 fi
 
+# NOTE (WI-0129 D1): every `# shellcheck disable=SC2088` from here on down
+# suppresses a literal "~" inside an err/warn/info MESSAGE STRING shown to
+# the human operator (e.g. "~/.claude/instincts.md — 42 KB exceeds..."),
+# never a shell expansion -- the actual paths this script reads are
+# resolved through $HOME-based variables (TIER1_GLOBAL_FILE, TIER2_GLOBAL_DIR,
+# ...) elsewhere in this file. Suppressed per-site, not file-wide, so a
+# genuine SC2088 (an accidentally unquoted, live "~/..." path expansion)
+# added to this file later still surfaces instead of being silently masked.
+
 # (h) Tier-1-global size cap — ~/.claude/instincts.md must not balloon.
 # Drift signal: persona-specific entries leak into global; cleanup or migration needed.
 if [[ -f "$TIER1_GLOBAL_FILE" ]]; then
     size_bytes=$(wc -c < "$TIER1_GLOBAL_FILE" | tr -d ' ')
     size_kb=$(( size_bytes / 1024 ))
     if (( size_bytes > TIER1_GLOBAL_ERR_KB * 1024 )); then
+        # shellcheck disable=SC2088
         err "~/.claude/instincts.md — ${size_kb} KB exceeds hard cap (${TIER1_GLOBAL_ERR_KB} KB). Migrate persona-specific entries to ~/.claude/memory/{agent}/instincts.md, then prune confirmed-stable entries via /postmortem."
     elif (( size_bytes > TIER1_GLOBAL_WARN_KB * 1024 )); then
+        # shellcheck disable=SC2088
         warn "~/.claude/instincts.md — ${size_kb} KB exceeds soft cap (${TIER1_GLOBAL_WARN_KB} KB). Consider migrating persona-specific entries to ~/.claude/memory/{agent}/."
     fi
 fi
@@ -447,6 +458,7 @@ if [[ -d "$TIER2_GLOBAL_DIR" ]]; then
         fi
 
         if ! fm_has "$gfile"; then
+            # shellcheck disable=SC2088
             err "~/${grel} — Tier-2-global file without YAML frontmatter"
             continue
         fi
@@ -454,6 +466,7 @@ if [[ -d "$TIER2_GLOBAL_DIR" ]]; then
         # scope: tier-2-global is the new convention marker
         gscope="$(fm_field "$gfile" scope || true)"
         if [[ "$gscope" != "tier-2-global" ]]; then
+            # shellcheck disable=SC2088
             warn "~/${grel} — Tier-2-global file should declare 'scope: tier-2-global' (found: '${gscope:-none}')"
         fi
 
@@ -461,8 +474,10 @@ if [[ -d "$TIER2_GLOBAL_DIR" ]]; then
         gagent="$(fm_field "$gfile" agent || true)"
         expected_agent="$(basename "$(dirname "$gfile")")"
         if [[ -n "$gagent" && "$gagent" != "$expected_agent" ]]; then
+            # shellcheck disable=SC2088
             warn "~/${grel} — agent='${gagent}' does not match parent directory '${expected_agent}'"
         elif [[ -z "$gagent" ]]; then
+            # shellcheck disable=SC2088
             warn "~/${grel} — missing 'agent:' field (should be '${expected_agent}')"
         fi
     done < <(find "$TIER2_GLOBAL_DIR" -type f -name "*.md" 2>/dev/null)
@@ -521,6 +536,7 @@ if (( ${#tier1_low_conf_files[@]} > 0 )); then
         if [[ -d "$TIER1_GLOBAL_TOPIC_DIR" ]]; then
             info "Tier-1-global — ${low_conf} entries at Confidence ≤ 0.4 across ~/.claude/instincts.md + ~/.claude/instincts/*.md (review candidates if older than ${DECAY_DAYS}d without confirmation; full decay check belongs in /postmortem)."
         else
+            # shellcheck disable=SC2088
             info "~/.claude/instincts.md — ${low_conf} entries at Confidence ≤ 0.4 (review candidates if older than ${DECAY_DAYS}d without confirmation; full decay check belongs in /postmortem)."
         fi
     fi
@@ -537,17 +553,20 @@ if [[ -d "$TIER1_GLOBAL_TOPIC_DIR" ]]; then
         trel="${tfile#$HOME/}"
 
         if ! fm_has "$tfile"; then
+            # shellcheck disable=SC2088
             err "~/${trel} — Tier-1-global topic file without YAML frontmatter"
             continue
         fi
 
         ttype="$(fm_field "$tfile" type || true)"
         if [[ "$ttype" != "instincts" ]]; then
+            # shellcheck disable=SC2088
             warn "~/${trel} — Tier-1-global topic file should declare 'type: instincts' (found: '${ttype:-none}')"
         fi
 
         tscope="$(fm_field "$tfile" scope || true)"
         if [[ "$tscope" != "tier-1-global-topic" ]]; then
+            # shellcheck disable=SC2088
             warn "~/${trel} — Tier-1-global topic file should declare 'scope: tier-1-global-topic' (found: '${tscope:-none}')"
         fi
 
@@ -555,18 +574,22 @@ if [[ -d "$TIER1_GLOBAL_TOPIC_DIR" ]]; then
         topic_bytes=$(wc -c < "$tfile" | tr -d ' ')
         topic_kb=$(( topic_bytes / 1024 ))
         if (( topic_bytes > TIER1_TOPIC_ERR_KB * 1024 )); then
+            # shellcheck disable=SC2088
             err "~/${trel} — ${topic_kb} KB exceeds Tier-1-global topic hard cap (${TIER1_TOPIC_ERR_KB} KB). Split the theme further (e.g. orchestration vs briefing-discipline) or migrate persona-specific entries to ~/.claude/memory/{agent}/."
         elif (( topic_bytes > TIER1_TOPIC_WARN_KB * 1024 )); then
+            # shellcheck disable=SC2088
             warn "~/${trel} — ${topic_kb} KB exceeds Tier-1-global topic soft cap (${TIER1_TOPIC_WARN_KB} KB). Consider further theme split or persona-silo migration."
         fi
     done < <(find "$TIER1_GLOBAL_TOPIC_DIR" -maxdepth 1 -type f -name "*.md" 2>/dev/null)
 
     if (( topic_total == 0 )); then
+        # shellcheck disable=SC2088
         info "~/.claude/instincts/ exists but contains no *.md topic files (split layout incomplete — fill it or remove the directory)."
     fi
 
     # (m) Archive presence — split layout without the archive is unusual but not fatal.
     if [[ ! -f "$TIER1_GLOBAL_ARCHIVE" ]]; then
+        # shellcheck disable=SC2088
         info "~/.claude/instincts-archive/HISTORY.md missing in a split layout — /postmortem expects to append the verbose narrative there. Create it or accept that postmortem history will accumulate elsewhere."
     fi
 fi

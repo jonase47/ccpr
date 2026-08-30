@@ -3,7 +3,7 @@
 # remember, and report ACTUAL exit code against an EXPECTED one from a
 # versioned baseline, not against "exit 0".
 #
-# Why "exit 0" is not the pass criterion: two of the seven checks below are
+# Why "exit 0" is not the pass criterion: two of the eight checks below are
 # non-zero BY DESIGN on a clean CCPR checkout right now (memory-lint.sh exits
 # 1 on long-standing memory-freshness warnings; doc-volume-check.sh exits 2 on
 # known oversized files pending a split). A script that failed on any non-zero
@@ -46,22 +46,26 @@
 # already carves out for the same reason (a check that cannot run must never
 # look like a check that ran and found nothing).
 #
-# --- the seven checks, and which ones apply outside this repository --------
+# --- the eight checks, and which ones apply outside this repository --------
 #
 # Four are GENERIC over any documentation tree and always attempted, whatever
 # <project-dir> is: phase-docs-lint, memory-lint, manual-lint,
-# doc-volume-check. Three are CCPR-REPOSITORY-ONLY: artifact-gate.sh sweeps
+# doc-volume-check. Four are CCPR-REPOSITORY-ONLY: artifact-gate.sh sweeps
 # THIS repository's own shipped artifacts for the Constitution's Inviolable;
 # conformance-run.sh runs THIS repository's own shipped checks against ITS
 # consumers (it takes no project-dir argument at all — see its own header);
 # python-tests runs the suite under scripts/tests/, which this repository is
-# the only one that ships. All three are gated on one existence check:
-# "<project-dir>/scripts/tests exists" — chosen over the alternative
+# the only one that ships; shellcheck (scripts/shellcheck-run.sh, WI-0129 D2)
+# lints THIS repository's own shipped scripts/*.sh + scripts/lib/*.sh +
+# install.sh — an adopter project's own, unrelated shell scripts (if any)
+# are not this check's business, and "scripts/*.sh" is not a CCPR naming
+# convention any adopter is bound to. All four are gated on one existence
+# check: "<project-dir>/scripts/tests exists" — chosen over the alternative
 # considered (comparing `git -C <project-dir> rev-parse --show-toplevel`
 # against this script's own git root, the self-detection artifact-gate.sh
 # itself already uses for its docs/-boundary sub-rule) because it is the ONE
-# signal all three checks actually need: python-tests needs that exact path
-# to exist to have anything to discover, and reusing it for the other two
+# signal all four checks actually need: python-tests needs that exact path
+# to exist to have anything to discover, and reusing it for the other three
 # keeps a single, uniform "is this the CCPR checkout" answer rather than two
 # different mechanisms answering the same question. The git-identity approach
 # has its own accepted gap (a project that vendors a copy of this repository
@@ -72,7 +76,7 @@
 #
 # --- the seam: CCPR_CHECK_ALL_SCRIPT_DIR -------------------------------------
 #
-# Six of the seven checks are shipped SIBLING SCRIPTS, invoked as
+# Seven of the eight checks are shipped SIBLING SCRIPTS, invoked as
 # "$CHECK_SCRIPT_DIR/<name>.sh <args>". CHECK_SCRIPT_DIR defaults to this
 # script's own directory and is overridable via CCPR_CHECK_ALL_SCRIPT_DIR —
 # the exact seam conformance-run.sh already ships as CCPR_CONFORMANCE_
@@ -83,7 +87,7 @@
 # the python suite alone) in every test of the comparison logic would mean
 # nobody runs those tests. scripts/tests/test_check_all.py points this
 # variable at a scratch directory holding tiny stub scripts that `exit <N>`
-# on demand — the SAME shape for every one of the six, so one seam covers
+# on demand — the SAME shape for every one of the seven, so one seam covers
 # all of them. A sibling script that does not exist under CHECK_SCRIPT_DIR
 # (a scratch dir with no stub for it, or a genuinely broken installation) is
 # itself a could-not-run outcome, not a crash — this is also what lets a test
@@ -129,14 +133,20 @@ CHECK_SCRIPT_DIR="${CCPR_CHECK_ALL_SCRIPT_DIR:-$HERE}"
 # The check catalogue — parallel arrays, not an associative array: this
 # repository's floor is bash 3.2 (macOS /bin/bash), which has none (the same
 # constraint conformance-run.sh's own table comment states).
-CHECK_NAMES=(phase-docs-lint memory-lint manual-lint doc-volume-check artifact-gate conformance-run python-tests)
+CHECK_NAMES=(phase-docs-lint memory-lint manual-lint doc-volume-check artifact-gate conformance-run python-tests shellcheck)
 # "script" — a sibling script under CHECK_SCRIPT_DIR. "python" — the fixed
 # unittest-discover invocation (no sibling script, see header above).
-CHECK_KIND=(script script script script script script python)
-CHECK_SCRIPTS=(phase-docs-lint.sh memory-lint.sh manual-lint.sh doc-volume-check.sh artifact-gate.sh conformance-run.sh "")
+# The "shellcheck" catalogue entry is "script" too (scripts/shellcheck-
+# run.sh) — WI-0129 D2 gave the external ShellCheck TOOL the same
+# sibling-script seam artifact-gate.sh/conformance-run.sh already have,
+# rather than invoking it raw here.
+CHECK_KIND=(script script script script script script python script)
+CHECK_SCRIPTS=(phase-docs-lint.sh memory-lint.sh manual-lint.sh doc-volume-check.sh artifact-gate.sh conformance-run.sh "" shellcheck-run.sh)
 # 1 = CCPR-repository-only (gated on <project-dir>/scripts/tests existing —
-# see header above).
-CHECK_CCPR_ONLY=(0 0 0 0 1 1 1)
+# see header above). shellcheck is 1: its scope (THIS repository's own
+# scripts/*.sh + scripts/lib/*.sh + install.sh) is not a convention any
+# adopter project is bound to.
+CHECK_CCPR_ONLY=(0 0 0 0 1 1 1 1)
 CHECK_COUNT=${#CHECK_NAMES[@]}
 
 # --- CLI ---------------------------------------------------------------------
@@ -199,6 +209,12 @@ while IFS= read -r raw_line || [ -n "$raw_line" ]; do
     ''|'#'*) continue ;;
   esac
   b_name="" b_exit="" b_rest=""
+  # b_rest: the baseline's third (note) column -- a required READ TARGET,
+  # never consumed itself (WI-0129 D1, ShellCheck SC2034). It exists so a
+  # tab in the human-facing note text is absorbed here rather than
+  # bleeding into $b_exit; the note is "free text, for humans; check-all.sh
+  # never parses it" per this file's own baseline-format comment above.
+  # shellcheck disable=SC2034
   IFS=$'\t' read -r b_name b_exit b_rest <<<"$raw_line"
   [ -n "$b_name" ] || die "baseline line $line_no: missing check name"
   case "$b_exit" in
@@ -400,6 +416,7 @@ while [ "$ci" -lt "$CHECK_COUNT" ]; do
             fi
             ;;
           conformance-run)             invoke_args=() ;;
+          shellcheck)                  invoke_args=("$PROJECT_DIR") ;;
         esac
         # bash 3.2: "${arr[@]}" on a zero-element array is safe under
         # set -u only via this length-gated shape (conformance-run.sh's
@@ -421,7 +438,6 @@ while [ "$ci" -lt "$CHECK_COUNT" ]; do
     esac
 
     stdout_text="$(cat "$stdout_file")"
-    stderr_text="$(cat "$stderr_file")"
     rm -f "$stdout_file" "$stderr_file"
 
     # conformance-run.sh's own "not configured" state is exit-code-invisible
@@ -465,6 +481,26 @@ while [ "$ci" -lt "$CHECK_COUNT" ]; do
         *"the memory-lint check DID NOT RUN"*)
           state="could-not-run"
           reason="no targets present (no docs/memory/, no ~/.claude instincts/memory files) — nothing to compare against a baseline exit code"
+          ;;
+      esac
+    fi
+
+    # The shellcheck-run.sh sibling script's own could-not-run state
+    # (WI-0129 D2) is exit-code-invisible the same way: it exits 0 both
+    # when it verified a clean tree AND when it could not verify anything
+    # at all (ShellCheck not installed on PATH, or no scripts/*.sh /
+    # scripts/lib/*.sh / install.sh under the project dir) — the same "0
+    # alone cannot distinguish clean from unverified" shape memory-lint's
+    # and conformance-run's own no-scope states already have, one tool
+    # over. Matched on the shared "the shellcheck check DID NOT RUN"
+    # substring ALONE (both of shellcheck-run.sh's two could-not-run
+    # causes emit it), same discipline as the memory-lint branch
+    # immediately above.
+    if [ "$name" = "shellcheck" ]; then
+      case "$stdout_text" in
+        *"the shellcheck check DID NOT RUN"*)
+          state="could-not-run"
+          reason="shellcheck not installed on PATH, or no scripts/*.sh / scripts/lib/*.sh / install.sh found — nothing to compare against a baseline exit code"
           ;;
       esac
     fi

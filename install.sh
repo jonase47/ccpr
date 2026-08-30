@@ -343,7 +343,7 @@ for item in "${ARTIFACTS[@]}"; do
     if [[ -n "$stash" ]]; then
       for p in "${PROTECTED[@]}"; do
         if [[ "$p" == "$item/"* && -e "$stash/$p" ]]; then
-          rm -rf "$DEST/$p"
+          rm -rf "${DEST:?}/$p"
           mkdir -p "$(dirname "$DEST/$p")"
           cp -R "$stash/$p" "$DEST/$p"
         fi

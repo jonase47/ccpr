@@ -965,6 +965,11 @@ while IFS= read -r rec_line; do
       CONSUMER_OPTIONAL+=("$rec_optional")
       ;;
     PIN$'\t'*)
+      # rec_type: a required READ TARGET, never itself consumed (WI-0129
+      # D1, ShellCheck SC2034) -- the case pattern above already tells this
+      # branch it is "PIN", the same discriminant this read absorbs so the
+      # remaining tab-separated columns line up with p_consumer onward.
+      # shellcheck disable=SC2034
       IFS=$'\t' read -r rec_type p_consumer p_check p_kind p_expect p_param p_regex p_why <<<"$rec_line"
       PIN_CONSUMER+=("$p_consumer")
       PIN_CHECK+=("$p_check")

@@ -42,7 +42,7 @@ BOTH of the previous two tests' pins go red against it.
 ## The seam: CCPR_CHECK_ALL_SCRIPT_DIR
 
 check-all.sh's own header explains the choice at length; the summary here
-is only the test-facing half. Six of the seven checks are shipped sibling
+is only the test-facing half. Seven of the eight checks are shipped sibling
 scripts, invoked as `$CHECK_SCRIPT_DIR/<name>.sh <args>`, where
 CHECK_SCRIPT_DIR defaults to check-all.sh's own directory and is
 overridable via CCPR_CHECK_ALL_SCRIPT_DIR — the same seam
@@ -323,7 +323,7 @@ class AllChecksMatchBaselineTest(CheckAllTestBase):
         self.assertEqual(0, r.returncode, self.output(r))
         self.assertIn("**Exit:** 0", r.stdout, self.output(r))
         self.assertIn(
-            "**Summary:** 7 catalogued, 7 matched, 0 divergent, 0 could-not-run, 0 mismatched",
+            "**Summary:** 8 catalogued, 8 matched, 0 divergent, 0 could-not-run, 0 mismatched",
             r.stdout, self.output(r),
         )
         self.assertIn("memory-lint: exit 1 (expected 1) — match", r.stdout, self.output(r))
@@ -342,7 +342,7 @@ class OneCheckDivergesTest(CheckAllTestBase):
         self.assertIn("phase-docs-lint: exit 3 (expected 0) — DIVERGENT", r.stdout, self.output(r))
         self.assertIn("phase-docs-lint: expected exit 0, got exit 3", r.stdout, self.output(r))
         self.assertIn(
-            "**Summary:** 7 catalogued, 6 matched, 1 divergent, 0 could-not-run, 0 mismatched",
+            "**Summary:** 8 catalogued, 7 matched, 1 divergent, 0 could-not-run, 0 mismatched",
             r.stdout, self.output(r),
         )
         self.assertIn("**Exit:** 1", r.stdout, self.output(r))
@@ -360,11 +360,11 @@ class CouldNotRunIsNeverCountedAsPassTest(CheckAllTestBase):
         self.assertIn("conformance-run: could-not-run", r.stdout, self.output(r))
         self.assertIn("python-tests: could-not-run", r.stdout, self.output(r))
         self.assertIn(
-            "**Checks:** 7 catalogued, 4 ran, 3 could-not-run, 0 mismatched",
+            "**Checks:** 8 catalogued, 4 ran, 4 could-not-run, 0 mismatched",
             r.stdout, self.output(r),
         )
         self.assertIn(
-            "**Summary:** 7 catalogued, 4 matched, 0 divergent, 3 could-not-run, 0 mismatched",
+            "**Summary:** 8 catalogued, 4 matched, 0 divergent, 4 could-not-run, 0 mismatched",
             r.stdout, self.output(r),
         )
 
@@ -382,7 +382,7 @@ class CouldNotRunIsNeverCountedAsPassTest(CheckAllTestBase):
         self.assertIn("conformance-run: could-not-run", r.stdout, self.output(r))
         self.assertNotIn("conformance-run: exit 0 (expected 0) — match", r.stdout, self.output(r))
         self.assertIn(
-            "**Summary:** 7 catalogued, 6 matched, 0 divergent, 1 could-not-run, 0 mismatched",
+            "**Summary:** 8 catalogued, 7 matched, 0 divergent, 1 could-not-run, 0 mismatched",
             r.stdout, self.output(r),
         )
 
@@ -414,7 +414,7 @@ class CouldNotRunIsNeverCountedAsPassTest(CheckAllTestBase):
         self.assertIn("memory-lint: could-not-run", r.stdout, self.output(r))
         self.assertNotIn("memory-lint: exit 0 (expected 1) — DIVERGENT", r.stdout, self.output(r))
         self.assertIn(
-            "**Summary:** 7 catalogued, 6 matched, 0 divergent, 1 could-not-run, 0 mismatched",
+            "**Summary:** 8 catalogued, 7 matched, 0 divergent, 1 could-not-run, 0 mismatched",
             r.stdout, self.output(r),
         )
 
@@ -465,7 +465,7 @@ class CouldNotRunIsNeverCountedAsPassTest(CheckAllTestBase):
         self.assertIn("memory-lint: could-not-run", r.stdout, self.output(r))
         self.assertNotIn("memory-lint: exit 0 (expected 1) — DIVERGENT", r.stdout, self.output(r))
         self.assertIn(
-            "**Summary:** 7 catalogued, 6 matched, 0 divergent, 1 could-not-run, 0 mismatched",
+            "**Summary:** 8 catalogued, 7 matched, 0 divergent, 1 could-not-run, 0 mismatched",
             r.stdout, self.output(r),
         )
 
@@ -586,9 +586,9 @@ class ArtifactGateDenylistDetectionCrashTest(CheckAllTestBase):
 
         r = self.run_check_all()
 
-        # (a) all seven checks still ran, not just artifact-gate.
+        # (a) all eight checks still ran, not just artifact-gate.
         self.assertIn(
-            "**Checks:** 7 catalogued, 7 ran, 0 could-not-run, 0 mismatched",
+            "**Checks:** 8 catalogued, 8 ran, 0 could-not-run, 0 mismatched",
             r.stdout, self.output(r),
         )
         self.assertEqual(0, r.returncode, self.output(r))
@@ -670,7 +670,7 @@ class CatalogueBaselineMismatchTest(CheckAllTestBase):
             r.stdout, self.output(r),
         )
         self.assertIn(
-            "**Summary:** 7 catalogued, 6 matched, 0 divergent, 0 could-not-run, 2 mismatched",
+            "**Summary:** 8 catalogued, 7 matched, 0 divergent, 0 could-not-run, 2 mismatched",
             r.stdout, self.output(r),
         )
 
@@ -687,11 +687,11 @@ class AllCouldNotRunTest(CheckAllTestBase):
         r = self.run_check_all()
         self.assertNotEqual(0, r.returncode, self.output(r))
         self.assertIn(
-            "**Checks:** 7 catalogued, 0 ran, 7 could-not-run, 0 mismatched",
+            "**Checks:** 8 catalogued, 0 ran, 8 could-not-run, 0 mismatched",
             r.stdout, self.output(r),
         )
         self.assertIn(
-            "**Summary:** 7 catalogued, 0 matched, 0 divergent, 7 could-not-run, 0 mismatched",
+            "**Summary:** 8 catalogued, 0 matched, 0 divergent, 8 could-not-run, 0 mismatched",
             r.stdout, self.output(r),
         )
         self.assertIn("NOTHING WAS VERIFIED", r.stderr, self.output(r))
@@ -728,7 +728,7 @@ class BaselineCatalogueContractTest(unittest.TestCase):
         detail = "returncode: %s\nstdout:\n%s\nstderr:\n%s" % (r.returncode, r.stdout, r.stderr)
         self.assertNotEqual(2, r.returncode, detail)  # 2 = baseline could not be parsed
         self.assertNotIn("baseline line", r.stderr, detail)
-        self.assertIn("**Checks:** 7 catalogued", r.stdout, detail)
+        self.assertIn("**Checks:** 8 catalogued", r.stdout, detail)
 
 
 # ---------------------------------------------------------------------------
@@ -736,11 +736,13 @@ class BaselineCatalogueContractTest(unittest.TestCase):
 # is untrustworthy until it has been SEEN red)
 # ---------------------------------------------------------------------------
 class CouldNotRunCountsAsPassRedProofTest(CheckAllTestBase):
-    """check-all.sh's four could-not-run branches all assign the literal
-    `state="could-not-run"`. Flipping that literal to `state="match"` in a
-    scratch copy simulates a defect where an unavailable check is silently
-    folded into the pass count. Both CouldNotRunIsNeverCountedAsPassTest's
-    and AllCouldNotRunTest's pins must go red against this mutated copy."""
+    """check-all.sh's five could-not-run branches (WI-0129 D2 added
+    shellcheck-run.sh's own text-detection branch as the fifth) all assign
+    the literal `state="could-not-run"`. Flipping that literal to
+    `state="match"` in a scratch copy simulates a defect where an
+    unavailable check is silently folded into the pass count. Both
+    CouldNotRunIsNeverCountedAsPassTest's and AllCouldNotRunTest's pins
+    must go red against this mutated copy."""
 
     def setUp(self):
         super().setUp()
@@ -752,7 +754,7 @@ class CouldNotRunCountsAsPassRedProofTest(CheckAllTestBase):
         needle = 'state="could-not-run"'
         occurrences = original.count(needle)
         self.assertEqual(
-            4, occurrences,
+            5, occurrences,
             "check-all.sh's own could-not-run assignment literal changed -- update this test",
         )
         match_before = original.count('state="match"')
@@ -779,7 +781,7 @@ class CouldNotRunCountsAsPassRedProofTest(CheckAllTestBase):
         # since that substring is present even on a fully clean report.
         self.assertNotIn(": could-not-run —", r.stdout, self.output(r))
         self.assertNotIn(
-            "**Summary:** 7 catalogued, 4 matched, 0 divergent, 3 could-not-run, 0 mismatched",
+            "**Summary:** 8 catalogued, 4 matched, 0 divergent, 4 could-not-run, 0 mismatched",
             r.stdout, self.output(r),
         )
 

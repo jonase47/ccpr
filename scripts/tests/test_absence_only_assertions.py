@@ -857,7 +857,7 @@ class NoStaleKnownFindingsTest(unittest.TestCase):
 
 class ClassificationCountsTest(unittest.TestCase):
     def test_classification_counts(self):
-        """Regression pin on the measured baseline: 1051 `test_*` methods
+        """Regression pin on the measured baseline: 1069 `test_*` methods
         across the corpus call something shaped like a subprocess invocation
         and are therefore in scope for this check; 0 of those are currently
         absence-only-needs-exemption -- `KNOWN_FINDINGS` above is empty for
@@ -871,6 +871,29 @@ class ClassificationCountsTest(unittest.TestCase):
         growing paragraph:
 
           in-scope / flagged   when
+          1069 / 0             WI-0129 D2 (ShellCheck adoption, 30.08.2026):
+                               test_shellcheck_run.py's 16 in-scope methods,
+                               all built on a shared `self.run_wrapper(...)`
+                               helper (matches `RUN_HELPER_RE`) or
+                               `SelfCheckTest`'s own direct `subprocess.run`
+                               call. All 16 not-flagged: each asserts a
+                               specific returncode and/or a positive
+                               substring/regex match (a finding's SC code,
+                               the "DID NOT RUN" marker text, a file's
+                               name) -- see ScannedFilesCoverTheShippedScope
+                               Test's own entry for the file-count side.
+                               +16 in scope, 0 newly flagged.
+          1053 / 0             WI-0129 D1 (ShellCheck adoption,
+                               30.08.2026): test_install_protected_path_rm_
+                               guard.py's two behavioural methods
+                               (install.sh:346's SC2115 fix) each call
+                               `subprocess.run` directly. Neither is
+                               flagged: one asserts a specific returncode
+                               (0) plus file-existence outcomes, the other
+                               asserts a nonzero returncode AND a positive
+                               regex match naming the unset/null DEST
+                               parameter in stderr -- not merely "did not
+                               crash". +2 in scope, 0 newly flagged.
           1051 / 0             WI-0129 Paket B, PO decision follow-up on the
                                code-review's second Important finding
                                (30.08.2026): gate_load_config()'s own
@@ -1325,7 +1348,7 @@ class ClassificationCountsTest(unittest.TestCase):
         count."""
         recs = scan_tree()
         flagged = [r for r in recs if r.disposition in NEEDS_EXEMPTION]
-        self.assertEqual(1051, len(recs))
+        self.assertEqual(1069, len(recs))
         self.assertEqual(0, len(flagged))
 
 
@@ -1399,14 +1422,36 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
         `_write_scratch` helper only calls `Path.write_text`) -- so the
         whole file sits entirely outside this scanner's scope, the same
         "out of scope entirely" shape the scan test itself already is,
-        named two paragraphs up."""
+        named two paragraphs up.
+
+        Bumped 54 -> 55, 30.08.2026 (WI-0129 D1, ShellCheck adoption --
+        install.sh:346's SC2115 fix): added
+        test_install_protected_path_rm_guard.py. In-scope count above
+        (1051 -> 1053, see ClassificationCountsTest) moved by +2: both of
+        its behavioural test methods call `subprocess.run` directly. Both
+        are `not-flagged` -- one asserts a specific returncode (0) plus
+        file-existence outcomes, the other asserts a nonzero returncode
+        AND a positive regex match on stderr naming the unset/null DEST
+        parameter, not merely "did not crash". Its third method
+        (`test_install_sh_ships_the_guarded_rm_...`) reads install.sh's own
+        text and calls neither `subprocess.run` nor a `self.<name>(...)` --
+        out of scope entirely, no contribution to either number.
+
+        Bumped 55 -> 56, 30.08.2026 (WI-0129 D2, ShellCheck adoption): added
+        test_shellcheck_run.py. In-scope count above (1053 -> 1069, see
+        ClassificationCountsTest) moved by +16 -- see that test's own entry
+        for the per-method reasoning; every method there calls
+        `subprocess.run`, directly or via the shared `run_wrapper` helper,
+        and none is flagged."""
         files = sorted(TESTS_DIR.glob("*.py")) + sorted((TESTS_DIR / "workitems").glob("*.py"))
         names = sorted(f.relative_to(TESTS_DIR).as_posix() for f in files if f.name != "__init__.py")
-        self.assertEqual(54, len(names))
+        self.assertEqual(56, len(names))
         self.assertIn("test_absence_only_assertions.py", names)
         self.assertIn("test_run_tests_heredoc_injection.py", names)
         self.assertIn("test_heredoc_interpolation_scan.py", names)
         self.assertIn("test_phase_docs_lint.py", names)
+        self.assertIn("test_install_protected_path_rm_guard.py", names)
+        self.assertIn("test_shellcheck_run.py", names)
         self.assertIn("test_ci_workflow.py", names)
         self.assertIn("workitems/test_migrate.py", names)
 

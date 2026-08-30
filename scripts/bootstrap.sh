@@ -62,7 +62,7 @@ collect_handover() {
     fi
 
     # Extract key sections
-    local phase status last_agent next_step
+    local phase status last_agent
 
     # Strip markdown bold (**) and extract value after colon
     phase=$(sed -n 's/^[* ]*Phase[* ]*:[[:space:]]*//p' "${HANDOVER_FILE}" 2>/dev/null | sed 's/\*//g; s/^[[:space:]]*//' | head -1) || true  # exit-status: exempt doc-field-extraction
