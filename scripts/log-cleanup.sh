@@ -9,6 +9,21 @@ SESSION_DIR="${LOG_DIR}/sessions"
 KEEP_DAYS="${KEEP_DAYS:-7}"
 DRY_RUN=false
 
+# Portable file-mtime-as-epoch-seconds -- the established idiom already used
+# by scripts/instinct-check.sh and scripts/bootstrap.sh (`uname`-branch, not
+# a BSD-only `stat -f`). GNU `stat -f` is NOT "file not found" on Linux -- it
+# is a different, valid mode ("display file system status instead of file
+# status") that succeeds with unrelated multi-line output, so a bare
+# `stat -f '%m' <path>` silently measures the wrong thing on Linux instead of
+# failing loud.
+mtime_of() {
+    if [[ "$(uname)" == "Darwin" ]]; then
+        stat -f %m "$1"
+    else
+        stat -c %Y "$1"
+    fi
+}
+
 # Parse args
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -65,20 +80,32 @@ if [ -d "${SESSION_DIR}" ]; then
         [ -d "${session}" ] || continue
         session_id=$(basename "${session}")
 
-        # Determine age: newest file in directory
-        newest_file=$(find "${session}" -type f -printf '%T@\n' 2>/dev/null | sort -rn | head -1 || \
-                      stat -f '%m' "${session}"/*.jsonl 2>/dev/null | sort -rn | head -1 || echo "0")
+        # Determine age: newest *.jsonl file in the directory. A plain glob
+        # loop instead of `find -printf` -- the latter is GNU-only (BSD/macOS
+        # find has no -printf), and unfiltered it would match every file in
+        # the directory, including session-summary.json, whose mtime is
+        # "now" the moment cleanup writes it -- masking an old session as
+        # fresh on the one platform where -printf DOES run.
+        newest_file=0
+        for jsonl in "${session}"/*.jsonl; do
+            [ -f "${jsonl}" ] || continue
+            file_mtime=$(mtime_of "${jsonl}" 2>/dev/null || echo "0")
+            if [ "${file_mtime}" -gt "${newest_file}" ] 2>/dev/null; then
+                newest_file="${file_mtime}"
+            fi
+        done
 
-        # macOS-compatible: directory modification time as fallback
-        if [ -z "${newest_file}" ] || [ "${newest_file}" = "0" ]; then
-            newest_file=$(stat -f '%m' "${session}" 2>/dev/null || echo "0")
+        # Fallback for a session with only session-summary.json (no *.jsonl):
+        # the directory's own mtime.
+        if [ "${newest_file}" = "0" ]; then
+            newest_file=$(mtime_of "${session}" 2>/dev/null || echo "0")
         fi
 
         cutoff_epoch=$(date -j -f "%Y-%m-%dT%H:%M:%S" "${CUTOFF_DATE}" +%s 2>/dev/null || \
                        date -d "${CUTOFF_DATE}" +%s 2>/dev/null || echo "0")
 
         # Comparison: is the session older than the cutoff?
-        if [ "${newest_file%.*}" -lt "${cutoff_epoch}" ] 2>/dev/null; then
+        if [ "${newest_file}" -lt "${cutoff_epoch}" ] 2>/dev/null; then
             session_size=$(du -sk "${session}" 2>/dev/null | cut -f1)
 
             # Archive session-summary.json (into archive directory)

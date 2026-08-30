@@ -1045,5 +1045,66 @@ class FormatStringInMissingFileNameTest(PromoteTestBase):
         self.assertIn(str(missing), self.output(r), self.output(r))
 
 
+# ---------------------------------------------------------------------------
+# 14. WI-0129 sweep after the say() HOME-tilde fix (defect 1): the identical
+# `${var/#$HOME/~}` idiom exists a second time, at `ensure_memory_pointer` —
+# in fact the comment at line 967 above names THIS call site as the idiom
+# the HomeDirectoryMaskingTest cases were modeled on. Same bash-version
+# semantic bug (bash 4+/5 tilde-expands an unquoted `~` on the replacement
+# side of a parameter substitution, bash 3.2 does not — see memory-sync.sh's
+# HOME_TILDE comment), different call site: this one writes into a project
+# doc file (the memory index pointer), not stderr, so an unmasked $HOME here
+# leaks the operator's home path into a committed-adjacent doc instead of a
+# terminal.
+# ---------------------------------------------------------------------------
+class MemoryPointerHomeMaskingTest(PromoteTestBase):
+    def _push_memory_dir(self, files):
+        """Push a `memory/<name>` tree to the default remote so `pull`'s
+        overlay step (cmd_pull block 3) runs and reaches ensure_memory_pointer.
+        """
+        checkout = self.tmp / "pointer-seed"
+        r = self._git("clone", "--quiet", self.remote, checkout)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        mem_dir = checkout / "memory"
+        mem_dir.mkdir()
+        for name, text in files.items():
+            (mem_dir / name).write_text(text, encoding="utf-8")
+        self.assertEqual(self._git("add", "memory", cwd=checkout).returncode, 0)
+        self.assertEqual(
+            self._git("commit", "--quiet", "-m", "seed memory", cwd=checkout).returncode, 0
+        )
+        r = self._git("push", "--quiet", "origin", "main", cwd=checkout)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        shutil.rmtree(checkout)
+
+    def _write_config_with_pointer(self, index_ptr):
+        cfg = {
+            "repoUrl": str(self.remote),
+            "namespace": "XX",
+            "tokenFile": str(self.token),
+            "clonePath": str(self.clone),
+            "overlay": {
+                "memoryNsDir": "~/.claude/memory/shared",
+                "memoryIndexPointer": str(index_ptr),
+            },
+        }
+        (self.home / ".claude" / "memory-sync.json").write_text(
+            json.dumps(cfg), encoding="utf-8"
+        )
+
+    def test_the_memory_pointer_note_does_not_leak_the_home_path(self):
+        self._push_memory_dir({"fact.md": "# shared fact\n"})
+        index_ptr = self.home / ".claude" / "instincts.md"
+        index_ptr.write_text("# Instincts\n", encoding="utf-8")
+        self._write_config_with_pointer(index_ptr)
+
+        r = self.run_sync("pull")
+        self.assertEqual(r.returncode, 0, self.output(r))
+
+        pointer_text = index_ptr.read_text(encoding="utf-8")
+        self.assertNotIn(str(self.home), pointer_text, pointer_text)
+        self.assertIn("~/.claude/memory/shared/", pointer_text, pointer_text)
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

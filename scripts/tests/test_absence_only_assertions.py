@@ -857,7 +857,7 @@ class NoStaleKnownFindingsTest(unittest.TestCase):
 
 class ClassificationCountsTest(unittest.TestCase):
     def test_classification_counts(self):
-        """Regression pin on the measured baseline: 1070 `test_*` methods
+        """Regression pin on the measured baseline: 1074 `test_*` methods
         across the corpus call something shaped like a subprocess invocation
         and are therefore in scope for this check; 0 of those are currently
         absence-only-needs-exemption -- `KNOWN_FINDINGS` above is empty for
@@ -871,6 +871,51 @@ class ClassificationCountsTest(unittest.TestCase):
         growing paragraph:
 
           in-scope / flagged   when
+          1074 / 0             WI-0129 defect 2 second-review follow-up
+                               (30.08.2026): a second code-reviewer pass on
+                               SessionAgeDetectionUsesJsonlNotSummaryTest
+                               found its single mixed-age test proved only
+                               one iteration order (old-file-first) of the
+                               max-mtime-selection loop -- split into
+                               test_a_recent_jsonl_keeps_the_session_even_
+                               when_iterated_first and its
+                               _..._when_iterated_last mirror, both calling
+                               `self.run_cleanup(...)` (matches
+                               `RUN_HELPER_RE`). Neither flagged, same
+                               reasoning as the row below. +1 in scope
+                               (3 methods in the class now, was 2), 0 newly
+                               flagged.
+          1073 / 0             WI-0129 defect 2 code-reviewer follow-up
+                               (30.08.2026): added
+                               test_log_cleanup_behavior.py's
+                               SessionAgeDetectionUsesJsonlNotSummaryTest,
+                               two methods, both calling
+                               `self.run_cleanup(...)` (matches
+                               `RUN_HELPER_RE` via the shared
+                               LogCleanupTestBase helper). Neither flagged:
+                               each asserts a positive returncode (0) AND a
+                               positive existence/non-existence check on the
+                               session directory that is the actual subject
+                               under test (assertFalse/assertTrue on
+                               `session_dir.exists()`, not merely "nothing
+                               crashed") -- never absence-only. +2 in scope,
+                               0 newly flagged.
+          1071 / 0             WI-0129 defect 1 (30.08.2026): added
+                               test_memory_sync_promote.py's
+                               MemoryPointerHomeMaskingTest.test_the_memory
+                               _pointer_note_does_not_leak_the_home_path,
+                               a regression test for the sibling occurrence
+                               of the bash-4+/5 `${var/#$HOME/~}` tilde-
+                               expansion bug found while sweeping for other
+                               instances of the say() fix. Calls
+                               `self.run_sync(...)` (matches `RUN_HELPER_RE`
+                               via the shared PromoteTestBase helper). Not
+                               flagged: asserts a positive returncode (0)
+                               AND a positive substring
+                               (`~/.claude/memory/shared/`) alongside the
+                               `assertNotIn(str(self.home), ...)` absence
+                               check -- never absence-only. +1 in scope, 0
+                               newly flagged.
           1070 / 0             WI-0129 CI-hardening (30.08.2026):
                                test_shellcheck_run.py's new
                                BothCouldNotRunCausesTest.test_both_causes_
@@ -1365,7 +1410,7 @@ class ClassificationCountsTest(unittest.TestCase):
         count."""
         recs = scan_tree()
         flagged = [r for r in recs if r.disposition in NEEDS_EXEMPTION]
-        self.assertEqual(1070, len(recs))
+        self.assertEqual(1074, len(recs))
         self.assertEqual(0, len(flagged))
 
 

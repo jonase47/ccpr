@@ -33,6 +33,18 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 
 CONFIG="$(gate_config_path)"
 
+# `${var/pattern/replacement}`: when `replacement` is an UNQUOTED word that
+# starts with `~`, bash tilde-expands it -- to the current $HOME, not to a
+# literal tilde character. On bash 3.2 this expansion is not performed (a
+# bare `~` there stays a literal tilde), so a masking line reading
+# `${msg//$HOME/~}` looks correct on a Mac's system bash and is a silent
+# no-op on bash 4+/5: it substitutes $HOME's own value back in for itself.
+# Measured directly (WI-0129, the Linux CI run): bash 3.2 -> "xx~yy", bash 5.3.15 ->
+# "xx/rootyy" for the identical line. Routing the replacement through this
+# variable instead of the literal keeps the word quoted-by-reference, so
+# tilde expansion never triggers on either interpreter -- verified on both.
+HOME_TILDE="~"
+
 # Loaded before anything is printed, and before the config-existence check
 # below: die()/note() route every message through the same deny-list mask
 # artifact-gate.sh's say()/warn()/die() use, and that mask can only redact a
@@ -63,11 +75,12 @@ gate_load_config
 say() {
   local msg
   msg="$(gate_redact_path "$(printf "$@")")"
-  # An empty $HOME would turn `${msg//$HOME/~}` into "insert ~ between every
-  # character" — bash's pattern substitution treats an empty pattern as
-  # matching everywhere. Not a real deployment, but guarding it costs one
-  # comparison.
-  if [[ -n "${HOME:-}" ]]; then msg="${msg//$HOME/~}"; fi
+  # An empty $HOME would turn `${msg//$HOME/$HOME_TILDE}` into "insert ~
+  # between every character" — bash's pattern substitution treats an empty
+  # pattern as matching everywhere. Not a real deployment, but guarding it
+  # costs one comparison. See HOME_TILDE's own definition above for why the
+  # replacement is a variable rather than a literal `~`.
+  if [[ -n "${HOME:-}" ]]; then msg="${msg//$HOME/$HOME_TILDE}"; fi
   printf '%s\n' "$msg"
 }
 warn() { say "$@" >&2; }
@@ -323,7 +336,7 @@ ensure_memory_pointer() {
   local marker="## ${INDEX_BLOCK_TITLE} (synced memory)"
   if ! grep -qF "$marker" "$MEM_INDEX_PTR"; then
     { printf '\n%s\n' "$marker";
-      printf -- '- Geteilte Team-Fakten liegen unter `%s/` (synced via memory-sync.sh, read-only).\n' "${MEM_NS_DIR/#$HOME/~}"; } >> "$MEM_INDEX_PTR"
+      printf -- '- Geteilte Team-Fakten liegen unter `%s/` (synced via memory-sync.sh, read-only).\n' "${MEM_NS_DIR/#$HOME/$HOME_TILDE}"; } >> "$MEM_INDEX_PTR"
     note "memory pointer added to $MEM_INDEX_PTR"
   fi
 }

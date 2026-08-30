@@ -327,5 +327,76 @@ class ArchiveDirectoryPermissionsTest(LogCleanupTestBase):
         self.assertEqual(0o700, mode, oct(mode))
 
 
+# ---------------------------------------------------------------------------
+# WI-0129 defect 2 code-reviewer follow-up: ArchiveDirectoryPermissionsTest's
+# make_old_session() covers only the "no *.jsonl at all" fallback path. The
+# fix's own comment names a more specific shape -- an old *.jsonl next to a
+# freshly-written session-summary.json, which the unfiltered `find -printf`
+# this fix removed would have matched instead of falling through -- and the
+# multi-file max-mtime-selection loop it replaced that `find` call with.
+# Neither shape was previously pinned by a test named for what it protects.
+# ---------------------------------------------------------------------------
+class SessionAgeDetectionUsesJsonlNotSummaryTest(LogCleanupTestBase):
+    def make_session(self, session_id, jsonl_ages_days=()):
+        """A session dir with one `*.jsonl` per age in jsonl_ages_days
+        (named log-0.jsonl, log-1.jsonl, ...) and a session-summary.json
+        written LAST -- the shadowing shape under test. The directory's own
+        mtime is irrelevant here and deliberately left alone: writing
+        session-summary.json into it always bumps it to "now" regardless of
+        anything set beforehand (measured -- a directory's mtime updates
+        whenever an entry is created inside it, an `os.utime` backdate
+        before that write does not survive it), and the fixed script only
+        ever reads the directory's own mtime as the NO-*.jsonl-at-all
+        fallback (see ArchiveDirectoryPermissionsTest.make_old_session for
+        that path) -- with real *.jsonl files present, as here, that
+        fallback branch is never reached.
+        """
+        session_dir = self.log_dir / "sessions" / session_id
+        session_dir.mkdir(parents=True)
+        now = time.time()
+        for i, age_days in enumerate(jsonl_ages_days):
+            f = session_dir / ("log-%d.jsonl" % i)
+            f.write_text("{}\n", encoding="utf-8")
+            t = now - age_days * 86400
+            os.utime(f, (t, t))
+        # Written after the jsonl backdating above, so it naturally lands at
+        # "now" -- exactly the shape the fix's own comment names.
+        (session_dir / "session-summary.json").write_text("{}\n", encoding="utf-8")
+        return session_dir
+
+    def test_an_old_jsonl_is_archived_even_with_a_freshly_touched_summary(self):
+        # Pre-fix, the unfiltered `find -printf` matched session-summary.json
+        # too -- its "now" mtime kept the session looking fresh regardless of
+        # how old the real *.jsonl activity was.
+        session_dir = self.make_session("shadow-session", jsonl_ages_days=(30,))
+        r = self.run_cleanup("--days", "7")
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertFalse(session_dir.exists(), r.stdout + r.stderr)
+
+    def test_a_recent_jsonl_keeps_the_session_even_when_iterated_first(self):
+        # Pins the max-mtime-selection loop, old-then-recent order: the glob
+        # visits log-0.jsonl (old) before log-1.jsonl (recent). A regression
+        # that dropped the `-gt` comparison and just kept whichever file the
+        # loop iterated LAST would still land on the recent file here and
+        # pass by accident -- this case alone does not discriminate that.
+        session_dir = self.make_session("mixed-session-first", jsonl_ages_days=(30, 1))
+        r = self.run_cleanup("--days", "7")
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertTrue(session_dir.exists(), r.stdout + r.stderr)
+
+    def test_a_recent_jsonl_keeps_the_session_even_when_iterated_last(self):
+        # Mirror of the case above, recent-then-old order: the glob visits
+        # log-0.jsonl (recent) before log-1.jsonl (old). A regression that
+        # kept whichever file the loop iterated FIRST would land on the
+        # recent file here too and also pass by accident -- only having BOTH
+        # orderings green rules out both "always first" and "always last"
+        # simplifications of the max-selection loop; a true `-gt` comparison
+        # is the only implementation that passes both.
+        session_dir = self.make_session("mixed-session-last", jsonl_ages_days=(1, 30))
+        r = self.run_cleanup("--days", "7")
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertTrue(session_dir.exists(), r.stdout + r.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()
