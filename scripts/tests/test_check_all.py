@@ -9,7 +9,11 @@ verifying were actually all run.
 Measured directly on this repository (29.08.2026, HEAD 961165f):
 memory-lint.sh exits 1 (long-standing memory-freshness warnings) and
 doc-volume-check.sh exits 2 (known oversized files pending a split) on a
-CLEAN tree. A script that failed on any non-zero exit would be permanently
+CLEAN tree. (doc-volume-check.sh has since moved to 0 -- it scans only
+git-tracked files as of 30.08.2026, and the oversized files it used to
+report are all untracked working state. The measurement above is kept with
+its own date and HEAD because that is what makes it readable as history
+rather than as a current claim.) A script that failed on any non-zero exit would be permanently
 red on a correct tree; a script that always reports "exit 0 = pass" would
 never notice one of those two silently becoming exit 0 for the wrong
 reason (a warning that stopped being detected, not one that got fixed).
@@ -81,6 +85,24 @@ the SPECIFIC assertions from the corresponding positive/negative test now
 fail against the mutated copy, rather than asserting some unrelated
 difference exists.
 
+## The note column: reasons, not measurements
+
+The baseline's third column is free text nothing parses. That makes it the
+one place in the file where a wrong value costs nothing and is therefore
+never caught -- and it had filled up with run measurements (file counts,
+test counts, findings-by-severity) plus values describing the maintainer's
+own machine (targets present, deny-list entries, consumers configured),
+which are wrong on any CI runner by construction. `BaselineNoteColumn
+CarriesNoQuantitiesTest` pins the separation: durable reasons stay,
+quantities go. Its detector deliberately judges whitespace-delimited
+tokens with an EDGE-only punctuation strip, because the two durable notes
+this repository actually ships are exactly the shapes a careless rule
+breaks -- `none` (a substring search for "one" flags it) and `non-zero` (a
+`\bzero\b` regex flags it, since a hyphen is a word boundary). `NoteColumn
+QuantityRedProofTest` re-introduces a quantity in BOTH number forms, digits
+and spelled-out cardinal, rather than deleting one: deleting a note makes
+any absence check pass and proves nothing.
+
 ## The contract test
 
 `BaselineCatalogueContractTest` derives BOTH sides from their own artifacts
@@ -119,20 +141,95 @@ def parse_bash_array(source, varname):
     return [tok.strip('"').strip("'") for tok in m.group(1).split()]
 
 
+def parse_baseline_entries(text):
+    """(name, note) for every non-comment, non-blank line of a check-all.sh
+    baseline TSV. `note` is the third tab-separated column, or "" when the
+    line carries none -- check-all.sh's own reader tolerates both shapes
+    (`IFS=$'\t' read -r b_name b_exit b_rest` leaves b_rest empty), and
+    b_rest is a read target it never consumes."""
+    entries = []
+    for line in text.splitlines():
+        if not line or line.startswith("#"):
+            continue
+        fields = line.split("\t")
+        name = fields[0]
+        if not name:
+            continue
+        entries.append((name, fields[2] if len(fields) > 2 else ""))
+    return entries
+
+
 def parse_baseline_names(text):
     """The first tab-separated column of every non-comment, non-blank line
     of a check-all.sh baseline TSV -- the same parse check-all.sh's own
     baseline reader performs, reimplemented independently here rather than
     shelling out to the script under test for what is, at this point, pure
     text parsing."""
-    names = []
-    for line in text.splitlines():
-        if not line or line.startswith("#"):
+    return [name for name, _note in parse_baseline_entries(text)]
+
+
+# Spelled-out cardinals. A quantity does not stop being a quantity because
+# it was typed as a word -- "three consumers covered" ages exactly like
+# "3 consumers covered" does.
+_NUMBER_WORDS = frozenset(
+    """zero one two three four five six seven eight nine ten eleven twelve
+    thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty
+    thirty forty fifty sixty seventy eighty ninety hundred thousand
+    dozen""".split()
+)
+
+# Stripped from the OUTER edges of a whitespace-delimited token only, never
+# from inside it. That single choice is what lets the two durable notes this
+# repository actually ships through the rule:
+#   * `none` (in "CCPR has none of its own") is one token, and `none` is not
+#     in _NUMBER_WORDS -- a substring search for "one" would flag it;
+#   * `non-zero` (in "non-zero by design") stays `non-zero` because the
+#     hyphen is interior -- a `\bzero\b` regex would flag it, since a hyphen
+#     IS a word boundary.
+_TOKEN_EDGE = " \t.,;:!?()[]{}<>\"'`\u2014\u2013-/*%"
+
+_NUMERAL_RE = re.compile(r"^\d[\d.,]*$")
+
+
+def quantity_tokens(note):
+    """Every whitespace-delimited token of `note` that states a QUANTITY --
+    a bare numeral (`332`, `0`, `1,965`) or a spelled-out cardinal
+    (`three`). Returns the tokens as they appear, so a failure names them.
+
+    Known limits, stated rather than discovered later. They are pinned by
+    `DocumentedDetectorLimitsTest` below, so this list is a checked claim
+    rather than prose that can drift away from the code.
+
+    MISSED (false negatives) -- two distinct fusion mechanisms, not one:
+      * separator-mediated: a numeral joined to a word or to another numeral
+        by an interior separator (`3-consumer`, `22/33`), and a hyphenated
+        cardinal (`three-consumer`);
+      * direct: a numeral fused to letters with no separator at all -- an
+        ordinal (`1st`, `2nd`, `3rd`) or a multiplier (`3x`). `1st` survives
+        edge-stripping intact, fails _NUMERAL_RE on its trailing letters,
+        and is not a _NUMBER_WORDS member, so it passes through.
+    Also missed: vague quantities that use no numeral at all (`several`,
+    `a couple of`).
+
+    WRONGLY CAUGHT (false positives): any durable note carrying a VERSION or
+    a numeric identifier -- `requires bash >= 3.2`, `pinned to python 3.12`
+    -- is flagged, because the detector cannot tell a version pin from a
+    measurement; both are just a numeral. No such note exists in the file
+    today. If one is ever needed, rephrase it without the numeral (the
+    baseline header already states the bash floor once) or widen the rule
+    deliberately -- do not silence the test.
+
+    Both lists are the price of the edge-only strip above, and it is the
+    right side to err on: the interior-hyphen rule that would catch
+    `three-consumer` is the same one that would falsely flag `non-zero`."""
+    found = []
+    for raw in note.split():
+        token = raw.strip(_TOKEN_EDGE)
+        if not token:
             continue
-        name = line.split("\t", 1)[0]
-        if name:
-            names.append(name)
-    return names
+        if _NUMERAL_RE.match(token) or token.lower() in _NUMBER_WORDS:
+            found.append(raw)
+    return found
 
 
 _SCRIPT_SOURCE = SCRIPT_PATH.read_text(encoding="utf-8")
@@ -875,6 +972,156 @@ class DroppedBaselineEntryRedProofTest(unittest.TestCase):
         baseline_names = set(parse_baseline_names(scratch.read_text(encoding="utf-8")))
         self.assertNotEqual(catalogue_names, baseline_names)
         self.assertIn("conformance-run", catalogue_names - baseline_names)
+
+
+# ---------------------------------------------------------------------------
+# The note column carries reasons, not measurements
+# ---------------------------------------------------------------------------
+class BaselineNoteColumnCarriesNoQuantitiesTest(unittest.TestCase):
+    """The baseline's third column is free text nothing parses -- which is
+    exactly why a measurement placed there has no reader: no test compares
+    it, no check re-derives it, nothing goes red when it is wrong. It only
+    rots, while the file's own header asks for deliberate re-measurement.
+    (`artifact-gate`'s file count was stale four times in three days:
+    313 -> 323 -> 328 -> 332.) Worse, several such notes described the
+    maintainer's own machine -- how many memory-lint targets, deny-list
+    entries and conformance consumers are present -- values that are simply
+    wrong on any CI runner, where those three checks report could-not-run.
+
+    So the column keeps DURABLE REASONS (why this exit code is the right
+    expectation) and nothing a commit can change. What the run measured
+    belongs in the run's own report, where it is current by definition."""
+
+    def test_every_real_baseline_note_is_free_of_quantities(self):
+        entries = parse_baseline_entries(BASELINE_PATH.read_text(encoding="utf-8"))
+        # Positive floor first: an absence assertion over an empty parse is
+        # vacuous, so pin that this actually read the shipped file's every
+        # entry before judging any note.
+        self.assertEqual(sorted(CATALOGUE_NAMES), sorted(name for name, _ in entries))
+        offenders = {
+            name: quantity_tokens(note)
+            for name, note in entries
+            if quantity_tokens(note)
+        }
+        self.assertEqual(
+            {}, offenders,
+            "baseline note column states quantities that nothing reads and every commit can "
+            "invalidate; keep the durable reason, drop the measurement: %s" % offenders,
+        )
+
+    def test_the_two_durable_reasons_that_look_numeric_are_kept_and_pass(self):
+        # Both phrases are legitimate durable justifications AND both are
+        # the exact shapes a careless rule mis-flags: `none` contains "one",
+        # and `non-zero` contains "zero" behind what a regex calls a word
+        # boundary. Pinned here so a future tightening of quantity_tokens
+        # cannot quietly start deleting reasons.
+        durable = (
+            "no phase folders under docs/ (CCPR has none of its own)",
+            "non-zero by design (long-standing memory-freshness warnings)",
+        )
+        text = BASELINE_PATH.read_text(encoding="utf-8")
+        for phrase in durable:
+            self.assertEqual([], quantity_tokens(phrase), phrase)
+            self.assertIn(phrase, text)
+
+
+class DocumentedDetectorLimitsTest(unittest.TestCase):
+    """`quantity_tokens`'s docstring claims a specific set of things it
+    misses and one class it wrongly catches. A claim about the code is a
+    testable hypothesis (G-128), and an undertested one drifts: this pins
+    every documented case to the behaviour it describes, so widening or
+    narrowing the detector without updating the docstring goes red.
+
+    Raised by code review (30.08.2026), which found the original limits
+    paragraph named only SEPARATOR-mediated fusion and omitted DIRECT
+    fusion (`1st`, `3x`) -- a second mechanism with the same effect -- and
+    documented no false-positive class at all."""
+
+    # Documented as MISSED: the detector must return nothing for these.
+    DOCUMENTED_FALSE_NEGATIVES = (
+        "3-consumer runs",          # separator-mediated fusion
+        "22/33 files",              # separator between two numerals
+        "three-consumer coverage",  # hyphenated cardinal
+        "1st run of the day",       # direct fusion: ordinal
+        "2nd pass", "3rd attempt",
+        "3x slower",                # direct fusion: multiplier
+        "several consumers",        # vague, no numeral
+    )
+
+    # Documented as WRONGLY CAUGHT: a version pin is indistinguishable from
+    # a measurement to this rule.
+    DOCUMENTED_FALSE_POSITIVES = (
+        ("requires bash >= 3.2", ["3.2"]),
+        ("pinned to python 3.12", ["3.12"]),
+    )
+
+    def test_the_documented_false_negatives_really_do_slip_through(self):
+        for note in self.DOCUMENTED_FALSE_NEGATIVES:
+            self.assertEqual(
+                [], quantity_tokens(note),
+                "docstring documents %r as missed, but the detector caught it -- "
+                "the rule was widened; update the docstring" % note,
+            )
+
+    def test_the_documented_false_positive_class_really_is_caught(self):
+        for note, expected in self.DOCUMENTED_FALSE_POSITIVES:
+            self.assertEqual(
+                expected, quantity_tokens(note),
+                "docstring documents %r as wrongly caught, but the detector let it "
+                "through -- the rule was narrowed; update the docstring" % note,
+            )
+
+    def test_the_two_forms_the_detector_must_catch_are_unaffected(self):
+        # The counterweight: none of the above may be achieved by making the
+        # detector blind. Both number forms the red proof injects stay caught.
+        self.assertEqual(["332"], quantity_tokens("332 files scanned"))
+        self.assertEqual(["three"], quantity_tokens("three consumers covered"))
+
+
+class NoteColumnQuantityRedProofTest(unittest.TestCase):
+    """G-109: removing a note makes any absence check pass and proves
+    nothing. This RE-INTRODUCES a quantity into a SCRATCH copy of the real
+    baseline text -- once as digits, once as a spelled-out cardinal, the two
+    forms a previous sweep in this repository is on record for missing --
+    and shows the check above catches both. G-141: each injection asserts
+    its own landing (absent before, present exactly once after) before
+    anything is measured."""
+
+    INJECTIONS = (
+        ("shellcheck", "22 file(s) scanned"),
+        ("conformance-run", "three consumers covered"),
+    )
+
+    def test_a_reintroduced_quantity_is_caught_in_both_number_forms(self):
+        before = BASELINE_PATH.read_bytes()
+        original = BASELINE_PATH.read_text(encoding="utf-8")
+
+        for host, injected in self.INJECTIONS:
+            self.assertNotIn(injected, original, "%s: needle already present" % injected)
+            prefix = "%s\t" % host
+            hosts = [l for l in original.splitlines() if l.startswith(prefix)]
+            self.assertEqual(
+                1, len(hosts),
+                "scripts/check-all.baseline.tsv's own %s line changed -- update this test" % host,
+            )
+            mutated_line = hosts[0].rstrip("\t") + ("\t" if hosts[0].count("\t") < 2 else "; ") + injected
+            mutated = original.replace(hosts[0], mutated_line, 1)
+            self.assertEqual(1, mutated.count(injected), "mutation did not land: %s" % injected)
+
+            entries = parse_baseline_entries(mutated)
+            offenders = {
+                name: quantity_tokens(note)
+                for name, note in entries
+                if quantity_tokens(note)
+            }
+            # The exact assertion BaselineNoteColumnCarriesNoQuantitiesTest
+            # makes is now false, and it is false about the injected host.
+            self.assertNotEqual({}, offenders, "%s: not caught" % injected)
+            self.assertEqual([host], list(offenders), "%s: wrong host flagged" % injected)
+            self.assertEqual([injected.split()[0]], offenders[host])
+
+        self.assertEqual(before, BASELINE_PATH.read_bytes(), "shipped baseline file content changed")
+
 
 
 if __name__ == "__main__":

@@ -5,14 +5,35 @@
 # ignored. Tab-separated on purpose (readable and diffable without jq;
 # bash 3.2 has no associative arrays, so `IFS=$'\t' read` is the parser).
 #
+# The note states the DURABLE REASON this exit code is the right
+# expectation -- never what a run measured. A measurement here has no
+# reader: nothing parses it, nothing re-derives it, nothing goes red when
+# it is wrong. It is invalidated by the next commit (artifact-gate's file
+# count went 313 -> 323 -> 328 -> 332 in three days), and where it
+# described the maintainer's own machine -- targets present, deny-list
+# entries, consumers configured -- it was simply false on any CI runner,
+# which reports could-not-run for exactly those checks. What a run measured
+# is in that run's own report, where it is current by definition.
+# scripts/tests/test_check_all.py enforces the separation.
+#
+# A note may be EMPTY (two fields, no trailing tab) when a check has no
+# reason to state beyond "exit 0 is the ordinary outcome". check-all.sh's
+# reader takes that shape unchanged -- b_rest is a read target it never
+# consumes.
+#
 # This file declares EXPECTATIONS, never commands — the check catalogue
 # (name -> which script/args run it) lives once, in check-all.sh itself.
 #
-# ONE entry is non-zero BY DESIGN, not a regression: memory-lint.sh's 5
-# warnings are long-standing memory-freshness notices. It was two until
-# 30.08.2026 -- doc-volume-check.sh now scans only git-tracked files, so the
-# oversized files it used to report (all of them untracked working state
-# under docs/memory/) are out of its scope and its expected exit is 0.
+# ONE entry is non-zero BY DESIGN, not a regression: memory-lint.sh's
+# long-standing memory-freshness warnings. It was two until 30.08.2026 --
+# doc-volume-check.sh now scans only git-tracked files, so the oversized
+# files it used to report (all of them untracked working state under
+# docs/memory/) are out of its scope and its expected exit is 0.
+#
+# Three entries are environment-independent by construction rather than by
+# luck: memory-lint and conformance-run report their own scope, so a
+# machine without those targets gets could-not-run instead of a divergence,
+# and doc-volume-check measures only what git tracks.
 #
 # Re-measure and update this file DELIBERATELY when a check's expected
 # outcome actually changes -- the same "re-measure the pair together, never
@@ -20,18 +41,17 @@
 # --without-t measurement (WI-0126 lineage). Do not let this file drift
 # silently out of step with the tree it describes.
 #
-# Measured 30.08.2026 on the working tree of HEAD 666e8e6 plus the check
-# changes this line ships with. Two of these entries are now
-# environment-independent by construction rather than by luck: memory-lint
-# and conformance-run report their own scope, so a machine without those
-# targets gets could-not-run instead of a divergence, and doc-volume-check
-# measures only what git tracks. Verified in a fresh clone with an empty
-# HOME: 0 divergent, 2 could-not-run, everything else match.
-phase-docs-lint	0	0 errors, 0 warnings, 0 info — no phase folders under docs/ (CCPR has none of its own)
-memory-lint	1	4 of 4 targets present; 0 errors, 5 warnings, 1 info — non-zero by design (long-standing memory-freshness warnings)
-manual-lint	0	0 errors, 0 warnings, 0 info
-doc-volume-check	0	14 tracked files scanned, 188 untracked skipped; 0 critical, 0 warning, 3 info (PROJECT_PHASES.md, ADR-0002, ADR-0009)
-artifact-gate	0	332 files scanned, 0 findings; deny-list active (source: config), 4 name(s) checked
-conformance-run	0	0 CCPR-attributable finding(s), 11 consumer finding(s) (P), 3 consumers covered
-python-tests	0	1965 tests, OK (run with -t ., not optional — see CONTRIBUTING.md)
-shellcheck	0	22 file(s) scanned, 0 finding(s) at --severity=warning
+# No provenance line here on purpose. "Measured on HEAD <sha>" is itself a
+# freshness claim, and an unchecked one goes stale exactly like the counts
+# it vouches for -- the line this replaces named a HEAD three commits older
+# than one of its values and five older than another, in a header that asks
+# for deliberate re-measurement. With the measurements gone, nothing left
+# in this file is bound to a point in time.
+phase-docs-lint	0	no phase folders under docs/ (CCPR has none of its own)
+memory-lint	1	non-zero by design (long-standing memory-freshness warnings)
+manual-lint	0
+doc-volume-check	0	info findings alone do not raise the exit code
+artifact-gate	0
+conformance-run	0	only a CCPR-attributable finding raises the exit code; consumer findings do not
+python-tests	0	run with -t ., not optional — see CONTRIBUTING.md
+shellcheck	0	run at --severity=warning
