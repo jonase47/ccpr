@@ -1,6 +1,6 @@
 """test_check_all.py -- coverage for scripts/check-all.sh, the single
 command CONTRIBUTING.md's "Quality checks before opening a PR" section asks
-a contributor to remember by hand: seven commands, two of which are
+a contributor to remember by hand: eight commands, one of which is
 non-zero on a correct tree BY DESIGN, and none of which anyone was
 verifying were actually all run.
 
@@ -237,7 +237,7 @@ class CheckAllTestBase(unittest.TestCase):
     def write_fake_discipline_gate_lib(self, deny_source):
         """Installs a minimal scratch lib/discipline_gate.sh under
         self.stub_dir -- the same seam CCPR_CHECK_ALL_SCRIPT_DIR already
-        gives the six sibling-script stubs, extended to this shared
+        gives the seven sibling-script stubs, extended to this shared
         library. Exercises the actual integration point (check-all.sh
         sources this file and calls gate_load_config, then reads
         $GATE_DENY_SOURCE) without needing the real, ~900-line pattern
@@ -260,10 +260,10 @@ class CheckAllTestBase(unittest.TestCase):
         internal grep classification, scripts/lib/discipline_gate.sh:287-298).
         Measured directly against the PRE-fix check-all.sh (30.08.2026):
         sourcing this and calling gate_load_config() at top level killed the
-        whole process with exit 2 BEFORE any of the seven checks ran -- no
+        whole process with exit 2 BEFORE any of the eight checks ran -- no
         report, no "NOTHING WAS VERIFIED" diagnosis, just a bare stderr line
         and a process exit. A crash in ONE check's configuration must never
-        prevent the other six from being attempted, and must never look like
+        prevent the other seven from being attempted, and must never look like
         the ordinary "not configured" case either -- see
         ArtifactGateDenylistDetectionCrashTest below."""
         lib_dir = self.stub_dir / "lib"
@@ -309,8 +309,11 @@ class CheckAllTestBase(unittest.TestCase):
 class AllChecksMatchBaselineTest(CheckAllTestBase):
     def setUp(self):
         super().setUp()
-        # Mirrors this repository's own real baseline shape: two checks are
-        # non-zero BY DESIGN and must still report "match", not "divergent".
+        # Deliberately stubs TWO non-zero-by-design checks, not one, so the
+        # "match" branch is exercised twice over -- broader than this
+        # repository's own real baseline, which has carried only ONE
+        # non-zero entry (memory-lint) since 30.08.2026 (doc-volume-check
+        # now scans git-tracked files only and reports 0 on a clean tree).
         self.write_stub("memory-lint.sh", 1)
         self.write_stub("doc-volume-check.sh", 2)
         mapping = {name: 0 for name in CATALOGUE_NAMES}
@@ -492,7 +495,7 @@ class ArtifactGateRequireDenylistTest(CheckAllTestBase):
     lookup a second time in check-all.sh. `write_fake_discipline_gate_lib`
     substitutes a minimal scratch copy of that ONE function
     (`gate_load_config`) under the same CCPR_CHECK_ALL_SCRIPT_DIR seam the
-    six sibling-script stubs already use -- proving the INTEGRATION (source
+    seven sibling-script stubs already use -- proving the INTEGRATION (source
     the lib, read $GATE_DENY_SOURCE, decide the flag) without needing the
     real ~900-line pattern library.
     """
@@ -563,9 +566,9 @@ class ArtifactGateDenylistDetectionCrashTest(CheckAllTestBase):
     trying to find out. Fail-loud (letting the crash propagate, as the
     pre-fix code did) is wrong because it bypasses the exact rule
     check-all.sh exists to enforce: the crash happens at check-all.sh's own
-    top level, BEFORE any of the seven checks run and before RAN_COUNT is
+    top level, BEFORE any of the eight checks run and before RAN_COUNT is
     ever counted, so "NOTHING WAS VERIFIED -- this is not a pass" never
-    fires and the other six checks are never attempted over a config
+    fires and the other seven checks are never attempted over a config
     problem in ONE of them. A silent fallback to "not configured" is
     equally wrong (the exact fail-open class B3 itself was built to close)
     -- "nobody configured a deny-list" and "the configuration is broken"
@@ -800,8 +803,10 @@ class CompareAgainstZeroInsteadOfBaselineRedProofTest(CheckAllTestBase):
     """Mutates the one comparison line check-all.sh uses to classify
     match/divergent (`[ "$rc_str" = "$expected" ]`) to always compare
     against the literal "0" instead. AllChecksMatchBaselineTest's pin on
-    the two by-design-nonzero checks (memory-lint expects 1, doc-volume-
-    check expects 2) must go red against this mutated copy."""
+    its two deliberately-stubbed by-design-nonzero checks (memory-lint
+    expects 1, doc-volume-check expects 2 -- a test-only pair broader than
+    the real baseline's single non-zero entry since 30.08.2026) must go red
+    against this mutated copy."""
 
     def setUp(self):
         super().setUp()

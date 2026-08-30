@@ -3,12 +3,14 @@
 # remember, and report ACTUAL exit code against an EXPECTED one from a
 # versioned baseline, not against "exit 0".
 #
-# Why "exit 0" is not the pass criterion: two of the eight checks below are
+# Why "exit 0" is not the pass criterion: one of the eight checks below is
 # non-zero BY DESIGN on a clean CCPR checkout right now (memory-lint.sh exits
-# 1 on long-standing memory-freshness warnings; doc-volume-check.sh exits 2 on
-# known oversized files pending a split). A script that failed on any non-zero
-# exit would be permanently red on a correct tree, and a check that is red
-# when nothing is wrong gets ignored within a fortnight. So every check's
+# 1 on long-standing memory-freshness warnings). It was two until 30.08.2026 —
+# doc-volume-check.sh now scans only git-tracked files, so the oversized files
+# it used to report are all untracked working state and out of its scope. A
+# script that failed on any non-zero exit would be permanently red on a
+# correct tree, and a check that is red when nothing is wrong gets ignored
+# within a fortnight. So every check's
 # expected exit code is declared once, in scripts/check-all.baseline.tsv, and
 # this script reports AGREEMENT or DIVERGENCE against it — never bare
 # pass/fail against zero.
@@ -299,11 +301,11 @@ done
 # grep-based classification — CI is exactly where that env var is meant to
 # be used, so this is not a purely theoretical corner). Calling it directly
 # here — as a first version of this fix did — meant that crash killed this
-# entire process, at the top, BEFORE any of the seven checks ran and before
+# entire process, at the top, BEFORE any of the eight checks ran and before
 # RAN_COUNT is ever counted: the "NOTHING WAS VERIFIED — this is not a
 # pass" diagnosis a few dozen lines down never gets to fire, and a config
 # problem in ONE check (artifact-gate's deny-list) silently prevented all
-# seven from being attempted. Fail-loud here bypasses the very rule this
+# eight from being attempted. Fail-loud here bypasses the very rule this
 # script exists to enforce. The opposite extreme — silently falling back to
 # "not configured" on ANY failure — is equally wrong, and for the reason B3
 # itself already names: a strictness that vanishes because its own

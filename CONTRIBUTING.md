@@ -45,20 +45,28 @@ optional).
 bash scripts/check-all.sh .
 ```
 
-Runs the seven checks below and compares each against
+Runs the eight checks below and compares each against
 `scripts/check-all.baseline.tsv`, the versioned record of what this repository's
 checks are *supposed* to return. Takes about five minutes, most of it the test
 suite.
 
-**It does not compare against exit zero, and neither should you.** Two of the
-seven are non-zero on a correct tree — `memory-lint.sh` exits 1 on long-standing
-warnings, `doc-volume-check.sh` exits 2 on oversized agent-memory files — so a
-collector that failed on any non-zero result would be permanently red, and a
-check that is red when nothing is wrong gets ignored within a fortnight. A check
+**It does not compare against exit zero, and neither should you.** One of the
+eight is non-zero on a correct tree — `memory-lint.sh` exits 1 on long-standing
+warnings — so a collector that failed on any non-zero result would be
+permanently red, and a check that is red when nothing is wrong gets ignored
+within a fortnight. (It was two until 30.08.2026: `doc-volume-check.sh` now
+scans only git-tracked files, and the oversized files it used to report are all
+untracked working state.) A check
 that *could not run* (no consumers configured, no `scripts/tests/` because you
-are running from an installed `~/.claude`) is reported as `could-not-run` and
-counted separately: it is neither a pass nor a failure, and it never lands in the
-matched count.
+are running from an installed `~/.claude`, ShellCheck not installed) is reported
+as `could-not-run` and counted separately: it is neither a pass nor a failure,
+and it never lands in the matched count.
+
+**One external tool is needed for the full set:** `shellcheck`
+(`brew install shellcheck`, or your platform's package). Without it the
+`shellcheck` check honestly reports `could-not-run` rather than passing — but it
+also means you will not see a finding it would have caught until CI does. It is
+the only non-stdlib dependency anywhere in the checks.
 
 When you change what a check legitimately returns, update the baseline in the
 same commit and say why in the commit body. The sections below stay useful for
@@ -113,14 +121,16 @@ Run the ones relevant to what you touched — each is read-only:
 | `scripts/phase-docs-lint.sh` | phase-doc frontmatter (scoped to the phase folders) |
 | `scripts/manual-lint.sh` | `Manual/` index↔detail contract: `parent_index`, back-links, `kind` |
 | `scripts/doc-volume-check.sh` | file size against the 25/40/50 KB splitting thresholds |
+| `scripts/shellcheck-run.sh` | ShellCheck over the shipped shell scripts at `--severity=warning` |
 | `scripts/conformance-run.sh` | the shipped checks above, run against real consumer projects (see below) |
 
 Two notes on reading their output:
 
 - **A non-zero exit is not automatically your regression.** This repository has a
   known, stable baseline of findings — `memory-lint.sh` exits 1 on long-standing
-  warnings, and `doc-volume-check.sh` exits 2 on oversized files under
-  `docs/memory/` (5 critical, 6 warning, 8 info as of 29.08.2026). Rather than
+  warnings. (`doc-volume-check.sh` used to exit 2 on oversized files under
+  `docs/memory/`; since 30.08.2026 it scans only git-tracked files, so those
+  untracked ones are out of its scope and it exits 0.) Rather than
   comparing against a run on `main` by hand, run `scripts/check-all.sh`, which
   holds those expectations in a versioned baseline and tells you which check
   diverged from it.
@@ -155,6 +165,15 @@ a violated pin does. The reasoning is in
 ### Keep scripts syntactically clean
 
 `bash -n <file>` for shell, `python3 -m py_compile <file>` for Python.
+
+Beyond syntax, `scripts/shellcheck-run.sh` runs ShellCheck at
+`--severity=warning` over the shipped shell scripts and is expected to find
+**nothing** — the baseline is 0, deliberately, because `check-all.sh` compares
+exit codes and a non-zero baseline would be blind to the next finding. When
+ShellCheck flags something it is genuinely wrong about, suppress it with a
+point-precise `# shellcheck disable=SCxxxx` **and a reason in the comment**;
+this repository has no file-wide suppressions, so a directive never hides a
+finding beyond the line it was written for.
 
 ### Follow the doc schemas
 
