@@ -107,13 +107,13 @@ Every phase produces a slim **phase index** plus one **detail file per subskill*
 │   ├── discovery/             ← P0: DISCOVERY.md (index) + PROBLEM.md, MARKET.md, REGULATORY.md
 │   ├── concept/               ← P1: CONCEPT.md (index) + USER_JOURNEYS.md, FEATURES.md, BUSINESS_MODEL.md, FINANCIAL_PLAN.md, DSGVO_INITIAL_ASSESSMENT.md
 │   ├── validation/            ← P2: VALIDATION.md (index) + ASSUMPTIONS.md, MARKET_VALIDATION.md, POC.md, REGULATORY_CHECK.md
-│   ├── architecture/          ← P3: ARCHITECTURE.md (index) + COMPONENTS.md, TECH_STACK.md, NFR.md, DATA_MODEL.md, ADR/, COST_ESTIMATION.md
+│   ├── architecture/          ← P3: ARCHITECTURE.md (index) + COMPONENTS.md, TECH_STACK.md, NFR.md, DATA_MODEL.md, API_SPEC.md, ADR/, COST_ESTIMATION.md
 │   │   ├── SECURITY.md        ← P3 sub-index: THREATS.md, AUTH.md, DATA_SECURITY.md, API_SECURITY.md, CHECKLIST.md
 │   │   ├── UX_CONCEPT.md      ← P3 sub-index: WIREFRAMES.md, A11Y.md, DARKMODE.md, NAVIGATION.md
 │   │   └── INFRA.md           ← P3 sub-index: HOSTING.md, CICD.md, MONITORING.md, TESTSTRATEGY.md
-│   ├── planning/              ← P4: PROJECT_PLAN.md (index) + BACKLOG.md, SPRINT.md, RISKS.md
-│   ├── quality/               ← P6: QA.md (index) + A11Y.md, AUDIT.md, FUNCTIONAL.md, PENTEST.md sub-indexes plus their detail files
-│   ├── launch/                ← P7: LAUNCH.md (index) + DEPLOYMENT.md, MONITORING.md, RELEASE_DOCS.md, GTM.md
+│   ├── planning/              ← P4: PROJECT_PLAN.md (index) + BACKLOG.md, SPRINT.md, RISKS.md, SETUP.md, DOCS.md
+│   ├── quality/               ← P6: QA.md (index) + A11Y.md, AUDIT.md, FUNCTIONAL.md, PENTEST.md sub-indexes (plus their detail files); also EXPLORATORY.md, BUGFIX.md
+│   ├── launch/                ← P7: LAUNCH.md (index) + PREPARE.md, DEPLOYMENT.md, MONITORING.md, RELEASE_DOCS.md, GTM.md
 │   └── operations/            ← P8: OPS.md (index) + BUSINESS.md, ITERATION.md, OPS_REVIEW.md, SECURITY.md
 ├── src/                       ← P5: Source code
 ├── tests/                     ← P5: Tests

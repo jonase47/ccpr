@@ -8,6 +8,31 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Added
 
+- **The project template's document tree now names every file a command writes** (finding
+  #18). `templates/PROJECT_CLAUDE_TEMPLATE.md`'s `docs/` tree is what a new project copies to
+  learn its own layout, and it omitted six documents that shipped commands produce:
+  `architecture/API_SPEC.md`, `planning/SETUP.md`, `planning/DOCS.md`,
+  `quality/EXPLORATORY.md`, `quality/BUGFIX.md` and `launch/PREPARE.md`. The finding named
+  only the last one; the other five turned up when the tree was held against the commands'
+  own `## Result` sections rather than against the one reported case.
+
+  The expectation is derived from the **producers** — each command's statement about the file
+  it writes — not from `scripts/gate-preflight.py`, which is a hand-maintained consumer list
+  exactly like the tree. Two consumers agreeing proves only that they were copied together.
+
+  The test states what it does **not** claim, because both limits were measured. The reverse
+  direction ("the tree names something no command writes") produces 24 false positives, since
+  only 49 of 116 commands carry a parseable `## Result` section — so only producer → tree is
+  asserted. And the six `GATE_P<N>.md` artifacts are excluded deliberately: the string `GATE_`
+  occurs **zero** times in the whole template, at 6 of 6 gate files, which is a consistent
+  omission rather than a hole. That premise is itself asserted, so the exclusion fails loudly
+  if a gate file ever appears in the tree instead of quietly widening.
+
+  Red-proven three ways: deleting a name (presence), and — because a flat name-list check
+  survives that — **moving** one between two folder rows, where the multiset of all names is
+  unchanged and only the mapping breaks. Plus the historical proof: the pre-fix template fed
+  through the parser returns exactly the six.
+
 - **This repository has CI** (WI-0129, finding F11 — the last one that was open). Until now
   nothing but a person ran the test suite: `.github/` held only issue templates, `.git/hooks/`
   only samples, and there had been **zero** workflow runs. With a second person working on the
@@ -109,8 +134,10 @@ All notable changes to this project are documented in this file. The format is b
   skipped entirely.
 
   **The design point is that exit zero is not the pass criterion.** Measured on this
-  repository: `memory-lint.sh` exits 1 and `doc-volume-check.sh` exits 2 on a perfectly
-  correct tree. A collector that failed on any non-zero result would be red from its first
+  repository at the time: `memory-lint.sh` exits 1 and `doc-volume-check.sh` exits 2 on a
+  perfectly correct tree. (`doc-volume-check.sh`'s expected exit became 0 later in this same
+  release, when it was scoped to git-tracked files — see the entry below. The reasoning is
+  what survived, not the pair of numbers.) A collector that failed on any non-zero result would be red from its first
   run, and a check that is red when nothing is wrong is ignored within a fortnight. So each
   check's expected exit lives in `scripts/check-all.baseline.tsv` and the script reports
   agreement or divergence with it, naming both numbers.

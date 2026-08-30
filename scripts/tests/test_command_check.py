@@ -100,6 +100,7 @@ import importlib.util
 import os
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -1355,6 +1356,521 @@ class ShippedCommandsDirNotFoundTest(unittest.TestCase):
         ready, reasons = self.isolated_cc.check_command("p5-implement", str(project_dir))
         self.assertFalse(ready)
         self.assertTrue(any("could not determine" in r for r in reasons), reasons)
+
+
+# ---------------------------------------------------------------------------
+# WI-0129 finding #18: templates/PROJECT_CLAUDE_TEMPLATE.md's docs/ tree vs.
+# what the commands themselves claim to write.
+# ---------------------------------------------------------------------------
+
+PROJECT_TEMPLATE_PATH = REPO_ROOT / "templates" / "PROJECT_CLAUDE_TEMPLATE.md"
+
+# The revision at which the tree was still missing the six documents -- the
+# historical RED fixture, per G-082 verified to resolve before being pinned
+# (`git rev-parse --verify d85c2bd^{commit}`).
+#
+# Naming differs deliberately from `test_agent_frontmatter.py`'s
+# `PRE_FIX_COMMIT`, which names the FIX commit and reaches the pre-fix state
+# via `{PRE_FIX_COMMIT}^`. This one names the pre-fix state directly, so it
+# is read without a `^`. Check which convention a file uses before copying
+# the pattern into a third one -- the indirection is easy to get backwards
+# and both spellings resolve to a real commit.
+TEMPLATE_PRE_FIX_COMMIT = "d85c2bd"
+
+# The template's one fenced "## Directory Structure" block. Anchored on the
+# heading rather than "the first fence in the file" so an unrelated fence
+# added earlier cannot silently become the parsed tree.
+TEMPLATE_TREE_BLOCK_RE = re.compile(
+    r"^## Directory Structure\n```\n(.*?)^```", re.MULTILINE | re.DOTALL
+)
+
+# One tree row: an indent built from 4-column segments, then a connector.
+# Depth is derived from the indent width, NOT from counting box-drawing
+# glyphs, because the two segment shapes in this file ("|   " with a pipe
+# for a continuing branch, "    " for a closed one) differ in glyph but not
+# in width.
+TEMPLATE_TREE_ENTRY_RE = re.compile(r"^((?:\S   |    )*)(?:├──|└──) (\S+)")
+
+# A document name as a whole token. Word boundaries are mandatory here, not
+# cosmetic: a substring search for "DOCS.md" hits inside "RELEASE_DOCS.md",
+# which would report the P4 file as present in the P7 folder.
+TEMPLATE_DOC_NAME_RE = re.compile(r"\b([A-Za-z0-9_-]+\.md)\b")
+
+# A command's `## Result` section runs until the next H2 or EOF. Nested H3s
+# (every command's "### Handover Epilogue" boilerplate) stay inside it on
+# purpose: measured 29.08.2026, cutting the epilogue changes the parsed
+# claim set by exactly zero entries (44 either way), because the only paths
+# that boilerplate names are `docs/HANDOVER.md` (no phase folder, so
+# RESULT_DOC_CLAIM_RE cannot match it) and
+# `~/.claude/docs/NEXT_STEPS_REFERENCE.md` (the character before `docs/`
+# is not the required backtick). An inert filter is worse than none: it
+# would look load-bearing to the next reader.
+RESULT_SECTION_RE = re.compile(r"^## Result\s*$(.*?)(?=^## |\Z)", re.MULTILINE | re.DOTALL)
+
+# A backticked two-segment project-doc path inside a Result section. The
+# leading backtick is what excludes `~/.claude/docs/NEXT_STEPS_REFERENCE.md`
+# and every other CCPR-installation path: those have a `/` or `.` where this
+# pattern requires the fence.
+RESULT_DOC_CLAIM_RE = re.compile(r"`docs/([a-z_]+)/([A-Za-z0-9_-]+\.md)`")
+
+# Gate protocol artifacts are deliberately absent from the template tree --
+# see TemplateTreeExcludesGateArtifactsTest for the evidence and the guard
+# that keeps this exclusion honest. `\d+` rather than `\d`: phases only run
+# P0-P8 today, so a single digit would be correct-by-accident, and the way
+# it would fail is silent -- a future `GATE_P10.md` would stop being
+# excluded and start being reported as a document missing from the tree.
+GATE_ARTIFACT_RE = re.compile(r"^GATE_P\d+\.md$")
+
+
+def _parse_project_template_tree(tree_text: Optional[str] = None) -> dict:
+    """Parses the template's ASCII `docs/` tree into `{folder: {names}}`.
+
+    Takes TEXT, not a path, so a red proof can hand it a mutated in-memory
+    copy without writing to (or restoring) the tracked template.
+
+    Two row shapes carry names, and reading only the first is a measured
+    trap. Ignoring sub-index rows drops 16 names from `architecture/`;
+    exactly one of them (`SECURITY.md`, claimed by `/p8-security`) is also
+    on the producer side, so it surfaces as a phantom omission while the
+    other 15 go missing silently -- the parser would misreport the tree
+    either way:
+
+    * a folder row -- `docs/<folder>/` on the left of the arrow, its
+      documents listed on the right:
+      `|   +-- planning/   <- P4: PROJECT_PLAN.md (index) + BACKLOG.md, ...`
+    * a sub-index row one level deeper -- a document on the left, its own
+      children on the right, all of them belonging to the folder the
+      preceding folder row opened:
+      `|   |   +-- SECURITY.md   <- P3 sub-index: THREATS.md, AUTH.md, ...`
+
+    Every `*.md` token on either shape's row is attributed to the current
+    folder; the arrow is not a boundary, because the folder row's own
+    documents live to the right of it.
+
+    Only rows nested under the top-level `docs/` row are collected. The
+    sibling `src/`, `tests/` and `README.md` rows are project-root entries,
+    not project documents; `.claude/CLAUDE.md` likewise.
+
+    Documents that sit directly in `docs/` (`HANDOVER.md`, `instincts.md`)
+    are filed under the empty-string folder key -- kept rather than dropped
+    so the parser's output is a complete picture of the tree, even though
+    the contract below only ever consults two-segment paths.
+    """
+    if tree_text is None:
+        tree_text = PROJECT_TEMPLATE_PATH.read_text(encoding="utf-8")
+    block_match = TEMPLATE_TREE_BLOCK_RE.search(tree_text)
+    if block_match is None:
+        raise AssertionError(
+            "templates/PROJECT_CLAUDE_TEMPLATE.md has no fenced block under a "
+            "'## Directory Structure' heading -- the heading was renamed, the "
+            "fence changed shape, or the tree was removed. This parser refuses "
+            "to fall back to 'some other fence in the file'."
+        )
+    tree: dict = {}
+    top_level_entry = None
+    current_folder = None
+    for line in block_match.group(1).split("\n"):
+        entry = TEMPLATE_TREE_ENTRY_RE.match(line)
+        if entry is None:
+            continue
+        depth = len(entry.group(1)) // 4
+        label = entry.group(2)
+        if depth == 0:
+            top_level_entry = label
+            current_folder = None
+            continue
+        if top_level_entry != "docs/":
+            continue
+        names = set(TEMPLATE_DOC_NAME_RE.findall(line))
+        if depth == 1:
+            current_folder = label[:-1] if label.endswith("/") else ""
+            tree.setdefault(current_folder, set()).update(names)
+        elif current_folder is not None:
+            tree.setdefault(current_folder, set()).update(names)
+    if not tree:
+        raise AssertionError(
+            "parsed the template's directory-structure block but found no rows "
+            "under `docs/` -- the tree's indentation or connector glyphs changed "
+            "shape and TEMPLATE_TREE_ENTRY_RE no longer matches anything."
+        )
+    return tree
+
+
+def _parse_result_section_doc_claims(commands_dir: Optional[Path] = None) -> dict:
+    """Parses every `commands/*.md`'s own `## Result` section into
+    `{(folder, name): {command filenames}}` -- the producer side of the
+    contract.
+
+    The expectation is derived from each command's positive statement about
+    its own output (`- **`docs/launch/PREPARE.md`** (complete deployment
+    preparation)`), which is the only artifact in this repo that is
+    authoritative about what a command writes.
+
+    Deliberately NOT derived from `scripts/gate-preflight.py`'s hand-kept
+    path list: that file is a CONSUMER of these documents, exactly like the
+    template tree is. Two consumers agreeing proves only that they were
+    copied from each other, so one can never be the other's expectation.
+
+    Over-approximation, stated rather than hidden: this collects every
+    project-doc path a Result section NAMES, not only the ones it writes.
+    Measured 30.08.2026: 6 of the 44 collected paths are named by at least
+    one command belonging to a DIFFERENT phase than the folder they live in
+    (`/p3-cost` naming `docs/concept/FINANCIAL_PLAN.md`, `/p6-exploratory`
+    naming `docs/planning/BACKLOG.md`, ...). Five of those six are also
+    claimed by their own phase's command, so only ONE path
+    (`docs/architecture/SECURITY.md`, named solely by `/p8-security`) enters
+    the set purely as a cross-reference. Distinguishing them would need a
+    write-verb classifier over prose, and the direction this feeds can only
+    be made stricter by the extra entries, never laxer -- every one of them
+    is a real phase document that belongs in the tree on its own merits.
+    The residual risk is a loud, reviewable failure (a Result section one
+    day naming a path that is genuinely not a phase document), not a silent
+    pass.
+
+    The path pattern is `docs/<folder>/<NAME>.md` -- exactly two segments,
+    literal characters only. Four classes of real Result-section path are
+    therefore NOT collected (measured 30.08.2026 by relaxing the pattern to
+    `` `docs/<anything>.md` `` and diffing). None is a gap in the contract,
+    because the tree does not model any of them either -- but they are
+    listed rather than left to be rediscovered:
+
+    * docs-root files, one segment: `docs/HANDOVER.md`,
+      `docs/CONSTITUTION.md`, `docs/.cross-check-report.md`, and the
+      Lean-track set (`docs/FRAME.md`, `docs/CLAUDE-lean.md`,
+      `docs/LEARNINGS.md`, `docs/PROMOTION_BRIEF.md`,
+      `docs/TRACK_DECISION.md`). The Lean track ships its own slim
+      `docs/CLAUDE-lean.md`, not this template.
+    * three-segment paths: `docs/planning/polish/POLISH-SPRINT-NN.md`,
+      `docs/operations/snapshots/INCIDENT_REPORT_<date>.md`,
+      `docs/operations/snapshots/SECURITY_UPDATE_<date>.md` -- same
+      exclusion as `docs/architecture/ADR/ADR-0001.md`, which the tree
+      represents as a bare `ADR/` directory entry with no file names in it.
+    * templated filenames, where the name is a pattern and not a name:
+      `docs/reviews/SPRINT-[N]-review.md`, the `<date>` paths above.
+    * `docs/reviews/`, a folder the template tree does not model at all.
+    """
+    if commands_dir is None:
+        commands_dir = REPO_ROOT / "commands"
+    claims: dict = {}
+    for path in sorted(commands_dir.glob("*.md")):
+        section = RESULT_SECTION_RE.search(path.read_text(encoding="utf-8"))
+        if section is None:
+            continue
+        for folder, name in RESULT_DOC_CLAIM_RE.findall(section.group(1)):
+            claims.setdefault((folder, name), set()).add(path.name)
+    if not claims:
+        raise AssertionError(
+            "no command's `## Result` section named a single docs/<folder>/"
+            "<NAME>.md path -- the section heading or the bullet shape changed "
+            "and this parser now measures nothing. A contract test with an "
+            "empty expectation is not a passing contract test."
+        )
+    return claims
+
+
+def _claims_missing_from_tree(tree: dict, claims: dict) -> list:
+    """Producer -> tree: every claimed path the tree does not list, as
+    sorted `(folder, name, [command filenames])` triples.
+
+    `GATE_P<N>.md` is excluded, deliberately and for a stated reason: the
+    template tree shows the phase WORKING documents a project accumulates,
+    not the gate PROTOCOLS the `gate-p<N>` commands write alongside them.
+    That is a consistent editorial line, not an oversight -- measured
+    29.08.2026, the string `GATE_` appears zero times in the whole template
+    while all six gate commands that have a parsable `## Result` section
+    claim their own `GATE_P<N>.md`. `TemplateTreeExcludesGateArtifactsTest`
+    keeps the exclusion from going stale: if a `GATE_*.md` ever does appear
+    in the tree, the editorial line has changed and this filter must be
+    re-decided rather than silently skipping over it.
+    """
+    missing = []
+    for (folder, name), sources in sorted(claims.items()):
+        if GATE_ARTIFACT_RE.match(name):
+            continue
+        if name not in tree.get(folder, set()):
+            missing.append((folder, name, sorted(sources)))
+    return missing
+
+
+class ProjectTemplateTreeParserTest(unittest.TestCase):
+    """Pins the parser's own reading of the tree before anything is
+    concluded from it -- the two row shapes, the folder attribution, and
+    the token boundary that separates `DOCS.md` from `RELEASE_DOCS.md`."""
+
+    def setUp(self):
+        self.tree = _parse_project_template_tree()
+
+    def test_every_phase_folder_row_is_seen(self):
+        self.assertEqual(
+            set(self.tree) - {""},
+            {
+                "memory",
+                "discovery",
+                "concept",
+                "validation",
+                "architecture",
+                "planning",
+                "quality",
+                "launch",
+                "operations",
+            },
+        )
+
+    def test_sub_index_rows_are_attributed_to_the_folder_row_above_them(self):
+        """The three P3 sub-index rows (`SECURITY.md`, `UX_CONCEPT.md`,
+        `INFRA.md`) and their listed children carry no folder of their own
+        -- they belong to the `architecture/` row that precedes them. A
+        parser reading only folder rows reports all 17 of these names as
+        missing from the tree."""
+        for name in ("SECURITY.md", "THREATS.md", "UX_CONCEPT.md", "WIREFRAMES.md",
+                     "INFRA.md", "TESTSTRATEGY.md"):
+            with self.subTest(name=name):
+                self.assertIn(name, self.tree["architecture"])
+
+    def test_a_folder_rows_own_documents_are_collected_from_both_sides_of_the_arrow(self):
+        self.assertIn("PROJECT_PLAN.md", self.tree["planning"])
+        self.assertIn("BACKLOG.md", self.tree["planning"])
+
+    def test_release_docs_is_one_token_and_does_not_stand_in_for_docs_md(self):
+        """`RELEASE_DOCS.md` sits in `launch/`; `DOCS.md` is P4's and sits
+        in `planning/`. A substring check would find "DOCS.md" inside the
+        P7 name and conclude the P4 document is listed -- in the wrong
+        folder, no less."""
+        self.assertIn("RELEASE_DOCS.md", self.tree["launch"])
+        self.assertNotIn("DOCS.md", self.tree["launch"])
+        self.assertIn("DOCS.md", self.tree["planning"])
+
+    def test_project_root_siblings_of_docs_are_not_collected_as_documents(self):
+        """`src/`, `tests/` and `README.md` are top-level rows, not
+        children of `docs/`; `.claude/CLAUDE.md` belongs to another
+        top-level row entirely."""
+        all_names = {name for names in self.tree.values() for name in names}
+        self.assertNotIn("README.md", all_names)
+        self.assertNotIn("CLAUDE.md", all_names)
+
+
+class ResultSectionDocClaimParserTest(unittest.TestCase):
+    """Pins the producer side: what the commands say about themselves."""
+
+    def setUp(self):
+        self.claims = _parse_result_section_doc_claims()
+
+    def test_the_bold_bullet_shape_is_parsed(self):
+        self.assertEqual(self.claims[("launch", "PREPARE.md")], {"p7-deploy.md", "p7-prepare.md"})
+
+    def test_the_plain_backtick_prose_shape_is_parsed_too(self):
+        """`/p6-bugfix` is the one command that names its own written
+        detail file in running prose rather than the bold-lead bullet
+        ("Updated `docs/quality/BUGFIX.md` log + ..."). Measured
+        30.08.2026: of the 49 commands with a `## Result` section, 33 name
+        such a path at all, and three of those use a bare backtick
+        somewhere -- but the other two (`/p6-exploratory`, `/p8-security`)
+        do so only for `docs/planning/BACKLOG.md`, a document P4 owns.
+        `/p6-bugfix` is the only command that names its OWN output that
+        way. A
+        pattern anchored on `- **`...`**` at line start misses it -- and
+        `BUGFIX.md` is one of the six omissions this contract exists to
+        catch, so that miss would have been silent."""
+        self.assertEqual(self.claims[("quality", "BUGFIX.md")], {"p6-bugfix.md"})
+
+    def test_ccpr_installation_paths_are_not_mistaken_for_project_documents(self):
+        """Every Result section's epilogue boilerplate names
+        `~/.claude/docs/NEXT_STEPS_REFERENCE.md`. That is a file in the
+        CCPR installation, not a document the project accumulates; the
+        required leading backtick before `docs/` is what excludes it."""
+        self.assertNotIn(("docs", "NEXT_STEPS_REFERENCE.md"), self.claims)
+        for folder, name in self.claims:
+            self.assertNotEqual(name, "NEXT_STEPS_REFERENCE.md")
+
+
+class ResultSectionClaimsAreListedInTheProjectTemplateTreeTest(unittest.TestCase):
+    """WI-0129 finding #18. `templates/PROJECT_CLAUDE_TEMPLATE.md`'s
+    `docs/` tree is the shipped answer to "what will this project's docs/
+    folder contain" -- `scripts/project-init.sh:42` copies it into every
+    new project's `.claude/CLAUDE.md`. Six documents that commands
+    explicitly claim to write were absent from it (measured 29.08.2026
+    against d85c2bd): `architecture/API_SPEC.md`, `launch/PREPARE.md`,
+    `planning/SETUP.md`, `planning/DOCS.md`, `quality/EXPLORATORY.md`,
+    `quality/BUGFIX.md`.
+
+    `launch/PREPARE.md` was the costly one: `/p7-deploy`, `/gate-p7-tech`
+    and `scripts/gate-preflight.py` all depend on it, so a reader who took
+    the tree as the inventory would find a prerequisite that, by the
+    project's own top-level documentation, does not exist.
+
+    ## What this test does NOT claim
+
+    **Only the producer -> tree direction.** The reverse ("the tree lists
+    something no command writes") is measured and deliberately not
+    asserted: only 49 of the 116 commands have a `## Result` section at
+    all, and only 33 of those name a `docs/<folder>/<NAME>.md` path, so the
+    reverse direction currently produces 24 false positives -- 18 in
+    `architecture/` (`COMPONENTS.md`, `NFR.md` and `TECH_STACK.md` off the
+    folder row, plus the 15 sub-index-row names), `quality/`'s four P6
+    sub-indexes, `launch/RELEASE_DOCS.md` and `memory/MEMORY.md` -- every
+    one of them a
+    document that IS written, by a command that documents its output in
+    some other shape. Asserting that direction would mean deleting real
+    entries from the tree to make a test pass.
+
+    **Nothing about gate protocols.** See
+    `TemplateTreeExcludesGateArtifactsTest`.
+    """
+
+    def test_no_claimed_document_is_missing_from_the_tree(self):
+        missing = _claims_missing_from_tree(
+            _parse_project_template_tree(), _parse_result_section_doc_claims()
+        )
+        self.assertEqual(
+            missing,
+            [],
+            "documents a command's own `## Result` section claims to write, "
+            "absent from templates/PROJECT_CLAUDE_TEMPLATE.md's docs/ tree: "
+            + ", ".join(f"docs/{f}/{n} (from {', '.join(s)})" for f, n, s in missing),
+        )
+
+
+class TemplateTreeExcludesGateArtifactsTest(unittest.TestCase):
+    """The one exclusion `_claims_missing_from_tree` applies, stated in the
+    open and checked in both directions rather than filtered away quietly.
+
+    The tree shows the phase WORKING documents; the `GATE_P<N>.md` protocols
+    the gate commands write are a different kind of artifact and appear
+    nowhere in it. That is consistent (not a hole): zero occurrences of
+    `GATE_` across the whole template, against six gate commands that all
+    claim their own file.
+    """
+
+    def test_the_exclusion_has_real_work_to_do(self):
+        """If no claim ever matched the filter, the filter would be dead
+        code that a future reader would mistake for a live rule."""
+        excluded = sorted(
+            name for _, name in _parse_result_section_doc_claims() if GATE_ARTIFACT_RE.match(name)
+        )
+        self.assertEqual(
+            excluded, ["GATE_P0.md", "GATE_P1.md", "GATE_P2.md", "GATE_P3.md", "GATE_P4.md"]
+        )
+
+    def test_gate_p6_and_p7_are_absent_from_the_claim_set_for_a_different_reason(self):
+        """`gate-p6.md` and `gate-p7.md` do claim their own GATE_P<N>.md
+        files (see `_parse_gate_file_claims` above, which reads their whole
+        body), but neither has a `## Result` section, so they never reach
+        this parser. Naming that here keeps the count in the test above
+        from reading like "only five gates write a protocol"."""
+        claims = _parse_gate_file_claims()
+        self.assertEqual(claims["gate-p6"], "docs/quality/GATE_P6.md")
+        self.assertEqual(claims["gate-p7"], "docs/launch/GATE_P7.md")
+        result_claims = _parse_result_section_doc_claims()
+        self.assertNotIn(("quality", "GATE_P6.md"), result_claims)
+        self.assertNotIn(("launch", "GATE_P7.md"), result_claims)
+
+    def test_the_tree_still_lists_no_gate_artifact_at_all(self):
+        """The exclusion's own premise. If a `GATE_*.md` ever does appear
+        in the tree, the editorial line has changed and the filter above
+        must be re-decided -- it must not keep skipping over a name the
+        tree has started to carry."""
+        listed = sorted(
+            name
+            for names in _parse_project_template_tree().values()
+            for name in names
+            if name.startswith("GATE_")
+        )
+        self.assertEqual(listed, [])
+
+
+class ResultSectionTreeContractRedProofTest(unittest.TestCase):
+    """G-107/G-109 proof that the contract above can fail, on in-memory
+    copies of the template -- the tracked file is never touched, so there
+    is nothing to restore and nothing to forget.
+
+    A PRESENCE mutation (delete a name) is the weak half: almost any check
+    over a name set catches it. The STRUCTURE mutation is the one that
+    discriminates -- it MOVES a name from its correct folder row to another,
+    leaving the multiset of all names in the tree byte-for-byte identical.
+    A test that only compared name lists would stay green through it.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.template_text = PROJECT_TEMPLATE_PATH.read_text(encoding="utf-8")
+        cls.claims = _parse_result_section_doc_claims()
+
+    def _missing_for(self, mutated_text):
+        return _claims_missing_from_tree(
+            _parse_project_template_tree(mutated_text), self.claims
+        )
+
+    def test_the_unmutated_template_is_the_control(self):
+        self.assertEqual(self._missing_for(self.template_text), [])
+
+    def test_presence_mutation_removing_one_name_is_caught(self):
+        """The weak half, kept for completeness: delete `PREPARE.md` from
+        the `launch/` row and the contract must name it. Deliberately not
+        mutating a name no command claims (`RELEASE_DOCS.md`) -- that
+        deletion is invisible to a producer-side contract by design, and a
+        mutation the test is not meant to catch proves nothing either way.
+        """
+        mutated = self.template_text.replace("PREPARE.md, ", "", 1)
+        self.assertEqual(
+            mutated.count("PREPARE.md"), self.template_text.count("PREPARE.md") - 1,
+            "presence mutation did not apply -- the literal was not found",
+        )
+        missing = self._missing_for(mutated)
+        self.assertEqual([(f, n) for f, n, _ in missing], [("launch", "PREPARE.md")])
+
+    def test_structure_mutation_moving_a_name_between_folders_is_caught(self):
+        """`SPRINT.md` moves from the `planning/` row to the `launch/` row
+        -- a name the tree already carried before finding #18 was fixed, so
+        this proof does not lean on the fix it is guarding.
+        The set of every name mentioned anywhere in the tree is unchanged;
+        only the folder each one is filed under differs. This is the
+        mutation that proves the contract is about (folder, name) pairs and
+        not about a flat inventory of file names."""
+        mutated = self.template_text.replace("BACKLOG.md, SPRINT.md, RISKS.md", "BACKLOG.md, RISKS.md", 1)
+        self.assertEqual(
+            mutated.count("SPRINT.md"), self.template_text.count("SPRINT.md") - 1,
+            "structure mutation step 1 (remove from planning/) did not apply",
+        )
+        mutated = mutated.replace("RELEASE_DOCS.md, GTM.md", "RELEASE_DOCS.md, GTM.md, SPRINT.md", 1)
+        self.assertEqual(
+            mutated.count("SPRINT.md"), self.template_text.count("SPRINT.md"),
+            "structure mutation step 2 (add to launch/) did not apply",
+        )
+
+        before = _parse_project_template_tree(self.template_text)
+        after = _parse_project_template_tree(mutated)
+        self.assertEqual(
+            sorted(n for ns in before.values() for n in ns),
+            sorted(n for ns in after.values() for n in ns),
+            "the mutation was supposed to MOVE a name, not add or remove one",
+        )
+        self.assertNotEqual(before, after, "the mutation changed nothing the parser can see")
+
+        missing = self._missing_for(mutated)
+        self.assertEqual([(f, n) for f, n, _ in missing], [("planning", "SPRINT.md")])
+
+    def test_historical_red_the_pre_fix_template_fails_the_contract(self):
+        """The strongest available proof: the contract run against the real
+        pre-fix template from history, not a reconstruction. d85c2bd is the
+        commit before finding #18 was fixed; at that revision the tree was
+        missing exactly the six documents named in
+        `ResultSectionClaimsAreListedInTheProjectTemplateTreeTest`."""
+        pre_fix_text = subprocess.run(
+            ["git", "show", f"{TEMPLATE_PRE_FIX_COMMIT}:templates/PROJECT_CLAUDE_TEMPLATE.md"],
+            cwd=str(REPO_ROOT), check=True, capture_output=True, text=True,
+        ).stdout
+        missing = self._missing_for(pre_fix_text)
+        self.assertEqual(
+            [(f, n) for f, n, _ in missing],
+            [
+                ("architecture", "API_SPEC.md"),
+                ("launch", "PREPARE.md"),
+                ("planning", "DOCS.md"),
+                ("planning", "SETUP.md"),
+                ("quality", "BUGFIX.md"),
+                ("quality", "EXPLORATORY.md"),
+            ],
+        )
 
 
 if __name__ == "__main__":

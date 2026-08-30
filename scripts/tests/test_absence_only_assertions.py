@@ -873,7 +873,7 @@ class NoStaleKnownFindingsTest(unittest.TestCase):
 
 class ClassificationCountsTest(unittest.TestCase):
     def test_classification_counts(self):
-        """Regression pin on the measured baseline: 1074 `test_*` methods
+        """Regression pin on the measured baseline: 1075 `test_*` methods
         across the corpus call something shaped like a subprocess invocation
         and are therefore in scope for this check; 0 of those are currently
         absence-only-needs-exemption -- `KNOWN_FINDINGS` above is empty for
@@ -887,6 +887,23 @@ class ClassificationCountsTest(unittest.TestCase):
         growing paragraph:
 
           in-scope / flagged   when
+          1075 / 0             Finding #18 (30.08.2026): added
+                               test_command_check.py's ResultSectionTree
+                               ContractRedProofTest.test_historical_red_the
+                               _pre_fix_template_fails_the_contract, which
+                               drives `git show` through `subprocess.run`
+                               to feed the pre-fix template into the
+                               producer/tree contract parser. In scope
+                               because it invokes a subprocess; not flagged
+                               because it asserts the six expected
+                               (folder, name) pairs are REPORTED, not that
+                               nothing was. +1 in scope, 0 newly flagged.
+
+                               Proven a move, not a swap: the in-scope SET
+                               at d85c2bd and at this commit differ by
+                               exactly that one entry, with nothing
+                               removed -- a bare count delta of +1 cannot
+                               tell "one added" from "one added, one gone".
           1074 / 0             WI-0129 defect 2 second-review follow-up
                                (30.08.2026): a second code-reviewer pass on
                                SessionAgeDetectionUsesJsonlNotSummaryTest
@@ -1426,7 +1443,7 @@ class ClassificationCountsTest(unittest.TestCase):
         count."""
         recs = scan_tree()
         flagged = [r for r in recs if r.disposition in NEEDS_EXEMPTION]
-        self.assertEqual(1074, len(recs))
+        self.assertEqual(1075, len(recs))
         self.assertEqual(0, len(flagged))
 
 
