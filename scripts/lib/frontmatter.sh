@@ -233,14 +233,14 @@ fm_date_to_epoch() {
     # day, and only that day, at UTC midnight. Whether the loose form should stay
     # legal is a schema question, and it is filed as one (WI-0106).
     local ymd
-    if ymd="$(date -j -f "%d.%m.%Y" "$d" "+%Y-%m-%d" 2>/dev/null)"; then
+    if ymd="$(date -j -f "%d.%m.%Y" "$d" "+%Y-%m-%d" 2>/dev/null)"; then  # portability: exempt bsd-gnu-date-flags-are-mutually-invalid
         date -j -u -f "%Y-%m-%d %H:%M:%S" "$ymd 00:00:00" "+%s" 2>/dev/null && return 0
     fi
     # GNU date: -u -d with the value rewritten to ISO. -d already anchors on
     # midnight, so only the time zone changes here.
     local iso
     iso="$(printf '%s' "$d" | awk -F. '{print $3"-"$2"-"$1}')"  # exit-status: exempt downstream-checks-result
-    date -u -d "$iso" "+%s" 2>/dev/null || echo "0"
+    date -u -d "$iso" "+%s" 2>/dev/null || echo "0"  # portability: exempt bsd-gnu-date-flags-are-mutually-invalid
 }
 
 # _fm_preserve_mode <original-file> <temp-file> — copies the original's
@@ -250,15 +250,15 @@ fm_date_to_epoch() {
 # inode carries the SOURCE's permissions forward, not the destination's.
 # Left alone, every fm_set/fm_set_many write silently narrows a 644 or
 # 755 file to 600. `chmod --reference` is GNU-only; this repo's target
-# platform is BSD/macOS, so the mode is read portably via BSD `stat -f
-# '%Lp'` first, falling back to GNU `stat -c '%a'`. Best-effort: if
-# neither `stat` flavour is available, the file is still written
-# correctly, just without its original mode restored.
+# platform is BSD/macOS, so the mode is read via BSD `stat -f '%Lp'`, falling
+# back to GNU `stat -c '%a'`. That chain is NOT a portability guard: it holds
+# by accident — see the marker below and its registered reason. Best-effort:
+# if neither `stat` works, the file keeps its content, not its original mode.
 _fm_preserve_mode() {
     local original="$1" tmp="$2" mode
     mode="$(stat -f '%Lp' "$original" 2>/dev/null)" \
         || mode="$(stat -c '%a' "$original" 2>/dev/null)" \
-        || return 0
+        || return 0  # portability: exempt stat-f-guard-is-an-operand-accident
     chmod "$mode" "$tmp" 2>/dev/null || true
 }
 

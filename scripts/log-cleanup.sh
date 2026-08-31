@@ -65,7 +65,7 @@ if $DRY_RUN; then
     echo "[DRY-RUN] No files will be deleted."
 fi
 
-# Current date as reference
+# Current date as reference  # portability: exempt bsd-gnu-date-flags-are-mutually-invalid
 CUTOFF_DATE=$(date -v-${KEEP_DAYS}d +%Y-%m-%dT00:00:00 2>/dev/null || date -d "${KEEP_DAYS} days ago" +%Y-%m-%dT00:00:00 2>/dev/null)
 echo "Cutoff: ${CUTOFF_DATE}"
 echo ""
@@ -102,7 +102,7 @@ if [ -d "${SESSION_DIR}" ]; then
         fi
 
         cutoff_epoch=$(date -j -f "%Y-%m-%dT%H:%M:%S" "${CUTOFF_DATE}" +%s 2>/dev/null || \
-                       date -d "${CUTOFF_DATE}" +%s 2>/dev/null || echo "0")
+                       date -d "${CUTOFF_DATE}" +%s 2>/dev/null || echo "0")  # portability: exempt bsd-gnu-date-flags-are-mutually-invalid
 
         # Comparison: is the session older than the cutoff?
         if [ "${newest_file}" -lt "${cutoff_epoch}" ] 2>/dev/null; then

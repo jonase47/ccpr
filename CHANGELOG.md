@@ -8,6 +8,42 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Added
 
+- **The nine portability findings now say why they work, at the place where they work** (R3).
+  All nine are `||` fallback chains rather than `uname` branches. Until that is written down, the
+  next reader takes the chain for intent and builds on it — which turns a reported finding into
+  an inherited assumption.
+
+  **They are two unequal groups, and each instance was measured rather than the class.** Seven
+  `date` sites are genuine portable idioms: `date -v` is an *invalid option* on GNU, `date -d`
+  on BSD, so the wrong side fails loudly with a non-zero exit and empty stdout, and the chain
+  works as intended. Verified end to end on a machine carrying both implementations, with the
+  shipped functions run under a GNU-first PATH: `fm_date_to_epoch "16.05.2026"` returns the same
+  epoch either way.
+
+  **The two `stat` sites are not, and the measurement is worse than the finding claimed.**
+  `stat -f` is a *valid* GNU option meaning something else entirely (`--file-system`), so GNU
+  never rejects the flag. The chain falls through only because GNU then reads the format string
+  `%Lp` as a second file operand that does not resolve — while writing a real filesystem block
+  for the first operand to stdout. Demonstrated on the shipped function, not reconstructed:
+  under a GNU-first PATH `_fm_preserve_mode` restores mode 755 correctly; create a file
+  literally named `%Lp` in the working directory and the same call returns 600, because the
+  fallback never fires. The marker says `stat-f-guard-is-an-operand-accident`, and the comment
+  above the function, which previously called the chain *portable*, now says it holds by
+  accident.
+
+  The exemption form is itself checked, because an exemption list nobody verifies is the next
+  drifting skip list — this repository has had four. A marker with no reason does not exempt;
+  the exempted set is pinned as a **set** of `(path, line, rule, category)` so a swap of two
+  categories is visible where a count would not be; and a marker pointing at a site with no
+  finding is itself a finding, built after the sibling guard that already does this for the
+  absence-only register.
+
+  **A blocking discovery on the way:** without extending marker sight to the *logical* line, the
+  second limb of any backslash-continued chain cannot be marked at all — a comment on a middle
+  line eats the rest of the command. One mutation survived and was measured rather than assumed:
+  a loosened grammar produced byte-identical output because the empty capture is falsy at the
+  only decision point. An equivalent mutant, not a gap, and recorded as such.
+
 - **The agent lint now checks the memory-frontmatter contract** (R4). A `code-reviewer`
   subagent wrote a silo file without frontmatter, `memory-lint` went from exit 1 to exit 2, and
   `check-all` reported a divergence on a change that had nothing to do with it. Structural, not

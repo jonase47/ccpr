@@ -196,10 +196,35 @@ A match is a finding UNLESS one of exactly two things is in sight:
 
   1. a `uname` occurrence -- the pattern `instinct-check.sh` and
      `bootstrap.sh` already use; or
-  2. an explicit marker comment `# portability: exempt <reason>` on the
-     construct's own line or the line directly above it, mirroring the
-     `# exit-status: exempt <reason>` idiom this repository already carries in
-     `instinct-check.sh`, `memory-sync.sh`, `shellcheck-run.sh` and others.
+  2. an explicit marker comment `# portability: exempt <reason>` in the
+     construct's marker sight, mirroring the `# exit-status: exempt <reason>`
+     idiom this repository already carries in `instinct-check.sh`,
+     `memory-sync.sh`, `shellcheck-run.sh` and others. Three things make that
+     marker a recorded decision rather than a skip list (R3):
+
+       * The `<reason>` token is MANDATORY. A bare `# portability: exempt`
+         names nothing, can be neither reviewed nor seen to go stale, and
+         does NOT exempt -- `MarkerWithoutAReasonDoesNotExemptTest`.
+       * The sight is the LOGICAL line -- every physical line a backslash
+         splices into one command -- plus the one line above it. Not
+         `(idx, idx-1)`: a `\`-continued statement cannot carry a comment on
+         a middle line without the splice eating the rest of the command, so
+         the only legal position on a multi-line `||` chain is the line the
+         statement FINISHES on, which sits BELOW the construct. That is
+         `scripts/lib/frontmatter.sh:259-261` exactly, and it is the same
+         range `test_external_tool_exit_status.py`'s `find_exemption` searches
+         for the same reason. Bounded by the statement, not by a distance:
+         `MarkerCoversTheWholeContinuedStatementTest` pins four negatives --
+         two lines above, the line after, an even backslash run, and a
+         backslash followed by whitespace.
+       * The set of exempted sites and the set of reasons are both pinned.
+         `EXEMPTED_SITES` is set equality on `(path, line, rule, category)`,
+         so a site cannot appear, disappear or SWAP categories quietly; every
+         category must resolve to a written reason in `EXEMPTION_CATEGORIES`
+         and every registered reason must still be carried by some site; and
+         `NoStaleMarkerTest` reports a marker that excuses nothing -- the
+         accounting direction `NoStaleKnownFindingsTest` enforces for
+         `test_absence_only_assertions.py`'s registry.
 
 A `||` fallback chain is deliberately NOT an exemption, and that is a
 measured decision rather than a stylistic one. `git show 269d490^:scripts/
@@ -272,18 +297,54 @@ the file-scope alternative directly, and
     that rejected the long-option rule above (see "Candidates evaluated and
     REJECTED"), stated here too because it is a near-miss for the ADOPTED
     rules and not only for the rejected ones. Measured zero occurrences.
+  * A marker inside a QUOTED STRING. Markers are searched in heredoc-blanked
+    text with comments intact (they have to be -- a marker IS a comment), and
+    that view keeps quoted content, so `echo "# portability: exempt x"` would
+    be honoured as a decision. Blanking quotes while keeping comments needs a
+    fourth mask and the same quote-tracking `_mask_non_live` already does;
+    named rather than built because the corpus has none. Measured 31.08.2026:
+    5 marker occurrences in the 29 files, all 5 real comments.
+    `test_external_tool_exit_status.py`'s `find_exemption` has the identical
+    shape and the same exposure.
+  * A backslash ending an UNTERMINATED quoted string (`x='a \` continuing on
+    the next line) counts as a splice, because the splice view keeps quoted
+    content too. Unreachable in practice rather than merely unobserved: the
+    next line is then INSIDE that string, so `_mask_non_live` blanks it and
+    no construct can be found there to be exempted. Measured 31.08.2026:
+    44 continuation backslashes in the 29 files, 0 of them inside a string,
+    a comment or a heredoc body (sentinel probe -- the backslash replaced by
+    a marker character, the file re-masked, the character checked for
+    survival).
   * Whether a flagged site is actually BROKEN. A finding is a SHAPE. Both
     `frontmatter.sh` sites in `KNOWN_FINDINGS` below happen to work today, for
     a reason the scanner cannot check -- see that registry's own note.
 
-## Findings on the current tree: surfaced, not fixed
+## Findings on the current tree: marked, still not fixed (R3)
 
-This work item's write boundary is this file. The shipped shell scripts are
-out of it, so the nine findings the scan produces against the current tree are
-recorded in `KNOWN_FINDINGS` and reported, not repaired -- each one needs its
-own red proof and its own round. `KnownFindingsMatchTheCurrentScanTest` asserts
-SET EQUALITY, so neither a new unaccounted finding nor a stale entry left
-behind after a repair passes silently.
+WI-0130 surfaced nine and repaired none -- its write boundary was this file.
+R3 did not repair them either: every repair is a code change and needs its own
+red proof and its own round. What R3 added is the REASON, written at the site,
+so the next reader does not inherit a `||` chain as an intention.
+
+The nine are not equivalent, and the two categories say which is which:
+
+  * Seven `date` sites are genuine portable idioms. The two forms reject each
+    other's flags outright, so the wrong platform's form fails by exit status
+    -- the thing the `||` actually reads. Measured 31.08.2026 on one machine
+    carrying both implementations, each form under each: `-v` and `-j` are
+    `invalid option` on GNU, `-d` is `illegal option` on BSD, all exit 1 with
+    empty stdout.
+  * The two `stat` sites are NOT. `stat -f` is a VALID GNU option
+    (`--file-system`), so GNU does not reject the flag; the chain falls
+    through only because GNU reads `%Lp` as a second file operand that does
+    not resolve. Put a file named `%Lp` in the working directory and the same
+    call exits 0 (measured) with a filesystem block in `mode`, the `||` never
+    fires, and the file keeps mktemp's 0600. That site's marker says so in
+    its category name.
+
+`KNOWN_FINDINGS` is consequently empty and `EXEMPTED_SITES` holds the nine.
+Both are set equalities, and `NoStaleMarkerTest` closes the third direction:
+a marker whose construct was repaired or moved is itself reported.
 """
 
 import re
@@ -308,7 +369,14 @@ RUN_TESTS_FIX_COMMIT = "bc87c9f"
 # See the module docstring's '"In sight"' section for both halves.
 TOP_LEVEL_WINDOW = 10
 
-EXEMPTION_MARKER = "portability: exempt"
+# The marker grammar. A REASON TOKEN is mandatory: `# portability: exempt`
+# on its own records no decision, cannot be reviewed and cannot be seen to go
+# stale -- exactly the unread skip list this module exists to avoid. Same
+# shape as `test_external_tool_exit_status.py`'s `MARKER_RE`, which has
+# required a `<category>` since it was written. Membership of the token in
+# EXEMPTION_CATEGORIES is checked separately, over the shipped tree only, so
+# fixtures in this file are not forced to invent shipped categories.
+EXEMPTION_MARKER_RE = re.compile(r"#\s*portability:\s*exempt\s+([A-Za-z0-9_-]+)")
 
 HEREDOC_OPEN_RE = re.compile(r"(?<!<)<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
 
@@ -703,14 +771,67 @@ def sight_range(masked_lines, ranges, idx):
             if k not in in_a_function]
 
 
-def _has_exemption_marker(raw_lines, idx):
-    """`# portability: exempt <reason>` on the construct's own line or the one
-    directly above it. Read off the RAW lines on purpose -- the marker IS a
-    comment, and every masked variant has already blanked it."""
-    for probe in (idx, idx - 1):
-        if 0 <= probe < len(raw_lines) and EXEMPTION_MARKER in raw_lines[probe]:
-            return True
-    return False
+def _splices(line):
+    """True when `line` is spliced into the next one by a trailing backslash.
+    The run of trailing backslashes must be ODD (`cmd \\` passes a literal
+    backslash and ENDS the command) and nothing may follow it -- a single
+    space after the backslash kills the splice in the shell as well. Both
+    halves are pinned by `MarkerCoversTheWholeContinuedStatementTest`."""
+    run = len(line) - len(line.rstrip("\\"))
+    return run % 2 == 1
+
+
+def logical_line_span(splice_lines, idx):
+    """The physical line range [start, end] of the ONE command line `idx`
+    belongs to, following backslash splices in both directions.
+
+    `splice_lines` must be the COMMENT-BLANKED, heredoc-blanked variant, not
+    the raw text: a comment runs to the end of its line in the shell whether
+    or not it ends in a backslash, and a heredoc body is data. Reading either
+    as a continuation extends the sight past a boundary the shell itself
+    respects -- `MarkerTextIsReadOffLiveSourceTest` pins both."""
+    start = idx
+    while start > 0 and _splices(splice_lines[start - 1]):
+        start -= 1
+    end = idx
+    while end + 1 < len(splice_lines) and _splices(splice_lines[end]):
+        end += 1
+    return start, end
+
+
+def marker_sight(splice_lines, idx):
+    r"""The line indices where a `# portability: exempt <reason>` marker counts
+    for the construct at `idx`: the whole logical line, plus the one line
+    above it.
+
+    Not just `(idx, idx - 1)`. A `\`-continued statement cannot carry a
+    comment on a middle line without the splice eating the rest of the
+    command, so the only legal place for the marker on a multi-line `||`
+    chain is the line the statement FINISHES on -- which sits BELOW the
+    construct being exempted. `test_external_tool_exit_status.py`'s
+    `find_exemption` searches the same range for the same reason.
+
+    Bounded by the statement, not by a distance: a marker on the line after
+    the statement ends, or two lines above where it starts, is not a marker
+    for it."""
+    start, end = logical_line_span(splice_lines, idx)
+    return range(max(0, start - 1), end + 1)
+
+
+def _exemption_category(marker_lines, splice_lines, idx):
+    """The `<reason>` token of a `# portability: exempt <reason>` marker
+    anywhere in the construct's marker sight, or None.
+
+    `marker_lines` is the heredoc-blanked text with COMMENTS INTACT -- the
+    marker is itself a comment, so `_mask_non_live` and `_strip_comments_only`
+    have both already erased it, while the raw text would let a marker-shaped
+    line inside a heredoc body (a script writing a script) count as a real
+    decision."""
+    for probe in marker_sight(splice_lines, idx):
+        m = EXEMPTION_MARKER_RE.search(marker_lines[probe])
+        if m and m.group(1):
+            return m.group(1)
+    return None
 
 
 class PortabilityFinding:
@@ -761,10 +882,37 @@ def _mktemp_hits(comment_stripped_line, masked_line):
     return False
 
 
-def scan_source(text, path_label):
-    """Scans one shell script's SOURCE TEXT (so a historical revision read via
-    `git show` is scanned by exactly the same code path as a file on disk).
-    Returns a list of PortabilityFinding."""
+class ScanBases:
+    """The three position-preserving views one scan needs, kept together so a
+    caller cannot pick the wrong one by accident:
+
+      * `raw`    -- untouched source. Only for the TEXT of a reported finding.
+      * `marker` -- heredoc bodies blanked, comments INTACT. For finding
+                    `# portability: exempt` markers.
+      * `splice` -- heredoc bodies AND comment bodies blanked, escapes intact.
+                    For deciding what a backslash continuation joins.
+
+    All three have the same length and the same line numbering."""
+
+    __slots__ = ("raw", "marker", "splice")
+
+    def __init__(self, raw, marker, splice):
+        self.raw = raw
+        self.marker = marker
+        self.splice = splice
+
+
+def _construct_matches(text):
+    """Every line carrying a candidate construct, with BOTH exemption
+    dispositions attached rather than short-circuited away:
+    `(idx, rule_names, uname_guarded, marker_category)`.
+
+    One loop, three views. `scan_source` reports what neither disposition
+    excused, `scan_exemptions` reports what a MARKER excused, and
+    `stale_markers` needs the set of lines a marker could legitimately sit on.
+    Before R3 the marker branch was a bare `continue`, so an exemption left no
+    trace anything could count -- which is how an exemption list starts
+    growing unread."""
     body_blanked = _blank_heredocs(text)
     masked = _mask_non_live(body_blanked)
     comment_stripped = _strip_comments_only(body_blanked)
@@ -773,21 +921,67 @@ def scan_source(text, path_label):
     raw_lines = text.split("\n")
     ranges = function_ranges(masked_lines)
 
-    findings = []
+    marker_lines = body_blanked.split("\n")
+
+    matches = []
     for idx, masked_line in enumerate(masked_lines):
         hits = [rule.name for rule in FLAG_RULES if rule.matches(masked_line)]
         if _mktemp_hits(stripped_lines[idx], masked_line):
             hits.append(MKTEMP_RULE_NAME)
         if not hits:
             continue
-        if _has_exemption_marker(raw_lines, idx):
-            continue
-        if any("uname" in masked_lines[k]
-               for k in sight_range(masked_lines, ranges, idx)):
+        guarded = any("uname" in masked_lines[k]
+                      for k in sight_range(masked_lines, ranges, idx))
+        matches.append((idx, hits, guarded,
+                        _exemption_category(marker_lines, stripped_lines, idx)))
+    return ScanBases(raw_lines, marker_lines, stripped_lines), matches
+
+
+def scan_source(text, path_label):
+    """Scans one shell script's SOURCE TEXT (so a historical revision read via
+    `git show` is scanned by exactly the same code path as a file on disk).
+    Returns a list of PortabilityFinding."""
+    bases, matches = _construct_matches(text)
+    findings = []
+    for idx, hits, guarded, category in matches:
+        if category or guarded:
             continue
         for name in hits:
-            findings.append(PortabilityFinding(path_label, idx + 1, name, raw_lines[idx]))
+            findings.append(
+                PortabilityFinding(path_label, idx + 1, name, bases.raw[idx]))
     return findings
+
+
+def scan_exemptions(text, path_label):
+    """The complement of `scan_source`: `(path, line, rule, category)` for
+    every construct a MARKER excused. A construct a `uname` branch already
+    guards is NOT listed -- its marker excuses nothing, and `stale_markers`
+    reports it as dead instead of quietly counting it as used."""
+    _, matches = _construct_matches(text)
+    return [(path_label, idx + 1, name, category)
+            for idx, hits, guarded, category in matches
+            if category and not guarded
+            for name in hits]
+
+
+def stale_markers(text, path_label):
+    """Markers that excuse nothing: `(path, line, category)` for every
+    `# portability: exempt` whose position is in no construct's marker sight
+    -- a construct that moved, was repaired, or was `uname`-guarded all the
+    way. Without this, a repaired site leaves its marker behind and the next
+    construct that drifts onto that line is silently pre-excused."""
+    bases, matches = _construct_matches(text)
+    live = set()
+    for idx, _hits, guarded, _category in matches:
+        if guarded:
+            continue
+        live.update(marker_sight(bases.splice, idx))
+    out = []
+    for i, line in enumerate(bases.marker):
+        m = EXEMPTION_MARKER_RE.search(line)
+        if m and i not in live:
+            out.append((path_label, i + 1, m.group(1)))
+    return out
 
 
 def scanned_files(repo_root=REPO_ROOT):
@@ -804,12 +998,24 @@ def scanned_files(repo_root=REPO_ROOT):
     return [f for f in files if f.is_file()]
 
 
-def scan_tree(repo_root=REPO_ROOT):
-    findings = []
+def _over_tree(fn, repo_root=REPO_ROOT):
+    out = []
     for f in scanned_files(repo_root):
         label = f.relative_to(repo_root).as_posix()
-        findings.extend(scan_source(f.read_text(), label))
-    return findings
+        out.extend(fn(f.read_text(), label))
+    return out
+
+
+def scan_tree(repo_root=REPO_ROOT):
+    return _over_tree(scan_source, repo_root)
+
+
+def exemptions_tree(repo_root=REPO_ROOT):
+    return _over_tree(scan_exemptions, repo_root)
+
+
+def stale_markers_tree(repo_root=REPO_ROOT):
+    return _over_tree(stale_markers, repo_root)
 
 
 def _read_git_show(ref_and_path):
@@ -829,46 +1035,118 @@ def _read_git_show(ref_and_path):
     return result.stdout
 
 
-# Findings on the CURRENT tree, reported rather than repaired: this work
-# item's write boundary is this test module, and every shipped shell script is
-# outside it. Keyed (path, line, rule), the same way
-# test_heredoc_interpolation_scan.py's own registry is.
+# Findings on the CURRENT tree that carry NO exemption, keyed (path, line,
+# rule) the same way test_heredoc_interpolation_scan.py's own registry is.
 #
-# All nine are `||` fallback chains rather than `uname` branches, which is the
-# single reason they are flagged -- see the module docstring on why a `||`
-# chain is not accepted as a guard. Two notes the scanner itself cannot make:
+# Empty since R3. WI-0130 recorded nine here, all `||` fallback chains rather
+# than `uname` branches -- the single reason they were flagged; see the module
+# docstring on why a `||` chain is not accepted as a guard. R3 did not repair
+# any of them (each repair is a code change and needs its own red proof and
+# its own round). It wrote down, at each site, WHY the chain carries today,
+# and moved the nine into EXEMPTED_SITES below, where two separate checks now
+# hold them: the set cannot change silently, and a marker that stops excusing
+# anything is reported as stale.
 #
-#   * scripts/lib/frontmatter.sh:259-260 (`stat -f '%Lp' || stat -c '%a'`)
-#     happens to WORK on both platforms, because GNU `stat -f '%Lp' <file>`
-#     reads the format as a second, nonexistent file operand and exits 1, so
-#     the chain does fall through. That is luck of the exit status, not a
-#     guard: the identical shape at log-cleanup.sh:70 pre-fix sat behind a
-#     pipe, where the exit status belonged to `head` and the fallback could
-#     never fire. Recommended repair is a one-line `# portability: exempt`
-#     marker naming that reasoning, not a code change.
-#   * scripts/log-cleanup.sh:69 and :104-105 and scripts/lib/frontmatter.sh:
-#     236-237,243 are BSD-first-then-GNU `date` chains where the BSD form does
-#     fail loudly on GNU, so the chain works. Same recommendation.
+# An empty registry makes this test's set equality one-directional in
+# practice -- there is nothing left to go stale here -- but not vacuous: a
+# NEWLY introduced unexempted construct anywhere in the 29 files still fails
+# it on the next run. The direction this registry used to cover is now
+# covered by NoStaleMarkerTest for the exemption list instead.
 #
-# Each needs its own round and its own red proof. Filed as findings here, not
-# fixed here.
-KNOWN_FINDINGS = {
-    # WI-0131 line shift: the CRLF fix inserted a 43-line header block
-    # ABOVE all five sites; none of the five lines was itself touched.
-    # Proven by byte-comparing HEAD:<old line> against <new line> for
-    # each (all five identical, uniform delta +43) and by the diff
-    # carrying 13 removed lines, none of them a `date`/`stat` call --
-    # a count of 5-before/5-after alone cannot tell a shift from
-    # "one gone, one new".
-    ("scripts/lib/frontmatter.sh", 236, "date-j"),
-    ("scripts/lib/frontmatter.sh", 237, "date-j"),
-    ("scripts/lib/frontmatter.sh", 243, "date-d"),
-    ("scripts/lib/frontmatter.sh", 259, "stat-f"),
-    ("scripts/lib/frontmatter.sh", 260, "stat-c"),
-    ("scripts/log-cleanup.sh", 69, "date-d"),
-    ("scripts/log-cleanup.sh", 69, "date-v"),
-    ("scripts/log-cleanup.sh", 104, "date-j"),
-    ("scripts/log-cleanup.sh", 105, "date-d"),
+# WI-0131 line shift (kept for the record, since EXEMPTED_SITES inherited the
+# line numbers): the CRLF fix inserted a 43-line header block ABOVE all five
+# frontmatter.sh sites; none of the five lines was itself touched. Proven by
+# byte-comparing HEAD:<old line> against <new line> for each (all five
+# identical, uniform delta +43) and by the diff carrying 13 removed lines,
+# none of them a `date`/`stat` call -- a count of 5-before/5-after alone
+# cannot tell a shift from "one gone, one new". R3 itself shifted NOTHING:
+# every marker is a trailing comment on a line that already existed, so both
+# line-keyed registries survived it untouched.
+KNOWN_FINDINGS = set()
+
+
+# --------------------------------------------------------------------------
+# The exemption registry (R3)
+# --------------------------------------------------------------------------
+#
+# One reason text per CATEGORY, not per site -- the same shape
+# `test_external_tool_exit_status.py`'s `EXEMPTION_REASONS` uses, and for the
+# same reason: the sites within a category share their argument, and nine
+# copies of one paragraph is nine chances to drift.
+#
+# The two categories are NOT equivalent, and the split is the point of this
+# registry. Seven sites are portable idioms. Two are not: they work today by
+# an accident the scanner cannot see, and the category name says so at every
+# site that carries it.
+EXEMPTION_CATEGORIES = {
+    "bsd-gnu-date-flags-are-mutually-invalid": (
+        "A BSD-form-then-GNU-form `date` chain whose two forms reject each "
+        "other's flags OUTRIGHT, so the wrong platform's form fails by EXIT "
+        "STATUS -- which is exactly what the `||` reads -- and cannot "
+        "half-succeed into a plausible wrong answer. Measured 31.08.2026 on "
+        "one machine carrying both implementations (BSD /bin/date on Darwin "
+        "25.5, GNU coreutils 9.11 date), each of the four forms run under "
+        "each: `date -v-7d`, `date -j -f ...` and `date -j -u -f ...` are "
+        "`invalid option` on GNU (exit 1, empty stdout); `date -d ...` and "
+        "`date -u -d ...` are `illegal option -- d` on BSD (exit 1, empty "
+        "stdout). This is an exemption, not a claim that the shape is ideal: "
+        "a `uname` branch would state the intent instead of relying on the "
+        "flag namespaces staying disjoint. That is its own round."
+    ),
+    "stat-f-guard-is-an-operand-accident": (
+        "NOT a portable idiom -- exempted because it WORKS today, by "
+        "accident, and the accident has to be written down where the next "
+        "reader of the chain will see it. `stat -f` is a VALID GNU option "
+        "(`--file-system`), an entirely different mode, so GNU does not "
+        "reject the flag the way it rejects `date -j`. The chain falls "
+        "through only because GNU then reads the format string `%Lp` as a "
+        "second FILE OPERAND that does not resolve. Measured 31.08.2026 with "
+        "GNU coreutils 9.11 stat: `stat -f '%Lp' <file>` exits 1 with "
+        "`cannot read file system information for '%Lp'` on stderr WHILE "
+        "writing a real filesystem block for <file> to stdout. Create a file "
+        "literally named `%Lp` in the working directory and the identical "
+        "call exits 0 (measured), `mode` becomes that multi-line block, the "
+        "`||` never fires, and `chmod \"$mode\"` fails into its `|| true` -- "
+        "leaving the rewritten file at mktemp's 0600 instead of its original "
+        "mode. What guards this site is the argument's path-resolvability, "
+        "not the flag's portability. The chain's SECOND member is different: "
+        "BSD stat rejects `-c` outright (`illegal option -- c`, exit 1, "
+        "measured), so only the first half is the accident -- it is filed "
+        "under the same category because one marker covers the one statement "
+        "they are both part of. This site wants a real `uname` branch; that "
+        "is a code change and so its own round, with its own red proof."
+    ),
+}
+
+
+# Every site a MARKER excuses, keyed `(path, line, rule, category)`.
+#
+# Keyed by line number like `KNOWN_FINDINGS` above rather than by the
+# marker's own source position (the drift-immune keying
+# `test_external_tool_exit_status.py` chose): one module, one convention, and
+# a line-keyed set makes an EXCHANGE visible -- swapping which of two
+# adjacent sites carries which category changes the set, where a count or a
+# per-file tally would not. The cost is the same bookkeeping `KNOWN_FINDINGS`
+# already carries, and WI-0131 shows what paying it looks like.
+EXEMPTED_SITES = {
+    ("scripts/lib/frontmatter.sh", 236, "date-j",
+     "bsd-gnu-date-flags-are-mutually-invalid"),
+    ("scripts/lib/frontmatter.sh", 237, "date-j",
+     "bsd-gnu-date-flags-are-mutually-invalid"),
+    ("scripts/lib/frontmatter.sh", 243, "date-d",
+     "bsd-gnu-date-flags-are-mutually-invalid"),
+    ("scripts/lib/frontmatter.sh", 259, "stat-f",
+     "stat-f-guard-is-an-operand-accident"),
+    ("scripts/lib/frontmatter.sh", 260, "stat-c",
+     "stat-f-guard-is-an-operand-accident"),
+    ("scripts/log-cleanup.sh", 69, "date-d",
+     "bsd-gnu-date-flags-are-mutually-invalid"),
+    ("scripts/log-cleanup.sh", 69, "date-v",
+     "bsd-gnu-date-flags-are-mutually-invalid"),
+    ("scripts/log-cleanup.sh", 104, "date-j",
+     "bsd-gnu-date-flags-are-mutually-invalid"),
+    ("scripts/log-cleanup.sh", 105, "date-d",
+     "bsd-gnu-date-flags-are-mutually-invalid"),
 }
 
 
@@ -1128,6 +1406,143 @@ class ExemptionMarkerIsHonouredTest(unittest.TestCase):
             'stat -c %Y "$1"\n'
         )
         self.assertEqual([(4, "stat-c")], [(f.line, f.rule) for f in _scan_text(source)])
+
+
+class MarkerWithoutAReasonDoesNotExemptTest(unittest.TestCase):
+    """R3: a marker is a RECORDED DECISION, so it has to record something. A
+    bare `# portability: exempt` with no reason after it names nothing, cannot
+    be reviewed and cannot go stale visibly -- it is the "skip list nobody
+    re-reads" shape this repo has already grown four times. Same grammar as
+    `test_external_tool_exit_status.py`'s `MARKER_RE`, which has required a
+    `<category>` token since it was written.
+
+    Mutation note: loosening the grammar to `\\s*([A-Za-z0-9_-]*)` -- which DOES
+    match a bare marker -- survives this whole module, and that is an
+    EQUIVALENT mutant rather than a gap. Traced and measured: the loosened
+    regex matches and returns `''`, which is falsy at `_exemption_category`'s
+    single decision point, so all three views (`scan_source`,
+    `scan_exemptions`, `stale_markers`) return byte-identical output. The
+    explicit `and m.group(1)` there collapses the two guards into one visible
+    statement rather than leaving the rule resting on Python truthiness."""
+
+    def test_a_bare_marker_does_not_exempt(self):
+        source = (
+            "#!/usr/bin/env bash\n"
+            "# portability: exempt\n"
+            'stat -c %Y "$1"\n'
+        )
+        self.assertEqual(
+            [(3, "stat-c")], [(f.line, f.rule) for f in _scan_text(source)])
+
+    def test_a_marker_whose_reason_is_only_whitespace_does_not_exempt(self):
+        source = (
+            "#!/usr/bin/env bash\n"
+            "# portability: exempt   \n"
+            'stat -c %Y "$1"\n'
+        )
+        self.assertEqual(
+            [(3, "stat-c")], [(f.line, f.rule) for f in _scan_text(source)])
+
+    def test_a_marker_with_a_reason_still_exempts(self):
+        """The other direction: without this, a grammar that rejects
+        EVERYTHING would pass the two tests above."""
+        source = (
+            "#!/usr/bin/env bash\n"
+            "# portability: exempt linux-only-helper\n"
+            'stat -c %Y "$1"\n'
+        )
+        self.assertEqual([], _scan_text(source))
+
+
+class MarkerCoversTheWholeContinuedStatementTest(unittest.TestCase):
+    r"""R3: a `\`-continued statement cannot carry the marker on a middle
+    line -- the splice would eat the rest of the command -- so the marker has
+    to go on the line the statement FINISHES on. This is not a new idea in
+    this repo: `test_external_tool_exit_status.py`'s `find_exemption` searches
+    the whole physical range of an invocation for exactly this reason, and
+    names the three shipped sites that need it. Without this, the second and
+    later members of a backslash-continued `||` chain are structurally
+    unmarkable -- `scripts/lib/frontmatter.sh:259-261` is precisely that
+    shape.
+
+    The sight is the LOGICAL line (every physical line spliced into one
+    command) plus the one line above it -- not "some line nearby". The three
+    negative tests below are what makes that a boundary rather than a
+    direction."""
+
+    CHAIN = (
+        "#!/usr/bin/env bash\n"
+        "mode=\"$(stat -f '%Lp' \"$1\" 2>/dev/null)\" \\\n"
+        "    || mode=\"$(stat -c '%a' \"$1\" 2>/dev/null)\" \\\n"
+        "    || return 0\n"
+    )
+
+    def test_without_a_marker_both_members_of_the_chain_are_findings(self):
+        """The red half. A `||` chain is not a guard (see
+        FallbackChainIsNotAnExemptionTest); both lines are reported."""
+        self.assertEqual(
+            [(2, "stat-f"), (3, "stat-c")],
+            sorted((f.line, f.rule) for f in _scan_text(self.CHAIN)),
+        )
+
+    def test_a_marker_on_the_finishing_line_exempts_the_whole_statement(self):
+        source = self.CHAIN.replace(
+            "    || return 0\n",
+            "    || return 0  # portability: exempt fixture-reason\n",
+        )
+        self.assertEqual([], _scan_text(source))
+
+    def test_a_marker_on_the_line_above_the_statement_exempts_it(self):
+        source = self.CHAIN.replace(
+            "mode=\"$(stat -f",
+            "# portability: exempt fixture-reason\nmode=\"$(stat -f",
+        )
+        self.assertEqual([], _scan_text(source))
+
+    def test_a_marker_two_lines_above_the_statement_does_not_exempt(self):
+        source = self.CHAIN.replace(
+            "mode=\"$(stat -f",
+            "# portability: exempt fixture-reason\necho unrelated\nmode=\"$(stat -f",
+        )
+        self.assertEqual(
+            [(4, "stat-f"), (5, "stat-c")],
+            sorted((f.line, f.rule) for f in _scan_text(source)),
+        )
+
+    def test_a_marker_on_the_line_after_the_statement_does_not_exempt(self):
+        """The forward boundary. The splice ends at `|| return 0`; a marker on
+        the NEXT line is outside the statement and must not reach back into
+        it. Without this the fix would be "look downwards until you find
+        one", which is a direction, not a scope."""
+        source = self.CHAIN + "# portability: exempt fixture-reason\n"
+        self.assertEqual(
+            [(2, "stat-f"), (3, "stat-c")],
+            sorted((f.line, f.rule) for f in _scan_text(source)),
+        )
+
+    def test_an_even_backslash_run_is_not_a_continuation(self):
+        """`cmd \\` ends the command and passes a literal backslash; only an
+        ODD trailing run splices. A naive `endswith("\\")` would splice this
+        line into the marker below it and exempt a construct nobody
+        exempted."""
+        source = (
+            "#!/usr/bin/env bash\n"
+            'stat -c %Y "$1" \\\\\n'
+            "# portability: exempt fixture-reason\n"
+        )
+        self.assertEqual(
+            [(2, "stat-c")], [(f.line, f.rule) for f in _scan_text(source)])
+
+    def test_a_backslash_followed_by_whitespace_is_not_a_continuation(self):
+        """A trailing space after the backslash kills the splice in the shell
+        too -- the scanner must agree with `bash`, not with a lenient rstrip."""
+        source = (
+            "#!/usr/bin/env bash\n"
+            'stat -c %Y "$1" \\ \n'
+            "# portability: exempt fixture-reason\n"
+        )
+        self.assertEqual(
+            [(2, "stat-c")], [(f.line, f.rule) for f in _scan_text(source)])
 
 
 # --------------------------------------------------------------------------
@@ -1488,18 +1903,313 @@ class KnownFindingsMatchTheCurrentScanTest(unittest.TestCase):
 
 class ClassificationCountsTest(unittest.TestCase):
     def test_classification_counts(self):
-        """Regression pin on the measured baseline (WI-0130, 30.08.2026): 29
-        scanned files, 11 rules, 9 findings across 2 files. A change in any of
-        these means a script changed shape or this scanner's own logic did --
-        worth a deliberate look either way, not a silent drift."""
+        """Regression pin on the measured baseline: 29 scanned files, 11
+        rules, and -- since R3 -- 0 unexempted findings with all 9 of
+        WI-0130's sites moved into the marker-exempted set, still in the same
+        2 files. A change in any of these means a script changed shape or
+        this scanner's own logic did -- worth a deliberate look either way,
+        not a silent drift.
+
+        The exempted count is pinned HERE as well as in EXEMPTED_SITES on
+        purpose: `0 findings` on its own is also what a scanner that stopped
+        matching anything would report, and the two numbers cannot both be
+        right if that happened."""
         findings = scan_tree()
+        exempted = exemptions_tree()
         self.assertEqual(29, len(scanned_files()))
         self.assertEqual(11, len(FLAG_RULES) + 1)
-        self.assertEqual(9, len(findings))
+        self.assertEqual(0, len(findings))
+        self.assertEqual(9, len(exempted))
         self.assertEqual(
             {"scripts/lib/frontmatter.sh", "scripts/log-cleanup.sh"},
-            {f.path_label for f in findings},
+            {path for path, _line, _rule, _cat in exempted},
         )
+
+
+# --------------------------------------------------------------------------
+# The exemption list, held to the same standard as the findings list (R3)
+# --------------------------------------------------------------------------
+
+
+def _strip_markers(text):
+    """Removes every `# portability: exempt ...` marker WITHOUT removing its
+    line -- the mutation has to change the exemption and nothing else, so
+    line numbers stay put and the restored findings can be compared to
+    EXEMPTED_SITES key for key."""
+    out = []
+    for line in text.split("\n"):
+        m = EXEMPTION_MARKER_RE.search(line)
+        out.append(line[:m.start()].rstrip() if m else line)
+    return "\n".join(out)
+
+
+def _move_marker(text, anchor, delta):
+    """Moves the marker on the line carrying `anchor` by `delta` lines,
+    without changing the line count. The structural mutation the R3 briefing
+    asks for: not "delete the marker" (which changes its PRESENCE, and any
+    exemption rule at all notices that) but "put it one line off", which
+    only a rule with a real boundary notices. `delta` is signed because the
+    two boundaries are not symmetric -- the sight reaches one line UP from
+    the statement's first line and down only to its last."""
+    lines = text.split("\n")
+    for i, line in enumerate(lines):
+        if anchor not in line:
+            continue
+        m = EXEMPTION_MARKER_RE.search(line)
+        if not m:
+            continue
+        lines[i] = line[:m.start()].rstrip()
+        lines[i + delta] = lines[i + delta] + "  " + line[m.start():]
+        return "\n".join(lines)
+    raise AssertionError(f"no marker found on a line containing {anchor!r}")
+
+
+class ExemptedSitesArePinnedTest(unittest.TestCase):
+    """The exemption list cannot grow, shrink or SWAP silently. Set equality
+    on `(path, line, rule, category)`, the same standard
+    `KnownFindingsMatchTheCurrentScanTest` holds the findings list to -- an
+    exemption nobody re-verifies is the drift this repo has already grown
+    four skip lists' worth of."""
+
+    def test_the_marker_exempted_sites_equal_the_registry(self):
+        current = set(exemptions_tree())
+        self.assertEqual(
+            EXEMPTED_SITES, current,
+            "the portability EXEMPTION list drifted from its registry.\n"
+            "  new:  {}\n  gone: {}".format(
+                sorted(current - EXEMPTED_SITES), sorted(EXEMPTED_SITES - current),
+            ),
+        )
+
+    def test_the_two_stat_sites_are_not_filed_as_portable_idioms(self):
+        """The classification, not just the count. The `stat` chain works by
+        an accident of operand shape and the `date` chains do not; filing all
+        nine under one category would put a false statement in the shipped
+        source, which is the exact register drift this round removes
+        elsewhere."""
+        by_category = {}
+        for path, line, rule, category in exemptions_tree():
+            by_category.setdefault(category, set()).add((path, line, rule))
+        self.assertEqual(
+            {("scripts/lib/frontmatter.sh", 259, "stat-f"),
+             ("scripts/lib/frontmatter.sh", 260, "stat-c")},
+            by_category.get("stat-f-guard-is-an-operand-accident"),
+        )
+        self.assertEqual(
+            7, len(by_category.get("bsd-gnu-date-flags-are-mutually-invalid", ())))
+
+
+class EveryMarkerNamesARegisteredCategoryTest(unittest.TestCase):
+    """A marker's reason token has to resolve to a written-down reason. A free
+    text token would satisfy the grammar and record nothing reviewable."""
+
+    def test_every_category_in_the_tree_is_registered(self):
+        unregistered = sorted(
+            (path, line, category)
+            for path, line, _rule, category in exemptions_tree()
+            if category not in EXEMPTION_CATEGORIES
+        )
+        self.assertEqual([], unregistered)
+
+    def test_every_registered_category_is_used(self):
+        """The other direction: a category nobody carries any more is a dead
+        reason, and dead entries are how a register starts lying."""
+        used = {category for _p, _l, _r, category in exemptions_tree()}
+        self.assertEqual([], sorted(set(EXEMPTION_CATEGORIES) - used))
+
+    def test_every_registered_reason_is_substantial(self):
+        thin = [k for k, v in EXEMPTION_CATEGORIES.items() if len(v) < 200]
+        self.assertEqual([], thin)
+
+
+class NoStaleMarkerTest(unittest.TestCase):
+    """A marker at a place that has no finding is itself a finding. Same
+    accounting direction `NoStaleKnownFindingsTest` enforces for
+    `test_absence_only_assertions.py`'s registry: without it, a repaired site
+    leaves its marker behind, and the next construct that drifts onto that
+    line arrives pre-excused."""
+
+    def test_no_marker_in_the_tree_excuses_nothing(self):
+        self.assertGreater(
+            len(exemptions_tree()), 0,
+            "no marker-exempted site found at all -- the staleness check "
+            "below would pass vacuously; the scan stopped enumerating",
+        )
+        self.assertEqual([], stale_markers_tree())
+
+    def test_a_marker_on_an_innocent_line_is_reported(self):
+        """The red half, on a fixture: without it the assertion above is only
+        the claim that `stale_markers` returns an empty list, which the
+        function would also do if it were `return []`."""
+        source = (
+            "#!/usr/bin/env bash\n"
+            "echo nothing portable here  # portability: exempt fixture-reason\n"
+        )
+        self.assertEqual(
+            [("fixture.sh", 2, "fixture-reason")], stale_markers(source, "fixture.sh"))
+
+    def test_a_marker_on_a_uname_guarded_construct_is_reported(self):
+        """A marker that duplicates a `uname` branch excuses nothing either --
+        it is dead the moment it is written, and a category tally that counted
+        it would overstate what the marker list is holding up."""
+        source = (
+            "#!/usr/bin/env bash\n"
+            "mtime_of() {\n"
+            '    if [[ "$(uname)" == "Darwin" ]]; then\n'
+            '        stat -f %m "$1"  # portability: exempt fixture-reason\n'
+            "    else\n"
+            '        stat -c %Y "$1"\n'
+            "    fi\n"
+            "}\n"
+        )
+        self.assertEqual([], scan_source(source, "fixture.sh"))
+        self.assertEqual(
+            [("fixture.sh", 4, "fixture-reason")], stale_markers(source, "fixture.sh"))
+
+
+class RemovingTheMarkersRestoresTheFindingsTest(unittest.TestCase):
+    """The other direction of the exemption proof, on the SHIPPED files rather
+    than on a fixture. `ExemptedSitesArePinnedTest` shows the markers are
+    there; this shows they are the only thing standing between the scan and
+    nine findings. Without it, an exemption rule that excused everything --
+    or a scanner that had quietly stopped matching `date` at all -- would look
+    identical."""
+
+    def test_stripping_every_marker_brings_all_nine_findings_back(self):
+        restored = set()
+        for f in scanned_files():
+            label = f.relative_to(REPO_ROOT).as_posix()
+            restored.update(
+                x.key() for x in scan_source(_strip_markers(f.read_text()), label))
+        self.assertEqual({(p, l, r) for p, l, r, _c in EXEMPTED_SITES}, restored)
+
+
+class MarkerOnTheWrongLineDoesNotExemptTheShippedSiteTest(unittest.TestCase):
+    """The structural mutation. Deleting a marker is the weak form -- it
+    changes the marker's PRESENCE, and any rule at all notices that. Moving it
+    one line down changes only its POSITION, so it shows where the boundary
+    actually is: `marker_sight` is the logical line plus the line above, and
+    the line BELOW the statement is outside it."""
+
+    def _mutate(self, path, anchor, delta):
+        text = (REPO_ROOT / path).read_text()
+        mutated = _move_marker(text, anchor, delta)
+        self.assertNotEqual(text, mutated, "the mutation did not apply")
+        self.assertEqual(
+            text.count("portability: exempt"),
+            mutated.count("portability: exempt"),
+            "the mutation removed a marker instead of moving it",
+        )
+        self.assertEqual(
+            len(text.split("\n")), len(mutated.split("\n")),
+            "the mutation changed the line count",
+        )
+        return sorted(f.key() for f in scan_source(mutated, path))
+
+    def test_moving_the_stat_chain_marker_off_the_statement_restores_both(self):
+        self.assertEqual(
+            [("scripts/lib/frontmatter.sh", 259, "stat-f"),
+             ("scripts/lib/frontmatter.sh", 260, "stat-c")],
+            self._mutate("scripts/lib/frontmatter.sh", "|| return 0", +1),
+        )
+
+    def test_moving_the_cutoff_date_marker_one_line_up_restores_both(self):
+        """The UPPER boundary. This marker sits on the comment line directly
+        above its construct, so the mutation that tests the boundary is a move
+        AWAY from the construct, not towards it -- one line further up is two
+        lines above the construct, and out of sight."""
+        self.assertEqual(
+            [("scripts/log-cleanup.sh", 69, "date-d"),
+             ("scripts/log-cleanup.sh", 69, "date-v")],
+            self._mutate("scripts/log-cleanup.sh", "# Current date as reference", -1),
+        )
+
+    def test_moving_the_gnu_date_marker_one_line_down_restores_it(self):
+        self.assertEqual(
+            [("scripts/lib/frontmatter.sh", 243, "date-d")],
+            self._mutate("scripts/lib/frontmatter.sh", 'date -u -d "$iso"', +1),
+        )
+
+
+class MarkerTextIsReadOffLiveSourceTest(unittest.TestCase):
+    """Code review R3, Important 1 and 2: both the marker search and the
+    splice detection ran on the RAW text, while the constructs they are
+    matched against are found in text with heredoc bodies blanked. Two
+    consequences, neither of them theoretical:
+
+      * a marker-shaped line inside a heredoc BODY -- a script writing a
+        script -- can never be in any construct's sight, so `stale_markers`
+        reported it as dead on every run. A staleness detector with a
+        built-in false positive is not one.
+      * a COMMENT ending in a backslash is not a line continuation in the
+        shell, but `_splices` read it as one, silently extending the sight
+        upwards past it. A marker above such a comment exempted a construct
+        below it -- the sight widening quietly, which is exactly what the
+        rest of this round exists to prevent.
+
+    Fixed by giving each question the right basis: markers are searched in
+    heredoc-blanked text (comments intact, because the marker IS a comment),
+    splices in heredoc-AND-comment-blanked text (escapes intact, because the
+    continuation IS an escape). Both were already computed."""
+
+    def test_a_marker_inside_a_heredoc_body_is_not_a_stale_marker(self):
+        source = (
+            "#!/usr/bin/env bash\n"
+            "cat > out.sh <<'EOF'\n"
+            "# portability: exempt fixture-reason\n"
+            "EOF\n"
+        )
+        self.assertEqual([], stale_markers(source, "fixture.sh"))
+
+    def test_a_marker_inside_a_heredoc_body_does_not_exempt_a_construct(self):
+        source = (
+            "#!/usr/bin/env bash\n"
+            "cat > out.sh <<'EOF'\n"
+            "# portability: exempt fixture-reason\n"
+            "EOF\n"
+            'stat -c %Y "$1"\n'
+        )
+        self.assertEqual(
+            [(5, "stat-c")], [(f.line, f.rule) for f in _scan_text(source)])
+
+    def test_a_comment_ending_in_a_backslash_does_not_extend_the_sight(self):
+        """`# ... \\` does NOT continue in the shell -- a comment runs to the
+        end of the line, backslash or not. Reading it as a splice pulled the
+        marker on line 1 into line 3's sight."""
+        source = (
+            "# portability: exempt fixture-reason\n"
+            "# an ordinary comment that happens to end in a backslash \\\n"
+            'stat -c %Y "$1"\n'
+        )
+        self.assertEqual(
+            [(3, "stat-c")], [(f.line, f.rule) for f in _scan_text(source)])
+
+    def test_a_comment_backslash_does_not_keep_a_stale_marker_alive(self):
+        """The same wrong basis inside `stale_markers` rather than inside the
+        exemption: with the raw text as the splice basis, line 2's comment
+        pulls line 1 into line 3's sight, and the dead marker on line 1 looks
+        used. Added after a mutation of `stale_markers`' own sight call
+        SURVIVED the rest of this class -- the two callers need their own
+        discriminator each."""
+        source = (
+            "# portability: exempt fixture-reason\n"
+            "# an ordinary comment that happens to end in a backslash \\\n"
+            'stat -c %Y "$1"\n'
+        )
+        self.assertEqual(
+            [("fixture.sh", 1, "fixture-reason")], stale_markers(source, "fixture.sh"))
+
+    def test_a_real_continuation_still_extends_the_sight(self):
+        """The other direction, so the fix cannot be "never splice". Same
+        chain as MarkerCoversTheWholeContinuedStatementTest, kept here as the
+        positive control for the comment-blanked splice basis."""
+        source = (
+            "#!/usr/bin/env bash\n"
+            "mode=\"$(stat -f '%Lp' \"$1\" 2>/dev/null)\" \\\n"
+            "    || mode=\"$(stat -c '%a' \"$1\" 2>/dev/null)\" \\\n"
+            "    || return 0  # portability: exempt fixture-reason\n"
+        )
+        self.assertEqual([], _scan_text(source))
 
 
 class EveryRuleNamesItsDivergenceTest(unittest.TestCase):
