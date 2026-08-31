@@ -865,6 +865,45 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Fixed
 
+- **`install.sh --verify` reported generated artefacts as divergence.** Found on its first real
+  run, seconds after the first `--update` that wrote a provenance marker: 161 of 161 files
+  compared and every one correct, but `hooks/__pycache__/agent-monitor.cpython-314.pyc` and
+  `templates/.DS_Store` were reported as UNEXPECTED. Neither comes from the repository — the
+  Python interpreter writes the first when the hook runs, the Finder writes the second — so the
+  check would have been permanently red on any macOS machine, for nothing.
+
+  That is worse than an ordinary false positive: it is the exact argument `check-all.sh` was
+  built on and states in its own header — **a check that is red when nothing is wrong is ignored
+  within a fortnight**, and then the run that reports something real is ignored with it.
+
+  **CI could not have caught it.** A runner has no installation, so the check correctly reports
+  could-not-run there and the job stays green. The defect is visible only on a machine with a
+  real installation — the same shape WI-0130 argued about: a rule written in the repository that
+  defines it is a hypothesis until it meets a consumer.
+
+  **The exclusion is derived, not typed.** One line —
+  `git -C "$SRC" -c core.excludesFile=/dev/null check-ignore -q -- "$rel"` — and the argument is
+  structural rather than a judgement about filenames: **a path the source repository refuses to
+  track cannot be inside any commit, so its presence in the installation is not drift from one.**
+  `.gitignore` already states that once and `check-ignore` is its reference implementation, so
+  both the rule and its evaluator are borrowed instead of rebuilt. There is no second register to
+  drift. Excused paths are counted separately and printed in their own `IGNORED` block rather
+  than dropped — an exemption nobody can see is the next drifting skip list.
+
+  The exemption is held from both sides: the fixture copies the *shipped* `.gitignore` instead of
+  retyping a subset, so dropping `__pycache__/` from it makes the artefact a finding again; and
+  removing the rule, inventing an unused pattern, or moving the rule to the adopter's global git
+  config each produce the measured outcome. Any `check-ignore` status other than 0 — git's 128
+  included — leaves the path in UNEXPECTED, and the argument was probed with `-rf`, `*`, `;`,
+  `$(…)`, `..`, spaces and non-ASCII.
+
+  MISSING, CHANGED and the total are untouched, and a real foreign body still exits 1 — proven
+  against a rogue file, a rogue file *beside* an excused one, a rogue dotfile, an edited command
+  and a deleted agent. Of five structural mutations, the two **widenings** are the ones deleting
+  the rule cannot stand in for; each left the artefact tests green while going red elsewhere.
+  One mutation survived the whole module and exposed a comment describing a case the code never
+  reaches — test written, comment rewritten to what the run showed.
+
 - **`scripts/lib/frontmatter.sh` was blind to CRLF frontmatter** (finding #22). `fm_has` and
   its siblings compared `$0 == "---"`; on a CRLF file awk sees `"---\r"`, so the whole block
   read as absent. **The error direction is the dangerous one**: the lint is the strict reader

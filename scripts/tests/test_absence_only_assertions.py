@@ -873,7 +873,7 @@ class NoStaleKnownFindingsTest(unittest.TestCase):
 
 class ClassificationCountsTest(unittest.TestCase):
     def test_classification_counts(self):
-        """Regression pin on the measured baseline: 1170 `test_*` methods
+        """Regression pin on the measured baseline: 1176 `test_*` methods
         across the corpus call something shaped like a subprocess invocation
         and are therefore in scope for this check; 0 of those are currently
         absence-only-needs-exemption -- `KNOWN_FINDINGS` above is empty for
@@ -887,6 +887,26 @@ class ClassificationCountsTest(unittest.TestCase):
         growing paragraph:
 
           in-scope / flagged   when
+          1176 / 0             31.08.2026: install.sh --verify stopped
+                               reporting locally generated files as
+                               divergence. The exemption is derived from the
+                               source checkout's own ignore rules
+                               (`git check-ignore`), so most of its tests
+                               drive `self.verify()` and stay out of scope;
+                               +6 come from
+                               TheExemptionIsDerivedFromTheSourceCheckoutTest,
+                               whose six methods each install first via
+                               `self.run_install`. None flagged; every one
+                               asserts on a returncode plus a named path in
+                               a named report block. Set proof rather than a
+                               bare delta: the scanner was run against a
+                               `git archive` of 8b824bf in a scratch tree and
+                               against this one, keyed on (module,
+                               Class.method) so line shifts cannot read as
+                               moves -- exactly those six additions, zero
+                               removals. The file count did not move: no new
+                               module, the tests went into the existing
+                               test_install_provenance.py.
           1170 / 0             31.08.2026: check-all.sh's catalogue gained a
                                ninth entry, install.sh --verify, wired in as
                                a new "installer" CHECK_KIND parametrised by
@@ -1535,7 +1555,7 @@ class ClassificationCountsTest(unittest.TestCase):
         count."""
         recs = scan_tree()
         flagged = [r for r in recs if r.disposition in NEEDS_EXEMPTION]
-        self.assertEqual(1170, len(recs))
+        self.assertEqual(1176, len(recs))
         self.assertEqual(0, len(flagged))
 
 

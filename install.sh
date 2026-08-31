@@ -202,6 +202,85 @@ PROVENANCE_FILE=".ccpr-install-provenance"
 # result.
 VERIFY_SCOPE=( agents commands hooks templates )
 
+# path_is_source_ignored <relpath> -- would the SOURCE repository refuse to
+# track this path?
+#
+# An installation grows files nobody installed. Running a hook once leaves
+# `hooks/__pycache__/*.pyc`; opening the tree in a macOS file browser leaves
+# `.DS_Store`. Both sit inside VERIFY_SCOPE and neither is in any commit, so
+# the UNEXPECTED half reported both -- DIVERGENT on a correct installation,
+# on every macOS machine, from the first run onward. That is the one defect
+# scripts/check-all.sh names in its own header as fatal to a check: red when
+# nothing is wrong is red nobody reads, and the run that finds something
+# real goes unread with it.
+#
+# The exclusion is DERIVED rather than typed, which is the rule d85c2bd
+# settled: the source repository already states which paths are not part of
+# its delivered tree, in .gitignore, and `git check-ignore` is the reference
+# implementation of that statement. A path this repository will not track
+# cannot be inside any commit, so its presence in the installation is not
+# drift FROM one. A typed pattern list here would be a second register of
+# the same fact, free to drift from the first (G-091).
+#
+# THE ONE PLACE --verify IS NOT PINNED TO THE RECORDED COMMIT. Everything
+# else here resolves against $p_commit (`ls-tree`, `hash-object`). The ignore
+# rules cannot: `check-ignore` is a working-tree operation and takes no
+# commit, so it reads $SRC AS IT STANDS ON DISK -- including a .gitignore
+# edit that is uncommitted, or not even `git add`ed, and including
+# .git/info/exclude. Measured, not assumed: an untracked one-line .gitignore
+# in $SRC moves an already-planted foreign file from UNEXPECTED to IGNORED
+# on the next run, with nothing about $DEST or the marker changed.
+#
+# Kept deliberately, because the question this branch answers is not the
+# same question as the comparison's. "What should be installed" is a
+# property OF the recorded commit. "What gets generated locally" is a
+# property of the TOOLING, and today's checkout knows about a generator a
+# six-month-old commit never met. The cost is the door above; the price of
+# closing it is evaluating the rules against a clean checkout of $p_commit
+# (a temporary worktree -- `core.excludesFile` alone cannot do it, the
+# worktree's own .gitignore still applies on top), which is a bigger change
+# than this one. Whoever revisits it should note that $SRC is inside the
+# trust boundary regardless: the program answering the question IS
+# $SRC/install.sh.
+#
+# Three properties this shape has and a typed list would not:
+#   * index-aware: `check-ignore` reports a TRACKED path as NOT ignored even
+#     when a pattern matches it. That buys one narrow case -- the checkout
+#     has moved on and now tracks a file the RECORDED commit never had, and
+#     a copy of it turns up in the installation: still drift, still named.
+#     It is NOT what keeps MISSING and CHANGED out of reach; that is
+#     structural, since this branch is consulted only for paths the recorded
+#     commit does not carry and a shipped file is carried by definition.
+#     Measured, not assumed: switching this to `--no-index` leaves every
+#     test in scripts/tests/test_install_provenance.py green except the one
+#     written for exactly it.
+#   * `core.excludesFile=/dev/null` cuts out the adopter's PERSONAL global
+#     ignore file. That file says what its owner does not want to see in ANY
+#     repository; it says nothing about what CCPR ships, and one broad
+#     pattern in it (`*.md`) would otherwise excuse every foreign agent file
+#     in the installation. This is the one exclude source that is cut; the
+#     checkout's own files stay in scope per the paragraph above.
+#   * fail-closed: any status other than 0 (including git erroring out, 128)
+#     leaves the path in UNEXPECTED, which is the behaviour that existed
+#     before this exemption. A broken exclusion is loud, never silent.
+#
+# BREADTH: it inherits EVERY rule in that .gitignore, not only the two the
+# defect named. Measured against the shipped file, `*.egg-info/`, `.vscode/`,
+# `.idea/`, `*.log`, `*.swp`, `*~`, `Thumbs.db` and `desktop.ini` all ride
+# along, so a foreign file wearing one of those shapes is excused too. What
+# does NOT ride along is every shape the framework actually loads --
+# `agents/*.md`, `commands/*.md`, `hooks/*.py`, `hooks/*.sh`,
+# `templates/*.md` are all reported, and a test pins exactly that.
+#
+# What it excuses is reported by name in its own IGNORED block rather than
+# dropped -- an exemption nobody can see is the next drifting skip list.
+path_is_source_ignored() {
+  local rc=0
+  git -C "$SRC" -c core.excludesFile=/dev/null check-ignore -q -- "$1" \
+    >/dev/null 2>&1 || rc=$?
+  [[ "$rc" -eq 0 ]]
+}
+
 SRC_PHYS=""
 SRC_KIND="non-git"
 SRC_COMMIT=""
@@ -277,8 +356,8 @@ verify_installation() {
   local line key val
   local expected_raw meta path sha ahash
   local expected_count=0 compared=0
-  local missing="" differing="" extra=""
-  local missing_n=0 differing_n=0 extra_n=0
+  local missing="" differing="" extra="" ignored=""
+  local missing_n=0 differing_n=0 extra_n=0 ignored_n=0
   local exp_paths d f rel total toplevel scan_out
   local enum_incomplete=0
 
@@ -408,7 +487,13 @@ verify_installation() {
       rel="${f#"$DEST"/}"
       case "$exp_paths" in
         *$'\n'"$rel"$'\n'*) ;;
-        *) extra="${extra}${rel}"$'\n'; extra_n=$((extra_n + 1)) ;;
+        *)
+          if path_is_source_ignored "$rel"; then
+            ignored="${ignored}${rel}"$'\n'; ignored_n=$((ignored_n + 1))
+          else
+            extra="${extra}${rel}"$'\n'; extra_n=$((extra_n + 1))
+          fi
+          ;;
       esac
     done <<< "$scan_out"
   done
@@ -428,6 +513,14 @@ verify_installation() {
   if [[ "$extra_n" -gt 0 ]]; then
     echo "  UNEXPECTED -- in the installation, not in the recorded commit:"
     printf '%s' "$extra" | LC_ALL=C sort | sed 's/^/    - /'
+  fi
+  if [[ "$ignored_n" -gt 0 ]]; then
+    echo "  IGNORED -- in the installation, ignored by the SOURCE CHECKOUT (excused, not skipped):"
+    printf '%s' "$ignored" | LC_ALL=C sort | sed 's/^/    - /'
+    echo "    (git check-ignore against $SRC as it stands now -- the one rule here"
+    echo "     NOT resolved from commit $p_commit. A path this repository will not"
+    echo "     track is in no commit, so having it here is not drift from one --"
+    echo "     it is locally generated. Not counted as a finding.)"
   fi
 
   total=$((missing_n + differing_n + extra_n))

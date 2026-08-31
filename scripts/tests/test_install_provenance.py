@@ -492,6 +492,344 @@ class VerifyReportsDivergenceTest(VerifyBase):
         self.assertNotIn("no divergence", r.stdout.lower())
 
 
+# ---------------------------------------------------------------------------
+# Locally generated artefacts -- the exemption, and both of its directions
+# ---------------------------------------------------------------------------
+
+
+def report_block(out, heading):
+    """The `    - path` lines following a `  HEADING -- ...` line in a
+    --verify report. Returns [] when the heading is absent, so a test can
+    assert that a class produced nothing without also having to assert on
+    the wording of a section that was never printed."""
+    lines = out.splitlines()
+    for i, line in enumerate(lines):
+        if line.strip().startswith(heading + " --"):
+            paths = []
+            for follow in lines[i + 1:]:
+                if follow.startswith("    - "):
+                    paths.append(follow[len("    - "):])
+                else:
+                    break
+            return paths
+    return []
+
+
+# Both names come from a measured installation, not from an invented
+# placeholder: running the hooks once leaves the first, opening the tree in
+# a macOS file browser leaves the second. Neither can ever be in a commit --
+# the repository's own .gitignore excludes both.
+PYCACHE_ARTEFACT = "hooks/__pycache__/agent-monitor.cpython-314.pyc"
+DS_STORE_ARTEFACT = "templates/.DS_Store"
+
+
+class LocallyGeneratedArtefactsAreNotDivergenceTest(VerifyBase):
+    """An installation grows files nobody put there. A `.pyc` cache appears
+    the first time a hook runs; a `.DS_Store` appears when the directory is
+    opened in a file browser. Both are inside the compared scope, both are
+    absent from every commit, and before this exemption both were reported
+    as UNEXPECTED -- so `--verify` was DIVERGENT on a correct installation,
+    on every macOS machine, from the first run onwards.
+
+    That is not merely a false positive. It is the exact failure mode
+    `scripts/check-all.sh` was built against and states in its own header:
+    a check that is red when nothing is wrong gets ignored, and then the
+    run that reports something real is ignored with it.
+
+    The exemption is DERIVED, not typed: `git check-ignore` against the
+    source checkout. A path the source repository itself refuses to track
+    cannot be in any commit, so its presence in the installation is not
+    drift from one. `TheExemptionIsDerivedFromTheSourceCheckoutTest` below
+    holds that derivation to its source; this class holds it to reality by
+    copying the SHIPPED .gitignore into the fixture rather than retyping a
+    subset of it."""
+
+    def setUp(self):
+        super().setUp()
+        shutil.copy(REPO_ROOT / ".gitignore", self.src / ".gitignore")
+        self.git("add", "-A")
+        self.commit("add the shipped .gitignore")
+        self.assertEqual(0, self.run_install("--yes").returncode)
+
+    def plant(self, rel, body="x\n"):
+        p = self.dest / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(body, encoding="utf-8")
+        return p
+
+    def test_a_python_bytecode_cache_left_by_a_hook_is_not_a_divergence(self):
+        self.plant(PYCACHE_ARTEFACT)
+        r = self.verify()
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertIn("Result: VERIFIED", r.stdout)
+        self.assertEqual([], report_block(r.stdout, "UNEXPECTED"))
+
+    def test_a_finder_metadata_file_is_not_a_divergence(self):
+        self.plant(DS_STORE_ARTEFACT)
+        r = self.verify()
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertIn("Result: VERIFIED", r.stdout)
+        self.assertEqual([], report_block(r.stdout, "UNEXPECTED"))
+
+    def test_the_pair_a_real_installation_grows_verifies_clean(self):
+        """The measured case, reproduced: an installation that is correct in
+        every shipped file and carries exactly these two extra paths."""
+        self.plant(PYCACHE_ARTEFACT)
+        self.plant(DS_STORE_ARTEFACT)
+        r = self.verify()
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertIn("Result: VERIFIED", r.stdout)
+
+    def test_the_exempted_paths_are_reported_rather_than_silently_dropped(self):
+        """An exemption nobody can see is the next drifting skip list. The
+        run names what it excused and why, so the exemption is auditable
+        from the report itself -- the same carve-out install_docs() already
+        makes when it names each skipped working-state path."""
+        self.plant(PYCACHE_ARTEFACT)
+        self.plant(DS_STORE_ARTEFACT)
+        r = self.verify()
+        self.assertEqual(
+            [PYCACHE_ARTEFACT, DS_STORE_ARTEFACT],
+            sorted(report_block(r.stdout, "IGNORED")),
+        )
+        self.assertIn("check-ignore", r.stdout)
+
+    def test_a_foreign_file_is_still_unexpected_alongside_the_exempted_ones(self):
+        """The second direction. A fix that simply stopped reporting
+        UNEXPECTED would pass every test above and this one is the reason it
+        would not pass here: somebody's own agent file in the installation is
+        still a finding, still named, and still exit 1."""
+        self.plant(PYCACHE_ARTEFACT)
+        self.plant(DS_STORE_ARTEFACT)
+        self.plant("agents/rogue-agent.md", "# not from any commit\n")
+        r = self.verify()
+        self.assertEqual(1, r.returncode, r.stdout + r.stderr)
+        self.assertEqual(["agents/rogue-agent.md"], report_block(r.stdout, "UNEXPECTED"))
+        self.assertNotIn("Result: VERIFIED", r.stdout)
+
+    def test_a_foreign_file_beside_an_exempted_one_is_still_reported(self):
+        """Discriminates the PATTERN from the DIRECTORY. An exclusion widened
+        to "this directory produced an excused file, so excuse the rest of
+        it" verifies clean here -- somebody's own hook, sitting next to the
+        bytecode cache that earned the exemption, walks straight through."""
+        self.plant(PYCACHE_ARTEFACT)
+        self.plant("hooks/my-own-hook.py", "# mine\n")
+        r = self.verify()
+        self.assertEqual(1, r.returncode, r.stdout + r.stderr)
+        self.assertEqual(["hooks/my-own-hook.py"], report_block(r.stdout, "UNEXPECTED"))
+        self.assertEqual([PYCACHE_ARTEFACT], report_block(r.stdout, "IGNORED"))
+
+    def test_a_foreign_dotfile_is_still_reported(self):
+        """Discriminates the derived rule from the naive one it is easy to
+        mistake it for. "Excuse every dotfile and every generated-looking
+        directory" excuses both measured artefacts too, and is broader by
+        exactly this file: the shipped .gitignore says nothing about a
+        dotfile under templates/, so a scratch note left there is drift and
+        has to be named."""
+        self.plant(DS_STORE_ARTEFACT)
+        self.plant("templates/.private-notes.md", "# mine\n")
+        r = self.verify()
+        self.assertEqual(1, r.returncode, r.stdout + r.stderr)
+        self.assertEqual(["templates/.private-notes.md"],
+                         report_block(r.stdout, "UNEXPECTED"))
+        self.assertEqual([DS_STORE_ARTEFACT], report_block(r.stdout, "IGNORED"))
+
+    def test_a_changed_shipped_file_is_still_reported(self):
+        self.plant(PYCACHE_ARTEFACT)
+        self.plant(DS_STORE_ARTEFACT)
+        (self.dest / "commands" / "guide.md").write_text("# tampered\n", encoding="utf-8")
+        r = self.verify()
+        self.assertEqual(1, r.returncode, r.stdout + r.stderr)
+        self.assertEqual(["commands/guide.md"], report_block(r.stdout, "CHANGED"))
+
+    def test_a_missing_shipped_file_is_still_reported(self):
+        self.plant(PYCACHE_ARTEFACT)
+        self.plant(DS_STORE_ARTEFACT)
+        (self.dest / "agents" / "konzeptor.md").unlink()
+        r = self.verify()
+        self.assertEqual(1, r.returncode, r.stdout + r.stderr)
+        self.assertEqual(["agents/konzeptor.md"], report_block(r.stdout, "MISSING"))
+
+    def test_no_rule_in_the_shipped_gitignore_excuses_a_framework_file_shape(self):
+        """The breadth question, answered where it matters. The exemption
+        inherits EVERY rule in the shipped .gitignore, not only the two the
+        defect named -- so the invariant worth pinning is not "the rule set
+        is small" but "nothing the framework actually loads is inside it".
+        One foreign file per scope directory, in the shape that directory
+        ships: all five reported, none excused."""
+        rogues = [
+            "agents/rogue-agent.md",
+            "commands/rogue.md",
+            "hooks/rogue.py",
+            "hooks/rogue.sh",
+            "templates/ROGUE.md",
+        ]
+        for rel in rogues:
+            self.plant(rel, "# not from any commit\n")
+        r = self.verify()
+        self.assertEqual(1, r.returncode, r.stdout + r.stderr)
+        self.assertEqual(sorted(rogues), sorted(report_block(r.stdout, "UNEXPECTED")))
+        self.assertEqual([], report_block(r.stdout, "IGNORED"))
+
+    def test_the_exemption_inherits_the_broad_rules_too_and_that_is_measured(self):
+        """Recorded because it is a consequence, not a goal. `*.egg-info/`
+        and `*.log` are in the shipped .gitignore for this repository's own
+        housekeeping, and the derivation takes them along: a foreign file
+        wearing one of those shapes is excused. Narrowing it would mean
+        intersecting the derived set with a typed list of shapes -- exactly
+        the second register this fix exists to avoid -- so it is a decision
+        rather than an oversight, and this test is where the decision is
+        visible. If it ever goes red, the rule set changed and somebody
+        should be told."""
+        self.plant("agents/payload.egg-info/inside.md", "# rides along\n")
+        self.plant("agents/notes.log", "log\n")
+        r = self.verify()
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertEqual(
+            ["agents/notes.log", "agents/payload.egg-info/inside.md"],
+            sorted(report_block(r.stdout, "IGNORED")),
+        )
+
+    def test_an_exempted_path_is_not_counted_into_the_compared_scope(self):
+        """The exempted files are not compared against anything -- they have
+        no counterpart in the commit. The scope line must keep reporting the
+        commit's file count, so KA-G-017's "0 files compared is not a pass"
+        guard still measures what it was written to measure."""
+        self.plant(PYCACHE_ARTEFACT)
+        r = self.verify()
+        self.assertRegex(r.stdout, r"compared\s+4\s+file\(s\), of 4 in scope")
+
+
+class TheExemptionIsDerivedFromTheSourceCheckoutTest(VerifyBase):
+    """The exemption must come from the source repository's own ignore
+    rules, not from a list inside install.sh. Three tests, each of which a
+    hardcoded list would fail:
+
+      * remove the rule and the very same filename is a finding again,
+      * invent a rule install.sh has never heard of and it is honoured,
+      * put the rule in the USER's global ignore file instead and it is
+        NOT honoured -- the source of truth is this repository's statement
+        about its own delivered tree, not the adopter's editor habits."""
+
+    def plant(self, rel, body="x\n"):
+        p = self.dest / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(body, encoding="utf-8")
+        return p
+
+    def test_without_a_matching_rule_the_same_filename_is_a_divergence(self):
+        """No .gitignore in this fixture at all. If `.DS_Store` were exempt
+        by name inside install.sh, this would still pass clean."""
+        self.assertFalse((self.src / ".gitignore").exists())
+        self.assertEqual(0, self.run_install("--yes").returncode)
+        self.plant(DS_STORE_ARTEFACT)
+        r = self.verify()
+        self.assertEqual(1, r.returncode, r.stdout + r.stderr)
+        self.assertEqual([DS_STORE_ARTEFACT], report_block(r.stdout, "UNEXPECTED"))
+
+    def test_a_rule_that_appears_nowhere_in_install_sh_is_honoured(self):
+        (self.src / ".gitignore").write_text("*.wibble\n", encoding="utf-8")
+        self.git("add", "-A")
+        self.commit("a rule install.sh cannot know")
+        self.assertNotIn(
+            "wibble", INSTALL.read_text(encoding="utf-8"),
+            "the token must be absent from install.sh, or this test proves nothing",
+        )
+        self.assertEqual(0, self.run_install("--yes").returncode)
+        self.plant("agents/scratch.wibble")
+        r = self.verify()
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertEqual(["agents/scratch.wibble"], report_block(r.stdout, "IGNORED"))
+
+    def test_a_path_the_checkout_now_tracks_is_still_not_in_the_recorded_commit(self):
+        """`git check-ignore` is index-aware, and that is load-bearing here:
+        a TRACKED path is reported as not ignored even when a pattern
+        matches it. The case is narrow but real -- the checkout has moved on
+        and force-tracked a file the recorded commit never had, and a copy of
+        it turns up in the installation. It is drift from that commit
+        whatever the checkout does with it today.
+
+        Without the index (`check-ignore --no-index`) the pattern wins and
+        the file is excused; every other test in this module survives that
+        change, so this one is the whole discriminator for it."""
+        self.assertEqual(0, self.run_install("--yes").returncode)
+        recorded = self.marker()["source_commit"]
+        (self.src / ".gitignore").write_text("*.md\n", encoding="utf-8")
+        (self.src / "agents" / "later.md").write_text("# added after the install\n",
+                                                      encoding="utf-8")
+        self.git("add", "-f", ".gitignore", "agents/later.md")
+        moved_on = self.commit("track a file the recorded commit does not have")
+        self.assertNotEqual(recorded, moved_on)
+        self.plant("agents/later.md", "# added after the install\n")
+        r = self.verify()
+        self.assertEqual(1, r.returncode, r.stdout + r.stderr)
+        self.assertEqual(["agents/later.md"], report_block(r.stdout, "UNEXPECTED"))
+
+    def test_the_rules_come_from_the_checkout_as_it_stands_not_from_the_commit(self):
+        """The one place `--verify` is NOT pinned to the recorded commit,
+        declared here so it is a decision rather than a discovery.
+        `git check-ignore` is a working-tree operation and takes no commit,
+        so an ignore rule that is uncommitted -- not even `git add`ed --
+        already changes how an installation is classified.
+
+        Both halves are asserted, so the test states the trade-off instead
+        of merely tolerating it: the same foreign file, same installation,
+        same recorded commit, reported before the edit and excused after.
+        install.sh's own comment carries the reasoning and the price of
+        closing it; changing this behaviour means changing that decision,
+        and this test is where it would go red."""
+        self.assertEqual(0, self.run_install("--yes").returncode)
+        self.plant("agents/rogue-agent.md", "# not from any commit\n")
+        before = self.verify()
+        self.assertEqual(1, before.returncode, before.stdout + before.stderr)
+        self.assertEqual(["agents/rogue-agent.md"],
+                         report_block(before.stdout, "UNEXPECTED"))
+
+        (self.src / ".gitignore").write_text("rogue-agent.md\n", encoding="utf-8")
+        self.assertIn("?? .gitignore",
+                      self.git("status", "--porcelain").stdout,
+                      "the rule must be UNTRACKED for this test to say anything")
+
+        after = self.verify()
+        self.assertEqual(0, after.returncode, after.stdout + after.stderr)
+        self.assertEqual(["agents/rogue-agent.md"],
+                         report_block(after.stdout, "IGNORED"))
+
+    def test_the_adopters_global_ignore_file_does_not_widen_the_exemption(self):
+        """A personal `~/.config/git/ignore` says what its owner does not
+        want to see in ANY repository. It says nothing about what CCPR
+        ships, and a broad pattern there (`*.md` is not far-fetched) would
+        otherwise excuse every foreign agent file in the installation."""
+        gitconfig_dir = self.home / ".config" / "git"
+        gitconfig_dir.mkdir(parents=True)
+        (gitconfig_dir / "ignore").write_text("*.md\n", encoding="utf-8")
+        self.assertEqual(0, self.run_install("--yes").returncode)
+        self.plant("agents/rogue-agent.md", "# not from any commit\n")
+        r = self.verify()
+        self.assertEqual(1, r.returncode, r.stdout + r.stderr)
+        self.assertEqual(["agents/rogue-agent.md"], report_block(r.stdout, "UNEXPECTED"))
+
+    def test_no_ignore_rule_can_reach_into_the_changed_class(self):
+        """A rule broad enough to match a SHIPPED file changes nothing about
+        it. Not because the rule is inspected, but because of WHERE the
+        exemption sits: it is consulted only for paths the recorded commit
+        does not carry, and a shipped file is carried by definition. MISSING
+        and CHANGED never reach it.
+
+        Measured rather than reasoned -- `*.md` here matches all three
+        fixture files, and the tampered one is still CHANGED."""
+        (self.src / ".gitignore").write_text("*.md\n", encoding="utf-8")
+        self.git("add", "-A")
+        self.git("add", "-f", "agents/konzeptor.md", "commands/guide.md",
+                 "templates/HANDOVER.md")
+        self.commit("a pattern that matches shipped files")
+        self.assertEqual(0, self.run_install("--yes").returncode)
+        (self.dest / "agents" / "konzeptor.md").write_text("# tampered\n", encoding="utf-8")
+        r = self.verify()
+        self.assertEqual(1, r.returncode, r.stdout + r.stderr)
+        self.assertEqual(["agents/konzeptor.md"], report_block(r.stdout, "CHANGED"))
+
+
 class VerifyReadsTheMarkerNotOnlyItsPresenceTest(VerifyBase):
     """The structural mutation, and the two halves do NOT do the same job.
     Deleting the comparison outright turns most of this module red and
