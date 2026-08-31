@@ -1,6 +1,6 @@
 """test_check_all.py -- coverage for scripts/check-all.sh, the single
 command CONTRIBUTING.md's "Quality checks before opening a PR" section asks
-a contributor to remember by hand: eight commands, one of which is
+a contributor to remember by hand: a catalogue of commands, one of which is
 non-zero on a correct tree BY DESIGN, and none of which anyone was
 verifying were actually all run.
 
@@ -46,8 +46,8 @@ BOTH of the previous two tests' pins go red against it.
 ## The seam: CCPR_CHECK_ALL_SCRIPT_DIR
 
 check-all.sh's own header explains the choice at length; the summary here
-is only the test-facing half. Seven of the eight checks are shipped sibling
-scripts, invoked as `$CHECK_SCRIPT_DIR/<name>.sh <args>`, where
+is only the test-facing half. A catalogued check is normally a shipped sibling
+script, invoked as `$CHECK_SCRIPT_DIR/<name>.sh <args>`, where
 CHECK_SCRIPT_DIR defaults to check-all.sh's own directory and is
 overridable via CCPR_CHECK_ALL_SCRIPT_DIR — the same seam
 conformance-run.sh already ships as CCPR_CONFORMANCE_SCRIPT_DIR, for the
@@ -61,7 +61,7 @@ against an all-zero scratch baseline unless a test overrides one — the same
 "clean unless overridden" default `ConformanceRunTestBase.setUp` already
 uses in test_conformance_run.py.
 
-The seventh check, python-tests, is not a sibling script — it is a fixed
+python-tests is the exception: it is not a sibling script — it is a fixed
 `python3 -m unittest discover -s <project-dir>/scripts/tests -t
 <project-dir>` invocation — and needs no separate seam: it is already
 parametrised by <project-dir>, so setUp gives every test a real, tiny,
@@ -236,6 +236,36 @@ _SCRIPT_SOURCE = SCRIPT_PATH.read_text(encoding="utf-8")
 CATALOGUE_NAMES = parse_bash_array(_SCRIPT_SOURCE, "CHECK_NAMES")
 CATALOGUE_KIND = parse_bash_array(_SCRIPT_SOURCE, "CHECK_KIND")
 CATALOGUE_SCRIPTS = parse_bash_array(_SCRIPT_SOURCE, "CHECK_SCRIPTS")
+CATALOGUE_CCPR_ONLY = parse_bash_array(_SCRIPT_SOURCE, "CHECK_CCPR_ONLY")
+
+# Counts DERIVED from the arrays above, never retyped. The ninth catalogue
+# entry (install-verify, 31.08.2026) turned eleven assertions in this module
+# red at once, every one of them a hand-typed report line restating the
+# catalogue's size -- the same defect
+# scripts/tests/test_live_status_claims.py's slice 2 refuses in PROSE, one
+# layer down in assertion DATA, where that scanner deliberately cannot
+# reach: a string literal in a test body is a fixture the module feeds its
+# own subject, not a claim about the tree. Deriving the numbers is the fix;
+# editing them would have been the defect repeating itself.
+CATALOGUE_COUNT = len(CATALOGUE_NAMES)
+CCPR_ONLY_COUNT = CATALOGUE_CCPR_ONLY.count("1")
+GENERIC_COUNT = CATALOGUE_CCPR_ONLY.count("0")
+
+
+def checks_line(ran, could_not_run, mismatched=0):
+    """check-all.sh's own **Checks:** scope line, catalogue count derived."""
+    return "**Checks:** %d catalogued, %d ran, %d could-not-run, %d mismatched" % (
+        CATALOGUE_COUNT, ran, could_not_run, mismatched
+    )
+
+
+def summary_line(matched, divergent=0, could_not_run=0, mismatched=0):
+    """check-all.sh's own **Summary:** line, catalogue count derived."""
+    return (
+        "**Summary:** %d catalogued, %d matched, %d divergent, "
+        "%d could-not-run, %d mismatched"
+        % (CATALOGUE_COUNT, matched, divergent, could_not_run, mismatched)
+    )
 
 
 def _write_mutated_script(tmpdir, mutate_fn):
@@ -280,10 +310,36 @@ class CheckAllTestBase(unittest.TestCase):
         # python-tests needs <project-dir>/scripts/tests to exist, both to
         # be attempted at all (check-all.sh's own CCPR-only precondition)
         # and to have something real, tiny and FAST to discover instead of
-        # this repository's own ~1850-test suite.
+        # this repository's own suite.
         self.make_trivial_test_package()
 
+        # install-verify runs "<project-dir>/install.sh --verify". Its seam
+        # is the PROJECT dir, not CHECK_SCRIPT_DIR -- see check-all.sh's own
+        # header on why reaching the real installer as
+        # "$CHECK_SCRIPT_DIR/../install.sh" was rejected. Without this stub
+        # every test here would run against the real install.sh and the real
+        # $HOME, which is exactly the escape that seam exists to prevent.
+        self.make_install_stub()
+
     # --- fixtures ------------------------------------------------------
+
+    def make_install_stub(self, exit_code=0, could_not_run=False):
+        """Writes (or overwrites) a stand-in install.sh in self.project_dir.
+
+        `could_not_run=True` emits the literal sentence install.sh's own
+        verify_cannot_run() prints, which is what check-all.sh matches on --
+        deliberately paired with a NON-zero exit so a test can prove the
+        report text wins over the exit code, the way it must for the three
+        checks whose could-not-run is exit-code-invisible.
+        """
+        lines = ["#!/usr/bin/env bash"]
+        if could_not_run:
+            lines.append('echo "  the install-provenance check DID NOT RUN"')
+        lines.append("exit %d" % exit_code)
+        path = self.project_dir / "install.sh"
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        path.chmod(0o755)
+        return path
 
     def make_trivial_test_package(self, passing=True):
         tests_dir = self.project_dir / "scripts" / "tests"
@@ -334,7 +390,7 @@ class CheckAllTestBase(unittest.TestCase):
     def write_fake_discipline_gate_lib(self, deny_source):
         """Installs a minimal scratch lib/discipline_gate.sh under
         self.stub_dir -- the same seam CCPR_CHECK_ALL_SCRIPT_DIR already
-        gives the seven sibling-script stubs, extended to this shared
+        gives the sibling-script stubs, extended to this shared
         library. Exercises the actual integration point (check-all.sh
         sources this file and calls gate_load_config, then reads
         $GATE_DENY_SOURCE) without needing the real, ~900-line pattern
@@ -357,10 +413,10 @@ class CheckAllTestBase(unittest.TestCase):
         internal grep classification, scripts/lib/discipline_gate.sh:287-298).
         Measured directly against the PRE-fix check-all.sh (30.08.2026):
         sourcing this and calling gate_load_config() at top level killed the
-        whole process with exit 2 BEFORE any of the eight checks ran -- no
+        whole process with exit 2 BEFORE any catalogued check ran -- no
         report, no "NOTHING WAS VERIFIED" diagnosis, just a bare stderr line
         and a process exit. A crash in ONE check's configuration must never
-        prevent the other seven from being attempted, and must never look like
+        prevent the others from being attempted, and must never look like
         the ordinary "not configured" case either -- see
         ArtifactGateDenylistDetectionCrashTest below."""
         lib_dir = self.stub_dir / "lib"
@@ -423,7 +479,7 @@ class AllChecksMatchBaselineTest(CheckAllTestBase):
         self.assertEqual(0, r.returncode, self.output(r))
         self.assertIn("**Exit:** 0", r.stdout, self.output(r))
         self.assertIn(
-            "**Summary:** 8 catalogued, 8 matched, 0 divergent, 0 could-not-run, 0 mismatched",
+            summary_line(CATALOGUE_COUNT),
             r.stdout, self.output(r),
         )
         self.assertIn("memory-lint: exit 1 (expected 1) — match", r.stdout, self.output(r))
@@ -442,7 +498,7 @@ class OneCheckDivergesTest(CheckAllTestBase):
         self.assertIn("phase-docs-lint: exit 3 (expected 0) — DIVERGENT", r.stdout, self.output(r))
         self.assertIn("phase-docs-lint: expected exit 0, got exit 3", r.stdout, self.output(r))
         self.assertIn(
-            "**Summary:** 8 catalogued, 7 matched, 1 divergent, 0 could-not-run, 0 mismatched",
+            summary_line(CATALOGUE_COUNT - 1, divergent=1),
             r.stdout, self.output(r),
         )
         self.assertIn("**Exit:** 1", r.stdout, self.output(r))
@@ -460,11 +516,11 @@ class CouldNotRunIsNeverCountedAsPassTest(CheckAllTestBase):
         self.assertIn("conformance-run: could-not-run", r.stdout, self.output(r))
         self.assertIn("python-tests: could-not-run", r.stdout, self.output(r))
         self.assertIn(
-            "**Checks:** 8 catalogued, 4 ran, 4 could-not-run, 0 mismatched",
+            checks_line(GENERIC_COUNT, CCPR_ONLY_COUNT),
             r.stdout, self.output(r),
         )
         self.assertIn(
-            "**Summary:** 8 catalogued, 4 matched, 0 divergent, 4 could-not-run, 0 mismatched",
+            summary_line(GENERIC_COUNT, could_not_run=CCPR_ONLY_COUNT),
             r.stdout, self.output(r),
         )
 
@@ -482,7 +538,7 @@ class CouldNotRunIsNeverCountedAsPassTest(CheckAllTestBase):
         self.assertIn("conformance-run: could-not-run", r.stdout, self.output(r))
         self.assertNotIn("conformance-run: exit 0 (expected 0) — match", r.stdout, self.output(r))
         self.assertIn(
-            "**Summary:** 8 catalogued, 7 matched, 0 divergent, 1 could-not-run, 0 mismatched",
+            summary_line(CATALOGUE_COUNT - 1, could_not_run=1),
             r.stdout, self.output(r),
         )
 
@@ -514,9 +570,53 @@ class CouldNotRunIsNeverCountedAsPassTest(CheckAllTestBase):
         self.assertIn("memory-lint: could-not-run", r.stdout, self.output(r))
         self.assertNotIn("memory-lint: exit 0 (expected 1) — DIVERGENT", r.stdout, self.output(r))
         self.assertIn(
-            "**Summary:** 8 catalogued, 7 matched, 0 divergent, 1 could-not-run, 0 mismatched",
+            summary_line(CATALOGUE_COUNT - 1, could_not_run=1),
             r.stdout, self.output(r),
         )
+
+    def test_install_verifys_own_nothing_compared_shape_is_could_not_run(self):
+        # install.sh --verify differs from the three checks above in one way
+        # that makes this branch look unnecessary and is not: its
+        # could-not-run IS visible in the exit code (3, distinct from 0
+        # verified and 1 divergent). But check-all.sh compares any exit code
+        # it does not recognise against the baseline, so without this branch
+        # exit 3 against an expected 0 would be reported as a DIVERGENCE --
+        # "we looked and found a problem" for a run that compared nothing.
+        # The stub therefore pairs the report sentence with a NON-zero exit,
+        # so the classification demonstrably comes from the report text.
+        self.make_install_stub(exit_code=3, could_not_run=True)
+        r = self.run_check_all()
+        self.assertIn("install-verify: could-not-run", r.stdout, self.output(r))
+        self.assertNotIn(
+            "install-verify: exit 3 (expected 0) — DIVERGENT", r.stdout, self.output(r)
+        )
+        self.assertIn(
+            summary_line(CATALOGUE_COUNT - 1, could_not_run=1),
+            r.stdout, self.output(r),
+        )
+        self.assertEqual(0, r.returncode, self.output(r))
+
+    def test_install_verify_without_the_report_sentence_still_runs_normally(self):
+        # Gegenprobe (counter-proof): the same non-zero exit WITHOUT the
+        # report sentence is an ordinary divergence, not a could-not-run.
+        # Without this, the test above would pass for a rule that classifies
+        # every non-zero install-verify exit as could-not-run.
+        self.make_install_stub(exit_code=3, could_not_run=False)
+        r = self.run_check_all()
+        self.assertIn(
+            "install-verify: exit 3 (expected 0) — DIVERGENT", r.stdout, self.output(r)
+        )
+        self.assertNotIn("install-verify: could-not-run", r.stdout, self.output(r))
+        self.assertNotEqual(0, r.returncode, self.output(r))
+
+    def test_a_missing_installer_is_could_not_run_not_a_crash(self):
+        # The precondition branch: a checkout that HAS scripts/tests (so the
+        # CCPR-only gate lets install-verify through) but no install.sh.
+        (self.project_dir / "install.sh").unlink()
+        r = self.run_check_all()
+        self.assertIn("install-verify: could-not-run", r.stdout, self.output(r))
+        self.assertIn("install.sh", r.stdout, self.output(r))
+        self.assertEqual(0, r.returncode, self.output(r))
 
     def test_memory_lint_with_a_present_target_still_runs_normally(self):
         # Gegenprobe (counter-proof): a stub that reports at least one
@@ -565,7 +665,7 @@ class CouldNotRunIsNeverCountedAsPassTest(CheckAllTestBase):
         self.assertIn("memory-lint: could-not-run", r.stdout, self.output(r))
         self.assertNotIn("memory-lint: exit 0 (expected 1) — DIVERGENT", r.stdout, self.output(r))
         self.assertIn(
-            "**Summary:** 8 catalogued, 7 matched, 0 divergent, 1 could-not-run, 0 mismatched",
+            summary_line(CATALOGUE_COUNT - 1, could_not_run=1),
             r.stdout, self.output(r),
         )
 
@@ -592,7 +692,7 @@ class ArtifactGateRequireDenylistTest(CheckAllTestBase):
     lookup a second time in check-all.sh. `write_fake_discipline_gate_lib`
     substitutes a minimal scratch copy of that ONE function
     (`gate_load_config`) under the same CCPR_CHECK_ALL_SCRIPT_DIR seam the
-    seven sibling-script stubs already use -- proving the INTEGRATION (source
+    sibling-script stubs already use -- proving the INTEGRATION (source
     the lib, read $GATE_DENY_SOURCE, decide the flag) without needing the
     real ~900-line pattern library.
     """
@@ -663,9 +763,9 @@ class ArtifactGateDenylistDetectionCrashTest(CheckAllTestBase):
     trying to find out. Fail-loud (letting the crash propagate, as the
     pre-fix code did) is wrong because it bypasses the exact rule
     check-all.sh exists to enforce: the crash happens at check-all.sh's own
-    top level, BEFORE any of the eight checks run and before RAN_COUNT is
+    top level, BEFORE any catalogued check runs and before RAN_COUNT is
     ever counted, so "NOTHING WAS VERIFIED -- this is not a pass" never
-    fires and the other seven checks are never attempted over a config
+    fires and every other catalogued check is never attempted over a config
     problem in ONE of them. A silent fallback to "not configured" is
     equally wrong (the exact fail-open class B3 itself was built to close)
     -- "nobody configured a deny-list" and "the configuration is broken"
@@ -686,9 +786,9 @@ class ArtifactGateDenylistDetectionCrashTest(CheckAllTestBase):
 
         r = self.run_check_all()
 
-        # (a) all eight checks still ran, not just artifact-gate.
+        # (a) every catalogued check still ran, not just artifact-gate.
         self.assertIn(
-            "**Checks:** 8 catalogued, 8 ran, 0 could-not-run, 0 mismatched",
+            checks_line(CATALOGUE_COUNT, 0),
             r.stdout, self.output(r),
         )
         self.assertEqual(0, r.returncode, self.output(r))
@@ -770,7 +870,7 @@ class CatalogueBaselineMismatchTest(CheckAllTestBase):
             r.stdout, self.output(r),
         )
         self.assertIn(
-            "**Summary:** 8 catalogued, 7 matched, 0 divergent, 0 could-not-run, 2 mismatched",
+            summary_line(CATALOGUE_COUNT - 1, mismatched=2),
             r.stdout, self.output(r),
         )
 
@@ -787,11 +887,11 @@ class AllCouldNotRunTest(CheckAllTestBase):
         r = self.run_check_all()
         self.assertNotEqual(0, r.returncode, self.output(r))
         self.assertIn(
-            "**Checks:** 8 catalogued, 0 ran, 8 could-not-run, 0 mismatched",
+            checks_line(0, CATALOGUE_COUNT),
             r.stdout, self.output(r),
         )
         self.assertIn(
-            "**Summary:** 8 catalogued, 0 matched, 0 divergent, 8 could-not-run, 0 mismatched",
+            summary_line(0, could_not_run=CATALOGUE_COUNT),
             r.stdout, self.output(r),
         )
         self.assertIn("NOTHING WAS VERIFIED", r.stderr, self.output(r))
@@ -828,7 +928,7 @@ class BaselineCatalogueContractTest(unittest.TestCase):
         detail = "returncode: %s\nstdout:\n%s\nstderr:\n%s" % (r.returncode, r.stdout, r.stderr)
         self.assertNotEqual(2, r.returncode, detail)  # 2 = baseline could not be parsed
         self.assertNotIn("baseline line", r.stderr, detail)
-        self.assertIn("**Checks:** 8 catalogued", r.stdout, detail)
+        self.assertIn("**Checks:** %d catalogued" % CATALOGUE_COUNT, r.stdout, detail)
 
 
 # ---------------------------------------------------------------------------
@@ -836,9 +936,14 @@ class BaselineCatalogueContractTest(unittest.TestCase):
 # is untrustworthy until it has been SEEN red)
 # ---------------------------------------------------------------------------
 class CouldNotRunCountsAsPassRedProofTest(CheckAllTestBase):
-    """check-all.sh's five could-not-run branches (WI-0129 D2 added
-    shellcheck-run.sh's own text-detection branch as the fifth) all assign
-    the literal `state="could-not-run"`. Flipping that literal to
+    """Every could-not-run branch in check-all.sh assigns the literal
+    `state="could-not-run"`. They fall into two kinds: a PRECONDITION that
+    was not met (not the CCPR checkout; a sibling script missing under
+    CHECK_SCRIPT_DIR; no install.sh under <project-dir>) and a check whose
+    own REPORT says it had no scope (conformance-run, memory-lint,
+    shellcheck, install-verify). The occurrence count below is pinned rather
+    than derived on purpose: adding a branch has to be a deliberate look,
+    and a self-updating pin would wave it through. Flipping that literal to
     `state="match"` in a scratch copy simulates a defect where an
     unavailable check is silently folded into the pass count. Both
     CouldNotRunIsNeverCountedAsPassTest's and AllCouldNotRunTest's pins
@@ -854,8 +959,10 @@ class CouldNotRunCountsAsPassRedProofTest(CheckAllTestBase):
         needle = 'state="could-not-run"'
         occurrences = original.count(needle)
         self.assertEqual(
-            5, occurrences,
-            "check-all.sh's own could-not-run assignment literal changed -- update this test",
+            7, occurrences,
+            "check-all.sh's own could-not-run assignment literal changed -- "
+            "update this test, and say in the docstring above which branch "
+            "was added and which kind it is",
         )
         match_before = original.count('state="match"')
 
@@ -881,7 +988,7 @@ class CouldNotRunCountsAsPassRedProofTest(CheckAllTestBase):
         # since that substring is present even on a fully clean report.
         self.assertNotIn(": could-not-run —", r.stdout, self.output(r))
         self.assertNotIn(
-            "**Summary:** 8 catalogued, 4 matched, 0 divergent, 4 could-not-run, 0 mismatched",
+            summary_line(GENERIC_COUNT, could_not_run=CCPR_ONLY_COUNT),
             r.stdout, self.output(r),
         )
 
@@ -1126,3 +1233,43 @@ class NoteColumnQuantityRedProofTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class InstallVerifyCouldNotRunRedProofTest(CheckAllTestBase):
+    """The install-verify could-not-run branch, seen doing its job by being
+    taken away (G-107: a new stage is not accepted until it has been seen
+    red). Removing only the report sentence it matches on -- in a SCRATCH
+    copy, the shipped script never touched -- turns a run that compared
+    nothing into a reported DIVERGENCE, which is the exact misreading the
+    branch exists to prevent."""
+
+    NEEDLE = '"the install-provenance check DID NOT RUN"'
+
+    def setUp(self):
+        super().setUp()
+        self.scratch_dir = Path(
+            tempfile.mkdtemp(prefix="ccpr-check-all-redproof-installverify-")
+        )
+        self.addCleanup(shutil.rmtree, self.scratch_dir, ignore_errors=True)
+
+    def test_without_the_report_match_a_no_op_verify_reads_as_a_divergence(self):
+        original = SCRIPT_PATH.read_text(encoding="utf-8")
+        # G-141: prove the mutation can land before measuring anything.
+        self.assertEqual(
+            1, original.count(self.NEEDLE),
+            "check-all.sh's install-verify report sentence changed -- re-pin "
+            "this mutation against its current wording",
+        )
+
+        def _mutate(text):
+            return text.replace(self.NEEDLE, '"a sentence install.sh never prints"')
+
+        scratch = _write_mutated_script(self.scratch_dir, _mutate)
+        self.assertEqual(0, scratch.read_text(encoding="utf-8").count(self.NEEDLE))
+
+        self.make_install_stub(exit_code=3, could_not_run=True)
+        r = self.run_check_all(script_path=scratch)
+        self.assertIn(
+            "install-verify: exit 3 (expected 0) — DIVERGENT", r.stdout, self.output(r)
+        )
+        self.assertNotIn("install-verify: could-not-run", r.stdout, self.output(r))

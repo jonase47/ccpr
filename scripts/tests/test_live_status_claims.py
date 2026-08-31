@@ -1024,3 +1024,607 @@ class ExemptionMarkerSuppressesAClaimTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ==========================================================================
+# Slice 2 -- a derivable COUNT stored in prose
+# ==========================================================================
+#
+# The module docstring names this slice as explicitly NOT covered by slice 1:
+# "Numbers (check-all.baseline.tsv's note counts, a docstring restating a
+# pinned constant) are NOT scanned. Their claims are derivable too, but each
+# needs its own generator." This is that generator, for one register: the
+# check catalogue in scripts/check-all.sh.
+#
+# ## Why this register and not another
+#
+# scripts/check-all.sh declares its catalogue as four parallel bash arrays.
+# Every count a reader might want -- how many checks there are, how many are
+# shipped sibling scripts, how many are gated on being the CCPR checkout --
+# is a `len()` away from those arrays. None of it needs to be typed. Yet the
+# tree stated those counts in prose across six files, and the counts were
+# already drifting: check-all.baseline.tsv's header said three checks report
+# their own scope when a fourth had done so since WI-0129 D2, and
+# .github/workflows/ci.yml recorded a measured CI shape that the CI had
+# stopped producing.
+#
+# This is the same rule d85c2bd applied to the baseline's note column
+# ("the note states the DURABLE REASON, never what a run measured") and the
+# same rule slice 1 applied to an outcome claim: what is derivable is
+# GENERATED, not STORED.
+#
+# ## The forbidden set is generated, never typed
+#
+# CATALOGUE_COUNT_LABELS below names WHICH counts the arrays derive; the
+# values come from the shipped arrays at import time. That matters for the
+# guard's own durability: when the catalogue grows, the forbidden set moves
+# with it, and prose still carrying the old number is caught because the old
+# number is still derivable (it is the new N minus one, the sibling-script
+# count, or one of the two scope splits). A hard-coded set would have to be
+# edited by the same hand that edits the catalogue -- which is the defect,
+# not the guard.
+#
+# ## Living claim vs. dated register -- two exclusions, both measured
+#
+# 1. **CHANGELOG.md** is the repository's dated release register. An entry
+#    records what was true at its release and is supposed to keep saying so.
+#    Real instance let through: its "one command for the seven quality
+#    checks" entry, correct when the catalogue held seven.
+#
+# 2. **A trajectory row** -- a sentence that OPENS with its own `N / M` pin
+#    pair. test_absence_only_assertions.py's ClassificationCountsTest keeps
+#    its history as a table whose own header declares the shape
+#    ("Trajectory, so the history is one line per event"; columns
+#    "in-scope / flagged | when"). Such a row is the same kind of register as
+#    a CHANGELOG entry, one file in. Measured across the whole tree
+#    (31.08.2026): this marker excludes exactly two sentences, both genuine
+#    trajectory rows, and nothing else. It is a shape, not a file name --
+#    any table adopting the same declared shape gets the same treatment.
+#
+# A DATE-based exclusion was built first and REJECTED, for a different
+# reason than the one that killed slice 1's date branch. Slice 1's was
+# unreachable; this one was reachable AND WRONG. The counter-example was a
+# docstring in test_check_all.py that opened by naming the date it measured
+# a pre-fix version of the script on, and then stated the live catalogue
+# count in the same sentence. A date rule would have read the stamp as a
+# historical anchor and produced a silent false negative on a living claim.
+# Two different reasons to reject the same exemption, both measured rather
+# than argued -- and the sentence itself is deliberately described here
+# rather than reproduced, because a module that states a claim shape must
+# not instantiate it.
+#
+# ## Attribution: which catalogue is this sentence about
+#
+# This repository has more than one thing called a catalogue. `/cross-check`
+# has a rule catalogue (`Manual/system/anchored-state.md`, ADR-0009);
+# conformance-run.sh ships a CHECK_NAMES array of its own. Attribution is
+# therefore the literal `check-all` or the phrase `catalogued check`, never
+# the bare word `catalogue`. Inside check-all.sh and its baseline it is
+# positional instead: a count of checks there is a count of its own
+# catalogue.
+#
+# The tree carries no sentence today that the bare token would wrongly
+# attribute -- measured 31.08.2026, the loosened variant reports the same
+# zero findings as the shipped one. The narrowing is consequently pinned by
+# a SYNTHETIC fixture (`AttributionNamesThisCatalogueTest`) rather than by
+# the corpus, the same job slice 1's PredicatePositionDiscriminatesTest does
+# for the one mutation its own corpus cannot discriminate (G-121: read a
+# survived mutation as a resolution problem before reading it as
+# equivalence). The synthetic sentence is modelled on the real rule-
+# catalogue prose named above, with a count of checks substituted in.
+
+# ## What slice 2 does NOT prove
+#
+# * **Ordinals are outside its alphabet.** "the seventh check", "the eighth
+#   catalogued check" name a POSITION, and APPENDING to the catalogue moves
+#   none of them -- they drift only on an insertion or a removal, which this
+#   rule does not see. Two real instances are left standing deliberately
+#   (`test_bsd_gnu_portability.py`, which pins its own findings by line
+#   number, so rephrasing its prose would cost more than the ordinal risk).
+#
+# * **The alphabet is `<number> ... check(s)`.** A count stated without that
+#   noun -- "one of the eight", "eight commands", a bare "8 catalogued, 6
+#   matched" in a CI comment -- is invisible to it. Widening to the elided
+#   form was built and MEASURED: it bought two true positives and cost four
+#   false ones, three of them prose about memory-lint.sh's own four targets,
+#   a number with nothing to do with this catalogue. A rule that fires on
+#   correct prose teaches its readers to ignore it, which is the same
+#   reasoning slice 1 used to reject its own unanchored widening.
+#
+# * **Only THIS catalogue.** conformance-run.sh ships a CHECK_NAMES array of
+#   its own and derives counts from it the same way. Those are not scanned;
+#   attribution deliberately excludes them, because a finding nobody can fix
+#   by editing check-all.sh is noise.
+#
+# * **It does not check that a stored count is WRONG.** It refuses the
+#   storing. A sentence stating the correct number today is still a finding,
+#   because the next catalogue change is what makes it false and nothing
+#   would notice then.
+#
+# * **A count that is no longer DERIVABLE is invisible to it**, and that is
+#   the sharpest edge of the previous point. Measured 31.08.2026, right
+#   after the ninth entry landed: re-typing the CURRENT count ("the nine
+#   checks") into the cleaned header is flagged, and re-typing the one it
+#   replaced ("the eight checks") is NOT -- eight stopped being derivable
+#   the moment install-verify joined, because it is not a sibling script
+#   and the sibling-script count stayed where it was. So this rule does not
+#   find a number left behind by a past change; it prevents one from being
+#   written. The two are only equivalent on a tree that is already clean,
+#   which is why the whole-tree scan and the elimination had to land
+#   together rather than one after the other.
+#
+# * **The trajectory exclusion is SENTENCE-scoped, not row-scoped.** Only the
+#   sentence carrying the `N / M` pin pair is excluded; the continuation
+#   sentences of a multi-sentence trajectory row are scanned normally. That
+#   is deliberate -- a row-scoped exclusion would blank an arbitrary amount
+#   of prose behind one pin pair -- but it is friction, not free: a
+#   continuation sentence that states a derivable count is a finding, and the
+#   answer is to rephrase it or to put the count in the pinned opening
+#   sentence. It fails LOUD, which is the trade being made.
+#
+# * **Masking is Python-only**, inherited from slice 1: `.sh`, `.md` and
+#   `.yml` are scanned as if the whole file were prose.
+
+CATALOGUE_SOURCE_REL = "scripts/check-all.sh"
+HISTORY_REGISTER_REL = "CHANGELOG.md"
+
+# The catalogue's own definition files. A count of checks stated here needs
+# no textual attribution -- the file IS the catalogue.
+CATALOGUE_DEFINITION_RELS = frozenset(
+    {CATALOGUE_SOURCE_REL, "scripts/check-all.baseline.tsv"}
+)
+
+# WHICH counts the arrays derive. The values are read from the shipped
+# source, never written here -- see the section comment above.
+CATALOGUE_COUNT_LABELS = (
+    ("catalogued checks", "CHECK_NAMES", None),
+    ("sibling-script checks", "CHECK_KIND", "script"),
+    ("CCPR-repository-only checks", "CHECK_CCPR_ONLY", "1"),
+    ("generic checks", "CHECK_CCPR_ONLY", "0"),
+)
+
+# Spelled-out forms, digit forms are generated. The map is FINITE, so
+# `test_every_derivable_count_has_both_spellings` asserts every derived value
+# has an entry: a catalogue that outgrows this map must fail loudly rather
+# than quietly falling back to digits-only and letting "thirteen checks"
+# through in prose. Extending the map is then the fix, and a deliberate one.
+CARDINAL_WORDS = {
+    1: "one", 2: "two", 3: "three", 4: "four", 5: "five", 6: "six",
+    7: "seven", 8: "eight", 9: "nine", 10: "ten", 11: "eleven", 12: "twelve",
+    13: "thirteen", 14: "fourteen", 15: "fifteen", 16: "sixteen",
+    17: "seventeen", 18: "eighteen", 19: "nineteen", 20: "twenty",
+}
+
+# A sentence that opens with its own `in-scope / flagged` pin pair is a row
+# in a declared trajectory register -- see exclusion 2 above.
+TRAJECTORY_ROW_RE = re.compile(r"^\d+\s*/\s*\d+\s")
+
+# Attribution to THIS catalogue, not another one in the same tree. `catalogue`
+# ALONE was measured and rejected -- see "Attribution" above. `check
+# catalogue` is included: the noun-noun form is how this repository actually
+# names the thing (three sites in check-all.sh and its baseline), and the
+# elimination pass introduced one of them, so leaving it out left an
+# idiomatic phrasing walking straight through the attribution in any file
+# outside CATALOGUE_DEFINITION_RELS. Measured 31.08.2026: adding it changes
+# nothing on the current tree (0 findings either way), so it closes a hole
+# without widening the result -- exactly the direction a narrowing decision
+# should move.
+CATALOGUE_ATTRIBUTION_RE = re.compile(
+    r"check-all|catalogued\s+checks?|check\s+catalogue", re.I
+)
+
+BASH_ARRAY_RE_TEMPLATE = r"^{}=\((.*?)\)$"
+
+
+def parse_catalogue_array(source, name):
+    """The elements of a top-level `NAME=(...)` bash array in `source`.
+
+    Deliberately NOT imported from test_check_all.py's parse_bash_array: a
+    relative import between test modules is itself a pinned property of this
+    suite (CONTRIBUTING.md's import-shape count), and a scanner that must
+    survive its subject's edits should not gain a dependency on another
+    module's parser to do it.
+    """
+    match = re.search(
+        BASH_ARRAY_RE_TEMPLATE.format(re.escape(name)), source, re.M | re.S
+    )
+    if match is None:
+        raise AssertionError(
+            "scripts/check-all.sh no longer declares a top-level "
+            "{}=(...) array -- the catalogue this rule derives from is "
+            "gone, which is a could-not-run, not a pass".format(name)
+        )
+    return re.findall(r'"[^"]*"|\S+', match.group(1))
+
+
+def derivable_catalogue_counts(source):
+    """`{label: count}` for every count the catalogue arrays derive.
+
+    A count of ZERO is dropped: a forbidden token set containing "zero"/"0"
+    would fire on exit codes, which this file's header is full of.
+    """
+    counts = {}
+    for label, array_name, member in CATALOGUE_COUNT_LABELS:
+        elements = parse_catalogue_array(source, array_name)
+        value = len(elements) if member is None else elements.count(member)
+        if value:
+            counts[label] = value
+    return counts
+
+
+def catalogue_count_claim_re(counts):
+    """A regex matching `<derivable number> [up to three words] check(s)`.
+
+    Both spellings of every value -- the digit and the English cardinal --
+    because prose in this tree uses both, and a rule that sees only one
+    spelling is a rule that a rephrase walks straight through.
+    """
+    tokens = set()
+    for value in set(counts.values()):
+        tokens.add(str(value))
+        if value in CARDINAL_WORDS:
+            tokens.add(CARDINAL_WORDS[value])
+    alternation = "|".join(sorted(re.escape(t) for t in tokens))
+    return re.compile(
+        r"\b(?:{})\b(?:\s+[A-Za-z][A-Za-z-]*){{0,3}}\s+checks?\b".format(alternation),
+        re.IGNORECASE,
+    )
+
+
+def is_catalogue_count_claim(sentence, rel, claim_re):
+    """True when `sentence` stores a number the catalogue already derives.
+
+    Order matters only for readability; the conditions are independent.
+
+    Slice 1's condition 3 -- run the test against `asserted_text`, so a
+    claim inside quotation or emphasis is SHOWN rather than made -- was
+    built here too and then REMOVED, because measuring it showed it
+    weakening the rule rather than narrowing it. Of the four real sentences
+    COUNT_PASS_FIXTURES pins, quotation-stripping silently stopped TWO from
+    being candidates at all: the CHANGELOG bullet is wrapped end-to-end in
+    `**...**`, and an apostrophe in "memory-lint.sh's own spelling" opens a
+    single-quote span that swallows the rest of its sentence. Both would
+    then have passed for the wrong reason, and a fixture that passes
+    because it was never a candidate proves nothing (G-126).
+
+    It is also not needed. The venue where prose legitimately QUOTES a
+    stored count is the history register, and that is already excluded by
+    name. This module's own section comment above was rephrased to describe
+    the drifted sentence instead of reproducing it -- the same answer slice
+    1 reached for the same problem, and the reason neither slice ships an
+    exemption marker for its own prose.
+    """
+    if rel == HISTORY_REGISTER_REL:
+        return False
+    if TRAJECTORY_ROW_RE.match(sentence):
+        return False
+    if not claim_re.search(sentence):
+        return False
+    if rel in CATALOGUE_DEFINITION_RELS:
+        return True
+    return bool(CATALOGUE_ATTRIBUTION_RE.search(sentence))
+
+
+def scan_text_for_count_claims(text, label, claim_re, suffix=""):
+    """Text-in, like `scan_text`, so a historical copy read with `git show`
+    runs through the identical production path."""
+    lines = text.split("\n")
+    findings = []
+    for sentence, start_line, end_line in iter_sentences(prose_only(text, suffix)):
+        if not is_catalogue_count_claim(sentence, label, claim_re):
+            continue
+        if exemption_in_range(lines, start_line, end_line):
+            continue
+        findings.append(Finding(label, start_line, end_line, sentence))
+    return findings
+
+
+def scan_repo_for_count_claims(repo_root=REPO_ROOT):
+    """Returns `(findings, scanned)` over the same scope slice 1 uses."""
+    source = (repo_root / CATALOGUE_SOURCE_REL).read_text(encoding="utf-8")
+    claim_re = catalogue_count_claim_re(derivable_catalogue_counts(source))
+    findings = []
+    scanned = []
+    for rel in in_scope_files(repo_root):
+        path = repo_root / rel
+        if not path.is_file():
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+        scanned.append(rel)
+        findings.extend(
+            scan_text_for_count_claims(text, rel, claim_re, path.suffix)
+        )
+    return findings, scanned
+
+
+# --- slice 2 fixtures, all real sentences from this tree -------------------
+
+# The state before the count was removed from prose, pinned by commit. At
+# this commit scripts/check-all.sh's own header states its catalogue's
+# cardinality four times over, and the sentence below is one of them. It is
+# the POSITIVE fixture: the rule must flag it, using the counts derived from
+# that same historical copy of the arrays, so the proof stays attributable
+# as the catalogue grows.
+COUNT_DRIFT_FIXTURE_COMMIT = "0b3617e"
+
+# Real sentences the rule must LET THROUGH, each excluded by a DIFFERENT
+# condition, so the pass is attributable rather than merely observed.
+# Pinned by substring against the live tree, not by line number.
+COUNT_PASS_FIXTURES = (
+    (
+        "CHANGELOG.md",
+        "one command for the seven quality checks",
+        "history-register",
+    ),
+    (
+        "scripts/tests/test_absence_only_assertions.py",
+        "one command that runs the seven",
+        "trajectory-row",
+    ),
+    (
+        "scripts/tests/test_anchor.py",
+        "eight scopes checked",
+        "check-noun",
+    ),
+    (
+        "scripts/tests/test_conformance_run.py",
+        "line four of the five checks carry",
+        "attribution",
+    ),
+)
+
+
+def _catalogue_claim_re(source=None):
+    if source is None:
+        source = (REPO_ROOT / CATALOGUE_SOURCE_REL).read_text(encoding="utf-8")
+    return catalogue_count_claim_re(derivable_catalogue_counts(source))
+
+
+def _sentence_carrying(rel, needle):
+    """The flattened sentence in `rel` that contains `needle`, as the scan
+    itself sees it. Fails loudly rather than returning None: a fixture whose
+    sentence has been rephrased must be re-pinned deliberately, never
+    silently dropped (the pass would then be vacuous)."""
+    text = (REPO_ROOT / rel).read_text(encoding="utf-8")
+    suffix = Path(rel).suffix
+    flat_needle = " ".join(needle.split())
+    for sentence, _, _ in iter_sentences(prose_only(text, suffix)):
+        if flat_needle in sentence:
+            return sentence
+    raise AssertionError(
+        "fixture sentence no longer present in {}: {!r} -- re-pin it "
+        "deliberately".format(rel, needle)
+    )
+
+
+# --------------------------------------------------------------------------
+# Slice 2 -- the rule
+# --------------------------------------------------------------------------
+
+
+class NoStoredCatalogueCountTest(unittest.TestCase):
+    """Living prose must not store a number scripts/check-all.sh's own
+    arrays already derive. See the slice 2 section comment for why this
+    register, and why the forbidden set is generated rather than typed."""
+
+    def test_the_forbidden_set_comes_from_the_shipped_arrays(self):
+        # The guard's own denominator. A rule whose forbidden set is empty
+        # reports "no findings" for the wrong reason (KA-G-017), and the
+        # labels are asserted so a renamed array fails loudly here rather
+        # than silently shrinking the set.
+        source = (REPO_ROOT / CATALOGUE_SOURCE_REL).read_text(encoding="utf-8")
+        counts = derivable_catalogue_counts(source)
+        self.assertEqual(
+            sorted(counts),
+            sorted(label for label, _, _ in CATALOGUE_COUNT_LABELS),
+            "a catalogue array stopped deriving a count -- the forbidden set "
+            "shrank without anyone deciding it should",
+        )
+        self.assertTrue(all(v > 0 for v in counts.values()), counts)
+
+    def test_no_living_prose_stores_a_derivable_catalogue_count(self):
+        findings, scanned = scan_repo_for_count_claims()
+        self.assertTrue(scanned, "the scan read no file -- could-not-run")
+        self.assertFalse(
+            findings,
+            "prose storing a number scripts/check-all.sh already derives. "
+            "Every one of these has to be edited by hand the next time the "
+            "catalogue changes, and nothing but this test would notice if it "
+            "were not. Rephrase so the count is not stated:\n"
+            + "\n".join(repr(f) for f in findings),
+        )
+
+
+class StoredCountRedProofTest(unittest.TestCase):
+    """The predictable red proof. Before the count was taken out of prose,
+    scripts/check-all.sh's own header stated it -- and a ninth catalogue
+    entry would have made every one of those sentences false at once.
+
+    Run against a historical copy read with `git show`, with the forbidden
+    set derived from THAT copy's own arrays, so the proof does not decay as
+    the catalogue grows: it compares a tree against its own contemporaneous
+    catalogue, not against today's."""
+
+    def test_the_pre_removal_header_is_flagged(self):
+        historical = read_git_show(
+            "{}:{}".format(COUNT_DRIFT_FIXTURE_COMMIT, CATALOGUE_SOURCE_REL)
+        )
+        findings = scan_text_for_count_claims(
+            historical,
+            CATALOGUE_SOURCE_REL,
+            _catalogue_claim_re(historical),
+            suffix=".sh",
+        )
+        self.assertTrue(
+            findings,
+            "the rule no longer flags the very prose it was built for -- "
+            "check-all.sh's own header at {} stored its catalogue's "
+            "cardinality".format(COUNT_DRIFT_FIXTURE_COMMIT),
+        )
+
+    def test_the_current_header_is_not_flagged(self):
+        # The other half of the same proof: the fix, measured at the same
+        # seam rather than assumed from the whole-tree scan above.
+        current = (REPO_ROOT / CATALOGUE_SOURCE_REL).read_text(encoding="utf-8")
+        findings = scan_text_for_count_claims(
+            current, CATALOGUE_SOURCE_REL, _catalogue_claim_re(current), suffix=".sh"
+        )
+        self.assertFalse(findings, [repr(f) for f in findings])
+
+
+class StoredCountExclusionsAreAttributableTest(unittest.TestCase):
+    """Each real sentence the rule lets through, with the ONE condition that
+    excludes it -- and a demonstration that the sentence reached the
+    discriminator at all. A negative that was never a candidate proves
+    nothing about the rule (the same reason slice 1 carries
+    FAILURE_WORD_RE)."""
+
+    def test_every_pass_fixture_is_a_candidate_but_is_not_flagged(self):
+        claim_re = _catalogue_claim_re()
+        naive = re.compile(r"\b(?:seven|eight|four)\b[^.]{0,40}check", re.I)
+        for rel, needle, reason in COUNT_PASS_FIXTURES:
+            with self.subTest(fixture=rel, excluded_by=reason):
+                sentence = _sentence_carrying(rel, needle)
+                self.assertRegex(
+                    sentence,
+                    naive,
+                    "fixture is not even a candidate for a naive number-near-"
+                    "'check' rule, so letting it through proves nothing",
+                )
+                self.assertFalse(
+                    is_catalogue_count_claim(sentence, rel, claim_re),
+                    "excluded-by-{} fixture is flagged: {!r}".format(
+                        reason, sentence[:160]
+                    ),
+                )
+
+    def test_the_history_register_is_what_excludes_the_changelog_entry(self):
+        # Attributable: the same sentence, read as if it lived anywhere else,
+        # IS a finding. Without this, "not flagged" could be the noun rule's
+        # doing rather than the history register's.
+        sentence = _sentence_carrying(*COUNT_PASS_FIXTURES[0][:2])
+        claim_re = _catalogue_claim_re()
+        self.assertFalse(is_catalogue_count_claim(sentence, "CHANGELOG.md", claim_re))
+        self.assertTrue(is_catalogue_count_claim(sentence, "docs/SOME.md", claim_re))
+
+    def test_the_pin_pair_is_what_excludes_the_trajectory_row(self):
+        sentence = _sentence_carrying(*COUNT_PASS_FIXTURES[1][:2])
+        claim_re = _catalogue_claim_re()
+        rel = COUNT_PASS_FIXTURES[1][0]
+        self.assertFalse(is_catalogue_count_claim(sentence, rel, claim_re))
+        # Strip the leading pin pair and nothing else: the row's prose alone
+        # is a finding, so the exclusion is doing the work, not the wording.
+        without_pin = TRAJECTORY_ROW_RE.sub("", sentence)
+        self.assertNotEqual(without_pin, sentence)
+        self.assertTrue(is_catalogue_count_claim(without_pin, rel, claim_re))
+
+    def test_attribution_separates_this_catalogue_from_the_other_one(self):
+        # conformance-run.sh ships a CHECK_NAMES array of its own. Its counts
+        # are derivable too, but from a different register -- and a rule that
+        # cannot tell the two apart would report a finding nobody can fix by
+        # editing check-all.sh.
+        sentence = _sentence_carrying(*COUNT_PASS_FIXTURES[3][:2])
+        claim_re = _catalogue_claim_re()
+        rel = COUNT_PASS_FIXTURES[3][0]
+        self.assertFalse(is_catalogue_count_claim(sentence, rel, claim_re))
+        self.assertTrue(
+            is_catalogue_count_claim(sentence, CATALOGUE_SOURCE_REL, claim_re),
+            "the sentence is only excluded by attribution, so reading it as "
+            "if it sat inside check-all.sh must flag it",
+        )
+
+    def test_the_noun_anchor_separates_a_count_of_checks_from_a_count_of_scopes(self):
+        # 'eight scopes checked' -- same number word, same neighbourhood as
+        # the word 'check', different subject. The head noun is the whole
+        # discrimination, and no attribution or history rule touches it.
+        sentence = _sentence_carrying(*COUNT_PASS_FIXTURES[2][:2])
+        claim_re = _catalogue_claim_re()
+        self.assertFalse(
+            is_catalogue_count_claim(sentence, CATALOGUE_SOURCE_REL, claim_re),
+            "reading it as if it sat inside check-all.sh must STILL not flag "
+            "it -- otherwise the noun anchor is not what excludes it",
+        )
+
+
+class AttributionNamesThisCatalogueTest(unittest.TestCase):
+    """The one narrowing the corpus cannot currently discriminate.
+
+    `catalogue` alone is ambiguous in this repository -- `/cross-check` has a
+    rule catalogue and conformance-run.sh has a check catalogue of its own --
+    but no sentence in the tree today combines the bare token with a count of
+    checks, so loosening the pattern changes nothing that can be measured
+    against real prose. A mutation that survives for want of a witness is a
+    resolution problem, not an equivalence (G-121), and the answer is a
+    synthetic fixture that supplies the witness the corpus lacks."""
+
+    # Modelled on Manual/system/anchored-state.md's real sentence about
+    # /cross-check's RULE catalogue, with a count of checks substituted in so
+    # it reaches this rule's alphabet at all.
+    OTHER_CATALOGUE = (
+        "/cross-check's rule catalogue pairs Markdown with Markdown, and "
+        "four checks in it read the same phase index twice."
+    )
+    LOOSE_ATTRIBUTION_RE = re.compile(r"check-all|catalogued?\b", re.I)
+
+    def test_a_count_about_another_catalogue_is_not_flagged(self):
+        claim_re = _catalogue_claim_re()
+        self.assertRegex(
+            self.OTHER_CATALOGUE,
+            claim_re,
+            "fixture does not reach the count pattern, so letting it through "
+            "proves nothing about attribution",
+        )
+        self.assertFalse(
+            is_catalogue_count_claim(self.OTHER_CATALOGUE, "docs/SOME.md", claim_re)
+        )
+
+    def test_the_loosened_pattern_is_what_would_flag_it(self):
+        # Attributable: the ONLY difference is the bare `catalogue` token.
+        self.assertTrue(self.LOOSE_ATTRIBUTION_RE.search(self.OTHER_CATALOGUE))
+        self.assertFalse(CATALOGUE_ATTRIBUTION_RE.search(self.OTHER_CATALOGUE))
+
+    def test_the_same_count_about_this_catalogue_is_flagged(self):
+        # The positive half, so the fixture pair proves discrimination rather
+        # than a rule that never fires.
+        about_this_one = self.OTHER_CATALOGUE.replace(
+            "/cross-check's rule catalogue", "check-all.sh's catalogue"
+        )
+        self.assertNotEqual(about_this_one, self.OTHER_CATALOGUE)
+        self.assertTrue(
+            is_catalogue_count_claim(
+                about_this_one, "docs/SOME.md", _catalogue_claim_re()
+            )
+        )
+
+
+class CardinalSpellingsCoverEveryDerivableCountTest(unittest.TestCase):
+    """The word map is finite; the catalogue is not. Without this, a
+    catalogue that grows past CARDINAL_WORDS would keep reporting findings
+    for digits and silently stop seeing the spelled-out form -- a guard
+    quietly narrowing itself is worse than one that fails."""
+
+    def test_every_derivable_count_has_both_spellings(self):
+        source = (REPO_ROOT / CATALOGUE_SOURCE_REL).read_text(encoding="utf-8")
+        counts = derivable_catalogue_counts(source)
+        missing = sorted({v for v in counts.values() if v not in CARDINAL_WORDS})
+        self.assertFalse(
+            missing,
+            "the catalogue derives a count with no entry in CARDINAL_WORDS: "
+            "{} -- extend the map, deliberately, or the spelled-out form of "
+            "this number walks through the guard".format(missing),
+        )
+
+    def test_the_pattern_carries_the_word_form_not_only_the_digit(self):
+        # Attributable: proves the map is actually REACHED by the compiled
+        # pattern, not merely populated. A test of the map alone would pass
+        # even if catalogue_count_claim_re() stopped consulting it.
+        source = (REPO_ROOT / CATALOGUE_SOURCE_REL).read_text(encoding="utf-8")
+        counts = derivable_catalogue_counts(source)
+        claim_re = catalogue_count_claim_re(counts)
+        for label, value in sorted(counts.items()):
+            with self.subTest(count=label):
+                self.assertRegex("%s checks" % CARDINAL_WORDS[value], claim_re)
+                self.assertRegex("%d checks" % value, claim_re)

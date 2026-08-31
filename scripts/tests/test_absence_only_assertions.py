@@ -873,7 +873,7 @@ class NoStaleKnownFindingsTest(unittest.TestCase):
 
 class ClassificationCountsTest(unittest.TestCase):
     def test_classification_counts(self):
-        """Regression pin on the measured baseline: 1166 `test_*` methods
+        """Regression pin on the measured baseline: 1170 `test_*` methods
         across the corpus call something shaped like a subprocess invocation
         and are therefore in scope for this check; 0 of those are currently
         absence-only-needs-exemption -- `KNOWN_FINDINGS` above is empty for
@@ -887,6 +887,31 @@ class ClassificationCountsTest(unittest.TestCase):
         growing paragraph:
 
           in-scope / flagged   when
+          1170 / 0             31.08.2026: check-all.sh's catalogue gained a
+                               ninth entry, install.sh --verify, wired in as
+                               a new "installer" CHECK_KIND parametrised by
+                               <project-dir> rather than by
+                               CHECK_SCRIPT_DIR (install.sh sits above the
+                               directory that seam substitutes, so reaching
+                               it through the seam would escape the scratch
+                               tree). +4 in scope, all four driving
+                               `self.run_check_all`: three in
+                               CouldNotRunIsNeverCountedAsPassTest (the new
+                               check's own could-not-run report, the
+                               counter-proof that a bare non-zero exit is
+                               still an ordinary divergence, and the
+                               missing-installer precondition) and one in
+                               the new InstallVerifyCouldNotRunRedProofTest.
+                               None flagged; each asserts on named report
+                               text or a returncode. Set proof rather than a
+                               bare delta: the scanner was run against a
+                               `git archive` of 0b3617e in a scratch tree and
+                               against this one, and the key sets differ by
+                               exactly those four additions with zero
+                               removals. The file count did not move -- no
+                               new module; the slice-2 rule that came with
+                               this work went into the existing
+                               test_live_status_claims.py.
           1166 / 0             31.08.2026: install.sh gained a provenance
                                marker and a `--verify` mode, and
                                test_install_provenance.py came with them.
@@ -1510,7 +1535,7 @@ class ClassificationCountsTest(unittest.TestCase):
         count."""
         recs = scan_tree()
         flagged = [r for r in recs if r.disposition in NEEDS_EXEMPTION]
-        self.assertEqual(1166, len(recs))
+        self.assertEqual(1170, len(recs))
         self.assertEqual(0, len(flagged))
 
 

@@ -45,20 +45,21 @@ optional).
 bash scripts/check-all.sh .
 ```
 
-Runs the eight checks below and compares each against
+Runs the checks catalogued below and compares each against
 `scripts/check-all.baseline.tsv`, the versioned record of what this repository's
 checks are *supposed* to return. Takes about five minutes, most of it the test
 suite.
 
-**It does not compare against exit zero, and neither should you.** One of the
-eight is non-zero on a correct tree — `memory-lint.sh` exits 1 on long-standing
+**It does not compare against exit zero, and neither should you.** One of them
+is non-zero on a correct tree — `memory-lint.sh` exits 1 on long-standing
 warnings — so a collector that failed on any non-zero result would be
 permanently red, and a check that is red when nothing is wrong gets ignored
 within a fortnight. (It was two until 30.08.2026: `doc-volume-check.sh` now
 scans only git-tracked files, and the oversized files it used to report are all
 untracked working state.) A check
 that *could not run* (no consumers configured, no `scripts/tests/` because you
-are running from an installed `~/.claude`, ShellCheck not installed) is reported
+are running from an installed `~/.claude`, ShellCheck not installed, no install
+provenance to compare against) is reported
 as `could-not-run` and counted separately: it is neither a pass nor a failure,
 and it never lands in the matched count.
 
@@ -125,6 +126,7 @@ Run the ones relevant to what you touched — each is read-only:
 | `scripts/doc-volume-check.sh` | file size against the 25/40/50 KB splitting thresholds |
 | `scripts/shellcheck-run.sh` | ShellCheck over the shipped shell scripts at `--severity=warning` |
 | `scripts/conformance-run.sh` | the shipped checks above, run against real consumer projects (see below) |
+| `install.sh --verify` | the `~/.claude` installation against the commit its provenance marker records |
 
 Two notes on reading their output:
 

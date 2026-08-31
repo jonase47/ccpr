@@ -115,31 +115,40 @@ jobs:
 
       - name: Run check-all.sh
         run: |
-          # Runs all eight catalogued checks, INCLUDING the python suite
+          # Runs every catalogued check, INCLUDING the python suite
           # (see scripts/check-all.sh's own header) -- its exit code IS
           # this job's result, compared against
           # scripts/check-all.baseline.tsv inside the script itself.
           #
-          # Measured in a fresh clone with an empty HOME and shellcheck
-          # on PATH (30.08.2026): 8 catalogued, 6 matched, 0 divergent, 2
-          # could-not-run, exit 0 -- memory-lint and conformance-run
-          # correctly report their own targets/consumers absent on a
-          # runner rather than diverging, and doc-volume-check scans only
-          # git-tracked files.
+          # A runner is not the maintainer's machine, and some checks
+          # correctly report could-not-run here rather than diverging:
+          # memory-lint and conformance-run find their own targets and
+          # consumers absent under an empty HOME, and install-verify finds
+          # no installation there to compare against a commit. That is the
+          # designed outcome, not a degraded run -- and doc-volume-check
+          # scans only git-tracked files, so it is environment-independent
+          # either way.
           #
-          # One thing that measurement does NOT settle: whether this
-          # runner image ships shellcheck. If it does not, the eighth
-          # check reports could-not-run and the shape is 5 matched / 3
-          # could-not-run -- equally correct, and covered by
+          # One thing no measurement settles: whether this runner image
+          # ships shellcheck. If it does not, that check reports
+          # could-not-run too -- equally correct, and covered by
           # scripts/tests/test_shellcheck_run.py, which proves the wrapper
           # reports could-not-run rather than exit 0 when the tool is
-          # absent. Read whichever shape this run prints; do not assume
-          # either. What would be wrong is 8/8 matched, because that would
-          # mean two checks claimed a scope they cannot have here.
+          # absent. Read the scope line this run actually prints; do not
+          # assume a shape. What would be wrong is EVERY check matching,
+          # because that would mean checks claimed a scope they cannot
+          # have here.
+          #
+          # No counts are recorded in this comment, on purpose. The ones
+          # that used to be here named a shape the CI had already stopped
+          # producing. The run's own report carries the current numbers,
+          # where they are correct by construction, and
+          # scripts/tests/test_live_status_claims.py now refuses prose
+          # that stores a count scripts/check-all.sh already derives.
           #
           # /bin/bash explicit here too, on top of the PATH-forcing above:
           # this top-level invocation does not need PATH resolution to hit
           # the right interpreter, but check-all.sh's OWN internal calls to
-          # its seven sibling scripts ("bash $script_path", not an absolute
+          # its sibling scripts ("bash $script_path", not an absolute
           # path) do -- that is what the PATH-forcing step actually buys.
           /bin/bash scripts/check-all.sh .

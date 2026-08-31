@@ -3,7 +3,7 @@
 # remember, and report ACTUAL exit code against an EXPECTED one from a
 # versioned baseline, not against "exit 0".
 #
-# Why "exit 0" is not the pass criterion: one of the eight checks below is
+# Why "exit 0" is not the pass criterion: one of the checks below is
 # non-zero BY DESIGN on a clean CCPR checkout right now (memory-lint.sh exits
 # 1 on long-standing memory-freshness warnings). It was two until 30.08.2026 —
 # doc-volume-check.sh now scans only git-tracked files, so the oversized files
@@ -48,11 +48,11 @@
 # already carves out for the same reason (a check that cannot run must never
 # look like a check that ran and found nothing).
 #
-# --- the eight checks, and which ones apply outside this repository --------
+# --- the check catalogue, and which ones apply outside this repository ----
 #
-# Four are GENERIC over any documentation tree and always attempted, whatever
+# Some are GENERIC over any documentation tree and always attempted, whatever
 # <project-dir> is: phase-docs-lint, memory-lint, manual-lint,
-# doc-volume-check. Four are CCPR-REPOSITORY-ONLY: artifact-gate.sh sweeps
+# doc-volume-check. The rest are CCPR-REPOSITORY-ONLY: artifact-gate.sh sweeps
 # THIS repository's own shipped artifacts for the Constitution's Inviolable;
 # conformance-run.sh runs THIS repository's own shipped checks against ITS
 # consumers (it takes no project-dir argument at all — see its own header);
@@ -61,13 +61,17 @@
 # lints THIS repository's own shipped scripts/*.sh + scripts/lib/*.sh +
 # install.sh — an adopter project's own, unrelated shell scripts (if any)
 # are not this check's business, and "scripts/*.sh" is not a CCPR naming
-# convention any adopter is bound to. All four are gated on one existence
-# check: "<project-dir>/scripts/tests exists" — chosen over the alternative
+# convention any adopter is bound to; install-verify runs THIS repository's
+# own install.sh --verify, which compares the ~/.claude installation
+# against the commit its provenance marker says it came from — an adopter
+# project has no install.sh and nothing to compare. All of them are gated
+# on one existence check: "<project-dir>/scripts/tests exists" — chosen
+# over the alternative
 # considered (comparing `git -C <project-dir> rev-parse --show-toplevel`
 # against this script's own git root, the self-detection artifact-gate.sh
 # itself already uses for its docs/-boundary sub-rule) because it is the ONE
-# signal all four checks actually need: python-tests needs that exact path
-# to exist to have anything to discover, and reusing it for the other three
+# signal every one of them actually needs: python-tests needs that exact path
+# to exist to have anything to discover, and reusing it for the others
 # keeps a single, uniform "is this the CCPR checkout" answer rather than two
 # different mechanisms answering the same question. The git-identity approach
 # has its own accepted gap (a project that vendors a copy of this repository
@@ -78,7 +82,7 @@
 #
 # --- the seam: CCPR_CHECK_ALL_SCRIPT_DIR -------------------------------------
 #
-# Seven of the eight checks are shipped SIBLING SCRIPTS, invoked as
+# A catalogued check is normally a shipped SIBLING SCRIPT, invoked as
 # "$CHECK_SCRIPT_DIR/<name>.sh <args>". CHECK_SCRIPT_DIR defaults to this
 # script's own directory and is overridable via CCPR_CHECK_ALL_SCRIPT_DIR —
 # the exact seam conformance-run.sh already ships as CCPR_CONFORMANCE_
@@ -89,19 +93,31 @@
 # the python suite alone) in every test of the comparison logic would mean
 # nobody runs those tests. scripts/tests/test_check_all.py points this
 # variable at a scratch directory holding tiny stub scripts that `exit <N>`
-# on demand — the SAME shape for every one of the seven, so one seam covers
+# on demand — the SAME shape for every one of them, so one seam covers
 # all of them. A sibling script that does not exist under CHECK_SCRIPT_DIR
 # (a scratch dir with no stub for it, or a genuinely broken installation) is
 # itself a could-not-run outcome, not a crash — this is also what lets a test
 # build the "every check could-not-run" case: point CCPR_CHECK_ALL_SCRIPT_DIR
 # at an empty directory and <project-dir> at a location with no scripts/tests.
 #
-# The seventh check, python-tests, is not a sibling script — it is a fixed
-# `python3 -m unittest discover` invocation — and needs no separate seam: it
-# is already parametrised by <project-dir> (`-s <project-dir>/scripts/tests
-# -t <project-dir>`), so a test simply points <project-dir> at a scratch
-# directory carrying a tiny, fast, real test package instead of this
-# repository's own ~1850-test, several-minutes suite.
+# The catalogue entries that are NOT sibling scripts need no seam of their
+# own, because each is already parametrised by <project-dir>:
+#
+#   python-tests   a fixed `python3 -m unittest discover` invocation
+#                  (`-s <project-dir>/scripts/tests -t <project-dir>`), so
+#                  a test points <project-dir> at a scratch directory
+#                  carrying a tiny, fast, real test package instead of
+#                  this repository's own several-minutes suite.
+#   install-verify `bash <project-dir>/install.sh --verify`, so a test
+#                  points <project-dir> at a scratch directory carrying a
+#                  tiny stub install.sh. Deliberately NOT reached through
+#                  CHECK_SCRIPT_DIR: install.sh sits at the repository
+#                  root, one level ABOVE the directory that seam
+#                  substitutes, so "$CHECK_SCRIPT_DIR/../install.sh" would
+#                  escape the scratch tree and run the real installer
+#                  against the real $HOME. --verify is read-only, but a
+#                  test seam that reaches outside its own sandbox is not
+#                  one, and the next flag added might not be read-only.
 #
 # One check also SOURCES a shared library under the same directory, not just
 # invokes a sibling as a subprocess: before running artifact-gate.sh, this
@@ -135,20 +151,25 @@ CHECK_SCRIPT_DIR="${CCPR_CHECK_ALL_SCRIPT_DIR:-$HERE}"
 # The check catalogue — parallel arrays, not an associative array: this
 # repository's floor is bash 3.2 (macOS /bin/bash), which has none (the same
 # constraint conformance-run.sh's own table comment states).
-CHECK_NAMES=(phase-docs-lint memory-lint manual-lint doc-volume-check artifact-gate conformance-run python-tests shellcheck)
+CHECK_NAMES=(phase-docs-lint memory-lint manual-lint doc-volume-check artifact-gate conformance-run python-tests shellcheck install-verify)
 # "script" — a sibling script under CHECK_SCRIPT_DIR. "python" — the fixed
 # unittest-discover invocation (no sibling script, see header above).
 # The "shellcheck" catalogue entry is "script" too (scripts/shellcheck-
 # run.sh) — WI-0129 D2 gave the external ShellCheck TOOL the same
 # sibling-script seam artifact-gate.sh/conformance-run.sh already have,
 # rather than invoking it raw here.
-CHECK_KIND=(script script script script script script python script)
-CHECK_SCRIPTS=(phase-docs-lint.sh memory-lint.sh manual-lint.sh doc-volume-check.sh artifact-gate.sh conformance-run.sh "" shellcheck-run.sh)
+# "installer" — "<project-dir>/install.sh --verify". Parametrised by
+# <project-dir> like "python", NOT by CHECK_SCRIPT_DIR: install.sh lives
+# at the repository root, and reaching it as "$CHECK_SCRIPT_DIR/../
+# install.sh" would point OUT of the scratch directory the test seam
+# substitutes, so a test could never stand in for it.
+CHECK_KIND=(script script script script script script python script installer)
+CHECK_SCRIPTS=(phase-docs-lint.sh memory-lint.sh manual-lint.sh doc-volume-check.sh artifact-gate.sh conformance-run.sh "" shellcheck-run.sh "")
 # 1 = CCPR-repository-only (gated on <project-dir>/scripts/tests existing —
 # see header above). shellcheck is 1: its scope (THIS repository's own
 # scripts/*.sh + scripts/lib/*.sh + install.sh) is not a convention any
 # adopter project is bound to.
-CHECK_CCPR_ONLY=(0 0 0 0 1 1 1 1)
+CHECK_CCPR_ONLY=(0 0 0 0 1 1 1 1 1)
 CHECK_COUNT=${#CHECK_NAMES[@]}
 
 # --- CLI ---------------------------------------------------------------------
@@ -301,11 +322,11 @@ done
 # grep-based classification — CI is exactly where that env var is meant to
 # be used, so this is not a purely theoretical corner). Calling it directly
 # here — as a first version of this fix did — meant that crash killed this
-# entire process, at the top, BEFORE any of the eight checks ran and before
+# entire process, at the top, BEFORE any catalogued check ran and before
 # RAN_COUNT is ever counted: the "NOTHING WAS VERIFIED — this is not a
 # pass" diagnosis a few dozen lines down never gets to fire, and a config
-# problem in ONE check (artifact-gate's deny-list) silently prevented all
-# eight from being attempted. Fail-loud here bypasses the very rule this
+# problem in ONE check (artifact-gate's deny-list) silently prevented every
+# other one from being attempted. Fail-loud here bypasses the very rule this
 # script exists to enforce. The opposite extreme — silently falling back to
 # "not configured" on ANY failure — is equally wrong, and for the reason B3
 # itself already names: a strictness that vanishes because its own
@@ -384,6 +405,18 @@ while [ "$ci" -lt "$CHECK_COUNT" ]; do
     fi
   fi
 
+  # Same shape one kind over: a missing installer is a could-not-run, not a
+  # crash. The CCPR-only gate above already refuses a project-dir with no
+  # scripts/tests, so this only fires on a checkout that HAS one and still
+  # has no install.sh -- a partial or broken tree, which must be reported
+  # rather than guessed at.
+  if [ -z "$state" ] && [ "$kind" = "installer" ]; then
+    if [ ! -f "$PROJECT_DIR/install.sh" ] || [ ! -r "$PROJECT_DIR/install.sh" ]; then
+      state="could-not-run"
+      reason="installer not found or not readable: $PROJECT_DIR/install.sh"
+    fi
+  fi
+
   if [ -z "$state" ]; then
     stdout_file="$(mktemp)"
     stderr_file="$(mktemp)"
@@ -394,6 +427,18 @@ while [ "$ci" -lt "$CHECK_COUNT" ]; do
         # always captures 0 for `$?` inside its `then` branch (measured
         # directly building conformance-run.sh; same shape reused here).
         if python3 -m unittest discover -s "$PROJECT_DIR/scripts/tests" -t "$PROJECT_DIR" \
+            >"$stdout_file" 2>"$stderr_file"; then
+          rc=0
+        else
+          rc=$?
+        fi
+        ;;
+      installer)
+        # Read-only mode: install.sh's own --verify takes precedence over
+        # every install flag (see its header). Same `if CMD; then rc=0;
+        # else rc=$?; fi` shape as the python branch above, for the same
+        # reason.
+        if bash "$PROJECT_DIR/install.sh" --verify \
             >"$stdout_file" 2>"$stderr_file"; then
           rc=0
         else
@@ -503,6 +548,26 @@ while [ "$ci" -lt "$CHECK_COUNT" ]; do
         *"the shellcheck check DID NOT RUN"*)
           state="could-not-run"
           reason="shellcheck not installed on PATH, or no scripts/*.sh / scripts/lib/*.sh / install.sh found — nothing to compare against a baseline exit code"
+          ;;
+      esac
+    fi
+
+    # install.sh --verify's own could-not-run state, read the same way --
+    # and this one is the reason the branch cannot be skipped. Unlike
+    # memory-lint, conformance-run and shellcheck, install.sh --verify makes
+    # its could-not-run VISIBLE in the exit code (3, distinct from 0
+    # verified and 1 divergent). That is not enough: an exit code this
+    # script does not recognise is compared against the baseline like any
+    # other, so a run that compared nothing would be reported as a
+    # DIVERGENCE -- "we looked and found a problem" for a check that never
+    # looked. The substring below is the wording install.sh's own
+    # verify_cannot_run() emits, and its header names these three checks as
+    # the carve-out it is mirroring.
+    if [ "$name" = "install-verify" ]; then
+      case "$stdout_text" in
+        *"the install-provenance check DID NOT RUN"*)
+          state="could-not-run"
+          reason="nothing to compare (no installation, no provenance marker, a non-git or dirty source tree, or the recorded commit is absent from this checkout) — see the check's own report for which"
           ;;
       esac
     fi

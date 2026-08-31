@@ -30,10 +30,13 @@
 # files it used to report (all of them untracked working state under
 # docs/memory/) are out of its scope and its expected exit is 0.
 #
-# Three entries are environment-independent by construction rather than by
-# luck: memory-lint and conformance-run report their own scope, so a
-# machine without those targets gets could-not-run instead of a divergence,
-# and doc-volume-check measures only what git tracks.
+# Several entries are environment-independent by construction rather than by
+# luck: memory-lint, conformance-run and shellcheck report their own scope,
+# so a machine without those targets, consumers or the external tool gets
+# could-not-run instead of a divergence, and doc-volume-check measures only
+# what git tracks. The count is deliberately not stated -- check-all.sh's
+# own report names which checks reported their scope on the run you are
+# reading, where it is current by definition.
 #
 # Re-measure and update this file DELIBERATELY when a check's expected
 # outcome actually changes -- the same "re-measure the pair together, never
@@ -55,3 +58,4 @@ artifact-gate	0
 conformance-run	0	only a CCPR-attributable finding raises the exit code; consumer findings do not
 python-tests	0	run with -t ., not optional — see CONTRIBUTING.md
 shellcheck	0	run at --severity=warning
+install-verify	0	compares the installation against the commit its provenance marker records; reports its own could-not-run when there is nothing to compare

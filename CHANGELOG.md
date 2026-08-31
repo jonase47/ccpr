@@ -8,6 +8,53 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Added
 
+- **The catalogue's own size stopped being typed, and `install.sh --verify` became the ninth
+  check.** The two are one change on purpose: adding a ninth entry would have meant retyping a
+  number word by hand, which is the sixth instance of the register-drift class — and the first
+  that could be seen coming. That made it the strongest available red proof for the mechanism
+  added earlier in this release: a number derivable from the catalogue, typed instead.
+
+  **The count was larger than either estimate.** A tree-wide sweep found **15 live sites** of
+  the catalogue number and **14 derived ones**, across six files. Both earlier counts had been
+  narrowed the same way — by a pattern requiring the noun `checks`, which misses `eight
+  commands`, `one of the eight`, and `all eight from being attempted`.
+
+  **Derived numbers are caught, not merely named.** The forbidden set is generated from the
+  catalogue arrays rather than typed: catalogued, sibling-script, CCPR-only, generic. That
+  covers "the other seven checks" (N−1, at eight sites) and the generic/CCPR-only split, which
+  `install-verify` moves from 4/4 to 4/5 — three sentences that would have become false.
+  Ordinals are deliberately excluded and said to be: they name a position, and appending moves
+  none.
+
+  Every site was measured for whether the number carried anything, and none did. `Seven of the
+  eight checks are shipped SIBLING SCRIPTS` became `A catalogued check is normally a shipped
+  SIBLING SCRIPT`, killing N and N−1 at once. The informing number is in every run's own
+  report, where it is current by construction.
+
+  One site was in no list: the baseline header claimed **Three** entries are
+  environment-independent, wrong since ShellCheck gained its own could-not-run state.
+
+  **The could-not-run branch looks redundant and is not.** Unlike the other three,
+  `install.sh --verify` makes its could-not-run visible in the exit code (3). But `check-all.sh`
+  compares any unrecognised exit code against the baseline, so without the branch a run that
+  compared *nothing* would be reported as a **divergence** — "we looked and found a problem",
+  for a check that never looked. The red proof pairs the report sentence with a non-zero exit
+  so the classification demonstrably comes from the text, and the counter-proof pairs the same
+  exit code *without* the sentence and expects an ordinary divergence.
+
+  The entry uses a new catalogue kind parametrised by the project directory rather than the
+  script directory: `install.sh` sits one level *above* the directory the test seam replaces,
+  so `$CHECK_SCRIPT_DIR/../install.sh` would have escaped the scratch tree and run the real
+  installer against the real `$HOME`. **A third home neither earlier option contained** — the
+  entry in `0b3617e` recorded that both *proposed* homes were blocked, which was true; this is
+  not one of them, and needs no new script.
+
+  Two exemptions were built and removed on measurement. A date rule would have been *reachable
+  and wrong* here — one file names a date and the live catalogue number in the same sentence —
+  where the same exemption in the earlier slice was *unreachable*. And the earlier slice's
+  quote-stripping, ported over, took the candidate property away from two of four pass fixtures,
+  so they would have passed for the wrong reason; the prose was reworded instead.
+
 - **`install.sh` records where it installed from, and `--verify` checks whether that still
   holds.** A measurement in this round needed to state what `~/.claude/commands/` actually
   *is* before it could say anything about it, and the only way to establish that was a hand
