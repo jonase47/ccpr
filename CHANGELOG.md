@@ -8,6 +8,35 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Added
 
+- **`hooks/agent-monitor.py` warns, before the fact, when a Bash command reads an exit
+  status a pipe already took away.** Built against a real defect class seen twice in one
+  day — `bash install.sh --verify 2>&1 | tail -6; echo "EXIT=$?"` reported the wrong exit
+  code because `$?` belonged to `tail`, not `install.sh`, and `gh run watch --exit-status
+  ... | tail -15` masked a real CI failure the same way. A prose checklist rule already
+  existed for this and did not stop the second instance, so the check moved into the one
+  place that can reach the command before it runs: a new PreToolUse branch on `Bash`
+  calls. It never blocks — only warns to stderr, mirroring the HANDOVER size-cap check's
+  discipline — and is deliberately narrow: `pipefail` anywhere in the command suppresses
+  it entirely, since `$?` after a pipe is the correct idiom there; both a chained
+  `&&`/`||` and a later `; echo $?` after a pipe stay silent when the pipe's own last
+  stage is itself a status-producing test (`grep -q`, `grep` used as a test, `cmp -s`,
+  `diff -q`, `test`, `[`, `[[`) rather than a plain output consumer, since then the
+  pipeline's exit status IS the test's own and reading it is correct usage, not the bug
+  — confirmed against `head -1 f | grep -q x && echo ja`, `head -1 f | grep -q x; echo $?`
+  and `cat a | cmp -s - b && echo gleich`, which all used to warn (a generic "any command
+  with a quiet/status flag" rule was considered for the last two and rejected — `-s` is
+  not quiet-only on `ls`/`sort`/`tail`/`date`/`column`, so the curated command list stayed
+  narrow instead); and it does not (yet) parse heredoc bodies or a literal newline
+  embedded inside a quoted multi-line string. 37 tests in
+  `scripts/tests/test_bash_exit_status_pipe_hook.py` weigh both historical commands,
+  the other shapes the detector also claims (an `&&`/`||` chain after a pipe, a
+  quiet-mode `grep -q` masked by a further pipe stage), and — at equal weight — the
+  negative controls: ordinary pipes, multi-stage pipes, the corrected redirect-then-read
+  form, `pipefail`, a `${PIPESTATUS[0]}` read, and both a chained `&&`/`||` and a
+  sequenced `; echo $?` whose pipe ends in a status test — plus a word-boundary
+  regression lock on the status-test regex itself (`diff3`, `diffstat`, `cmpfoo` must
+  still warn, not be mistaken for `diff`/`cmp`).
+
 - **ADR-0012 gives the "R1" rule an address.** The rule that derivable values are generated
   rather than stored had been cited for months under a label that resolved to no document —
   a reference whose target is missing, which is the very defect the rule forbids. The ADR

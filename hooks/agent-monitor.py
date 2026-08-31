@@ -87,6 +87,15 @@ HANDOVER_WARN_PCT = 80
 # Tools that can change the file's size. A Read does not, so it must not trigger a re-check.
 HANDOVER_WRITE_TOOLS = {"Write", "Edit", "MultiEdit", "NotebookEdit"}
 
+# Bash "exit status behind a pipe" check (run on PreToolUse of a Bash call)
+# ---------------------------------------------------------------------------------------
+# Deliberately narrow, hand-curated allowlist of flags whose whole point is reporting an
+# exit status. Not derived from anything else this repo holds -- ADR-0012's own carve-out
+# ("editorial judgement ... this ADR does not apply") covers it, so it is not a pin. A
+# longer list buys more true positives at the cost of more false ones; extend it via
+# /postmortem when a new instance is actually seen, not speculatively.
+EXIT_STATUS_ONLY_FLAGS = ("--exit-status", "--exit-code")
+
 # Log cleanup trigger (SessionStart, throttled to at most one run per calendar day)
 # --------------------------------------------------------------------------------
 # scripts/log-cleanup.sh has always implemented the retention policy correctly and
@@ -730,6 +739,270 @@ def check_handover_size(session_id: str, source_event: str):
         pass
 
 
+# === Bash "exit status behind a pipe" check ===
+
+_REAL_PIPE_RE = re.compile(r"(?<!\|)\|(?!\|)")            # a lone `|`, never `||`
+_STATEMENT_SEP_RE = re.compile(r"&&|\|\||;|\n")            # top-level statement boundaries
+_DOLLAR_QUESTION_RE = re.compile(r"\$\?")
+_GREP_TOOL_RE = re.compile(r"\b(?:grep|egrep|fgrep)\b")
+_GREP_QUIET_FLAG_RE = re.compile(r"(?:^|\s)(?:-[a-zA-Z]*q[a-zA-Z]*\b|--quiet\b)")
+_PIPEFAIL_RE = re.compile(r"\bpipefail\b", re.IGNORECASE)
+
+# Deliberately narrow, hand-curated set of commands whose whole point -- at the LAST
+# position in a pipe -- is producing an exit status, not output: grep/egrep/fgrep (with
+# or without -q; a bare `| grep pattern && ...` is exactly as much a test as
+# `| grep -q pattern && ...` -- the -q only suppresses output nobody is reading here),
+# cmp/diff (same reasoning: same-or-different is already `cmp`'s/`diff`'s exit code,
+# `-s`/`-q` only suppress the "differ at byte N" / unified-diff output), and the POSIX
+# test forms `test`, `[`, `[[`.
+#
+# A fully generic "any command carrying a quiet/status-only flag (-q/-s/--quiet/
+# --silent)" rule was considered instead of naming cmp/diff and rejected: -s is not
+# quiet/status-only on other common commands that could just as plausibly sit in this
+# same last-stage position -- `ls -s` prints block sizes, `sort -s` requests a stable
+# sort, and `column -s`/`date -s`/`tail -s` all take a flag-attached argument. A generic
+# flag match would silence those too, for the wrong reason. Naming the command instead
+# of the flag keeps this precise. Not derived from anything else this repo holds --
+# ADR-0012's own carve-out ("editorial judgement ... this ADR does not apply") covers
+# it, so it is not a pin, mirroring EXIT_STATUS_ONLY_FLAGS above. Extend via /postmortem
+# when a new instance is actually seen, not speculatively.
+_STATUS_TEST_LAST_STAGE_RE = re.compile(
+    r"^\s*(?:(?:grep|egrep|fgrep|test|cmp|diff)\b|\[\[?(?=\s|$))"
+)
+
+
+def _blank_quotes(text: str, blank_double: bool) -> str:
+    """Blanks quoted regions to spaces, keeping every other character's position fixed.
+
+    Single-quoted text is always fully literal in POSIX/bash, so it never carries a real
+    operator or a live `$?` -- it is always blanked. Double-quoted text still expands
+    `$?` / `$(...)` / `${...}`, so blank_double picks which question this mask answers:
+
+    * False (the "does this READ $?" mask): double-quoted content is left untouched, so
+      `"EXIT=$?"` still shows its live `$?` -- exactly the shape of the first historical
+      command below, where the read sits inside a double-quoted echo argument.
+    * True (the "where are the OPERATORS" mask): double-quoted content is blanked too, so
+      a literal `|` typed inside a string (`echo "a|b"`) is never mistaken for a pipe.
+    """
+    chars = list(text)
+    n = len(text)
+    i = 0
+    in_single = False
+    in_double = False
+    while i < n:
+        ch = text[i]
+        if in_single:
+            if ch == "'":
+                in_single = False
+            elif ch != "\n":
+                chars[i] = " "
+            i += 1
+            continue
+        if in_double:
+            if ch == "\\" and i + 1 < n:
+                if blank_double:
+                    chars[i] = " "
+                    if text[i + 1] != "\n":
+                        chars[i + 1] = " "
+                i += 2
+                continue
+            if ch == '"':
+                in_double = False
+            elif blank_double and ch != "\n":
+                chars[i] = " "
+            i += 1
+            continue
+        if ch == "\\" and i + 1 < n:
+            i += 2
+            continue
+        if ch == "'":
+            in_single = True
+        elif ch == '"':
+            in_double = True
+        i += 1
+    return "".join(chars)
+
+
+def _iter_statements(ops_mask: str):
+    """Yields (start, end, sep_after) for each top-level statement in ops_mask.
+
+    sep_after is the literal separator text ("&&", "||", ";" or "\n") that immediately
+    follows the statement, or None for the last statement in the command.
+    """
+    pos = 0
+    n = len(ops_mask)
+    for m in _STATEMENT_SEP_RE.finditer(ops_mask):
+        yield pos, m.start(), m.group(0)
+        pos = m.end()
+    yield pos, n, None
+
+
+def _last_stage_is_status_test(stage_text: str) -> bool:
+    """True when a pipe's LAST stage is itself a status-producing test (see
+    _STATUS_TEST_LAST_STAGE_RE) rather than a plain output consumer.
+
+    The distinction rules 1 and 2 both need: bash already reflects a pipeline's LAST
+    stage's exit code as the pipeline's own -- no `pipefail` required, that is POSIX
+    pipeline semantics, not the pipefail extension. Reading that status via `$?`, `&&` or
+    `||` is then correct usage, not the defect, exactly when the last stage's own exit
+    code is a meaningful thing to read -- i.e. when the last stage IS a test. This is the
+    mirror image of rule 4's non-last-stage check further down in SHAPE -- same
+    last-stage/non-last-stage split, opposite verdict -- but no longer in COMMAND
+    COVERAGE: rule 4 only recognises a quiet-mode grep/egrep/fgrep (`_GREP_TOOL_RE` +
+    `_GREP_QUIET_FLAG_RE`), while `_STATUS_TEST_LAST_STAGE_RE` here additionally
+    recognises cmp/diff/test/[/[[ and does not require a quiet flag on grep -- a bare
+    `grep pattern` at the last stage is already read as a test. Do not derive one rule's
+    command set from the other's.
+    """
+    return bool(_STATUS_TEST_LAST_STAGE_RE.match(stage_text))
+
+
+def find_exit_status_pipe_loss(command) -> list:
+    """Finds shapes where a Bash command reads an exit status a pipe already took away.
+
+    Deliberately narrow (PO directive: a false positive costs more than a false negative
+    here). It contains its own input like check_handover_size's siblings do: a non-string
+    or empty command reads as "nothing to check", not as a monitor defect.
+
+    Catches four shapes, all requiring a real pipe (`|`, not `||`) inside the SAME
+    top-level statement (a run of text between `;` / `&&` / `||` / newline):
+
+    1. The statement is immediately followed (via `;` or a newline) by another statement
+       that reads a literal `$?`, AND the pipe's last stage is a plain output consumer
+       rather than a status test (see _last_stage_is_status_test) -- `$?` after `;`
+       belongs to the pipe's own last stage, not to the piped command earlier in the
+       same statement, which is meaningless when that last stage is e.g. `tail` or `wc`.
+       When the last stage IS itself a status-producing test (`grep -q`, `cmp -s`,
+       `test`, ...), reading its status via a later `$?` is the correct idiom, not the
+       defect, and this rule stays silent -- confirmed false positive, measured directly
+       against `head -1 f | grep -q x; echo $?` before this narrowing existed. Shares its
+       gate with rule 2 below; same reasoning, different separator.
+    2. The statement is immediately followed by `&&` or `||`, AND the pipe's last stage
+       is a plain output consumer rather than a status test (see
+       _last_stage_is_status_test) -- the chain operator reacts to the pipeline's own
+       (last-stage) exit status, which is meaningless when the last stage is e.g. `tail`
+       or `cat`. When the last stage IS itself a status-producing test (`grep -q`, `grep`
+       used as a test, `cmp -s`, `diff -q`, `test`, `[`, `[[`), reading the pipeline's
+       status via `&&`/`||` is the correct idiom, not the defect, and this rule stays
+       silent -- confirmed false positive, measured directly against
+       `head -1 f | grep -q x && echo ja`, `cat f | grep -q x || echo nein` and
+       `cat a | cmp -s - b && echo gleich` before this narrowing existed. This makes
+       rule 2 the proper complement of rule 4: rule 4 warns when a status test sits at a
+       NON-last stage (its status is discarded there); rule 2 warns when a NON-test sits
+       at the last stage (nothing downstream can read a meaningful status from it).
+    3. The statement carries one of EXIT_STATUS_ONLY_FLAGS before a pipe -- the flag's
+       entire purpose is reporting an exit status, and the pipe already took it away from
+       whatever reads the command's own exit code afterward.
+    4. A quiet-mode grep/egrep/fgrep (`-q`, `-iq`, `--quiet`, ...) sits at a NON-LAST
+       stage of the pipe -- its own exit status is discarded by the stage after it,
+       regardless of what (if anything) reads $? later.
+
+    `pipefail` anywhere in the command suppresses all four: under it, bash reflects a
+    failing pipe stage's exit status in $? regardless of the stage's position (the exact
+    rule is "the last, i.e. rightmost, command to exit non-zero" -- with the single
+    failure that is the common case, that is the same command either framing predicts),
+    so reading $? after a pipe stops being the historical bug and becomes the fix. The
+    suppression is command-wide, not scoped to the statement that sets it: a coarser,
+    more conservative rule was chosen deliberately, on the same false-positive-aversion
+    directive that shapes every other decision in this function. A command reading
+    PIPESTATUS instead needs no suppression at all -- `${PIPESTATUS[0]}` never contains
+    the literal substring `$?`, so rule 1 never matches it in the first place.
+    """
+    if not isinstance(command, str) or not command.strip():
+        return []
+
+    ops_mask = _blank_quotes(command, blank_double=True)
+    if _PIPEFAIL_RE.search(ops_mask):
+        return []
+
+    exp_mask = _blank_quotes(command, blank_double=False)
+    statements = list(_iter_statements(ops_mask))
+
+    findings = []
+    for idx, (start, end, sep_after) in enumerate(statements):
+        stmt_ops = ops_mask[start:end]
+        stmt_orig = command[start:end]
+        pipe_positions = [m.start() for m in _REAL_PIPE_RE.finditer(stmt_ops)]
+        if not pipe_positions:
+            continue
+
+        snippet = stmt_orig.strip()
+        stage_starts = [0] + [p + 1 for p in pipe_positions]
+        stage_ends = pipe_positions + [len(stmt_ops)]
+        last_stage_text = stmt_orig[stage_starts[-1]:stage_ends[-1]]
+
+        if sep_after in ("&&", "||") and not _last_stage_is_status_test(last_stage_text):
+            findings.append(
+                f"`{snippet}` is piped, then chained with `{sep_after}` -- that reads the "
+                f"pipe's LAST stage's exit status, not the piped command's own"
+            )
+        elif sep_after in (";", "\n") and idx + 1 < len(statements):
+            next_start, next_end, _ = statements[idx + 1]
+            if (
+                _DOLLAR_QUESTION_RE.search(exp_mask[next_start:next_end])
+                and not _last_stage_is_status_test(last_stage_text)
+            ):
+                findings.append(
+                    f"`{snippet}` is piped, then `$?` is read afterward -- `$?` belongs to "
+                    f"the pipe's last stage, not to `{snippet}`"
+                )
+
+        for flag in EXIT_STATUS_ONLY_FLAGS:
+            flag_pos = stmt_ops.find(flag)
+            if flag_pos != -1 and any(p > flag_pos for p in pipe_positions):
+                findings.append(
+                    f"`{snippet}` carries `{flag}` and is then piped -- the flag's exit "
+                    f"status is lost to the pipe unless something downstream reads it"
+                )
+                break
+
+        for i in range(len(pipe_positions)):  # non-last stages only
+            stage_text = stmt_orig[stage_starts[i]:stage_ends[i]]
+            if _GREP_TOOL_RE.search(stage_text) and _GREP_QUIET_FLAG_RE.search(stage_text):
+                findings.append(
+                    f"`{stage_text.strip()}` runs a quiet-mode grep but is piped further -- "
+                    f"its own exit status is discarded before anything can read it"
+                )
+                break
+
+    return findings
+
+
+def check_bash_exit_status_pipe_loss(tool_input, session_id: str):
+    """PreToolUse warning for handle_pre_tool_use, on every Bash call.
+
+    Report, do not block (PO directive): logs a structured error event and prints to
+    stderr, never sys.exit(2) -- the author of the command may have a reason the hook
+    cannot see. Follows check_handover_size's discipline: contained try/except so a bug in
+    the detector itself cannot take the PreToolUse handler down with it.
+    """
+    try:
+        command = tool_input.get("command") if isinstance(tool_input, dict) else None
+        findings = find_exit_status_pipe_loss(command)
+        if not findings:
+            return
+
+        log_error(session_id, {
+            "ts": now_iso(),
+            "event": "ExitStatusPipeLoss",
+            "command": command[:500],
+            "findings": findings,
+            "session": session_id,
+        })
+        print(
+            "Exit status behind a pipe: this command reads an exit status a pipe already "
+            "took away:\n"
+            + "\n".join(f"  - {f}" for f in findings)
+            + "\n\nRedirect the measured command's output to a file (or set -o pipefail / "
+            "read ${PIPESTATUS[0]}), then read $?. Not blocked -- fix if this is the bug, "
+            "ignore if it isn't.",
+            file=sys.stderr
+        )
+    except Exception:
+        # Never block the pipeline due to a check failure
+        pass
+
+
 def default_clock():
     """The wall clock, as an injectable input.
 
@@ -1267,6 +1540,10 @@ def handle_pre_tool_use(data: dict, session_id: str):
     validator = PRETOOL_VALIDATORS.get(tool_name)
     if validator and not validator(tool_input, session_id):
         sys.exit(2)  # Blocks the tool call, stderr feedback goes to Claude
+
+    # Exit-status-behind-a-pipe check: advisory only, never blocks (see docstring).
+    if tool_name == "Bash":
+        check_bash_exit_status_pipe_loss(tool_input, session_id)
 
     state = load_loop_state(session_id)
     state["total_tool_calls"] = state.get("total_tool_calls", 0) + 1
