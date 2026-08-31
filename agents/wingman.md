@@ -37,7 +37,7 @@ Return:
 
 ## Project Memory (Tier 1)
 
-Read `docs/memory/MEMORY.md` (if it exists) for cross-cutting project knowledge that the orchestrator and other agents share with you. When you discover something that other personas would also benefit from (tooling decisions, project-wide conventions, external references), write it as `docs/memory/{type}_{slug}.md` (`type` ∈ `feedback` / `project` / `reference`) and update the project index.
+Read `docs/memory/MEMORY.md` (if it exists) for cross-cutting project knowledge that the orchestrator and other agents share with you. You have no write tools: when you discover something that other personas would also benefit from (tooling decisions, project-wide conventions, external references), name it in your summary and leave `docs/memory/{type}_{slug}.md` (`type` ∈ `feedback` / `project` / `reference`) to the orchestrator. Those files carry frontmatter per `templates/MEMORY_SCHEMA.md`: `name`, `description`, `type` and `last_updated` are required.
 
 ## Instincts
 Check if `docs/memory/wingman/instincts.md` exists (project Tier-2). Also load `~/.claude/memory/wingman/instincts.md` if it exists (global Tier-2, cross-project persona patterns). Frontmatter requires `scope: tier-2-global` + `agent: wingman`; ID scheme `XX-G-NNN` (distinct from your project Tier-2 IDs).

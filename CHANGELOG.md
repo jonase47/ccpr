@@ -8,6 +8,39 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Added
 
+- **The agent lint now checks the memory-frontmatter contract** (R4). A `code-reviewer`
+  subagent wrote a silo file without frontmatter, `memory-lint` went from exit 1 to exit 2, and
+  `check-all` reported a divergence on a change that had nothing to do with it. Structural, not
+  incidental: an agent produces an artifact that violates the project's own lint, in an area CI
+  cannot see — `docs/memory/` is gitignored and `memory-lint` reports could-not-run on a runner.
+
+  **The obvious rule would have missed the trigger.** `agents/code-reviewer.md` already names a
+  frontmatter contract — the *global* Tier-2 silo's (`scope: tier-2-global`). The file that
+  broke sat in the *project* silo, whose contract is `templates/MEMORY_SCHEMA.md`. Measured
+  across the fleet: **fifteen of fifteen** agents named the global contract, **zero** named the
+  project one. So the rule keys per silo, not per agent.
+
+  Built as **one rule with two triggers** rather than two rules, because the schema prescribes
+  the same required fields for both tiers — two rules would have restated one obligation over
+  overlapping sets. Neither trigger contains the other, which was measured rather than assumed:
+  the own-silo trigger covers eleven agents, the Tier-1 trigger thirteen, and `project-guide`
+  is caught only by the first while four others are caught only by the second. The first
+  assertion written was that one set contained the other; it went red immediately.
+
+  Two further rules came out of the same measurement. A body that directs a **write** while the
+  frontmatter grants no write tool is now refused — `wingman` was doing exactly that, and its
+  fix is a prose correction with a test pinning that its `tools:` line is **unchanged**, so a
+  later "fix" by granting the tool cannot pass as the same repair. And Rule 5's tool-name match
+  was opened to case, which catches `qa-tester`'s "Use bash to run existing tests" against a
+  frontmatter without Bash. That opening was measured before and after: over the whole corpus
+  the strict and the widened pattern disagree on **exactly one** file — the real finding.
+
+  Found while building it, and fixed: a **second `unittest.main()`** in the middle of the test
+  module, left by an earlier wave. Under `python3 -m unittest` it was inert; run as
+  `python3 <file>` it ended the run there, loaded only rules 1–4, and reported **OK**. A check
+  that reports success while checking a fraction of its subject is the defect class this
+  repository keeps removing, and it was sitting inside the lint that removes it.
+
 - **A mechanism against register drift, instead of a seventh sweep** (R1). A *register* is
   any place that records a claim about the state of something else — a docstring about its
   own test's outcome, a file header about its data rows, a list about open findings. Six

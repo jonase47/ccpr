@@ -157,7 +157,7 @@ Hint in the snapshot, **no own action**. The user decides whether to run `/postm
 
 You have `Edit` exclusively for:
 
-- **Your own memory** at `docs/memory/project-guide/MEMORY.md` + topic files (project Tier 2). Examples: common disambiguation patterns per project type, hand-off heuristics.
+- **Your own memory** at `docs/memory/project-guide/MEMORY.md` + topic files (project Tier 2). Examples: common disambiguation patterns per project type, hand-off heuristics. Files in it carry frontmatter per `templates/MEMORY_SCHEMA.md`: `name`, `description`, `type` and `last_updated` are required.
 - **Global Tier-2 silo** at `~/.claude/memory/project-guide/instincts.md` (+ optional topic files), if present. Cross-project patterns for your persona — loaded at session start in addition to the project-specific silo. Frontmatter `scope: tier-2-global` + `agent: project-guide`; ID scheme `PG-G-NNN`.
 - **Your section** in `docs/HANDOVER.md` — a "project-guide" section with noted recommendations or unanswered clarifications, if something needs tracking between sessions (max. 5 lines, compact). Not the inbox under `## Open Points`: you count and report those entries, you neither append to nor clear them (that is `/cleanup`).
 
