@@ -873,7 +873,7 @@ class NoStaleKnownFindingsTest(unittest.TestCase):
 
 class ClassificationCountsTest(unittest.TestCase):
     def test_classification_counts(self):
-        """Regression pin on the measured baseline: 1176 `test_*` methods
+        """Regression pin on the measured baseline: 1213 `test_*` methods
         across the corpus call something shaped like a subprocess invocation
         and are therefore in scope for this check; 0 of those are currently
         absence-only-needs-exemption -- `KNOWN_FINDINGS` above is empty for
@@ -887,6 +887,17 @@ class ClassificationCountsTest(unittest.TestCase):
         growing paragraph:
 
           in-scope / flagged   when
+          1213 / 0             31.08.2026: the PreToolUse hook that warns
+                               before a pipe takes an exit status away. All
+                               +37 come from test_bash_exit_status_pipe_hook,
+                               whose methods drive the hook as a subprocess
+                               with a crafted PreToolUse event. Proven a pure
+                               addition rather than a swap by re-running
+                               scan_tree() against a worktree of 0101b94 and
+                               differencing the (file, class, method) sets:
+                               37 additions, 0 removals, all in the new
+                               module. None flagged; each asserts on the
+                               warning count plus the command text.
           1176 / 0             31.08.2026: install.sh --verify stopped
                                reporting locally generated files as
                                divergence. The exemption is derived from the
@@ -1555,7 +1566,7 @@ class ClassificationCountsTest(unittest.TestCase):
         count."""
         recs = scan_tree()
         flagged = [r for r in recs if r.disposition in NEEDS_EXEMPTION]
-        self.assertEqual(1176, len(recs))
+        self.assertEqual(1213, len(recs))
         self.assertEqual(0, len(flagged))
 
 
@@ -1700,6 +1711,15 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
         here rather than worked around, because the workaround would be to
         reshape test code to please a measuring instrument.
 
+        Bumped 62 -> 63, 31.08.2026: added
+        test_bash_exit_status_pipe_hook.py, which pins the PreToolUse hook
+        that warns before a pipe takes an exit status away. Proven an
+        addition rather than a swap by `git diff --name-status
+        0101b94..HEAD -- scripts/tests/` -- one `A` line, nothing modified
+        or deleted. Second file-counter bump of the day; the in-scope
+        counter moved in the same push, which nobody predicted -- see
+        ClassificationCountsTest's trajectory entry.
+
         Bumped 61 -> 62, 31.08.2026: added test_command_frontmatter.py,
         which pins the disable-model-invocation classification of
         commands/*.md -- which files carry the flag, and on what evidence
@@ -1729,7 +1749,7 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
         reasoning."""
         files = sorted(TESTS_DIR.glob("*.py")) + sorted((TESTS_DIR / "workitems").glob("*.py"))
         names = sorted(f.relative_to(TESTS_DIR).as_posix() for f in files if f.name != "__init__.py")
-        self.assertEqual(62, len(names))
+        self.assertEqual(63, len(names))
         self.assertIn("test_absence_only_assertions.py", names)
         self.assertIn("test_run_tests_heredoc_injection.py", names)
         self.assertIn("test_heredoc_interpolation_scan.py", names)
