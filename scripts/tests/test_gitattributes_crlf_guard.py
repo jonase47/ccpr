@@ -4,25 +4,41 @@ guard can actually fail.
 
 ## Why this exists
 
-Four awk-based parsers in this repo are CRLF-blind
-(`scripts/lib/frontmatter.sh` lines 24, 26-27, 35-36, 295-296, 393-394;
-`scripts/migrate-review-headers.sh:267-268`; `scripts/memory-lint.sh:459`),
-while the equivalent Python-based parsers tolerate CRLF without complaint.
-Net effect: a CRLF-tainted frontmatter file could make the lint report a
-valid `gate: go` field as *missing* while the actual gate mechanism (Python)
-silently accepts it anyway -- a broken check that LOOKS passed, the
-dangerous direction. As long as this repo only ever had one committer on
-one OS that stayed theoretical; a second contributor plus the project's
-first CI (potentially multiple runner OSes) makes it not theoretical.
+Several shell parsers in this repo were CRLF-blind, while the equivalent
+Python-based parsers tolerate CRLF without complaint. Net effect: a
+CRLF-tainted frontmatter file made the lint report a valid `gate: go` field
+as *missing* while the actual gate mechanism (Python) accepted it anyway --
+a broken check that LOOKED passed, the dangerous direction. As long as this
+repo only ever had one committer on one OS that stayed theoretical; a second
+contributor plus the project's first CI (potentially multiple runner OSes)
+makes it not theoretical.
 
-Fixing the four CRLF-blind parsers themselves is explicitly OUT of scope
-for this change (a separate, later item covering that 4-parser blast
-radius). This file only proves the narrower guard rail that keeps CRLF
-from entering version control in the first place: a repo-root
-`.gitattributes` normalizing tracked text files to LF, plus this test
-suite that (a) asserts the real repo is clean today and stays that way,
-and (b) proves the detector is not vacuously true by making it fail on a
-synthetic fixture.
+Status of that blast radius, updated 31.08.2026 (WI-0131), because the
+paragraph that used to stand here said "explicitly OUT of scope for this
+change (a separate, later item)" and that later item has since run:
+
+  * `scripts/lib/frontmatter.sh` -- all five comparison sites repaired
+    (one shell first-line test, four `awk` blocks). Pinned by
+    `scripts/tests/test_frontmatter_crlf.py`.
+  * `scripts/memory-lint.sh:517` -- repaired in the same round; it is a
+    second, independent parser inside the same branch and the library fix
+    alone turned it from accidentally-right into a false "0 bytes of body"
+    report.
+  * `scripts/migrate-review-headers.sh:267-268` -- STILL CRLF-blind. The
+    library fix improved it (one fewer false "missing field") but its own
+    `_body_text` scan never advances past a `---\r` opener, so body-borne
+    fields are not hoisted out of a CRLF review document. Open finding, not
+    a regression.
+
+The old site list is deliberately not kept as line numbers here: it drifted
+(`memory-lint.sh:459` pointed at a blank line by the time anyone checked)
+and `test_frontmatter_crlf.py` is the register that is actually exercised.
+
+This file only proves the narrower guard rail that keeps CRLF from entering
+version control in the first place: a repo-root `.gitattributes` normalizing
+tracked text files to LF, plus this test suite that (a) asserts the real repo
+is clean today and stays that way, and (b) proves the detector is not
+vacuously true by making it fail on a synthetic fixture.
 
 ## What "binary" means here, and why it is NOT content-sniffed
 

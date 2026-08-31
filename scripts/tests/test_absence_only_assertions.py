@@ -873,7 +873,7 @@ class NoStaleKnownFindingsTest(unittest.TestCase):
 
 class ClassificationCountsTest(unittest.TestCase):
     def test_classification_counts(self):
-        """Regression pin on the measured baseline: 1099 `test_*` methods
+        """Regression pin on the measured baseline: 1135 `test_*` methods
         across the corpus call something shaped like a subprocess invocation
         and are therefore in scope for this check; 0 of those are currently
         absence-only-needs-exemption -- `KNOWN_FINDINGS` above is empty for
@@ -887,6 +887,34 @@ class ClassificationCountsTest(unittest.TestCase):
         growing paragraph:
 
           in-scope / flagged   when
+          1135 / 0             WI-0131 (31.08.2026): the CRLF blindness in
+                               `scripts/lib/frontmatter.sh` and in
+                               `scripts/memory-lint.sh`'s own second parser
+                               got its own module,
+                               test_frontmatter_crlf.py. 38 new methods, 36
+                               of them in scope (they drive the shipped
+                               library and four consumer scripts through
+                               `self.run_bash` / `self.run_script`); the two
+                               out of scope are FixtureIntegrityTest's,
+                               which only read bytes back off disk. None
+                               flagged -- every one asserts a positive fact
+                               about what the run produced (an exit code, an
+                               exact stdout value, exact file bytes), never
+                               merely that nothing was reported. THREE
+                               methods landed flagged during the round, and
+                               each repair was the missing
+                               `assertEqual(0, result.returncode, ...)`
+                               liveness assertion their siblings already
+                               carried -- never an exemption, and never a
+                               reshaping of the code to dodge the scanner.
+                               +36 in scope, 0 newly flagged.
+
+                               Proven a move, not a swap: the in-scope SET
+                               at 151b0db and here differ by exactly those
+                               36 entries, every one of them in the new
+                               module, with removals explicitly measured at
+                               zero -- a bare count delta cannot tell "36
+                               added" from "36 added, some gone".
           1099 / 0             Findings #27 + #25 (30.08.2026): the
                                SessionStart hook now triggers
                                log-cleanup.sh once a day and sweeps stale
@@ -1466,7 +1494,7 @@ class ClassificationCountsTest(unittest.TestCase):
         count."""
         recs = scan_tree()
         flagged = [r for r in recs if r.disposition in NEEDS_EXEMPTION]
-        self.assertEqual(1099, len(recs))
+        self.assertEqual(1135, len(recs))
         self.assertEqual(0, len(flagged))
 
 
@@ -1609,10 +1637,23 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
         reach git through a module-level function. THREE modules now sit
         outside this scanner for that one documented blind spot -- reported
         here rather than worked around, because the workaround would be to
-        reshape test code to please a measuring instrument."""
+        reshape test code to please a measuring instrument.
+
+        Bumped 59 -> 60, 31.08.2026 (WI-0131): added
+        test_frontmatter_crlf.py, which pins scripts/lib/frontmatter.sh
+        against CRLF input. Proven an addition rather than a swap by
+        `git status --porcelain scripts/tests` -- one `??` line, nothing
+        modified or deleted.
+
+        In-scope count above DID move here, by +36, which is the ordinary
+        case rather than the exception: this module drives the shipped
+        library and its consumers through `self.run_bash` /
+        `self.run_script`, both of which `RUN_HELPER_RE` recognises. See
+        ClassificationCountsTest's own entry for the per-method
+        reasoning."""
         files = sorted(TESTS_DIR.glob("*.py")) + sorted((TESTS_DIR / "workitems").glob("*.py"))
         names = sorted(f.relative_to(TESTS_DIR).as_posix() for f in files if f.name != "__init__.py")
-        self.assertEqual(59, len(names))
+        self.assertEqual(60, len(names))
         self.assertIn("test_absence_only_assertions.py", names)
         self.assertIn("test_run_tests_heredoc_injection.py", names)
         self.assertIn("test_heredoc_interpolation_scan.py", names)

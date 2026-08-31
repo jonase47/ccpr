@@ -17,22 +17,65 @@
 
 set -euo pipefail
 
+# CRLF (WI-0131). Every marker comparison in this library asks for the
+# string `---` exactly, and `awk` splits records on `\n` alone — so on a
+# file with Windows line endings the markers arrive as `---\r` and NOTHING
+# here matched them. The block did not read as malformed, it read as
+# ABSENT, which is the dangerous direction on both sides: the lints raise
+# `required field missing` about a field the document plainly carries,
+# while the writer (`freeze-phase-docs.sh`) silently freezes nothing. The
+# repo-root `.gitattributes` (bc87c9f) normalises endings HERE; it has no
+# reach into the adopter project trees these scripts actually run against.
+#
+# Two mechanisms, two treatments, because one does not reach the other:
+#
+#   * The READERS below strip the carriage return off `$0` itself, as the
+#     FIRST statement of the record block — the same position, and for the
+#     same "reach" reason, as `memory-lint.sh`'s own strip (WI-0086): every
+#     later branch reads `$0` or a substring of it. This is also why
+#     `fm_field`, `fm_list` and `fm_validate_required` need no strip of
+#     their own: all three read `fm_extract`'s output, never the file.
+#   * The WRITERS (`fm_set`, `fm_set_many`) must NOT do that — they print
+#     `$0` verbatim for every line they pass through, and a strip on `$0`
+#     would quietly rewrite the whole document to LF, breaking their
+#     body-untouched contract. They compare against a stripped COPY and
+#     carry the record's own terminator onto the line they write.
+#   * `fm_has`'s first-line test is a SHELL string comparison that runs
+#     before any `awk` does, so no `awk`-level strip can reach it. It gets
+#     its own `${first%$'\r'}` below.
+#
+# A bare `\r` INSIDE a line (a pre-OS-X Mac line ending) is deliberately
+# not handled anywhere here: `awk` has already split on `\n`, so such a
+# document arrives as a single record and no per-record strip can recover
+# a line structure it never had.
+
 # fm_has — Checks whether the file starts with a `---` block.
 fm_has() {
     local file="$1"
+    local first
     [[ -f "$file" ]] || return 1
-    [[ "$(head -n1 "$file")" == "---" ]] || return 1
+    first="$(head -n1 "$file")"
+    # Trims the TERMINATOR, not the content: `----\r` stays a non-match.
+    first="${first%$'\r'}"
+    [[ "$first" == "---" ]] || return 1
     # Search for the closing marker within the first 50 lines
-    awk 'NR==1 && $0=="---" {found_open=1; next}
+    awk '{ sub(/\r$/, "") }
+         NR==1 && $0=="---" {found_open=1; next}
          found_open && $0=="---" {found_close=1; exit}
          NR>50 {exit}
          END {exit !found_close}' "$file"  # exit-status: exempt propagates-as-function-return
 }
 
 # fm_extract — Outputs the frontmatter lines (without `---` markers).
+# Emits the lines WITHOUT their carriage returns, so every reader built on
+# top of it (fm_field, fm_list, fm_validate_required) sees clean values —
+# `fm_list`'s inline branch in particular anchors on `^\[.*\]$`, which a
+# trailing `\r` defeats even where a plain value would survive on a
+# trailing-whitespace trim alone.
 fm_extract() {
     local file="$1"
-    awk 'NR==1 && $0=="---" {in_fm=1; next}
+    awk '{ sub(/\r$/, "") }
+         NR==1 && $0=="---" {in_fm=1; next}
          in_fm && $0=="---" {exit}
          in_fm {print}' "$file"  # exit-status: exempt propagates-as-function-return
 }
@@ -292,14 +335,24 @@ fm_set() {
             state = 0
             replaced = 0
         }
-        NR == 1 && $0 == "---" { print; state = 1; next }
-        state == 1 && $0 == "---" {
-            if (!replaced) print key ": " value
+        # CRLF: compare against a stripped COPY, never against `$0` — see
+        # the library header. `eol` carries the terminator of the current
+        # record onto any line this program GENERATES, so a rewritten or
+        # inserted key matches the endings of the document it lands in,
+        # while every passed-through line is still printed byte-for-byte.
+        {
+            line = $0
+            eol = ""
+            if (sub(/\r$/, "", line)) eol = "\r"
+        }
+        NR == 1 && line == "---" { print; state = 1; next }
+        state == 1 && line == "---" {
+            if (!replaced) print key ": " value eol
             print
             state = 2
             next
         }
-        state == 1 && index($0, key ":") == 1 {
+        state == 1 && index(line, key ":") == 1 {
             # Literal match, NOT `$0 ~ "^" key ":"` (WI-0021 review, small
             # fix #1) — interpolating the key unchecked into a regex
             # turns any regex metacharacter in it ("." in particular)
@@ -307,7 +360,7 @@ fm_set() {
             # unrelated "axb:" line. Unreachable today (every caller
             # passes a literal identifier key), but fm_set is documented
             # as a general write path.
-            print key ": " value
+            print key ": " value eol
             replaced = 1
             next
         }
@@ -390,11 +443,18 @@ fm_set_many() {
             }
             state = 0
         }
-        NR == 1 && $0 == "---" { print; state = 1; next }
-        state == 1 && $0 == "---" {
+        # CRLF: stripped COPY for comparison, `eol` for generated lines —
+        # same treatment and same reasoning as fm_set above.
+        {
+            line = $0
+            eol = ""
+            if (sub(/\r$/, "", line)) eol = "\r"
+        }
+        NR == 1 && line == "---" { print; state = 1; next }
+        state == 1 && line == "---" {
             for (idx = 1; idx <= n; idx++) {
                 k = keys[idx]
-                if (!replaced[k]) print k ": " vals[k]
+                if (!replaced[k]) print k ": " vals[k] eol
             }
             print
             state = 2
@@ -405,10 +465,10 @@ fm_set_many() {
             for (idx = 1; idx <= n; idx++) {
                 k = keys[idx]
                 # Literal match, same reasoning as the fm_set fix above.
-                if (index($0, k ":") == 1) { matched = k; break }
+                if (index(line, k ":") == 1) { matched = k; break }
             }
             if (matched != "") {
-                print matched ": " vals[matched]
+                print matched ": " vals[matched] eol
                 replaced[matched] = 1
                 next
             }

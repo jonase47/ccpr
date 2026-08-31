@@ -743,6 +743,49 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Fixed
 
+- **`scripts/lib/frontmatter.sh` was blind to CRLF frontmatter** (finding #22). `fm_has` and
+  its siblings compared `$0 == "---"`; on a CRLF file awk sees `"---\r"`, so the whole block
+  read as absent. **The error direction is the dangerous one**: the lint is the strict reader
+  and the gate the lenient one, so a CRLF project was told a valid `gate: go` was missing while
+  the gate silently opened on it. Measured on one such file: `check_gate_passed` returned
+  `(True, None)` while `fm_field` returned the empty string.
+
+  Fixed now rather than later because `.gitattributes` (`bc87c9f`) covers **this** repository's
+  contributions, not an adopter's — their repos may carry CRLF and do not have it. Same
+  category as the `.gitkeep` finding: outward effect, not working tree.
+
+  Eight blind sites, and they are not one kind. Four are `awk` blocks; `:24` is a **shell**
+  string comparison that runs before any `awk`, so no `sub(/\r$/, "")` reaches it — it took
+  `${first%$'\r'}` and its own test. The two writer blocks could not take the readers' repair
+  either: stripping `$0` would have found the block and silently rewritten the whole document
+  to LF, so they compare a stripped copy and carry the original terminator onto generated lines.
+
+  **The consumer set is six, not the four the finding named** — `anchor.sh`,
+  `freeze-phase-docs.sh`, `migrate-review-headers.sh`, `manual-lint.sh`, `memory-lint.sh`,
+  `phase-docs-lint.sh`, each verified to call `fm_*` rather than merely to source the library.
+
+  **The hardening introduced one new false positive, and it is fixed in the same commit.**
+  `memory-lint.sh` carries a *second* parser: `if fm_has; then <own awk>; else <count whole
+  file>`. Before, the `else` branch made a CRLF silo accidentally right; after, `fm_has`
+  succeeded while the second parser still could not find the closing marker, so a silo holding
+  real content was reported as an empty skeleton. Two parsers over one document are one unit,
+  and the repair belongs in both. Shipping that in a later item would have meant a known new
+  false alarm behind a green `check-all` — in the very check that last cost a debugging round
+  for a cause outside itself.
+
+  Red-proven with real bytes: fixtures are written, read back, compared against a hand-written
+  literal, and asserted to contain no bare LF at any offset; the runners omit `text=True`
+  because universal-newline translation would erase the byte under test. Twenty-one of
+  thirty-five tests red before the fix. Eight structural mutations, each with its replacement
+  count asserted before measuring and the file byte-compared after restoring — moving a strip
+  *behind* its comparison, or applying it in only one of the four blocks, so the proof shows
+  each block is reached individually rather than through one shared path.
+
+  One consumer is **improved but still half-blind** and deliberately left unpinned:
+  `migrate-review-headers.sh`'s body-hoist no longer reports `last_updated` missing, but
+  `reviewed_head`, `reviewer` and `base_commit` stay unhoisted from a CRLF document. A test
+  written today would enshrine that half-state.
+
 - **Two cleanup mechanisms that existed, were correct, and never ran** (findings #27 and #25).
   `log-cleanup.sh` has had a retention rule since it was written — 7 days by default,
   `--days N`, `--dry-run` — and nothing ever called it: no hook, no cron entry, no settings

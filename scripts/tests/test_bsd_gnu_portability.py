@@ -107,7 +107,7 @@ SUCCEEDS with different semantics cannot. Every rule below names it.
                             backup suffix, edits the file, and leaves a stray
                             `f-e` behind. This repository already forbids the
                             construct outright -- ADR-0009 Addendum 1 A8, cited
-                            at `scripts/lib/frontmatter.sh:244`.
+                            at `scripts/lib/frontmatter.sh:287`.
   * `readlink -f`           GNU, and macOS only since 12.3. Loud on older BSD
                             (illegal option, exit 1).
   * `date -d`               GNU: parse a date string. BSD `-d` sets the
@@ -159,7 +159,7 @@ A list that names only its hits hides its own shape, so:
     30.08.2026: every `--long` option in all 29 shipped scripts belongs to
     `git`, `curl`, `pytest`, `jest`, `cargo`, or a CCPR script's own CLI; the
     single coreutils long option anywhere in the tree is `chmod --reference`,
-    named inside a comment at `scripts/lib/frontmatter.sh:209` as the GNU-only
+    named inside a comment at `scripts/lib/frontmatter.sh:252` as the GNU-only
     thing that was deliberately NOT used. Left for its own work item if an
     instance ever appears.
   * `mktemp -t` -- rejected. BSD reads the argument as a PREFIX and appends
@@ -494,7 +494,7 @@ def _mask_non_live(text):
     `-t .`, which CONTRIBUTING.md records as already silently skipping 510
     tests across 16 modules. The one behaviour that matters here is copied
     faithfully -- a `$(` inside a double-quoted string stays LIVE, because
-    `mode="$(stat -f '%Lp' "$f")"` (scripts/lib/frontmatter.sh:216) is a real
+    `mode="$(stat -f '%Lp' "$f")"` (scripts/lib/frontmatter.sh:259) is a real
     construct inside a quoted assignment and blanking it wholesale would blind
     the scanner to it."""
     n = len(text)
@@ -838,7 +838,7 @@ def _read_git_show(ref_and_path):
 # single reason they are flagged -- see the module docstring on why a `||`
 # chain is not accepted as a guard. Two notes the scanner itself cannot make:
 #
-#   * scripts/lib/frontmatter.sh:216-217 (`stat -f '%Lp' || stat -c '%a'`)
+#   * scripts/lib/frontmatter.sh:259-260 (`stat -f '%Lp' || stat -c '%a'`)
 #     happens to WORK on both platforms, because GNU `stat -f '%Lp' <file>`
 #     reads the format as a second, nonexistent file operand and exits 1, so
 #     the chain does fall through. That is luck of the exit status, not a
@@ -847,17 +847,24 @@ def _read_git_show(ref_and_path):
 #     never fire. Recommended repair is a one-line `# portability: exempt`
 #     marker naming that reasoning, not a code change.
 #   * scripts/log-cleanup.sh:69 and :104-105 and scripts/lib/frontmatter.sh:
-#     193-194,200 are BSD-first-then-GNU `date` chains where the BSD form does
+#     236-237,243 are BSD-first-then-GNU `date` chains where the BSD form does
 #     fail loudly on GNU, so the chain works. Same recommendation.
 #
 # Each needs its own round and its own red proof. Filed as findings here, not
 # fixed here.
 KNOWN_FINDINGS = {
-    ("scripts/lib/frontmatter.sh", 193, "date-j"),
-    ("scripts/lib/frontmatter.sh", 194, "date-j"),
-    ("scripts/lib/frontmatter.sh", 200, "date-d"),
-    ("scripts/lib/frontmatter.sh", 216, "stat-f"),
-    ("scripts/lib/frontmatter.sh", 217, "stat-c"),
+    # WI-0131 line shift: the CRLF fix inserted a 43-line header block
+    # ABOVE all five sites; none of the five lines was itself touched.
+    # Proven by byte-comparing HEAD:<old line> against <new line> for
+    # each (all five identical, uniform delta +43) and by the diff
+    # carrying 13 removed lines, none of them a `date`/`stat` call --
+    # a count of 5-before/5-after alone cannot tell a shift from
+    # "one gone, one new".
+    ("scripts/lib/frontmatter.sh", 236, "date-j"),
+    ("scripts/lib/frontmatter.sh", 237, "date-j"),
+    ("scripts/lib/frontmatter.sh", 243, "date-d"),
+    ("scripts/lib/frontmatter.sh", 259, "stat-f"),
+    ("scripts/lib/frontmatter.sh", 260, "stat-c"),
     ("scripts/log-cleanup.sh", 69, "date-d"),
     ("scripts/log-cleanup.sh", 69, "date-v"),
     ("scripts/log-cleanup.sh", 104, "date-j"),
@@ -1221,7 +1228,7 @@ class QuotedTemplateWithSuffixIsStillFlaggedTest(unittest.TestCase):
 
 
 class CommandSubstitutionInsideDoubleQuotesStaysLiveTest(unittest.TestCase):
-    """`mode="$(stat -f '%Lp' "$f")"` (scripts/lib/frontmatter.sh:216) is a
+    """`mode="$(stat -f '%Lp' "$f")"` (scripts/lib/frontmatter.sh:259) is a
     live construct inside a quoted assignment. Blanking double-quoted content
     wholesale would hide it -- and it is one of the nine current findings, so
     this is not a hypothetical."""

@@ -501,8 +501,20 @@ if [[ -d "$MEMORY_DIR" ]]; then
         # MEMORY.md only — measure body size after the closing frontmatter marker.
         body_bytes=0
         if fm_has "$silo_memory"; then
-            # Find second '---' line and count bytes after it
-            close_line=$(awk 'NR==1 && $0=="---" {found=1; next} found && $0=="---" {print NR; exit}' "$silo_memory")  # exit-status: exempt downstream-checks-result
+            # Find second '---' line and count bytes after it.
+            #
+            # WI-0131: the leading sub(/\r$/, "") is not optional and is not
+            # cosmetic. This awk is a SECOND, independent frontmatter parser
+            # sitting inside the `fm_has` branch, and the two have to agree
+            # about what a marker is. When lib/frontmatter.sh learned to read
+            # CRLF and this line had not, they disagreed: fm_has said "there
+            # is frontmatter", this scan found no closing marker, close_line
+            # came back empty, body_bytes stayed at its initialised 0, and a
+            # full silo index was reported as a 0-byte skeleton. Before that
+            # library fix the same file fell into the `else` branch below and
+            # was measured whole, so the check was accidentally right. Two
+            # parsers, one document: the strip belongs in both.
+            close_line=$(awk '{ sub(/\r$/, "") } NR==1 && $0=="---" {found=1; next} found && $0=="---" {print NR; exit}' "$silo_memory")  # exit-status: exempt downstream-checks-result
             if [[ -n "$close_line" ]]; then
                 body_bytes=$(tail -n +$((close_line + 1)) "$silo_memory" | wc -c | tr -d ' ')
             fi
