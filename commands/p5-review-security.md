@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /p5-review-security – Check Security Checklist
 
 Checks code against the security checklist. Focus on OWASP Top 10, injection, auth and data handling.

@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /p4-backlog – Work Breakdown, Backlog & Milestones
 
 Breaks down the features from FEATURES.md into actionable tasks, builds the prioritized backlog, and defines milestones and release planning. The result is BACKLOG.md and PROJECT_PLAN.md as the steering foundation for the entire implementation.

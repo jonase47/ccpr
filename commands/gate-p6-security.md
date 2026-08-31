@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /gate-p6-security – Security Approval Evaluation
 
 Evaluates all security-relevant points of the Gate-P6 checklist and grants Security approval.

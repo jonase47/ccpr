@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /gate-p2 – Quality Gate 2: Validation → Architecture
 
 Checks whether all critical Assumptions have been validated and a well-founded Go/No-Go/Pivot Decision can be made. This is the most important gate in the model – here it is decided whether to invest in the cost- and time-intensive architecture and implementation phase. No argument – this gate always checks the complete checklist.

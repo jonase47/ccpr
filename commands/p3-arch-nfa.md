@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /p3-arch-nfa – Define Non-Functional Requirements
 
 Defines the non-functional requirements (scalability, performance, availability, maintainability).

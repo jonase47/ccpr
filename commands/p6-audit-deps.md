@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /p6-audit-deps – Dependency Check
 
 Checks all dependencies for known vulnerabilities (CVEs), outdated packages, and maintenance status.

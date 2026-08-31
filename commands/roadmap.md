@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /roadmap – Create an initial roadmap
 
 ## Purpose

@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /epic – Create an epic
 
 ## Purpose

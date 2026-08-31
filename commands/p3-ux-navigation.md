@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /p3-ux-navigation – Sitemap & Information Architecture
 
 Creates the navigation structure, sitemap and identifies critical flows.

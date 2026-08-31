@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /constitution – Create or revise the project Constitution
 
 Creates or updates `docs/CONSTITUTION.md` — the project Constitution with three sections

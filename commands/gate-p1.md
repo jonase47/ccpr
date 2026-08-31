@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /gate-p1 – Quality Gate 1: Conception → Validation
 
 Checks whether all results of the conception phase are complete and robust, and prepares the transition to the validation phase. No argument – this gate always checks the complete checklist.

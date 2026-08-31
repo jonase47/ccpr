@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /p3-sec-data – Data Security Concept
 
 Defines encryption (transit/rest), secrets management and backup security.

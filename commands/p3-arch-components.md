@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /p3-arch-components – Component Diagram & Data Flows
 
 Creates the system architecture overview with component diagram, responsibilities and data flows.

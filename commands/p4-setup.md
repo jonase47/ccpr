@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /p4-setup – Repository, CI/CD & Development Environment Setup
 
 Sets up the repository, CI/CD pipeline and local development environment. The result is a working development infrastructure in which the team can immediately start with `/p5-implement`.

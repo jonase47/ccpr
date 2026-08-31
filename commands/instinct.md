@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # Instinct Management
 
 Manage instincts (confidence-based rules from session experience).

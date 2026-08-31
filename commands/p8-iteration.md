@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /p8-iteration – Evaluate Feedback, Maintain Backlog & Plan Next Sprint
 
 Evaluates user feedback and operational insights, maintains the backlog, and initiates the next iteration. This is the link between ongoing operations and the next development round – the engine of the evolution loop.

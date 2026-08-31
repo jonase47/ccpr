@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /roadmap-update – Update an existing roadmap
 
 ## Purpose

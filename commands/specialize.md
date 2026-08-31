@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /specialize – Adapt agents to the project's tech stack
 
 Generic CCPR agents are tech-stack-agnostic all-rounders. Once the stack is known,

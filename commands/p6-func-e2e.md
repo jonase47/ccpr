@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /p6-func-e2e – E2E Tests for Critical Paths
 
 Tests critical user journeys end-to-end – from start to the expected final result.

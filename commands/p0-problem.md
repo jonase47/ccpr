@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /p0-problem – Problem Definition & Target Audience Identification
 
 Defines the core problem of a project or business idea and identifies the first rough Target Audience. The result is a clear problem statement that serves as the foundation for all subsequent phases.

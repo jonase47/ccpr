@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /p8-ops – Production Operations: Analyse Incidents & Monitor Performance
 
 Analyses production errors and performance issues, evaluates incidents, and initiates countermeasures. Called reactively for specific incidents or proactively for regular operational reviews.

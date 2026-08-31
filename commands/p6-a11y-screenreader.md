@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /p6-a11y-screenreader – ARIA, Semantics & Alt Texts
 
 Checks screen reader compatibility: semantic HTML, ARIA attributes, alt texts, live regions.

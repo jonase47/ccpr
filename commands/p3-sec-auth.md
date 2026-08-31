@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /p3-sec-auth – Auth & Authorization Concept
 
 Defines the authentication and authorization concept including session management.

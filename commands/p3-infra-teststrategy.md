@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /p3-infra-teststrategy – Define Test Strategy
 
 Defines test levels, test tools, coverage targets and critical test paths.

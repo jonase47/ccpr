@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /p3-architecture – System Architecture, Tech Stack & ADRs
 
 Designs the system architecture, selects the tech stack and documents architectural decisions. Each concern is its own sub-skill.

@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /p3-security – Security Architecture, Threat Model & Auth Concept
 
 Creates the complete security architecture: threat model, auth concept, data security, API security and developer checklist. Each area is its own sub-skill.

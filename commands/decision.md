@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /decision – Develop a decision basis
 
 ## Purpose

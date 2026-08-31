@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # Session Postmortem
 
 Analyze the last session and extract instinct proposals.

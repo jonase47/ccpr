@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /gate-p7-business – Business Readiness Check
 
 Checks business readiness: documentation, GTM, KPIs, legal mandatory documents.

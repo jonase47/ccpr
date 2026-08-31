@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /p3-ux-wireframes – Wireframes for Key Screens
 
 Creates wireframes (ASCII art) for the most important screens with interaction descriptions.

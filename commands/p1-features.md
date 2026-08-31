@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /p1-features – Feature Definition & MVP Scope Boundary
 
 Defines the feature scope of the project, prioritises using MoSCoW, and clearly defines the MVP scope. The result is FEATURES.md and MVP.md as the binding basis for architecture and planning.

@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /p0-regulatory – Regulatory & Legal Knock-Out Criteria
 
 Identifies regulatory requirements, DSGVO (GDPR) obligations, and legal knock-out criteria early on, before significant time is invested in the idea. A regulatory showstopper should be recognised as early as possible.

@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /p7-monitoring – Set Up Monitoring & Test Rollback Plan
 
 Sets up production monitoring completely, configures alerting rules, and tests the rollback plan. The goal is a system that reports problems early and where a rollback works smoothly in an emergency.

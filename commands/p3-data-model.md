@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /p3-data-model – Data Model & API Design
 
 Designs the Data Model with entities and relationships as well as the API design with interface specification. The result is DATA_MODEL.md and API_SPEC.md as the binding foundation for implementation.

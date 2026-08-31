@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /p3-infra-hosting – Hosting & Deployment Strategy
 
 Plans hosting platform, deployment model, environments and CDN strategy.

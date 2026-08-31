@@ -8,6 +8,19 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Added
 
+- **113 of 116 `commands/*.md` files now carry `disable-model-invocation: true`,** removing them
+  from Claude Code's model-facing catalogue while leaving them callable as slash commands. Every
+  `gate-*`/`p[0-8]-*` file is flagged unconditionally; the remaining 19 are flagged by PO decision
+  because their write pre-empts a decision that belongs to the PO, not because the artifact they
+  write is versioned — `specialize` joins this set because it writes a project-local agent copy
+  that permanently shadows the global one, an environment decision only the PO can make. Only
+  `cross-check`, `guide` and `logs-summary` stay model-invocable. `test_command_frontmatter.py`
+  asserts the pattern-derived and body-derived (`workitems.py create`) halves at runtime, treats a
+  new command file matching neither as a classification failure rather than a silent pass, and now
+  also asserts each PO-decided entry's declared evidence class (`editorial` vs. `mechanical`)
+  against what the pattern/body rules actually find, so an entry gaining mechanical backing later
+  — or losing it — surfaces as a named failure instead of passing silently.
+
 - **The catalogue's own size stopped being typed, and `install.sh --verify` became the ninth
   check.** The two are one change on purpose: adding a ninth entry would have meant retyping a
   number word by hand, which is the sixth instance of the register-drift class — and the first

@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /p3-infra-cicd – CI/CD Pipeline
 
 Designs the CI/CD pipeline with stages, branch strategy and rollback concept.

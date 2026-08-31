@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /p2-assumptions – Identify & Prioritise Critical Assumptions
 
 Systematically lists all critical Assumptions from the conception phase and prioritises them by risk and validatability. The result is an Assumptions register that serves as the working basis for all further validation steps.

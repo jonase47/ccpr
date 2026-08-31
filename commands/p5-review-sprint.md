@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /p5-review-sprint – Holistic Sprint Code Review (whole-context)
 
 Runs ONE final code review over the **entire sprint** at sprint end, with a stronger model, to catch issues that single-story reviews structurally cannot see: cross-story interactions, the schema/data model as a whole, conformance to ADRs and Constitution Inviolables, and consistency with prior lessons/instincts.

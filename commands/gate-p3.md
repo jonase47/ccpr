@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /gate-p3 – Quality Gate 3: Architecture & Design → Planning
 
 Checks whether all architecture and design decisions are completely documented and robust before transitioning into the planning and implementation phase. No argument – this gate always checks the complete checklist.

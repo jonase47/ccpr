@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /p6-audit – Security Audit, Dependency Check & DSGVO (GDPR) Compliance
 
 Conducts a defensive security audit. Each audit area is a separate sub-skill.

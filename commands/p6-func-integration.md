@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /p6-func-integration – Run Integration Tests
 
 Tests the interaction between system components: API against DB, middleware chains, external services against mocks.

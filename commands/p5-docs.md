@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /p5-docs – Keep Code Documentation Up to Date
 
 Keeps code documentation in sync with the implemented code: inline comments, API documentation, changes to README or CONTRIBUTING, and updates to technical specifications if the code deviates from them. Called after implementing a feature.

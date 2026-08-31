@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /p3-ux-a11y – Accessibility Concept
 
 Defines WCAG target, contrast requirements, keyboard navigation, screen reader requirements and testing methods.

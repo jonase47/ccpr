@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /p3-arch-adr – Write Architecture Decision Records
 
 Documents all significant architectural decisions as ADRs.

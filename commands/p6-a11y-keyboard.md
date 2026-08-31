@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /p6-a11y-keyboard – Keyboard Navigation & Focus
 
 Checks full keyboard operability: tab order, focus indicator, Enter/Space, Escape, focus trap.

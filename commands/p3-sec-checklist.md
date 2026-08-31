@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /p3-sec-checklist – Developer Security Checklist
 
 Creates a concrete checklist that every feature in phase 5 must fulfill.

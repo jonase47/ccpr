@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /p1-journeys – Personas & User Journeys
 
 Develops detailed personas, user journeys, and usage scenarios based on the Discovery results. These artefacts form the user foundation for all further conception decisions.

@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /anchor – Anchored State Verification (Docs vs. Implementation)
 
 Checks phase documents against the code they describe, not against other documents. Where

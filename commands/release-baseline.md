@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /release-baseline – Set project state as baseline
 
 Makes a "cut" after a release: project state is documented as given,

@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /p6-audit-dsgvo – DSGVO (GDPR) Compliance Check
 
 Compares the implementation against the DSGVO initial assessment: data subject rights, data minimisation, deletion deadlines, data processing agreements.

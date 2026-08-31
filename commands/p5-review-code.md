@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /p5-review-code – Check Code Quality
 
 Checks code for quality, clean code, logic errors and test coverage. Delivers review findings with severity level.

@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /p5-impl-red – Write Failing Tests (RED)
 
 Writes unit tests for a feature BEFORE production code exists. Tests must fail.

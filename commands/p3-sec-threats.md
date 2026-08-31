@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /p3-sec-threats – Create STRIDE Threat Model
 
 Analyzes the system according to the STRIDE model and identifies threats with countermeasures.

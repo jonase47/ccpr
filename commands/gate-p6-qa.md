@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /gate-p6-qa – QA Approval Evaluation
 
 Evaluates all QA-relevant points of the Gate-P6 checklist and grants QA approval.

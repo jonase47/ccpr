@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /konzept-update – Revise an existing rough concept
 
 ## Purpose

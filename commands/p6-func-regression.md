@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /p6-func-regression – Run Regression Tests
 
 Ensures that existing functionality has not been broken by new changes.

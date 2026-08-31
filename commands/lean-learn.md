@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /lean-learn – Validate Lean-Track and make a decision
 
 Creates `docs/LEARNINGS.md` with hypothesis check, observations, and decision

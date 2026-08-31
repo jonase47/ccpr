@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /p3-arch-techstack – Tech Stack Decision
 
 Selects the tech stack and justifies each technology decision.

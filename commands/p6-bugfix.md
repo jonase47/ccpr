@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /p6-bugfix – Fix QA Findings
 
 Fixes bugs and vulnerabilities found during the QA phase (functional tests, exploratory tests, accessibility check, security audit, pentest). Each fix is secured by a regression test.

@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /gate-p6 – Release Gate: QA & Security Approval
 
 Checks whether the system is ready for launch. Both QA and Security must explicitly grant approval. No go-live without dual approval.

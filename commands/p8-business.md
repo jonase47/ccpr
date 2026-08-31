@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /p8-business – Evaluate KPIs & Optimise Business Model
 
 Evaluates the KPIs from ongoing operations, compares them with the plans from FINANCIAL_PLAN.md, and derives optimisation measures for the business model. Called regularly (recommended: monthly) or on an ad-hoc basis.

@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /project-init
 
 Initializes a new project with directory structure, project-specific CLAUDE.md, and Git repository.

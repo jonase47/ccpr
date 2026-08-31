@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /p0-market – Market Assessment & Competition Overview
 
 Delivers a first market assessment: Is there demand? Who are the competitors? Is the idea roughly viable economically? The result is an overview needed for the Go/No-Go Decision at Gate 0.

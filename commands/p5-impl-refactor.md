@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /p5-impl-refactor – Clean Up Code (REFACTOR)
 
 Improves code quality without changing behavior. All tests must continue to pass.

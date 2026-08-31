@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /gate-p0 – Quality Gate 0: Discovery → Conception
 
 Checks whether all criteria of the Discovery phase have been met and prepares the Go/No-Go Decision. No argument – this gate always checks the complete checklist.

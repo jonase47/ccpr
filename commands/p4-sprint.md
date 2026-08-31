@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /p4-sprint – Plan Sprint
 
 Plans the current sprint: pulls matching stories from the backlog, defines the sprint goal, identifies risks, and creates the sprint document. Called repeatedly at the start of each new sprint.

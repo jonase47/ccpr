@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /p2-regulatory-check – Validate Regulatory Feasibility
 
 Validates the regulatory Assumptions from Phase 1 concretely and practically: Is the venture legally implementable? Which hurdles are real, which are surmountable? The result is a robust regulatory validation as the Decision basis for Gate 2.

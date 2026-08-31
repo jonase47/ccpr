@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /p6-audit-auth – Review Auth Implementation
 
 Compares the auth implementation against the requirements in SECURITY.md: JWT, sessions, RBAC, password hashing.

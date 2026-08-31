@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /track-decision – Decide Lean vs. Full-Track (or reassess)
 
 Interactive prerequisite check + Knockout check + Indicator score that determines whether a project

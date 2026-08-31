@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /p6-a11y-visual – Contrast, Colours & Dark Mode
 
 Checks colour contrast (WCAG AA), colour-independence of information presentation, and dark mode conformance.

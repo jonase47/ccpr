@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /p1-financial-plan – Cost Structure, Revenue Forecast & Break-Even
 
 Creates a first financial plan with Cost Structure, Revenue Forecast, and break-even analysis. The goal is not exact bookkeeping but a plausible set of numbers that demonstrates the economic viability of the venture.

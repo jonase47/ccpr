@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /p2-market-validation – Validate Market, Pricing & Demand Assumptions
 
 Checks critical market, pricing, and demand Assumptions from the Assumptions register using concrete research, data, and competitive analyses. The result is confirmed or refuted Assumptions as the basis for informed Concept decisions.

@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /p3-ux-darkmode – Dark Mode Color Strategy
 
 Defines the color strategy for dark mode with semantic colors and toggle mechanism.

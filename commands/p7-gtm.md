@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /p7-gtm – Launch Go-to-Market & Set Up KPI Tracking
 
 Launches the go-to-market activities and sets up KPI tracking. The result is active marketing measures and a working tracking setup that delivers meaningful data from day one.

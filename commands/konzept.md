@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /konzept – Create a rough concept for a feature or (sub-)project
 
 ## Purpose

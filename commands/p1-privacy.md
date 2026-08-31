@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /p1-privacy – Data Classification & DSGVO Initial Assessment
 
 Conducts a systematic initial assessment of data protection requirements: What personal data is processed, on what legal basis, and what DSGVO (GDPR) obligations arise from this? The result is a well-founded DSGVO initial assessment as a mandatory component of the Concept.

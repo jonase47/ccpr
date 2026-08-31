@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /p4-docs – README, Contributing Guide & Project Structure Documentation
 
 Creates the foundational project documentation: a meaningful README, a contributing guide, and documentation of the project structure. The result is a documentation base that quickly onboards new developers and bindingly establishes standards.

@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /gate-p7-tech – Technical Go-Live Check
 
 Checks technical go-live readiness: deployment, monitoring, rollback, smoke tests.

@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /user-stories – Create or elaborate user stories
 
 ## Purpose

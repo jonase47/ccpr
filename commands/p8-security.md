@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /p8-security – Ongoing Security: Dependency Updates, Scans & Re-Tests
 
 Keeps the security of the running system current: regular dependency updates, security scans, checking for new CVEs, and periodic re-tests of critical areas. Security is not a one-time task – it must be continuously maintained.

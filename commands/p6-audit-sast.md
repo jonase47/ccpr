@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /p6-audit-sast – Static Code Analysis
 
 Checks source code for injection vulnerabilities, insecure cryptography, secrets in code, and insecure error handling.

@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /p3-cost – Operating Costs of the Architecture
 
 Estimates the ongoing Operating Costs of the chosen architecture for various usage scenarios. The goal is realistic cost planning that feeds back into the financial plan – no surprises after launch.

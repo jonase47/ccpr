@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /p2-poc – Technical Proof of Concept
 
 Builds a minimal technical Proof of Concept for the riskiest technical area of the project. The goal is not a finished feature but proof that the planned approach fundamentally works – before investing in architecture and implementation.

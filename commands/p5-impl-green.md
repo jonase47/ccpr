@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /p5-impl-green – Minimal Code for Green Tests (GREEN)
 
 Writes the minimal production code that makes the existing tests green. No over-engineering.

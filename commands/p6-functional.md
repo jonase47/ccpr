@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /p6-functional – Integration, E2E & Regression Tests
 
 Runs systematic functional tests at the system level. Each test level is a separate sub-skill.

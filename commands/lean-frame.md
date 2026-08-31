@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /lean-frame – Create Lean-Track Single-Source-of-Truth
 
 Creates or revises `docs/FRAME.md` (Single-Source-of-Truth of the Lean-Track) and

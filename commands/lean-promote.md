@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /lean-promote – Promote Lean → Full-Track via Promotion Brief
 
 Creates `docs/PROMOTION_BRIEF.md` as a structured bootstrap input for `/project-init`.

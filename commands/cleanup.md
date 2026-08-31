@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /cleanup – Doc Hygiene: HANDOVER cap + lint aggregator
 
 Runs a one-shot hygiene pass on a project's docs to keep them lean and

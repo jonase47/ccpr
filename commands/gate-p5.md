@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /gate-p5 – Sprint Gate: Check Implementation Quality
 
 Checks at the end of each sprint whether all tasks meet quality standards and the sprint can be considered successfully completed. Called repeatedly after each sprint. No argument – this gate always checks the complete current sprint status.

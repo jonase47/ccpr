@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /p6-audit-config – Review Infrastructure & Configuration
 
 Checks security headers, CORS, DB access, secrets management, and server configuration.

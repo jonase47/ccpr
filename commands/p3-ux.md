@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /p3-ux – UX Concept, Wireframes & Accessibility
 
 Develops the complete UX concept: navigation, wireframes, dark mode and accessibility. Each area is its own sub-skill.

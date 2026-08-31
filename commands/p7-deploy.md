@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /p7-deploy – Execute Deployment & Smoke Tests
 
 Executes the deployment to the target environment and then verifies with smoke tests that the system is running correctly. Only when the smoke tests pass is the deployment considered successful.

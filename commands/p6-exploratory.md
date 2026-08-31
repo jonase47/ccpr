@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /p6-exploratory – Exploratory Tests
 
 Conducts unstructured, experience-based tests that automated tests and defined test cases do not cover. The goal is to find unexpected behaviours, usability issues, and hidden bugs that remain invisible in structured testing.

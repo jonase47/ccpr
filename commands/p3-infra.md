@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /p3-infra – Infrastructure, CI/CD & Test Strategy
 
 Plans infrastructure, CI/CD pipeline, monitoring and test strategy. Each area is its own sub-skill.

@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /p5-acceptance – Acceptance Tests
 
 Tests an implemented feature against its requirements from a user perspective: are all acceptance criteria met? Are edge cases handled correctly? The result is test findings that determine whether the feature counts as "Done".

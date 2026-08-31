@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /p7-prepare – Deployment Preparation & Pre-Launch Checklist
 
 Prepares the deployment: checks all environments, prepares database migrations, verifies configurations, and ensures nothing has been overlooked. Only after this checklist is complete will `/p7-deploy` be executed.

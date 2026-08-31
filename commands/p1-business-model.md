@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /p1-business-model – Business Model Canvas & Value Proposition
 
 Develops the Business Model with Business Model Canvas, sharpens the value proposition, and defines a first pricing approach. The result is BUSINESS_MODEL.md as the economic foundation of the project.

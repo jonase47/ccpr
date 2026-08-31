@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /p7-release-docs – Release Notes, User Guide & Privacy Documents
 
 Creates all user-facing documents for the launch: release notes, user guide or onboarding materials, and the legally required mandatory documents (privacy policy, legal notice). These documents must be available before go-live.

@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /p3-infra-monitoring – Monitoring & Observability
 
 Defines logging, metrics, alerting and error tracking.

@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /p5-bugfix – Analyze & Fix Bug
 
 Systematically analyzes a found bug, identifies the root cause and fixes it with an accompanying regression test. Goal: the bug is fixed, secured by a test, and cannot be silently reintroduced.

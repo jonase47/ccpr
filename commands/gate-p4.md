@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /gate-p4 – Quality Gate 4: Planning → Implementation
 
 Checks whether all organizational and technical prerequisites are met to begin implementation. This is a readiness gate – all participants must know what to do first. No argument – this gate always checks the complete checklist.

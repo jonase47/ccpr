@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /gate-p7 – Go-Live Gate: Technical Readiness & Business Readiness
 
 Checks whether the system is fully ready for production operation. Last gate before the official go-live status.

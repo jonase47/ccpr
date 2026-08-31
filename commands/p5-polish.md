@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /p5-polish – Sprint Polish: Collect & Resolve Small Carry-Over TODOs
 
 Collects small clean-up TODOs accumulated during the sprint (from `/p5-review`, `/p5-acceptance`, `/p5-bugfix`, TODO/FIXME comments) that do not justify a full story but make the next sprint easier. Triages each item into `polish-now`, `backlog`, `handover`, or `drop`. Optionally executes `polish-now` items directly (TDD mini-cycle, one commit per item). Runs **between `/gate-p5` (Sprint Done) and the next `/p4-sprint`**.

@@ -1,3 +1,6 @@
+---
+disable-model-invocation: true
+---
 # /p3-sec-api – API Security Requirements
 
 Defines input validation, rate limiting, CORS and security headers.
