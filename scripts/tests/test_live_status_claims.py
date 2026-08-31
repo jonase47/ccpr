@@ -114,6 +114,39 @@ variant that also pattern-matched dates was DROPPED: no sentence in the tree
 satisfies both a date stamp and a live failure predicate, so the date clause
 was unreachable, and an exemption branch that never runs is not a guard.
 
+## A property of this defect class, for whoever widens the scan next
+
+A number drifts wherever it is typed, INCLUDING where no noun anchors it. This
+is not a caveat about one sweep -- it is the shape of the class, and it has now
+been measured three times in a row, each time by a pattern that was too narrow:
+
+* first, a sweep keyed on the spelled-out word missed the digit form
+  ("7 catalogued, 5 matched") and a derived count ("six sibling scripts");
+* then a sweep for the catalogue size keyed on the noun `checks` and missed
+  `eight commands`, `one of the eight`, and `all eight from being attempted`
+  -- twelve live sites where an earlier estimate had said nine, and fifteen
+  once the tree-wide sweep ran;
+* and the derived values (N-1 for the sibling-script count, the generic /
+  CCPR-only split) drift on the same edit while matching no pattern built
+  around the primary number at all.
+
+At the third occurrence this stops being carelessness and becomes a property
+worth stating: **the noun is not part of the claim.** A pattern that requires
+one is measuring English, not the register.
+
+What follows from it, for the next slice:
+
+1. Sweep for the VALUE first and classify afterwards. Filtering during the
+   sweep is what hid all three sets above.
+2. Derive the forbidden set from the source of truth rather than typing it --
+   the four counts named by `CATALOGUE_COUNT_LABELS` below are derived from
+   check-all.sh's own parallel arrays, so N-1 and the generic/CCPR-only split
+   fall under the same rule as N instead of each needing a pattern of its own.
+3. State what the sweep cannot reach, and test that statement against a real
+   instance. Ordinals are excluded here on purpose: they name a position, and
+   appending to the catalogue moves none of them. That is a named gap, not
+   coverage.
+
 ## What this module does NOT prove
 
 * **It does not run anything.** It reads prose and never invokes a test. It
