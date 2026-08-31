@@ -8,6 +8,45 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Added
 
+- **`install.sh` records where it installed from, and `--verify` checks whether that still
+  holds.** A measurement in this round needed to state what `~/.claude/commands/` actually
+  *is* before it could say anything about it, and the only way to establish that was a hand
+  comparison of all 116 files. It worked — **by luck**: `commands/` happened not to have been
+  touched since the install. Had it been, nothing on disk could have said which state was
+  installed. Same provenance logic as the check baseline's dropped header line, one layer
+  outside the repository.
+
+  The marker carries what it can support, and no more. A bare commit SHA would be a false
+  claim when the source tree was dirty, so `source_state` qualifies it rather than replacing
+  it — what was installed is that commit *plus* uncommitted work. A source that is not a git
+  repository gets **no** `source_commit` line at all rather than an invented one, and the
+  guard for that is a physical-path comparison of `rev-parse --show-toplevel` against the
+  source, because `git rev-parse` walks upward and an unpacked copy inside someone else's
+  checkout would otherwise inherit that checkout's HEAD.
+
+  **`--verify` answers two questions and keeps them apart**, because they are routinely
+  confused: *origin* is read from the marker and measures nothing; *present state* compares
+  the installed files against the recorded commit's tree. A user can edit `~/.claude` by hand
+  without the marker changing.
+
+  **Six doors lead to could-not-run and none of them to a pass:** no destination, no marker,
+  unreadable marker, non-git source, dirty source, recorded commit absent here, or an empty
+  comparison scope. The message says *"Nothing was compared. This is NOT the same as 'no
+  divergence'."* Every installation made before today takes the second door.
+
+  Both proposed homes for the check were measured and both were blocked: a ninth catalogue
+  entry needs a new tracked script, and an untracked one fails the executable-bit check that
+  reads the git index; a plain unittest module would have had to express could-not-run as a
+  skip, which runs vacuously green on CI — the fail-open shape. `--verify` lives in
+  `install.sh` because the destination resolution, the framework list and the allowlist are
+  already there; a second script would have been a second copy of them.
+
+  Red-proven in all three directions separately — marker matches, marker does not match,
+  marker absent — and nine structural mutations, each with its substitution count asserted
+  first. One finding out of that: the divergence test does **not** catch a mutation that
+  swaps the recorded commit for `HEAD`, because in that fixture the mutated commit *is* HEAD.
+  Only the clean-verification test catches it. The docstring had claimed otherwise.
+
 - **The nine portability findings now say why they work, at the place where they work** (R3).
   All nine are `||` fallback chains rather than `uname` branches. Until that is written down, the
   next reader takes the chain for intent and builds on it — which turns a reported finding into

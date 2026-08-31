@@ -188,7 +188,16 @@ git checkout v0.3.0-beta   # latest tag; run `git tag -l` to see all available t
 ```bash
 ./install.sh            # backs up ~/.claude, shows what gets overwritten, asks to confirm
 ./install.sh --dry-run  # preview only — change nothing
+./install.sh --verify   # read-only: which commit was installed, and does it still match?
 ```
+
+`--verify` reads the provenance marker `install.sh` leaves at
+`~/.claude/.ccpr-install-provenance` and answers two separate questions: **origin**
+(which commit this installation came from, read from the marker) and **present state**
+(whether the installed files still match that commit, measured). It writes nothing. An
+installation made before provenance recording existed — or made from a non-git source, or
+from a dirty tree — reports **could not run** rather than "no divergence"; the two are not
+the same, and it says so.
 
 The installer takes a timestamped backup of your existing `~/.claude/` before
 writing, lists every artifact that would be overwritten, and requires an

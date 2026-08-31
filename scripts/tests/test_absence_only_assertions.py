@@ -873,7 +873,7 @@ class NoStaleKnownFindingsTest(unittest.TestCase):
 
 class ClassificationCountsTest(unittest.TestCase):
     def test_classification_counts(self):
-        """Regression pin on the measured baseline: 1135 `test_*` methods
+        """Regression pin on the measured baseline: 1166 `test_*` methods
         across the corpus call something shaped like a subprocess invocation
         and are therefore in scope for this check; 0 of those are currently
         absence-only-needs-exemption -- `KNOWN_FINDINGS` above is empty for
@@ -887,6 +887,22 @@ class ClassificationCountsTest(unittest.TestCase):
         growing paragraph:
 
           in-scope / flagged   when
+          1166 / 0             31.08.2026: install.sh gained a provenance
+                               marker and a `--verify` mode, and
+                               test_install_provenance.py came with them.
+                               41 new methods, 31 of them in scope (they
+                               drive install.sh through `self.run_install`,
+                               which `RUN_HELPER_RE` recognises); the 10 out
+                               of scope read install.sh's own text or the
+                               written marker off disk. None flagged.
+                               Set proof rather than a bare delta: the
+                               scanner was run against a `git archive` of
+                               646474b in a scratch tree and against the
+                               working tree, per-file. Exactly one file's
+                               count changed (test_install_provenance.py,
+                               0 -> 31); no file's count fell and no file
+                               left the corpus, so +30 is an addition, not
+                               a swap that happens to net out
           1135 / 0             WI-0131 (31.08.2026): the CRLF blindness in
                                `scripts/lib/frontmatter.sh` and in
                                `scripts/memory-lint.sh`'s own second parser
@@ -1494,7 +1510,7 @@ class ClassificationCountsTest(unittest.TestCase):
         count."""
         recs = scan_tree()
         flagged = [r for r in recs if r.disposition in NEEDS_EXEMPTION]
-        self.assertEqual(1135, len(recs))
+        self.assertEqual(1166, len(recs))
         self.assertEqual(0, len(flagged))
 
 
@@ -1639,6 +1655,12 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
         here rather than worked around, because the workaround would be to
         reshape test code to please a measuring instrument.
 
+        Bumped 60 -> 61, 31.08.2026: added test_install_provenance.py,
+        which pins the provenance marker install.sh now writes into its
+        target and the `--verify` comparison that reads it back. Proven an
+        addition rather than a swap by `git status --porcelain
+        scripts/tests` -- one `??` line, nothing modified or deleted.
+
         Bumped 59 -> 60, 31.08.2026 (WI-0131): added
         test_frontmatter_crlf.py, which pins scripts/lib/frontmatter.sh
         against CRLF input. Proven an addition rather than a swap by
@@ -1653,7 +1675,7 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
         reasoning."""
         files = sorted(TESTS_DIR.glob("*.py")) + sorted((TESTS_DIR / "workitems").glob("*.py"))
         names = sorted(f.relative_to(TESTS_DIR).as_posix() for f in files if f.name != "__init__.py")
-        self.assertEqual(60, len(names))
+        self.assertEqual(61, len(names))
         self.assertIn("test_absence_only_assertions.py", names)
         self.assertIn("test_run_tests_heredoc_injection.py", names)
         self.assertIn("test_heredoc_interpolation_scan.py", names)
