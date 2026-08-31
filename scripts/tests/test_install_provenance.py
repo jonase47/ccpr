@@ -891,7 +891,17 @@ class VerifyReadsTheMarkerNotOnlyItsPresenceTest(VerifyBase):
 
     def test_the_same_installation_verifies_clean_against_its_own_commit(self):
         """The other half. Without it, a verify that always reports
-        divergence would pass the mutation test above and be worthless."""
+        divergence would pass the mutation test above and be worthless.
+
+        Since WI-0134, this exact scenario -- installation untouched, marker
+        still names the installed commit, checkout has moved on since -- is
+        reported as BEHIND rather than VERIFIED (see
+        MarkerIsBehindTheSourceCheckoutTest). What this test still pins is
+        narrower and unaffected by that: reading the RECORDED SHA (not
+        HEAD) finds no file-level divergence, exit 0, no DIVERGENT verdict.
+        A HEAD-based implementation would compute the identical expected
+        tree here too and also pass -- that half of the mutation is caught
+        by the FIRST test in this class, not this one."""
         self.assertEqual(0, self.run_install("--yes").returncode)
         (self.src / "commands" / "guide.md").write_text("# guide v2\n", encoding="utf-8")
         self.git("add", "-A")
@@ -900,7 +910,192 @@ class VerifyReadsTheMarkerNotOnlyItsPresenceTest(VerifyBase):
         # even though the checkout has moved on.
         r = self.verify()
         self.assertEqual(0, r.returncode, r.stdout + r.stderr)
-        self.assertIn("no divergence", r.stdout.lower())
+        self.assertNotIn("Result: DIVERGENT", r.stdout)
+        self.assertNotIn("MISSING", r.stdout)
+        self.assertNotIn("CHANGED", r.stdout)
+        self.assertNotIn("UNEXPECTED", r.stdout)
+
+
+# ---------------------------------------------------------------------------
+# PRESENT ancestry -- is the recorded commit still where the SOURCE stands?
+# (WI-0134)
+# ---------------------------------------------------------------------------
+
+
+class MarkerIsBehindTheSourceCheckoutTest(VerifyBase):
+    """VerifyReadsTheMarkerNotOnlyItsPresenceTest's second half already pins
+    that an installation "verifies clean" while the checkout has moved on --
+    that is VERIFIED's job (installed tree still matches its OWN recorded
+    commit) and it must keep doing it. This class pins the THIRD verdict the
+    same scenario should ALSO be able to report: BEHIND, a state distinct
+    from VERIFIED (marker commit is not merely resolvable, it is a STRICT
+    ancestor of the checkout's current HEAD).
+
+    BEHIND is deliberately exit 0 in this round -- WI-0134 reserves the
+    "should this fail --verify" question to the PO. Turning it into a
+    failing exit is a future, single-line policy flip, not something these
+    tests require."""
+
+    def test_a_stale_but_intact_installation_is_behind_not_only_verified(self):
+        self.assertEqual(0, self.run_install("--yes").returncode)
+        marker_commit = self.marker().get("source_commit")
+        (self.src / "commands" / "guide.md").write_text("# guide v2\n", encoding="utf-8")
+        self.git("add", "-A")
+        head = self.commit("moves the checkout on")
+        self.assertNotEqual(marker_commit, head)
+
+        r = self.verify()
+        self.assertEqual(
+            0, r.returncode,
+            "BEHIND must exit 0 today, exactly like VERIFIED -- turning it "
+            f"into a failure is a policy decision not yet taken:\n{r.stdout}",
+        )
+        self.assertIn("BEHIND", r.stdout)
+        self.assertNotIn("Result: VERIFIED", r.stdout)
+        self.assertIn(marker_commit, r.stdout)
+        self.assertIn(head, r.stdout)
+
+    def test_behind_reports_how_many_commits_it_trails(self):
+        self.assertEqual(0, self.run_install("--yes").returncode)
+        for i in range(3):
+            (self.src / "commands" / "guide.md").write_text(f"# guide v{i}\n", encoding="utf-8")
+            self.git("add", "-A")
+            self.commit(f"drift {i}")
+        r = self.verify()
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertIn("BEHIND", r.stdout)
+        # The literal phrase, not a bare "3": stdout also carries 40-char
+        # hex SHAs, file/byte counts and an ISO-8601 timestamp, any of
+        # which is near-certain to contain the digit "3" regardless of
+        # whether behind_n was computed correctly -- a bare digit search
+        # would pass even if `rev-list --count` always returned "1".
+        self.assertIn("3 commit(s) ahead of", r.stdout)
+
+    def test_a_current_installation_is_still_verified_not_behind(self):
+        """Negative control: the marker commit being resolvable and being a
+        STRICT ancestor are different things -- `merge-base --is-ancestor`
+        is reflexive (a commit is its own ancestor), so an untouched, fresh
+        installation must still say VERIFIED, never BEHIND."""
+        self.assertEqual(0, self.run_install("--yes").returncode)
+        r = self.verify()
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertIn("Result: VERIFIED", r.stdout)
+        self.assertNotIn("BEHIND", r.stdout)
+
+    def test_an_unresolvable_head_is_not_silently_reported_as_plain_verified(self):
+        """Code-review finding on WI-0134: if this checkout's current HEAD
+        cannot be resolved at all, `origin_state` stays "unknown" -- a
+        genuinely different situation from "current" (marker commit IS
+        HEAD), yet without this the total==0 branch fell straight through
+        to the same "Result: VERIFIED -- no divergence..." wording either
+        way, silently collapsing "origin freshness could not be determined"
+        into "origin freshness is fine". Fixture: `checkout --orphan` moves
+        HEAD to an unborn ref (`rev-parse HEAD` fails with no commits on
+        it), while the marker's commit object -- still reachable via the
+        original branch -- keeps resolving as an object, exactly the
+        precondition the earlier "commit is not present" refusal (which
+        checks `rev-parse --verify ${p_commit}^{commit}`, not `HEAD`) does
+        not catch."""
+        self.assertEqual(0, self.run_install("--yes").returncode)
+        marker_commit = self.marker().get("source_commit")
+        self.git("checkout", "-q", "--orphan", "orphan-branch")
+        probe = self.git("rev-parse", "HEAD", check=False)
+        self.assertNotEqual(
+            0, probe.returncode,
+            "fixture did not produce an unresolvable HEAD -- proves nothing",
+        )
+        still_resolves = self.git(
+            "rev-parse", "--verify", "--quiet", f"{marker_commit}^{{commit}}",
+            check=False,
+        )
+        self.assertEqual(
+            0, still_resolves.returncode,
+            "the marker commit must still resolve as an object, or this "
+            "fixture would hit the existing could-not-run path instead of "
+            "the branch under test",
+        )
+
+        r = self.verify()
+        self.assertEqual(
+            0, r.returncode,
+            f"an undetermined origin must not become a failing exit -- that "
+            f"is not one of the four states this round defines:\n{r.stdout}",
+        )
+        self.assertNotIn("Result: DIVERGENT", r.stdout)
+        self.assertNotIn("Result: BEHIND", r.stdout)
+        self.assertIn("could not be resolved", r.stdout.lower())
+
+
+class MarkerIsNotAnAncestorOfHeadTest(VerifyBase):
+    """Worse than BEHIND: the marker's commit is not an ancestor of the
+    checkout's current HEAD at all -- rewritten history, a different branch,
+    or a moved source. Must not be silently reported as either VERIFIED or
+    BEHIND; it gets its own distinct message."""
+
+    def test_a_rewritten_history_is_reported_distinctly(self):
+        self.assertEqual(0, self.run_install("--yes").returncode)
+        marker_commit = self.marker().get("source_commit")
+        # `commit --amend` on top of the SAME parent produces a SIBLING of
+        # the original commit, not a descendant of it -- the old commit
+        # object stays intact (still resolvable) but is provably not an
+        # ancestor of the new HEAD.
+        (self.src / "commands" / "guide.md").write_text("# guide amended\n", encoding="utf-8")
+        self.git("add", "-A")
+        self.git(
+            "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+            "-c", "commit.gpgsign=false",
+            "commit", "--amend", "-q", "-m", "amended",
+        )
+        new_head = self.git("rev-parse", "HEAD").stdout.strip()
+        self.assertNotEqual(marker_commit, new_head)
+        # Precondition, measured rather than assumed: the fixture really
+        # produced a non-ancestor relationship, or this test proves nothing.
+        probe = self.git("merge-base", "--is-ancestor", marker_commit, "HEAD", check=False)
+        self.assertEqual(
+            1, probe.returncode,
+            "fixture did not produce a non-ancestor relationship between "
+            "the marker commit and the new HEAD",
+        )
+
+        r = self.verify()
+        self.assertNotIn("Result: VERIFIED", r.stdout)
+        self.assertNotIn("Result: BEHIND", r.stdout)
+        self.assertIn("DIVERGED-ORIGIN", r.stdout)
+        self.assertEqual(1, r.returncode, r.stdout + r.stderr)
+        self.assertIn(marker_commit, r.stdout)
+        self.assertIn(new_head, r.stdout)
+
+
+class BehindAndDivergentComposeTest(VerifyBase):
+    """BEHIND (marker vs. this checkout's HEAD) and DIVERGENT (installed
+    tree vs. the marker's own commit) answer different questions and can
+    both be true at once. DIVERGENT must not be masked by BEHIND: WI-0134's
+    composition rule is that DIVERGENT wins the `Result:` line, with a
+    BEHIND note alongside, and the exit code stays DIVERGENT's (1) -- no new
+    exit code is introduced for the combination."""
+
+    def test_divergent_wins_the_result_line_with_a_behind_note_alongside(self):
+        self.assertEqual(0, self.run_install("--yes").returncode)
+
+        # Move the source checkout on (-> BEHIND)...
+        (self.src / "commands" / "guide.md").write_text("# guide v2\n", encoding="utf-8")
+        self.git("add", "-A")
+        head = self.commit("moves the checkout on")
+
+        # ...AND tamper with the installed tree (-> a real DIVERGENT finding).
+        (self.dest / "agents" / "konzeptor.md").unlink()
+
+        r = self.verify()
+        self.assertEqual(
+            1, r.returncode,
+            f"a real DIVERGENT finding must still fail, even when BEHIND is also true:\n{r.stdout}",
+        )
+        self.assertIn("Result: DIVERGENT", r.stdout)
+        self.assertNotIn("Result: VERIFIED", r.stdout)
+        self.assertNotIn("Result: BEHIND", r.stdout)
+        self.assertIn("agents/konzeptor.md", r.stdout)
+        self.assertIn("BEHIND", r.stdout)
+        self.assertIn(head, r.stdout)
 
 
 class MarkerAbsenceIsNotCleanTest(VerifyBase):

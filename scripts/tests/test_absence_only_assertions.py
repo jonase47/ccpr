@@ -873,7 +873,7 @@ class NoStaleKnownFindingsTest(unittest.TestCase):
 
 class ClassificationCountsTest(unittest.TestCase):
     def test_classification_counts(self):
-        """Regression pin on the measured baseline: 1213 `test_*` methods
+        """Regression pin on the measured baseline: 1219 `test_*` methods
         across the corpus call something shaped like a subprocess invocation
         and are therefore in scope for this check; 0 of those are currently
         absence-only-needs-exemption -- `KNOWN_FINDINGS` above is empty for
@@ -887,6 +887,15 @@ class ClassificationCountsTest(unittest.TestCase):
         growing paragraph:
 
           in-scope / flagged   when
+          1219 / 0             31.08.2026: --verify gained an origin-freshness
+                               answer (BEHIND / DIVERGED-ORIGIN) beside the
+                               installed-tree comparison. All +6 come from
+                               test_install_provenance, whose new methods drive
+                               install.sh through self.run_install / self.verify.
+                               Proven a pure addition rather than a swap by
+                               differencing scan_tree()'s (file, class, method)
+                               sets against a worktree of 2c231dc: 6 additions,
+                               0 removals, all in one module. None flagged.
           1213 / 0             31.08.2026: the PreToolUse hook that warns
                                before a pipe takes an exit status away. All
                                +37 come from test_bash_exit_status_pipe_hook,
@@ -1566,7 +1575,7 @@ class ClassificationCountsTest(unittest.TestCase):
         count."""
         recs = scan_tree()
         flagged = [r for r in recs if r.disposition in NEEDS_EXEMPTION]
-        self.assertEqual(1213, len(recs))
+        self.assertEqual(1219, len(recs))
         self.assertEqual(0, len(flagged))
 
 

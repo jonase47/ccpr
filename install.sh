@@ -348,7 +348,10 @@ verify_cannot_run() {
 }
 
 # verify_installation -- answers the PRESENT question and reports the ORIGIN
-# one alongside it. Exit: 0 verified, no divergence · 1 divergence found ·
+# one alongside it, plus a THIRD question: is the recorded commit still
+# where the source checkout stands (see "Origin freshness" below)?
+# Exit: 0 verified or behind, no divergence · 1 divergence found (file-level,
+# or the recorded commit is not an ancestor of this checkout's HEAD) ·
 # 3 could-not-run (nothing compared).
 verify_installation() {
   local marker="$DEST/$PROVENANCE_FILE"
@@ -360,6 +363,7 @@ verify_installation() {
   local missing_n=0 differing_n=0 extra_n=0 ignored_n=0
   local exp_paths d f rel total toplevel scan_out
   local enum_incomplete=0
+  local src_head="" origin_state="unknown" behind_n=""
 
   echo "CCPR install verification"
   echo "  target:        $DEST"
@@ -433,6 +437,39 @@ verify_installation() {
   if ! git -C "$SRC" rev-parse --verify --quiet "${p_commit}^{commit}" >/dev/null 2>&1; then
     verify_cannot_run "commit $p_commit is not present in this checkout ($SRC) -- fetch it, or run --verify from the checkout it was installed from"
     return 3
+  fi
+
+  # Origin freshness -- a QUESTION SEPARATE FROM the installed-tree
+  # comparison below. That comparison answers "does $DEST still match
+  # $p_commit"; this answers "is $p_commit still where $SRC stands", i.e.
+  # has the checkout this installation came from moved on since. An
+  # installation can be byte-identical to what it recorded (VERIFIED) while
+  # the checkout it was installed from is 100 commits ahead -- nothing above
+  # this point would ever say so.
+  #
+  # `merge-base --is-ancestor A B` is REFLEXIVE (a commit is its own
+  # ancestor, exit 0), so "the recorded commit IS current HEAD" is checked
+  # separately rather than folded into the ancestor test -- otherwise every
+  # up-to-date installation would misreport as BEHIND-by-zero. Exit-code
+  # semantics measured empirically (not assumed): 0 = is-an-ancestor
+  # (including "is the same commit"), 1 = is-not-an-ancestor, 128 = not a
+  # valid object -- the last case cannot occur here, $p_commit was already
+  # confirmed to resolve above.
+  src_head="$(git -C "$SRC" rev-parse HEAD 2>/dev/null)" || src_head=""
+  if [[ -n "$src_head" ]]; then
+    if [[ "$p_commit" == "$src_head" ]]; then
+      origin_state="current"
+    elif git -C "$SRC" merge-base --is-ancestor "$p_commit" "$src_head" 2>/dev/null; then
+      origin_state="behind"
+      behind_n="$(git -C "$SRC" rev-list --count "${p_commit}..${src_head}" 2>/dev/null)" || behind_n=""
+    else
+      # $p_commit resolves (checked above) but is NOT an ancestor of
+      # $src_head: rewritten history (amend/rebase), a different branch, or
+      # a source that has been swapped out from under the same path. Worse
+      # than BEHIND -- "ahead on the same line of history" is not what this
+      # is -- so it gets its own state, never folded into "behind".
+      origin_state="diverged"
+    fi
   fi
 
   expected_raw="$(git -C "$SRC" ls-tree -r "$p_commit" -- "${VERIFY_SCOPE[@]}")"
@@ -523,6 +560,26 @@ verify_installation() {
     echo "     it is locally generated. Not counted as a finding.)"
   fi
 
+  echo
+  echo "Origin freshness ($p_commit vs. this checkout's current HEAD):"
+  case "$origin_state" in
+    current)
+      echo "  current -- this checkout's HEAD is still $p_commit."
+      ;;
+    behind)
+      echo "  BEHIND -- this checkout has moved on: HEAD is now $src_head,"
+      echo "            ${behind_n:-an unknown number of} commit(s) ahead of $p_commit."
+      ;;
+    diverged)
+      echo "  DIVERGED-ORIGIN -- $p_commit is NOT an ancestor of this checkout's"
+      echo "                      current HEAD ($src_head) -- rewritten history, a"
+      echo "                      different branch, or a moved source."
+      ;;
+    *)
+      echo "  (not determined -- could not resolve this checkout's current HEAD)"
+      ;;
+  esac
+
   total=$((missing_n + differing_n + extra_n))
   echo
   # An incomplete walk of the installation cannot produce a clean verdict:
@@ -535,6 +592,49 @@ verify_installation() {
     return 3
   fi
   if [[ "$total" -eq 0 ]]; then
+    if [[ "$origin_state" == "diverged" ]]; then
+      echo "Result: DIVERGED-ORIGIN -- installed tree matches commit $p_commit exactly,"
+      echo "  but that commit is not an ancestor of this checkout's HEAD ($src_head)."
+      echo "  So \"unchanged since install\" is a statement about a state this checkout no"
+      echo "  longer carries on its current line of history: the tree is intact, the"
+      echo "  provenance is not checkable from here. This is a missing reference point,"
+      echo "  not a damaged installation."
+      echo
+      echo "  What to do, in this order:"
+      echo "    1. Most often you are simply verifying from the wrong checkout. Run"
+      echo "       --verify from the one this was installed from, and this state goes away."
+      echo "    2. Otherwise the source history was rewritten (amend/rebase/force-push) or"
+      echo "       the source directory was replaced. Nothing is wrong with the installed"
+      echo "       files; only their origin is unreachable. \`install.sh --update\` reinstalls"
+      echo "       from the current HEAD and restores a provenance that can be verified."
+      return 1
+    fi
+    if [[ "$origin_state" == "behind" ]]; then
+      echo "Result: BEHIND -- installed tree matches commit $p_commit exactly, but"
+      echo "  this checkout is ${behind_n:-some} commit(s) ahead of it (HEAD $src_head)."
+      # POLICY DECISION NOT YET TAKEN (WI-0134): BEHIND exits 0 today, same as
+      # VERIFIED, so scripts/check-all.sh (which reads this exit code) stays
+      # green. Whether a stale-but-intact installation should FAIL --verify
+      # is for the PO to decide. The single change point a future round
+      # needs is THIS line -- `return 0` becoming `return 1` -- plus
+      # updating the exit-code line in --help to match.
+      return 0
+    fi
+    if [[ "$origin_state" != "current" ]]; then
+      # This checkout's HEAD could not be resolved at all (e.g. an unborn
+      # branch after `checkout --orphan`) -- origin_state never left its
+      # initial "unknown". An undetermined origin freshness question is NOT
+      # the same claim as "checked and current": still exit 0 (this is not
+      # a divergence, MISSING/CHANGED/UNEXPECTED are still all empty), but
+      # the wording must not silently collapse into plain VERIFIED, or a
+      # real "could not determine" answers the same as "determined and
+      # clean" -- exactly the fail-open shape this function refuses
+      # everywhere else (see verify_cannot_run's callers above).
+      echo "Result: VERIFIED -- no divergence from commit $p_commit, but this"
+      echo "  checkout's current HEAD could not be resolved, so origin"
+      echo "  freshness (BEHIND/DIVERGED-ORIGIN) could not be determined."
+      return 0
+    fi
     echo "Result: VERIFIED -- no divergence from commit $p_commit."
     return 0
   fi
@@ -543,6 +643,18 @@ verify_installation() {
     echo "         further unexpected files this run did not see."
   fi
   echo "Result: DIVERGENT -- $total finding(s) against commit $p_commit."
+  # BEHIND/DIVERGED-ORIGIN never MASK a real DIVERGENT finding: DIVERGENT
+  # keeps the Result: line and the failing exit code, the origin state rides
+  # along as a note. Composition, not replacement -- the two answer
+  # different questions (installed-tree-vs-marker, marker-vs-checkout-HEAD)
+  # and both can be true at once.
+  if [[ "$origin_state" == "behind" ]]; then
+    echo "  ALSO BEHIND -- this checkout is ${behind_n:-some} commit(s) ahead of"
+    echo "                 $p_commit (HEAD $src_head)."
+  elif [[ "$origin_state" == "diverged" ]]; then
+    echo "  ALSO DIVERGED-ORIGIN -- $p_commit is not an ancestor of this checkout's"
+    echo "                          HEAD ($src_head)."
+  fi
   echo "  (Shipped files are replaced wholesale on the next install; re-apply"
   echo "   any deliberate local edits from a backup afterwards.)"
   return 1
@@ -586,9 +698,19 @@ Modes:
                      the installed tree still matches the state it records.
                      Two separate answers: WHERE it was installed from (the
                      marker) and WHETHER it still agrees (the comparison).
+                     Also reports a THIRD answer, origin freshness: whether
+                     the recorded commit is still where this checkout's HEAD
+                     stands (current), a strict ancestor of it (BEHIND — the
+                     checkout has moved on), or not an ancestor at all
+                     (DIVERGED-ORIGIN — rewritten history, a different
+                     branch, or a moved source).
                      Exit 0 verified · 1 divergence · 3 could not run
                      (no target, no marker, or a source that was not a
                      clean git checkout — none of which is "no divergence").
+                     BEHIND currently rides on exit 0 (same as verified) and
+                     DIVERGED-ORIGIN on exit 1 (same as divergence) — no new
+                     exit code yet. Whether a stale installation should FAIL
+                     --verify is a policy decision not yet taken.
 
 Options:
   --dry-run          Show what would happen, change nothing.

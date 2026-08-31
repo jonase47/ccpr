@@ -913,6 +913,27 @@ All notable changes to this project are documented in this file. The format is b
   same line would need correlation by ordinal occurrence instead of byte offset — that change
   first, then the fixture.
 
+- **`install.sh --verify` now detects a THIRD state: BEHIND.** An installation could be
+  "VERIFIED" (byte-identical to what its provenance marker recorded) while the checkout it
+  was installed from had moved dozens of commits ahead — nothing said so. `--verify` now
+  resolves the source checkout's current HEAD via `git merge-base --is-ancestor` and
+  distinguishes three cases: the marker commit **is** HEAD (VERIFIED, unchanged), the marker
+  commit is a **strict ancestor** of HEAD (new: BEHIND, reporting how many commits and the
+  current HEAD), and the marker commit is **not an ancestor** of HEAD at all — rewritten
+  history, a different branch, or a moved source (new: DIVERGED-ORIGIN, its own distinct
+  message). BEHIND deliberately still exits 0 today, exactly like VERIFIED, so
+  `scripts/check-all.sh` stays green — whether a stale-but-intact installation should fail
+  `--verify` is a policy decision reserved to a later round; the single change point that
+  decision needs is one `return 0` in `verify_installation()`. DIVERGED-ORIGIN exits 1,
+  piggybacking on the existing divergence exit code rather than adding a fourth. When BEHIND
+  and a real file-level DIVERGENT finding are both true, DIVERGENT keeps the `Result:` line
+  and the failing exit code — BEHIND rides along as a note, never masking a real finding.
+  A fourth case — this checkout's HEAD cannot be resolved at all (e.g. an unborn branch
+  after `checkout --orphan`), so origin freshness cannot be determined either way — still
+  exits 0 (it is not a divergence) but says so explicitly rather than silently reading as
+  plain VERIFIED; a code review caught this collapsing into the wrong wording during this
+  same round. `--help`'s `--verify` section now names all three origin states.
+
 ### Fixed
 
 - **`install.sh --verify` reported generated artefacts as divergence.** Found on its first real
