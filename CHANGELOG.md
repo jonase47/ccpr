@@ -8,6 +8,14 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Added
 
+- **ADR-0012 gives the "R1" rule an address.** The rule that derivable values are generated
+  rather than stored had been cited for months under a label that resolved to no document —
+  a reference whose target is missing, which is the very defect the rule forbids. The ADR
+  states the core, names pins as the deliberate exception (breaking is their function), and
+  requires each pin to identify itself at its own site and to record bumps with a set proof
+  rather than a count comparison. It deliberately carries no list of instances: those are
+  work items, referenced by ID.
+
 - **113 of 116 `commands/*.md` files now carry `disable-model-invocation: true`,** removing them
   from Claude Code's model-facing catalogue while leaving them callable as slash commands. Every
   `gate-*`/`p[0-8]-*` file is flagged unconditionally; the remaining 19 are flagged by PO decision
