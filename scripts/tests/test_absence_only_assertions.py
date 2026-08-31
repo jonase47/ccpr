@@ -1700,6 +1700,15 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
         here rather than worked around, because the workaround would be to
         reshape test code to please a measuring instrument.
 
+        Bumped 61 -> 62, 31.08.2026: added test_command_frontmatter.py,
+        which pins the disable-model-invocation classification of
+        commands/*.md -- which files carry the flag, and on what evidence
+        class. Proven an addition rather than a swap by `git diff
+        --name-status c2d5aed..HEAD -- scripts/tests` -- one `A` line,
+        nothing modified or deleted. (The two earlier entries below cite
+        `git status --porcelain` because they were proven before their
+        commit; this one is proven against the commit that introduced it.)
+
         Bumped 60 -> 61, 31.08.2026: added test_install_provenance.py,
         which pins the provenance marker install.sh now writes into its
         target and the `--verify` comparison that reads it back. Proven an
@@ -1720,7 +1729,7 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
         reasoning."""
         files = sorted(TESTS_DIR.glob("*.py")) + sorted((TESTS_DIR / "workitems").glob("*.py"))
         names = sorted(f.relative_to(TESTS_DIR).as_posix() for f in files if f.name != "__init__.py")
-        self.assertEqual(61, len(names))
+        self.assertEqual(62, len(names))
         self.assertIn("test_absence_only_assertions.py", names)
         self.assertIn("test_run_tests_heredoc_injection.py", names)
         self.assertIn("test_heredoc_interpolation_scan.py", names)
