@@ -1580,6 +1580,13 @@ All notable changes to this project are documented in this file. The format is b
   refuses to write a fixture where they disagree silently, accepted both with no recorded
   divergence — i.e. the script now agrees with the reference on this shape. 87 → 89 entries.
 
+- **`Manual/GETTING_STARTED.md` said the pipeline has eight phases; it has nine.** Both
+  occurrences corrected ("eight phases, P0 to P8" and "the full eight-phase pipeline"). The first
+  sentence contradicted itself — it named all nine phases immediately after the wrong count. Found
+  by measuring over whitespace-normalised text: a line-wise `grep 'eight phases'` matches neither,
+  because the first runs across a line break, and it briefly reported the defect as already fixed.
+  The other twelve countable numbers in `README.md` and `GETTING_STARTED.md` were re-derived from
+  the repository in the same pass and are correct.
 
 ## [v0.3.0-beta] – 26.08.2026
 

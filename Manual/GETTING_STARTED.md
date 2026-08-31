@@ -51,7 +51,7 @@ test-first, a `security-master`, and so on. You rarely call them by name. A skil
 pulls in the right specialists automatically (max. 3–4 per step, on purpose). The
 full roster is in [`../CLAUDE.md`](../CLAUDE.md) under "Agent Team".
 
-**3. Phases are a pipeline with gates.** Serious projects move through eight
+**3. Phases are a pipeline with gates.** Serious projects move through nine
 phases, P0 to P8 — Discovery, Conception, Validation, Architecture, Planning,
 Implementation, Quality Assurance, Launch, Operations. Between phases sit
 **gates** (`/gate-p0`, `/gate-p1`, …): a go / no-go check that the previous phase
@@ -65,7 +65,7 @@ P0 Discovery -> P1 Conception <-> P2 Validation -> P3 Architecture -> P4 Plannin
 
 ## Two tracks: pick the right amount of process
 
-Not every idea deserves the full eight-phase pipeline. The very first thing you
+Not every idea deserves the full nine-phase pipeline. The very first thing you
 run on any new idea is `/track-decision`. It asks a few questions and routes you to:
 
 - **Lean-Track** — four skills, no gates, no sprint bookkeeping. For prototypes,
