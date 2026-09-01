@@ -487,19 +487,30 @@ def _section_entries(lines, heading, heading_idx=None, end_idx=None):
     WI-0107's back into fragments, which is the thing findings #44/#45 exist to
     stop; treating the whole preamble as a single entry is the same discipline
     already applied to a multi-line comment/result entry after a bullet. A preamble
-    that is empty or carries only blank lines (the common case: a freshly created
-    item's still-empty section, or the historical `<!-- append-result writes ... -->`
-    placeholder comment before a real entry) is dropped, matching the pre-existing
-    section-with-no-entries-yet case -- only a preamble that carries at least one
-    non-blank line becomes an entry.
+    is dropped -- read as an empty section, matching the pre-existing
+    section-with-no-entries-yet case -- when it is empty, carries only blank lines,
+    or carries only HTML-comment lines (every non-blank line starts with `<!--`):
+    the common case there is a freshly created item's still-empty section, which the
+    shipped template (Manual/WORKITEMS.md) seeds with a scaffolding placeholder like
+    `<!-- append-result writes PR/commit links here -->` as the section's first line.
+    A preamble that carries at least one non-blank, non-`<!--` line is real authored
+    content and becomes an entry in full, HTML-comment lines included -- the
+    placeholder rule only ever drops a preamble that is scaffolding and nothing
+    else; it is not a blanket `<!--`-line filter (a blanket filter was an earlier,
+    incorrect version of this fix -- it would have also silently deleted an
+    HTML-comment line sitting inside a genuine multi-line preamble or entry, which
+    is exactly the class of bug findings #44/#45 closed).
 
-    Known limitation, not fixed here: this boundary rule is not fence-aware. A
-    column-0 `- ` line inside a ```` ``` ````-fenced code block embedded in a
-    comment's text is still treated as a new entry, splitting what the user wrote
-    as one fenced block into two. ADR-0002's Comments/Result channel has no concept
-    of embedded code fences, and a fence-aware parser is out of scope for this fix
-    -- see LocalBackendMultilineEntryShapeTest.test_a_dash_line_inside_a_fenced_code_
-    block_is_a_known_limitation in test_local.py, which documents (not fixes) it."""
+    Known limitation, not fixed here: this boundary rule has no notion of embedded
+    Markdown structure. Any column-0 `- ` line embedded in a comment's/result's own
+    authored text -- inside a ```` ``` ````-fenced code block or just as plain
+    prose -- is still treated as the start of a new entry, splitting what the user
+    wrote as one call into more than one returned entry. ADR-0002's Comments/Result
+    channel has no concept of embedded code fences or escaped bullets, and a
+    structure-aware parser is out of scope for this fix -- see
+    LocalBackendMultilineEntryShapeTest.test_a_dash_line_inside_a_fenced_code_
+    block_is_a_known_limitation in test_local.py, which documents (not fixes) the
+    fenced instance of this general limitation."""
     if heading_idx is None:
         heading_idx = _find_heading(lines, heading)
         if heading_idx is None:
@@ -523,7 +534,10 @@ def _section_entries(lines, heading, heading_idx=None, end_idx=None):
             entries[-1].append(line)
         else:
             preamble.append(line)
-    if any(preamble_line.strip() for preamble_line in preamble):
+    non_blank_preamble_lines = [line for line in preamble if line.strip()]
+    if non_blank_preamble_lines and not all(
+        line.strip().startswith("<!--") for line in non_blank_preamble_lines
+    ):
         entries.insert(0, preamble)
     return entries
 

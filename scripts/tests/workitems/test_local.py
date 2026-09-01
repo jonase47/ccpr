@@ -546,6 +546,63 @@ class LocalBackendUnbulletedSectionShapeTest(unittest.TestCase):
             [prose, "https://example.org/pr/9"],
         )
 
+    def test_a_section_containing_only_the_shipped_placeholder_comment_returns_no_entries(self):
+        """Finding: the shipped item template (Manual/WORKITEMS.md, mirrored in
+        ITEM_TEMPLATE above) puts an HTML-comment placeholder as the first line of a
+        freshly created `## Result`/`## Comments` section --
+        `<!-- append-result writes PR/commit links here -->`. Before this fix,
+        `any(line.strip() for line in preamble)` was true for that placeholder-only
+        preamble (the line is non-blank), so it became a real entry --
+        `result-link == ['<!-- append-result writes PR/commit links here -->']`
+        instead of `[]`. A preamble is only real content if it carries at least one
+        non-blank line that is NOT an HTML comment."""
+        item_id = "WI-0001"
+        self._write_raw(item_id, "<!-- append-result writes PR/commit links here -->")
+
+        result_links = self.backend.get(item_id)["result-link"]
+
+        self.assertEqual(result_links, [])
+
+    def test_an_html_comment_line_inside_a_preamble_that_also_has_real_content_is_preserved(self):
+        """Pins the narrowness of the fix above: dropping a placeholder-ONLY preamble
+        must not become a license to strip any `<!--`-shaped line out of a preamble
+        that also carries real authored content. That blanket-filter class of bug is
+        exactly what findings #44/#45 removed -- a `<!--`-prefix filter that also ate
+        `<!--` lines sitting inside genuine multi-line entries. Here the preamble has
+        a non-`<!--` non-blank line, so the whole preamble (comment line included)
+        must round-trip byte-identical, same as any other unbulleted preamble."""
+        item_id = "WI-0001"
+        preamble = (
+            "Real preamble text.\n"
+            "<!-- an embedded comment, not scaffolding -->\n"
+            "More real text."
+        )
+        self._write_raw(item_id, preamble)
+
+        result_links = self.backend.get(item_id)["result-link"]
+
+        self.assertEqual(result_links, [preamble])
+
+    def test_an_html_comment_line_after_a_bullet_is_a_continuation_not_dropped(self):
+        """Same narrowness pin as above, for the other branch of `_section_entries`:
+        once a column-0 `- ` line has started an entry, every following line
+        (`<!--`-shaped or not) is a continuation and must survive untouched -- the
+        placeholder-only rule only ever applies to the pre-bullet preamble."""
+        item_id = "WI-0001"
+        entry_text = (
+            "- A real entry.\n"
+            "<!-- embedded comment line, part of this entry's own text -->\n"
+            "More text."
+        )
+        self._write_raw(item_id, entry_text)
+
+        result_links = self.backend.get(item_id)["result-link"]
+
+        self.assertEqual(
+            result_links,
+            ["A real entry.\n<!-- embedded comment line, part of this entry's own text -->\nMore text."],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
