@@ -60,6 +60,32 @@ emits, including its own usage text and error messages. Running with no
 deny list configured is not silent — the gate says so out loud in its
 summary line instead of passing quietly.
 
+### What belongs on the list — and what must not
+
+The criterion is **names that do not belong in the shared repository** — not
+names that belong to us. The two are easy to confuse, and confusing them
+disables the check.
+
+Your own organisation or namespace name belongs **nowhere near** this list.
+It is the namespace the shared repository itself lives in, so it is present by
+construction in `repo`, `repoUrl` and every `overlay.*` path — which means it
+occurs in the destination path and in the content of essentially every file
+the tool has ever written. Configured as a deny name, it refuses every
+`promote` onto every existing file, including one whose content never changed.
+
+That failure is worse than it looks. A check that returns the same verdict for
+everything carries no information, so it stops being read; and once nobody
+promotes, nothing is scanned. Measured on one deployment on 01.09.2026: the
+org name as a deny entry blocked 8 of 9 tracked markdown files and both
+established destination paths, while five genuine tenant-name occurrences sat
+in the repository unnoticed — they had entered before the list existed, and no
+run since had been able to say anything but "blocked".
+
+A name earns a place here when it identifies a **customer, tenant or client
+project** that has no business being visible to everyone with read access to
+the shared repository. If a name is one you would print on your own repository
+URL, it is not that.
+
 ## `artifact-gate.sh`
 
 ```
