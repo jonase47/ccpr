@@ -469,7 +469,15 @@ def _section_entries(lines, heading, heading_idx=None, end_idx=None):
     the end of the section -- so an indented `- ` (e.g. a nested sub-bullet inside a
     comment) is a continuation, not a new entry. Lines before the first entry (a
     placeholder `<!-- ... -->` comment, stray blank lines) are preamble and are
-    dropped, matching the section-with-no-entries-yet case."""
+    dropped, matching the section-with-no-entries-yet case.
+
+    Known limitation, not fixed here: this boundary rule is not fence-aware. A
+    column-0 `- ` line inside a ```` ``` ````-fenced code block embedded in a
+    comment's text is still treated as a new entry, splitting what the user wrote
+    as one fenced block into two. ADR-0002's Comments/Result channel has no concept
+    of embedded code fences, and a fence-aware parser is out of scope for this fix
+    -- see LocalBackendMultilineEntryShapeTest.test_a_dash_line_inside_a_fenced_code_
+    block_is_a_known_limitation in test_local.py, which documents (not fixes) it."""
     if heading_idx is None:
         heading_idx = _find_heading(lines, heading)
         if heading_idx is None:

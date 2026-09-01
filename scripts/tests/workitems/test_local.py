@@ -7,6 +7,7 @@ which depends on local's own atomic-write implementation detail).
 
 import contextlib
 import io
+import re
 import shutil
 import sys
 import tempfile
@@ -360,6 +361,82 @@ class LocalBackendLinksEncodingTest(unittest.TestCase):
         self.assertEqual(
             fetched["links"], [{"type": "depends-on", "target": target["id"]}],
         )
+
+
+class LocalBackendMultilineEntryShapeTest(unittest.TestCase):
+    """On-disk shape assertions for a multi-line Comments/Result entry (findings
+    #44/#45), beyond what the backend-neutral contract suite in contract.py checks
+    (get()'s return value) -- these read the raw Markdown file itself, since the bug
+    was specifically in how an entry is laid out on disk and re-parsed from it."""
+
+    def setUp(self):
+        self.tmp_dir = tempfile.mkdtemp(prefix="ccpr-workitems-multiline-")
+        self.addCleanup(shutil.rmtree, self.tmp_dir, ignore_errors=True)
+        self.backend = local.create({"workitems_dir": self.tmp_dir})
+
+    def _file_text(self, item_id):
+        return (Path(self.tmp_dir) / f"{item_id}.md").read_text(encoding="utf-8")
+
+    def test_continuation_lines_keep_their_indentation(self):
+        """Boundary condition 1 (measured on WI-0109): a continuation line's leading
+        whitespace is part of its content, not incidental formatting to be trimmed."""
+        item = self.backend.create(title="First")
+        text = "First line.\n  Indented continuation."
+
+        self.backend.comment(item["id"], text)
+
+        self.assertIn("- First line.\n  Indented continuation.\n", self._file_text(item["id"]))
+        self.assertEqual(self.backend.get(item["id"])["comments"], [text])
+
+    def test_an_indented_dash_line_is_a_continuation_not_a_new_entry(self):
+        """Boundary condition 2 (measured on WI-0044, WI-0109): only a `- ` at column
+        0 opens a new entry -- an indented `- ` (a nested sub-bullet inside a
+        comment's own text) is content, and must not be split into its own entry."""
+        item = self.backend.create(title="First")
+        text = "First line.\n  - nested bullet\nMore text."
+
+        self.backend.comment(item["id"], text)
+
+        file_text = self._file_text(item["id"])
+        self.assertIn("- First line.\n  - nested bullet\nMore text.\n", file_text)
+        # Exactly one column-0 "- " line in the whole file: the indented nested
+        # bullet did not spawn a second entry.
+        self.assertEqual(len(re.findall(r"(?m)^- ", file_text)), 1)
+        self.assertEqual(self.backend.get(item["id"])["comments"], [text])
+
+    def test_blank_lines_inside_an_entry_are_preserved_on_disk(self):
+        """Boundary condition 3 (measured on WI-0019 through WI-0072): a blank line
+        in the middle of a comment is part of that comment's own text, not a
+        separator between two entries -- the flattening bug's most silently-passable
+        failure mode (an entry-count assertion alone would not catch it)."""
+        item = self.backend.create(title="First")
+        text = "First line.\n\nThird line after a blank line."
+
+        self.backend.comment(item["id"], text)
+
+        self.assertIn("- First line.\n\nThird line after a blank line.\n", self._file_text(item["id"]))
+        self.assertEqual(self.backend.get(item["id"])["comments"], [text])
+
+    def test_a_dash_line_inside_a_fenced_code_block_is_a_known_limitation(self):
+        """Boundary condition 4: the entry boundary rule (`line.startswith("- ")` at
+        column 0) is not fence-aware. Checked against the live corpus specimen
+        (WI-0121) first: it carries exactly one stray ``` token in running prose, not
+        an opening/closing pair, so it does not actually exercise this case. This
+        test instead constructs a genuine paired fence with a column-0 `- ` line
+        inside it, to name the limit explicitly rather than leave it undiscovered:
+        such a line is split into a second entry, same as it would be outside a
+        fence. Not fixed here -- ADR-0002's Comments/Result channel has no concept
+        of embedded code fences, and a fence-aware parser is out of scope for this
+        fix (see local.py's `_section_entries` docstring)."""
+        item = self.backend.create(title="First")
+        text = "Run this:\n```\n- not a bullet, just shell output\n```\nDone."
+
+        self.backend.comment(item["id"], text)
+
+        comments = self.backend.get(item["id"])["comments"]
+        self.assertEqual(len(comments), 2)
+        self.assertEqual(comments[0], "Run this:\n```")
+        self.assertEqual(comments[1], "not a bullet, just shell output\n```\nDone.")
 
 
 if __name__ == "__main__":
