@@ -439,5 +439,113 @@ class LocalBackendMultilineEntryShapeTest(unittest.TestCase):
         self.assertEqual(comments[1], "not a bullet, just shell output\n```\nDone.")
 
 
+class LocalBackendUnbulletedSectionShapeTest(unittest.TestCase):
+    """Regression tests for a gap in `_section_entries`: an entry only starts at a
+    column-0 `- ` line, so a section whose content begins with a non-bullet line has
+    nothing to attach those lines to -- they fell out of the parsed result entirely.
+    Measured on the live corpus: docs/workitems/WI-0107.md's `## Result` section is
+    ten non-blank lines of hand-written prose with no bullet anywhere in it; the
+    reader returned [] for it. 12 of 140 corpus items carry this shape in `## Result`
+    (324 dropped non-blank lines total), all hand-written rather than appended
+    through `append_result`/`comment`."""
+
+    def setUp(self):
+        self.tmp_dir = tempfile.mkdtemp(prefix="ccpr-workitems-unbulleted-")
+        self.addCleanup(shutil.rmtree, self.tmp_dir, ignore_errors=True)
+        self.backend = local.create({"workitems_dir": self.tmp_dir})
+
+    def _write_raw(self, item_id, result_section_text):
+        # Deliberately no blank-line padding between `result_section_text` and the
+        # next heading -- `result_section_text` must equal the section's raw content
+        # exactly (`lines[heading_idx + 1:end_idx]`), or a byte-identical assertion
+        # against it would be testing the fixture's own padding, not the function.
+        (Path(self.tmp_dir) / f"{item_id}.md").write_text(
+            "---\n"
+            f"id: {item_id}\n"
+            "title: Hand-written fixture\n"
+            "status: Backlog\n"
+            "---\n"
+            "\n"
+            "Description.\n"
+            "\n"
+            "## Acceptance Criteria\n"
+            "\n"
+            "## Result\n"
+            f"{result_section_text}\n"
+            "## Comments\n",
+            encoding="utf-8",
+        )
+
+    def test_a_section_with_no_bullet_at_all_round_trips_byte_identical(self):
+        """Measured shape: docs/workitems/WI-0107.md's `## Result` -- prose, no
+        bullet anywhere in the section, including an internal blank line."""
+        item_id = "WI-0001"
+        prose = (
+            "Closed 26.08.2026, commit `e324178`.\n"
+            "\n"
+            "Second paragraph after a blank line.\n"
+            "Third line, no blank line before it."
+        )
+        self._write_raw(item_id, prose)
+
+        result_links = self.backend.get(item_id)["result-link"]
+
+        self.assertEqual(result_links, [prose])
+
+    def test_unbulleted_prose_before_a_later_bullet_round_trips_byte_identical(self):
+        """Measured shape: a hand-written section that opens with prose and only
+        later gets a real bulleted entry appended."""
+        item_id = "WI-0001"
+        preamble = "Preamble line one.\nPreamble line two."
+        self._write_raw(item_id, f"{preamble}\n- A real bulleted entry.")
+
+        result_links = self.backend.get(item_id)["result-link"]
+
+        self.assertEqual(result_links, [preamble, "A real bulleted entry."])
+
+    def test_no_non_blank_line_in_a_section_is_absent_from_the_returned_entries(self):
+        """The general property, not just the two instances above: whatever shape a
+        section has, every non-blank line the file holds must surface somewhere in
+        the concatenation of the returned entries. This is the assertion that would
+        have caught the WI-0107 regression instead of one fixed example of it."""
+        item_id = "WI-0001"
+        section_text = (
+            "Unbulleted first line.\n"
+            "\n"
+            "- A bulleted entry.\n"
+            "  Continuation of that entry, no dash.\n"
+            "Trailing prose after the bullet, still no dash."
+        )
+        self._write_raw(item_id, section_text)
+
+        entries = self.backend.get(item_id)["result-link"]
+        concatenated_lines = "\n".join(entries).split("\n")
+
+        for line in section_text.split("\n"):
+            # A returned entry's own bullet marker is stripped (that is the entry's
+            # boundary syntax, not its content) -- compare content, not markup.
+            content = line[2:] if line.startswith("- ") else line
+            if content.strip():
+                self.assertIn(content, concatenated_lines)
+
+    def test_appending_to_a_section_that_begins_with_unbulleted_text_preserves_it_byte_identical(self):
+        """finding-#44/#45 sibling: `_append_to_section` rewrites the whole section
+        from its own parsed entries on every call, so this shape must survive an
+        append the same way a purely bulleted section already does."""
+        item_id = "WI-0001"
+        prose = "Closed prose with no bullet at all,\nspanning two lines."
+        self._write_raw(item_id, prose)
+
+        item = self.backend.append_result(item_id, "https://example.org/pr/9")
+
+        self.assertEqual(item["result-link"], [prose, "https://example.org/pr/9"])
+        file_text = (Path(self.tmp_dir) / f"{item_id}.md").read_text(encoding="utf-8")
+        self.assertIn(f"## Result\n{prose}\n- https://example.org/pr/9\n", file_text)
+        self.assertEqual(
+            self.backend.get(item_id)["result-link"],
+            [prose, "https://example.org/pr/9"],
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

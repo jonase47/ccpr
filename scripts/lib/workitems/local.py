@@ -455,11 +455,16 @@ def _extract_section_items(body, heading):
 
 
 def _entry_text(entry_lines):
-    """`entry_lines` is a non-empty list of raw lines: the first still carries its
-    leading `- ` marker (exactly two characters, see `_section_entries`), every
-    following line is returned byte-identical -- indentation and blank lines
-    included (findings #44/#45)."""
-    first_line = entry_lines[0][2:]
+    """`entry_lines` is a non-empty list of raw lines. A bulleted entry's first line
+    still carries its leading `- ` marker (exactly two characters, see
+    `_section_entries`) and is stripped of it; a preamble entry (see below) has no
+    marker to strip -- its first line is never eligible to start with `- ` by
+    construction, so it is returned as-is. Every following line, in both cases, is
+    returned byte-identical -- indentation and blank lines included (findings
+    #44/#45)."""
+    first_line = entry_lines[0]
+    if first_line.startswith("- "):
+        first_line = first_line[2:]
     return "\n".join([first_line] + entry_lines[1:])
 
 
@@ -467,9 +472,26 @@ def _section_entries(lines, heading, heading_idx=None, end_idx=None):
     """Groups a section's raw lines into entries. An entry is a line starting with
     `- ` at column 0, plus every following line up to the next column-0 `- ` line or
     the end of the section -- so an indented `- ` (e.g. a nested sub-bullet inside a
-    comment) is a continuation, not a new entry. Lines before the first entry (a
-    placeholder `<!-- ... -->` comment, stray blank lines) are preamble and are
-    dropped, matching the section-with-no-entries-yet case.
+    comment) is a continuation, not a new entry.
+
+    Lines before the first column-0 `- ` line (a preamble) are their own rule: a
+    section can be hand-written rather than appended through `append_result`/
+    `comment`, and its content need not start with -- or ever contain -- a bullet at
+    all (measured on the live corpus: docs/workitems/WI-0107.md's `## Result` is ten
+    non-blank lines of prose with no bullet anywhere in it). Dropping that preamble,
+    as an earlier version of this function did, is exactly the bug this fix closes:
+    it silently returned [] for such a section. The rule taken here is that the run
+    of lines before the first column-0 `- ` line forms ONE entry, byte-preserved --
+    not one entry per physical line. One-per-line would reproduce the pre-#44/#45
+    reader's entry count, but it would also split a hand-written paragraph like
+    WI-0107's back into fragments, which is the thing findings #44/#45 exist to
+    stop; treating the whole preamble as a single entry is the same discipline
+    already applied to a multi-line comment/result entry after a bullet. A preamble
+    that is empty or carries only blank lines (the common case: a freshly created
+    item's still-empty section, or the historical `<!-- append-result writes ... -->`
+    placeholder comment before a real entry) is dropped, matching the pre-existing
+    section-with-no-entries-yet case -- only a preamble that carries at least one
+    non-blank line becomes an entry.
 
     Known limitation, not fixed here: this boundary rule is not fence-aware. A
     column-0 `- ` line inside a ```` ``` ````-fenced code block embedded in a
@@ -491,11 +513,18 @@ def _section_entries(lines, heading, heading_idx=None, end_idx=None):
         # blank line the last entry's own text ended with. Drop only that one.
         section_lines = section_lines[:-1]
     entries = []
+    preamble = []
+    seen_bullet = False
     for line in section_lines:
         if line.startswith("- "):
+            seen_bullet = True
             entries.append([line])
-        elif entries:
+        elif seen_bullet:
             entries[-1].append(line)
+        else:
+            preamble.append(line)
+    if any(preamble_line.strip() for preamble_line in preamble):
+        entries.insert(0, preamble)
     return entries
 
 
