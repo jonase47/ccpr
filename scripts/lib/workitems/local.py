@@ -449,9 +449,46 @@ def _find_first_section_heading(lines):
 
 def _extract_section_items(body, heading):
     return [
-        _unescape_heading_lookalikes(_strip_bullet(line))
-        for line in _section_lines(body.split("\n"), heading)
+        _unescape_heading_lookalikes(_entry_text(entry))
+        for entry in _section_entries(body.split("\n"), heading)
     ]
+
+
+def _entry_text(entry_lines):
+    """`entry_lines` is a non-empty list of raw lines: the first still carries its
+    leading `- ` marker (exactly two characters, see `_section_entries`), every
+    following line is returned byte-identical -- indentation and blank lines
+    included (findings #44/#45)."""
+    first_line = entry_lines[0][2:]
+    return "\n".join([first_line] + entry_lines[1:])
+
+
+def _section_entries(lines, heading, heading_idx=None, end_idx=None):
+    """Groups a section's raw lines into entries. An entry is a line starting with
+    `- ` at column 0, plus every following line up to the next column-0 `- ` line or
+    the end of the section -- so an indented `- ` (e.g. a nested sub-bullet inside a
+    comment) is a continuation, not a new entry. Lines before the first entry (a
+    placeholder `<!-- ... -->` comment, stray blank lines) are preamble and are
+    dropped, matching the section-with-no-entries-yet case."""
+    if heading_idx is None:
+        heading_idx = _find_heading(lines, heading)
+        if heading_idx is None:
+            return []
+        end_idx = _section_end(lines, heading_idx)
+    section_lines = lines[heading_idx + 1:end_idx]
+    if end_idx == len(lines) and section_lines and section_lines[-1] == "":
+        # `body` always ends with a newline (frontmatter.render's convention), which
+        # turns into exactly one artefactual empty element here when this section is
+        # the last one in the body -- that is the file's own trailing newline, not a
+        # blank line the last entry's own text ended with. Drop only that one.
+        section_lines = section_lines[:-1]
+    entries = []
+    for line in section_lines:
+        if line.startswith("- "):
+            entries.append([line])
+        elif entries:
+            entries[-1].append(line)
+    return entries
 
 
 def _append_to_section(body, heading, text):

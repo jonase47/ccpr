@@ -268,6 +268,18 @@ class WorkItemsContractTestCase:
             self.backend.get(item_id)["comments"],
         )
 
+    def test_multiline_comment_round_trips_byte_identical(self):
+        """finding #45: a comment spanning several lines, including a blank line in
+        the middle, must come back exactly as written -- not flattened into one
+        entry per physical line, and not missing its blank line."""
+        item_id = self.create_item()
+        text = "First line.\n\nThird line after a blank line."
+
+        item = self.backend.comment(item_id, text)
+
+        self.assertEqual(item["comments"], [text])
+        self.assertEqual(self.backend.get(item_id)["comments"], [text])
+
     def test_comment_does_not_appear_in_result_link(self):
         item_id = self.create_item()
 
