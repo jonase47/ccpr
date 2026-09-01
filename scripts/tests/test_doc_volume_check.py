@@ -482,7 +482,7 @@ class AutoloadedContextScopeTest(DocVolumeCheckTestBase):
 
     def test_import_chain_is_followed_transitively_and_reported_as_critical(self):
         project_root, docs_root = self.fresh_project_root()
-        self.write_project_file(project_root, "CLAUDE.md", "# Root\n\n@extra.md\n")
+        self.write_project_file(project_root, "CLAUDE.md", "# Root\n\n" "@extra.md\n")
         extra = self.write_project_file(project_root, "extra.md", doc_without_h2(ERROR_BYTES))
 
         result = self.run_check(docs_root)
@@ -501,8 +501,8 @@ class AutoloadedContextScopeTest(DocVolumeCheckTestBase):
         # resolver that always resolves against project_root would miss it
         # entirely, which is exactly what this test would catch.
         project_root, docs_root = self.fresh_project_root()
-        self.write_project_file(project_root, "CLAUDE.md", "# Root\n\n@sub/inner.md\n")
-        self.write_project_file(project_root, "sub/inner.md", "# Inner\n\n@deep.md\n")
+        self.write_project_file(project_root, "CLAUDE.md", "# Root\n\n" "@sub/inner.md\n")
+        self.write_project_file(project_root, "sub/inner.md", "# Inner\n\n" "@deep.md\n")
         deep = self.write_project_file(project_root, "sub/deep.md", doc_without_h2(WARNING_BYTES))
 
         result = self.run_check(docs_root)
@@ -555,7 +555,7 @@ class AutoloadedContextScopeTest(DocVolumeCheckTestBase):
         self.assertEqual(0, before.returncode, before.stdout)
         self.assertNotIn("extra.md", before.stdout)
 
-        self.write_project_file(project_root, "CLAUDE.md", "# Root\n\n@extra.md\n")
+        self.write_project_file(project_root, "CLAUDE.md", "# Root\n\n" "@extra.md\n")
         after = self.run_check(docs_root)
 
         self.assertEqual(0, after.returncode, after.stdout)

@@ -1167,12 +1167,23 @@ class ExternalToolExitStatusTest(unittest.TestCase):
         result (0 findings greps to nothing, exit 1, not a crash), marked
         `grep-empty-is-valid` (`discard-needs-exemption` +1). 158
         invocations total: `discard-needs-exemption` +1,
-        `bare-needs-exemption` +2, everything else unchanged."""
+        `bare-needs-exemption` +2, everything else unchanged.
+        01.09.2026: +3 total for scripts/doc-volume-check.sh's autoloaded-
+        context scan -- `checked-condition` +1, `bare-needs-exemption` +2.
+        Proven a pure addition by a MULTISET difference over
+        (file, tool, disposition) against a worktree of e47587f, deliberately
+        NOT over (file, line, ...): inserting code above existing calls shifts
+        their line numbers, and a line-bearing identity reports each shift as
+        one removal plus one addition. That identity showed 7 additions and 4
+        removals for the same change; the line-independent one shows 3 and 0.
+        The total pinned here was correct, but the full set of pin registers
+        in this repository was NOT known at the time of this bump -- this pin
+        was discovered by a red CI run, not from a list (WI-0133)."""
         invocations = scan_tree()
         by_disposition = {}
         for inv in invocations:
             by_disposition[inv.disposition] = by_disposition.get(inv.disposition, 0) + 1
-        self.assertEqual(158, len(invocations))
+        self.assertEqual(161, len(invocations))
         self.assertEqual(
             {
                 # 28.08.2026, open-findings wave 1a: one invocation moved
@@ -1201,11 +1212,11 @@ class ExternalToolExitStatusTest(unittest.TestCase):
                 # 30.08.2026: +3 total for scripts/shellcheck-run.sh (WI-0129
                 # D2) -- see this test's own docstring entry immediately
                 # above for the per-invocation breakdown.
-                "checked-condition": 27,
+                "checked-condition": 28,
                 "checked-captured": 5,
                 "checked-chain": 14,
                 "discard-needs-exemption": 41,
-                "bare-needs-exemption": 71,
+                "bare-needs-exemption": 73,
             },
             by_disposition,
         )
