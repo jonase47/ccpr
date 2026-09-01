@@ -205,7 +205,7 @@ class PlatformConditionalSkipBudgetTest(unittest.TestCase):
         found = files_with_skip_decorators()
         new = found - _REGISTERED_SKIP_DECORATOR_FILES
         stale = _REGISTERED_SKIP_DECORATOR_FILES - found
-        self.assertEqual(
+        self.assertEqual(  # pin: set registered-skip-decorator-files
             set(), new,
             f"a new platform/toolchain-conditional skipUnless/skipIf "
             f"appeared in a file this module does not know about yet: "
@@ -214,7 +214,7 @@ class PlatformConditionalSkipBudgetTest(unittest.TestCase):
             "expected_skip_count() how to derive its contribution -- do "
             "not let it sit outside the pinned budget uncounted.",
         )
-        self.assertEqual(
+        self.assertEqual(  # pin: set registered-skip-decorator-files
             set(), stale,
             f"a file registered as carrying a platform/toolchain-"
             f"conditional skip no longer does: {sorted(stale)}. Remove it "

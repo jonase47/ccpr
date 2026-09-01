@@ -1233,7 +1233,7 @@ class ExternalToolExitStatusTest(unittest.TestCase):
         added scripts/shellcheck-run.sh)."""
         files = sorted(SCRIPTS_DIR.glob("*.sh")) + sorted((SCRIPTS_DIR / "lib").glob("*.sh"))
         names = sorted(f.relative_to(SCRIPTS_DIR).as_posix() for f in files)
-        self.assertEqual(
+        self.assertEqual(  # pin: set external-tool-scanned-scripts
             [
                 "anchor.sh",
                 "artifact-gate.sh",

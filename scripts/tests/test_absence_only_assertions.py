@@ -776,8 +776,10 @@ class ParentStateDiscriminationTest(unittest.TestCase):
         flagged = {rec.method_name for rec in records if rec.disposition in NEEDS_EXEMPTION}
         not_flagged = {rec.method_name for rec in records if rec.disposition not in NEEDS_EXEMPTION}
 
-        self.assertEqual(self.EXPECTED_FLAGGED, flagged)
-        self.assertEqual(self.EXPECTED_NOT_FLAGGED, not_flagged)
+        self.assertEqual(  # pin: set parent-state-flagged
+            self.EXPECTED_FLAGGED, flagged)
+        self.assertEqual(  # pin: set parent-state-not-flagged
+            self.EXPECTED_NOT_FLAGGED, not_flagged)
 
 
 class EveryAbsenceOnlyTestIsAccountedForTest(unittest.TestCase):

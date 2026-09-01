@@ -1868,7 +1868,8 @@ class CheckTableAlignmentTest(unittest.TestCase):
             self.assertEqual(5, len(values), "%s has %d entries, expected 5: %r" % (name, len(values), values))
 
     def test_exactly_the_seven_named_columns_exist_in_source(self):
-        self.assertEqual(CHECK_TABLE_COLUMN_NAMES, find_check_table_array_names())
+        self.assertEqual(  # pin: set check-table-column-names
+            CHECK_TABLE_COLUMN_NAMES, find_check_table_array_names())
 
 
 class CheckTableAlignmentRedProofTest(unittest.TestCase):

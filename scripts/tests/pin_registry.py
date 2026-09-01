@@ -172,6 +172,37 @@ def find_markers(path, rel=None):
     return out
 
 
+def floors_without_a_set(markers):
+    """Every `floor` marker whose subject carries no `set` marker.
+
+    Makes `PIN_GROUPS["floor"]`'s admissibility sentence enforceable: a floor
+    is a lower bound and structurally cannot see a SWAP (one entry out, one
+    entry in, count unchanged), so on its own it is not a membership guard.
+    Until WI-0133 T2 that rule was prose in a dict value -- a stated obligation
+    with no mechanism, the same shape ADR-0012 obligation 1 had before T1.
+
+    THE RULE IS ASYMMETRIC ON PURPOSE, AND THE ASYMMETRY IS A DECISION
+    (WI-0133 T2, PO). A `floor` requires a `set`. A `set` does NOT require a
+    `floor`: most membership guards need no lower bound, and demanding one
+    would force a coupling nobody asked for onto every set pin in the corpus.
+    Do not "complete" this into a symmetric check -- that is a scope change,
+    not a tidy-up, and
+    `FloorRequiresASetTest.test_a_set_without_a_floor_is_silent` fails if it
+    happens.
+
+    The subject is (file, id), not the bare id. Pin ids are short slugs and
+    nothing enforces uniqueness across the corpus, so a bare-id match would let
+    an unrelated pin in another module satisfy the rule by coincidence.
+
+    Returns a sorted list of (rel, lineno, pin_id) -- the line is carried for
+    the failure message only, never for identity.
+    """
+    subjects_with_a_set = {(m.rel, m.pin_id) for m in markers if m.group == "set"}
+    return sorted((m.rel, m.lineno, m.pin_id) for m in markers
+                  if m.group == "floor"
+                  and (m.rel, m.pin_id) not in subjects_with_a_set)
+
+
 # ---------------------------------------------------------------------------
 # Candidate discovery
 # ---------------------------------------------------------------------------

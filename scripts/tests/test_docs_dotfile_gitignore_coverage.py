@@ -140,7 +140,7 @@ class DocsDotfileSweepTest(unittest.TestCase):
     def test_sweep_finds_the_thirteen_concrete_artifacts_after_wi_0021s_anchor_report(self):
         """Was twelve at WI-0058; WI-0021 (Teilwelle 4c) added docs/.anchor-report.md,
         named literally in commands/anchor.md's ## Result section."""
-        self.assertEqual(
+        self.assertEqual(  # pin: set docs-dotfile-concrete-artifacts
             concrete_artifact_paths(),
             {
                 "docs/.anchor-report.md",
@@ -161,7 +161,7 @@ class DocsDotfileSweepTest(unittest.TestCase):
 
     def test_sweep_normalises_to_the_six_block_patterns_the_generator_uses(self):
         """Was five at WI-0058; see the thirteen-artifact test above for the addition."""
-        self.assertEqual(
+        self.assertEqual(  # pin: set docs-dotfile-block-patterns
             block_patterns(),
             {
                 "docs/.anchor-report.md",

@@ -86,6 +86,30 @@ asserting the gap in prose only.
    turned a fixture assertion into a repository measurement, eleven were
    reported and the twelfth, the one inside `assert_level`, was not.
 
+## Both sides of the comparison run over AST shapes beyond `ast.Name`
+
+The list above says what the pattern cannot see. This says where its two
+recognisers actually run, because assuming `ast.Name` on either side is what
+made T1 drop a real pin *silently*:
+
+* **The declared side** may be an `ast.Attribute`. A class-body constant is
+  written `self.EXPECTED_FLAGGED` at the assertion, not as a bare name.
+* **The fixture rule** may have to look *through* an `ast.Attribute`.
+  `self.<attr>` is a fixture root and is never followed -- except when the
+  class body binds it to a repository-derived expression
+  (`FIXTURE = FIXTURES_DIR / "..."`), which is a checked-in file and ages with
+  the repository like any module-level constant.
+
+Both cost `ParentStateDiscriminationTest` its place in the T1 candidate set,
+and neither failed a test at the time: a detector that drops a real instance
+drops it without a sound. `PatternLimitsTest` therefore tests each of the two
+with a POSITIVE and a NEGATIVE control (`test_a_class_body_literal_is_a_
+declaration_and_not_a_fixture`, `test_a_class_body_repo_path_is_not_a_fixture_
+root`). A clause that only describes is an enumeration; it becomes a check when
+every shape it names can fail. Both were verified by rolling the T1 fix back to
+its exact pre-fix form, one half at a time -- each half turns exactly one of
+the two tests red and leaves the other green.
+
 ## PENDING has an expiry date, in the test, not in a promise
 
 T1 can only place markers in the two sites it is allowed to write
@@ -114,6 +138,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from pin_registry import (  # noqa: E402
     PIN_GROUPS,
     TESTS_DIR,
+    Marker,
     corpus_files,
     all_candidates,
     all_markers,
@@ -121,6 +146,7 @@ from pin_registry import (  # noqa: E402
     candidates_from_source,
     find_candidates,
     find_markers,
+    floors_without_a_set,
 )
 
 
@@ -214,15 +240,16 @@ FIXTURE_ASSERTION_SITE_COUNTS = {
     "test_agent_monitor.py": 16,
     "test_bash_exit_status_pipe_hook.py": 12,
     "workitems/test_migrate.py": 8,
-    "test_quality_scan.py": 24,
+    "test_quality_scan.py": 21,
 }
 
 
-def _fixture_assertion_lines(rel, base_classes=None):
-    """`assertEqual(<int literal>, len(<expr>))` sites, either across a whole
-    module or restricted to classes deriving from `base_classes`."""
+def _fixture_assertion_sites_by_class(rel, base_classes=None):
+    """class name -> its `assertEqual(<int literal>, len(<expr>))` line
+    numbers, either across a whole module or restricted to classes deriving
+    from `base_classes`. Classes carrying none of the shape are absent."""
     tree = ast.parse((TESTS_DIR / rel).read_text(encoding="utf-8"))
-    out = set()
+    out = {}
     for class_def in ast.walk(tree):
         if not isinstance(class_def, ast.ClassDef):
             continue
@@ -244,40 +271,43 @@ def _fixture_assertion_lines(rel, base_classes=None):
                         and isinstance(measured, ast.Call)
                         and isinstance(measured.func, ast.Name)
                         and measured.func.id == "len"):
-                    out.add(call.lineno)
+                    out.setdefault(class_def.name, set()).add(call.lineno)
                     break
     return out
 
 
-# Two sites carry the fixture shape but are, at their own site, real pins over
-# the SHIPPED source rather than over a fixture. They are named here instead of
-# being dropped from FIXTURE_ASSERTION_BASE_CLASSES, so the disagreement stays
-# visible and goes red if either side changes. Reported to the decision-maker
-# with WI-0133 T1; the classification is theirs, not this module's.
+def _fixture_assertion_lines(rel, base_classes=None, excluded_classes=()):
+    by_class = _fixture_assertion_sites_by_class(rel, base_classes)
+    return {lineno for name, linenos in by_class.items()
+            if name not in excluded_classes for lineno in linenos}
+
+
+# Two classes in test_quality_scan.py derive from a fixture base class and are
+# nevertheless NOT fixture assertions: both read the shipped source from disk,
+# so their expected value ages with that source. They were transcribed into
+# this MUST-NOT half by mistake when the corpus was assembled (WI-0133 T1) and
+# `find_candidates` was right to report them. What T1 recorded as a corpus/
+# detector disagreement was therefore never one, and the construct that held
+# it -- a register conserving a premise that had already been refuted -- is
+# gone. The correction is to the corpus; the detector is unchanged.
 #
-#   test_quality_scan.py:2588-2589, CompletedHandlersBindingTest.
-#     `assertEqual(4, len(ns["COMPLETED"]))` over `load_tool_report_module()`,
-#     i.e. the shipped scripts/lib/tool_report.py. Its own class docstring
-#     (:2579) reads "Count pinned at 4 for both, so a removal shrinks the sweep
-#     below instead of narrowing it silently" -- the site calls itself a pin.
-#   test_quality_scan.py:2092, PiiPatternsRemovalRedProofTest.
-#     `assertEqual(1, len(dict_entry_line(source, name)))` where `source` is
-#     scripts/quality-scan.sh read from disk. It ages with the shipped script,
-#     not with a fixture, even though its message calls itself a "fixture
-#     assumption".
+#   CompletedHandlersBindingTest.test_both_dicts_are_pinned_at_4_entries
+#     asserts `4 == len(ns["COMPLETED"])` (and the same for HANDLERS) over
+#     `load_tool_report_module()`, i.e. the shipped scripts/lib/tool_report.py.
+#     Its own class docstring calls that count a pin.
+#   PiiPatternsRemovalRedProofTest.test_removing_a_pii_pattern_entry_makes_
+#     its_own_finding_disappear asserts over `dict_entry_line(source, name)`
+#     where `source = SCRIPT.read_text(...)`, i.e. the shipped
+#     scripts/quality-scan.sh -- even though its own message calls itself a
+#     "fixture assumption".
 #
-# Structurally these are indistinguishable from accepted MUST entries:
-# :2588 has the exact shape of test_manual_lint.py:469
-# (`assertEqual(19, len(VALID_KINDS))`), and :2092 has the shape of
-# test_check_all.py:1209, which parameterises a shipped-file measurement by a
-# declared registry entry. Sharpening the detector to drop these two would drop
-# those two as well.
-CORPUS_DISAGREEMENTS = frozenset({
-    ("test_quality_scan.py", "CompletedHandlersBindingTest",
-     "test_both_dicts_are_pinned_at_4_entries"),
-    ("test_quality_scan.py", "PiiPatternsRemovalRedProofTest",
-     "test_removing_a_pii_pattern_entry_makes_its_own_finding_disappear"),
-})
+# Both now run as ordinary candidates and are carried in PENDING like every
+# other unmarked candidate in their module (T4: test_quality_scan.py carries no
+# named live pin, so it is neither a T2 nor a T3 module).
+FIXTURE_ASSERTION_EXCLUDED_CLASSES = (
+    "CompletedHandlersBindingTest",
+    "PiiPatternsRemovalRedProofTest",
+)
 
 
 def fixture_assertion_sites():
@@ -285,7 +315,8 @@ def fixture_assertion_sites():
     sites = {rel: _fixture_assertion_lines(rel)
              for rel in FIXTURE_ASSERTION_MODULES}
     sites["test_quality_scan.py"] = _fixture_assertion_lines(
-        "test_quality_scan.py", FIXTURE_ASSERTION_BASE_CLASSES)
+        "test_quality_scan.py", FIXTURE_ASSERTION_BASE_CLASSES,
+        FIXTURE_ASSERTION_EXCLUDED_CLASSES)
     return sites
 
 
@@ -346,16 +377,20 @@ class FixtureAssertionsAreNotReportedTest(unittest.TestCase):
         self.assertEqual(  # pin: derived fixture-corpus-site-counts
             FIXTURE_ASSERTION_SITE_COUNTS, actual)
 
-    def test_each_declared_disagreement_is_still_reported(self):
-        """The exceptions above are exceptions, not deletions: each must still
-        be a live candidate. If one stops being reported, the exemption is
-        stale and must go -- an exemption nobody re-verifies is the drift this
+    def test_every_excluded_class_still_carries_the_shape(self):
+        """The exclusions above are exclusions, not deletions: each named class
+        must still carry the `assertEqual(<int>, len(...))` shape it is
+        excluded for. If one stops carrying it, the exclusion is dead weight
+        and must go -- an exemption nobody re-verifies is the drift this
         repository has already grown four skip lists' worth of
-        (test_bsd_gnu_portability.py:1968-1972)."""
-        found = {c.key() for c in all_candidates()}
-        assert_set_matches(  # pin: set fixture-corpus-disagreements
-            self, CORPUS_DISAGREEMENTS, CORPUS_DISAGREEMENTS & found,
-            "the declared fixture-corpus disagreements",
+        (test_bsd_gnu_portability.py:1968-1972). Class NAMES, never lines: a
+        line-keyed exclusion would move on every insertion above it."""
+        carrying = set(_fixture_assertion_sites_by_class(
+            "test_quality_scan.py", FIXTURE_ASSERTION_BASE_CLASSES))
+        declared = set(FIXTURE_ASSERTION_EXCLUDED_CLASSES)
+        assert_set_matches(  # pin: set fixture-corpus-exclusion
+            self, declared, declared & carrying,
+            "the fixture-corpus class exclusion",
         )
 
     def test_no_fixture_assertion_is_reported_as_a_candidate(self):
@@ -364,8 +399,6 @@ class FixtureAssertionsAreNotReportedTest(unittest.TestCase):
         for candidate in all_candidates():
             forbidden = sites.get(candidate.rel)
             if not forbidden:
-                continue
-            if candidate.key() in CORPUS_DISAGREEMENTS:
                 continue
             overlap = sorted(set(candidate.assert_linenos) & forbidden)
             if overlap:
@@ -444,6 +477,17 @@ class AssertSetMatchesIsItselfAPinShapeTest(unittest.TestCase):
 # PENDING entry naming one of these. Empty in T1 -- the guard reports nothing
 # yet, and has been seen red by adding "T2" here (see this module's own red
 # proofs in the WI-0133 T1 commit message).
+#
+# STILL EMPTY AFTER T2, deliberately. T2 marked the 10 of its 25 candidates
+# whose assertion IS the collection (`set`). The other 15 pin an exact COUNT
+# over a repository-derived population -- not a lower bound, not a membership
+# guard, not a live derivation, not a commit SHA. None of the four registered
+# groups describes them truthfully, and marking them `set` would put the same
+# kind of false statement at a site that a `derived` marker over a stored
+# literal would. That is a vocabulary finding, reported to the decision-maker
+# rather than resolved here (PIN_GROUPS was declared ahead of the
+# classification work, see pin_registry.py's docstring). Setting this to
+# ("T2",) is the last step of the tranche that answers it, not of this one.
 LANDED_TRANCHES = ()
 
 DECLARED_TRANCHES = ("T2", "T3", "T4")
@@ -460,9 +504,6 @@ DECLARED_TRANCHES = ("T2", "T3", "T4")
 PENDING = frozenset({
     ('test_absence_only_assertions.py', 'ClassificationCountsTest',
      'test_classification_counts', 'T2'),
-    ('test_absence_only_assertions.py', 'ParentStateDiscriminationTest',
-     'test_the_six_named_methods_are_flagged_and_the_five_siblings_are_not',
-     'T2'),
     ('test_absence_only_assertions.py', 'NoStaleKnownFindingsTest',
      'test_no_stale_known_findings', 'T3'),
     ('test_agent_frontmatter.py', 'AgentCountTest',
@@ -479,12 +520,8 @@ PENDING = frozenset({
      'test_every_category_in_the_tree_is_registered', 'T3'),
     ('test_bsd_gnu_portability.py', 'EveryMarkerNamesARegisteredCategoryTest',
      'test_every_registered_category_is_used', 'T3'),
-    ('test_bsd_gnu_portability.py', 'ExemptedSitesArePinnedTest',
-     'test_the_marker_exempted_sites_equal_the_registry', 'T2'),
     ('test_bsd_gnu_portability.py', 'HistoricalMktempTemplatesAreFlaggedTest',
      'test_the_current_run_tests_carries_no_mktemp_finding', 'T3'),
-    ('test_bsd_gnu_portability.py', 'KnownFindingsMatchTheCurrentScanTest',
-     'test_the_current_scan_equals_known_findings_exactly', 'T2'),
     ('test_bsd_gnu_portability.py', 'ScannedFilesCoverTheShippedScopeTest',
      'test_an_empty_scope_is_never_a_pass', 'T2'),
     ('test_bsd_gnu_portability.py', 'ScannedFilesCoverTheShippedScopeTest',
@@ -533,8 +570,6 @@ PENDING = frozenset({
      'test_total_command_file_count_is_pinned', 'T2'),
     ('test_conformance_run.py', 'CheckTableAlignmentTest',
      'test_all_seven_columns_are_five_entries_long', 'T3'),
-    ('test_conformance_run.py', 'CheckTableAlignmentTest',
-     'test_exactly_the_seven_named_columns_exist_in_source', 'T2'),
     ('test_conformance_run.py', 'CheckTableUncoveredColumnsValuesTest',
      'test_check_arg_shape_is_a_three_two_split', 'T3'),
     ('test_conformance_run.py', 'CheckTableUncoveredColumnsValuesTest',
@@ -549,14 +584,8 @@ PENDING = frozenset({
      'test_generic_branch_requires_three_lines', 'T3'),
     ('test_conformance_run.py', 'RequiredSkeletonLineCountPinTest',
      'test_the_required_lines_are_the_documented_ones', 'T3'),
-    ('test_docs_dotfile_gitignore_coverage.py', 'DocsDotfileSweepTest',
-     'test_sweep_finds_the_thirteen_concrete_artifacts_after_wi_0021s_anchor_report', 'T2'),
-    ('test_docs_dotfile_gitignore_coverage.py', 'DocsDotfileSweepTest',
-     'test_sweep_normalises_to_the_six_block_patterns_the_generator_uses', 'T2'),
     ('test_external_tool_exit_status.py', 'ExternalToolExitStatusTest',
      'test_classification_counts', 'T2'),
-    ('test_external_tool_exit_status.py', 'ExternalToolExitStatusTest',
-     'test_scanned_files_cover_the_shipped_scope', 'T2'),
     ('test_handover_epilogue_bullet.py', 'EpilogueOpenBulletTest',
      'test_104_files_carry_the_disambiguated_wording', 'T2'),
     ('test_handover_size_hook.py', 'WriteGateCoverageTest',
@@ -567,8 +596,6 @@ PENDING = frozenset({
      'test_run_tests_sh_carries_no_finding_after_the_wi_0129_fix', 'T3'),
     ('test_heredoc_interpolation_scan.py', 'ScannedFilesCoverTheShippedScopeTest',
      'test_scanned_files_cover_the_shipped_scope', 'T2'),
-    ('test_heredoc_interpolation_scan.py', 'ScopeMatchesKnownFindingsTest',
-     'test_the_measured_findings_match_known_findings_exactly', 'T2'),
     ('test_instinct_registers_agree.py', 'ClassificationCountsTest',
      'test_classification_counts', 'T2'),
     ('test_instinct_registers_agree.py', 'ExclusionRegressionPinTest',
@@ -616,6 +643,10 @@ PENDING = frozenset({
     ('test_phase_docs_lint.py', 'PhaseFoldersSweepTest',
      'test_every_phase_folder_is_reached_by_the_default_scan', 'T4'),
     ('test_pin_inventory.py', 'PatternLimitsTest',
+     'test_a_class_body_literal_is_a_declaration_and_not_a_fixture', 'T4'),
+    ('test_pin_inventory.py', 'PatternLimitsTest',
+     'test_a_class_body_repo_path_is_not_a_fixture_root', 'T4'),
+    ('test_pin_inventory.py', 'PatternLimitsTest',
      'test_a_number_in_a_docstring_is_not_reached', 'T4'),
     ('test_pin_inventory.py', 'PatternLimitsTest',
      'test_a_pin_inside_a_helper_method_is_not_reached', 'T4'),
@@ -625,8 +656,10 @@ PENDING = frozenset({
      'test_a_marker_with_an_unknown_group_is_rejected', 'T4'),
     ('test_pin_inventory.py', 'AssertSetMatchesIsItselfAPinShapeTest',
      'test_an_assert_set_matches_call_is_a_candidate', 'T4'),
-    ('test_platform_conditional_skip_budget.py', 'PlatformConditionalSkipBudgetTest',
-     'test_no_unregistered_skip_decorator_file_exists', 'T2'),
+    ('test_pin_inventory.py', 'FloorRequiresASetTest',
+     'test_a_floor_whose_subject_carries_no_set_is_reported', 'T4'),
+    ('test_pin_inventory.py', 'FloorRequiresASetTest',
+     'test_the_pairing_is_per_file_and_not_per_bare_id', 'T4'),
     ('test_quality_scan.py', 'CompletedHandlersBindingTest',
      'test_both_dicts_are_pinned_at_4_entries', 'T4'),
     ('test_quality_scan.py', 'CompletedHandlersRemovalRedProofTest',
@@ -681,8 +714,6 @@ PENDING = frozenset({
      'test_more_than_50_matches_are_capped_plus_one_truncation_marker', 'T4'),
     ('test_quality_scan_sast_patterns.py', 'TruncationCapTest',
      'test_the_50_real_findings_preceding_the_marker_are_unaffected', 'T4'),
-    ('test_shell_script_syntax.py', 'ShellScriptSyntaxTest',
-     'test_scanned_files_cover_the_shipped_scope', 'T2'),
     ('workitems/test_duration.py', 'ParseDurationSecondsTest',
      'test_bare_integer_is_seconds', 'T4'),
     ('workitems/test_duration.py', 'ParseDurationSecondsTest',
@@ -737,13 +768,30 @@ class PinMarkerInventoryTest(unittest.TestCase):
         assert_set_matches(  # pin: set pin-marker-inventory
             self,
             {("test_absence_only_assertions.py", "floor", "tests-corpus-files"),
+             ("test_absence_only_assertions.py", "set", "parent-state-flagged"),
+             ("test_absence_only_assertions.py", "set", "parent-state-not-flagged"),
              ("test_absence_only_assertions.py", "set", "tests-corpus-files"),
+             ("test_bsd_gnu_portability.py", "set", "portability-exempted-sites"),
+             ("test_bsd_gnu_portability.py", "set", "portability-known-findings"),
+             ("test_conformance_run.py", "set", "check-table-column-names"),
+             ("test_docs_dotfile_gitignore_coverage.py", "set",
+              "docs-dotfile-block-patterns"),
+             ("test_docs_dotfile_gitignore_coverage.py", "set",
+              "docs-dotfile-concrete-artifacts"),
+             ("test_external_tool_exit_status.py", "set",
+              "external-tool-scanned-scripts"),
+             ("test_heredoc_interpolation_scan.py", "set",
+              "heredoc-known-findings"),
              ("test_pin_inventory.py", "derived", "fixture-corpus-site-counts"),
-             ("test_pin_inventory.py", "set", "fixture-corpus-disagreements"),
+             ("test_pin_inventory.py", "set", "fixture-corpus-exclusion"),
              ("test_pin_inventory.py", "set", "named-live-pins-corpus"),
              ("test_pin_inventory.py", "set", "pending-transition-set"),
              ("test_pin_inventory.py", "set", "pin-marker-inventory"),
-             ("test_pin_inventory.py", "set", "skip-budget-blind-spot")},
+             ("test_pin_inventory.py", "set", "skip-budget-blind-spot"),
+             ("test_platform_conditional_skip_budget.py", "set",
+              "registered-skip-decorator-files"),
+             ("test_shell_script_syntax.py", "set",
+              "shell-syntax-scanned-scripts")},
             {m.key() for m in all_markers()},
             "the `# pin:` marker inventory",
         )
@@ -800,6 +848,65 @@ def _markers_in_source(source):
         return find_markers(path, "probe.py")
     finally:
         path.unlink()
+
+
+class FloorRequiresASetTest(unittest.TestCase):
+    """The `floor` group's admissibility rule, turned from prose into a check.
+
+    `PIN_GROUPS["floor"]` has said since T1 that a floor is admissible ONLY
+    where the same subject also carries a `set` pin, because a floor cannot
+    see a swap: one entry out, one entry in, count unchanged. Until now that
+    was a sentence in a dict value -- a formulated obligation with no
+    mechanism, which is the exact failure shape this module exists to close
+    (ADR-0012 obligation 1 stood the same way before T1).
+
+    Written as an INVARIANT rather than as an ordering rule ("place the set
+    pin first"). An ordering can be obeyed once and broken afterwards; an
+    invariant also holds for a floor added in six months by someone who never
+    read this round. It therefore replaces the tranche ordering that would
+    otherwise have had to carry the rule.
+    """
+
+    def test_no_floor_marker_stands_without_a_set_marker(self):
+        self.assertEqual(
+            [], floors_without_a_set(all_markers()),
+            "`floor` marker(s) whose subject carries no `set` marker. A floor "
+            "on its own cannot see a swap, so it is not a membership guard; "
+            "either add a `# pin: set <same-id>` beside it or reclassify it.",
+        )
+
+    def test_a_floor_whose_subject_carries_no_set_is_reported(self):
+        """The red proof. Constructed rather than measured on the live pair,
+        so that repairing or moving that pair cannot make this test lie about
+        what the invariant can see."""
+        # Constructed input, so not a pin; carried in PENDING (T4) for the
+        # same reason as AssertSetMatchesIsItselfAPinShapeTest's.
+        markers = [Marker("probe.py", 12, "floor", "orphan-subject")]
+        self.assertEqual([("probe.py", 12, "orphan-subject")],
+                         floors_without_a_set(markers))
+
+    def test_a_set_without_a_floor_is_silent(self):
+        """The counter-proof, and the asymmetry is a decision, not an
+        oversight (WI-0133 T2, decided by the PO). Most membership guards need
+        no lower bound at all; requiring one would force a coupling nobody
+        asked for and would make every `set` pin drag a second assertion
+        along. Without this test the invariant could quietly be
+        "completed" into a symmetric one, and the completion would look like
+        a tidy-up rather than the scope change it is."""
+        markers = [Marker("probe.py", 12, "set", "lonely-subject")]
+        self.assertEqual([], floors_without_a_set(markers))
+
+    def test_the_pairing_is_per_file_and_not_per_bare_id(self):
+        """A pin id is a short slug and nothing enforces that it is unique
+        across the corpus. Matching a floor to any `set` sharing its bare id
+        would let an unrelated pin in another module satisfy the rule by
+        coincidence -- a guard an uninvolved source can satisfy is not a
+        guard. `Marker.key()` is already (file, group, id) for the same
+        reason, so the subject is (file, id)."""
+        markers = [Marker("a.py", 1, "floor", "shared-slug"),
+                   Marker("b.py", 2, "set", "shared-slug")]
+        self.assertEqual([("a.py", 1, "shared-slug")],
+                         floors_without_a_set(markers))
 
 
 class PinCompletenessTest(unittest.TestCase):
@@ -947,6 +1054,92 @@ class PatternLimitsTest(unittest.TestCase):
             [c.key() for c in candidates_from_source(seeing, "probe.py")],
             "positive control: the identical body, renamed to test_*, must be "
             "reported -- the blindness is the NAME, not the assertion",
+        )
+
+    def test_a_class_body_literal_is_a_declaration_and_not_a_fixture(self):
+        """The declared side is not always an `ast.Name`.
+
+        A class-body constant is written `self.EXPECTED` at the assertion,
+        i.e. an `ast.Attribute` whose value is `Name("self")`. The first
+        version of `find_candidates` only accepted a bare `ast.Name` there and
+        silently dropped `ParentStateDiscriminationTest`, a real pin, without
+        reporting a gap -- it took a reviewer reading the corpus by hand to
+        surface it. Named in the boundary clause and tested here so the next
+        unforeseen AST shape is a failing test rather than a second silent
+        drop.
+
+        Negative control on the same input: the identical name bound in
+        `setUp` is a fixture the test itself built and must NOT be reported.
+        Without it, a detector that followed every `self.<attr>` would pass
+        the positive half."""
+        # Constructed input, so not a pin; carried in PENDING (T4).
+        declared_in_class_body = (
+            "from pathlib import Path\n"
+            "REPO = Path(__file__).resolve().parents[2]\n"
+            "class T:\n"
+            "    EXPECTED = frozenset({'a.sh', 'b.sh'})\n"
+            "    def test_names(self):\n"
+            "        names = {p.name for p in REPO.glob('*.sh')}\n"
+            "        self.assertEqual(self.EXPECTED, names)\n"
+        )
+        self.assertEqual(
+            [("probe.py", "T", "test_names")],
+            [c.key() for c in candidates_from_source(declared_in_class_body,
+                                                     "probe.py")],
+            "a class-body literal reached as self.EXPECTED is a DECLARATION; "
+            "recognising only ast.Name on the declared side drops it",
+        )
+
+        bound_in_setup = declared_in_class_body.replace(
+            "    EXPECTED = frozenset({'a.sh', 'b.sh'})\n",
+            "    def setUp(self):\n"
+            "        self.EXPECTED = frozenset({'a.sh', 'b.sh'})\n")
+        self.assertEqual(
+            [], candidates_from_source(bound_in_setup, "probe.py"),
+            "negative control: the same name bound in setUp is a fixture the "
+            "test built, and must stay unreported",
+        )
+
+    def test_a_class_body_repo_path_is_not_a_fixture_root(self):
+        """The measured side is not always an `ast.Name` either, and the
+        `self.<attr>`-is-a-fixture rule is the reason.
+
+        `FIXTURE = FIXTURES_DIR / "..."` in a class body is a checked-in file,
+        so a value measured through `self.FIXTURE` ages with the repository
+        exactly as one measured through a module-level constant does. Treating
+        every `self.<attr>` as scratch was the second half of the
+        `ParentStateDiscriminationTest` drop. The same `repo` fixpoint that
+        classifies module-level names decides it, rather than a second rule.
+
+        Negative control: the identical attribute name bound in `setUp` from a
+        temporary directory IS scratch and must stay unreported -- otherwise
+        the exception would have swallowed the rule it is an exception to."""
+        # Constructed input, so not a pin; carried in PENDING (T4).
+        repo_path_in_class_body = (
+            "import tempfile\n"
+            "from pathlib import Path\n"
+            "FIXTURES_DIR = Path(__file__).resolve().parent / 'fixtures'\n"
+            "class T:\n"
+            "    FIXTURE = FIXTURES_DIR / 'sample.txt'\n"
+            "    def test_lines(self):\n"
+            "        self.assertEqual(7, len(self.FIXTURE.read_text().split()))\n"
+        )
+        self.assertEqual(
+            [("probe.py", "T", "test_lines")],
+            [c.key() for c in candidates_from_source(repo_path_in_class_body,
+                                                     "probe.py")],
+            "a class-body path into the repository is not scratch; treating "
+            "every self.<attr> as a fixture drops the pin measured through it",
+        )
+
+        scratch_in_setup = repo_path_in_class_body.replace(
+            "    FIXTURE = FIXTURES_DIR / 'sample.txt'\n",
+            "    def setUp(self):\n"
+            "        self.FIXTURE = Path(tempfile.mkdtemp()) / 'sample.txt'\n")
+        self.assertEqual(
+            [], candidates_from_source(scratch_in_setup, "probe.py"),
+            "negative control: the same attribute built in setUp is scratch, "
+            "and must stay unreported",
         )
 
     def test_a_register_outside_the_corpus_is_not_reached(self):

@@ -367,7 +367,8 @@ class ScopeMatchesKnownFindingsTest(unittest.TestCase):
             for site in scan_tree()
             if site.is_finding
         }
-        self.assertEqual(KNOWN_FINDINGS, current)
+        self.assertEqual(  # pin: set heredoc-known-findings
+            KNOWN_FINDINGS, current)
 
 
 class FiveOriginalRunTestsSitesAreNoLongerFlaggedTest(unittest.TestCase):

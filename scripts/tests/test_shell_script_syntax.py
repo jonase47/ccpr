@@ -156,7 +156,7 @@ class ShellScriptSyntaxTest(unittest.TestCase):
         dropped from the glob (renamed, moved out of scripts/lib/) would
         make the syntax gate blind to it without this failing first."""
         names = sorted(f.relative_to(SCRIPTS_DIR).as_posix() for f in shipped_scripts())
-        self.assertEqual(
+        self.assertEqual(  # pin: set shell-syntax-scanned-scripts
             [
                 "anchor.sh",
                 "artifact-gate.sh",

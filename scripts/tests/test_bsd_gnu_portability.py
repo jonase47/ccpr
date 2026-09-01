@@ -1892,7 +1892,7 @@ class KnownFindingsMatchTheCurrentScanTest(unittest.TestCase):
         KNOWN_FINDINGS' own comment for what each of the nine is and why it is
         reported rather than fixed in this round."""
         current = {f.key() for f in scan_tree()}
-        self.assertEqual(
+        self.assertEqual(  # pin: set portability-known-findings
             KNOWN_FINDINGS, current,
             "the portability scan drifted from its recorded baseline.\n"
             "  new:  {}\n  gone: {}".format(
@@ -1973,7 +1973,7 @@ class ExemptedSitesArePinnedTest(unittest.TestCase):
 
     def test_the_marker_exempted_sites_equal_the_registry(self):
         current = set(exemptions_tree())
-        self.assertEqual(
+        self.assertEqual(  # pin: set portability-exempted-sites
             EXEMPTED_SITES, current,
             "the portability EXEMPTION list drifted from its registry.\n"
             "  new:  {}\n  gone: {}".format(
