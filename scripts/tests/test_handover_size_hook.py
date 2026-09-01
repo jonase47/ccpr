@@ -33,6 +33,7 @@ The tests are grouped by the question they answer:
 import importlib.util
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -747,6 +748,80 @@ class ThresholdDerivationTest(HandoverSizeHookTestCase):
         self.assertEqual([], self.size_warnings(result),
                          "warning earlier than the derivation allows makes the threshold arbitrary")
         self.assertEqual([], [e for e in self.error_events() if e.get("event") == "HandoverSize"])
+
+
+class ProjectGuideCleanupHintPinTest(unittest.TestCase):
+    """Pins agents/project-guide.md's cleanup-hint threshold to the hook's declared cap.
+
+    WI-0135: the HANDOVER size cap is declared in four registers —
+    templates/HANDOVER_TEMPLATE.md, hooks/agent-monitor.py's HANDOVER_DEFAULT_CAP_BYTES /
+    HANDOVER_DEFAULT_CAP_LINES, this module's DEFAULT_CAP_BYTES / DEFAULT_CAP_LINES
+    restatement, and agents/project-guide.md's cleanup-awareness hint. Three registers
+    agree; project-guide.md's byte value could drift from them with nothing here to catch
+    it, because no test read that file. This class does: it holds project-guide.md's own
+    line against AGENT_MONITOR's constants (the same module already loaded above for
+    HANDOVER_WRITE_TOOLS), not against a fifth restated literal.
+
+    This does not use HandoverSizeHookTestCase — no hook subprocess, HOME redirection, or
+    session id is involved, only a static read of agents/project-guide.md.
+    """
+
+    PROJECT_GUIDE_PATH = REPO_ROOT / "agents" / "project-guide.md"
+
+    # Matches "HANDOVER.md > <bytes> KB / ><lines> lines" in that order, within one line
+    # (re.DOTALL is deliberately not set, so `.`-free `\s*` cannot cross a newline).
+    # Does NOT match: a decimal KB value ("8.0 KB"), a byte-unit written as "B" or a bare
+    # "8192" instead of "KB", the two numbers swapped (a line-count-first phrasing), or
+    # the sentence split across two lines.
+    CLEANUP_HINT_PATTERN = re.compile(
+        r"HANDOVER\.md\s*>\s*(\d+)\s*KB\s*/\s*>\s*(\d+)\s*lines"
+    )
+
+    def _find_cleanup_hint(self, text: str):
+        return self.CLEANUP_HINT_PATTERN.search(text)
+
+    def test_cleanup_hint_line_is_found(self):
+        """Names the "not found" case on its own, ahead of the value comparisons.
+
+        The two comparison tests below each guard their own `match.group(...)` call with
+        the same assertIsNotNone, so neither of them can pass on a match failure — this
+        test is not what stops that. Its purpose is diagnostic ordering: if the pattern
+        stops matching (e.g. the line's phrasing changes), this test fails first, with a
+        message about the pattern, instead of two tests failing with a message about a
+        threshold number that was never actually read.
+        """
+        text = self.PROJECT_GUIDE_PATH.read_text(encoding="utf-8")
+        match = self._find_cleanup_hint(text)
+        self.assertIsNotNone(
+            match,
+            "CLEANUP_HINT_PATTERN found no 'HANDOVER.md > N KB / >N lines' line in "
+            "agents/project-guide.md",
+        )
+
+    def test_cleanup_hint_byte_threshold_matches_the_hooks_declared_cap(self):
+        text = self.PROJECT_GUIDE_PATH.read_text(encoding="utf-8")
+        match = self._find_cleanup_hint(text)
+        self.assertIsNotNone(match, "see test_cleanup_hint_line_is_found")
+        found_kb = int(match.group(1))
+        declared_kb = AGENT_MONITOR.HANDOVER_DEFAULT_CAP_BYTES // 1024
+        self.assertEqual(
+            declared_kb, found_kb,
+            f"agents/project-guide.md declares {found_kb} KB, but hooks/agent-monitor.py's "
+            f"HANDOVER_DEFAULT_CAP_BYTES declares {declared_kb} KB "
+            f"({AGENT_MONITOR.HANDOVER_DEFAULT_CAP_BYTES} B) — one HANDOVER size cap, not two",
+        )
+
+    def test_cleanup_hint_line_threshold_matches_the_hooks_declared_cap(self):
+        text = self.PROJECT_GUIDE_PATH.read_text(encoding="utf-8")
+        match = self._find_cleanup_hint(text)
+        self.assertIsNotNone(match, "see test_cleanup_hint_line_is_found")
+        found_lines = int(match.group(2))
+        self.assertEqual(
+            AGENT_MONITOR.HANDOVER_DEFAULT_CAP_LINES, found_lines,
+            f"agents/project-guide.md declares >{found_lines} lines, but "
+            f"hooks/agent-monitor.py's HANDOVER_DEFAULT_CAP_LINES declares "
+            f"{AGENT_MONITOR.HANDOVER_DEFAULT_CAP_LINES}",
+        )
 
 
 class RoundingBoundaryTest(HandoverSizeHookTestCase):
