@@ -612,12 +612,21 @@ verify_installation() {
     if [[ "$origin_state" == "behind" ]]; then
       echo "Result: BEHIND -- installed tree matches commit $p_commit exactly, but"
       echo "  this checkout is ${behind_n:-some} commit(s) ahead of it (HEAD $src_head)."
-      # POLICY DECISION NOT YET TAKEN (WI-0134): BEHIND exits 0 today, same as
-      # VERIFIED, so scripts/check-all.sh (which reads this exit code) stays
-      # green. Whether a stale-but-intact installation should FAIL --verify
-      # is for the PO to decide. The single change point a future round
-      # needs is THIS line -- `return 0` becoming `return 1` -- plus
-      # updating the exit-code line in --help to match.
+      # POLICY DECISION TAKEN 01.09.2026 (WI-0134): BEHIND exits 0, the same
+      # as VERIFIED, so scripts/check-all.sh (which reads this exit code)
+      # stays green on a stale-but-intact installation.
+      #
+      # The two freshness states answer DIFFERENT questions, and that is why
+      # their exit codes are deliberately asymmetric. BEHIND says "intact,
+      # origin known, the way forward is --update" -- the normal condition
+      # for anyone working from a second checkout, whose marker trails from
+      # the first foreign commit onward. Failing there would leave every
+      # working machine permanently red, and a check that is red when
+      # nothing is wrong gets ignored within a fortnight -- the one defect
+      # scripts/check-all.sh names in its own header as fatal to a check.
+      # DIVERGED-ORIGIN, handled in the branch just above, says "origin not
+      # resolvable": a check without a reference point, which is the heavier
+      # statement, so it rides on exit 1.
       return 0
     fi
     if [[ "$origin_state" != "current" ]]; then
@@ -707,10 +716,14 @@ Modes:
                      Exit 0 verified · 1 divergence · 3 could not run
                      (no target, no marker, or a source that was not a
                      clean git checkout — none of which is "no divergence").
-                     BEHIND currently rides on exit 0 (same as verified) and
-                     DIVERGED-ORIGIN on exit 1 (same as divergence) — no new
-                     exit code yet. Whether a stale installation should FAIL
-                     --verify is a policy decision not yet taken.
+                     BEHIND rides on exit 0 (same as verified) and
+                     DIVERGED-ORIGIN on exit 1 (same as divergence) — neither
+                     has an exit code of its own. Decided 01.09.2026
+                     (WI-0134): the two states answer different questions.
+                     "Intact but trailing" is the normal condition on a
+                     working machine and must not be red; "origin not
+                     resolvable" is a check without a reference point and
+                     must be.
 
 Options:
   --dry-run          Show what would happen, change nothing.

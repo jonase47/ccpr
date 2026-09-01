@@ -931,10 +931,11 @@ class MarkerIsBehindTheSourceCheckoutTest(VerifyBase):
     from VERIFIED (marker commit is not merely resolvable, it is a STRICT
     ancestor of the checkout's current HEAD).
 
-    BEHIND is deliberately exit 0 in this round -- WI-0134 reserves the
-    "should this fail --verify" question to the PO. Turning it into a
-    failing exit is a future, single-line policy flip, not something these
-    tests require."""
+    BEHIND is exit 0 by decision, not by deferral (WI-0134, 01.09.2026):
+    "intact, origin known, --update is the way forward" is the normal
+    condition on any second checkout, and failing there would leave every
+    working machine permanently red. DIVERGED-ORIGIN carries exit 1 instead,
+    because "origin not resolvable" is a check without a reference point."""
 
     def test_a_stale_but_intact_installation_is_behind_not_only_verified(self):
         self.assertEqual(0, self.run_install("--yes").returncode)
@@ -947,8 +948,9 @@ class MarkerIsBehindTheSourceCheckoutTest(VerifyBase):
         r = self.verify()
         self.assertEqual(
             0, r.returncode,
-            "BEHIND must exit 0 today, exactly like VERIFIED -- turning it "
-            f"into a failure is a policy decision not yet taken:\n{r.stdout}",
+            "BEHIND must exit 0, exactly like VERIFIED -- a stale but intact "
+            "installation is the normal state on a working machine, and "
+            f"WI-0134 decided it does not fail --verify:\n{r.stdout}",
         )
         self.assertIn("BEHIND", r.stdout)
         self.assertNotIn("Result: VERIFIED", r.stdout)
