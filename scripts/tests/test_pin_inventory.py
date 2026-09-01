@@ -85,6 +85,55 @@ asserting the gap in prose only.
    tests. Found by measuring, not by reading: of twelve one-line controls that
    turned a fixture assertion into a repository measurement, eleven were
    reported and the twelfth, the one inside `assert_level`, was not.
+8. **A declared side that is COMPUTED from a declared register** rather than
+   written out. `assert_set_matches(self, {(n, v) for n, v, _ in TABLE}, ...)`
+   stores its value in `TABLE`, but the operand at the assertion is a
+   comprehension -- neither a literal nor a bare name -- so `stores_a_value`
+   never fires. This module's own
+   `test_the_form_table_is_the_measured_behaviour` is an instance: it carries a
+   `# pin:` marker and is NOT in the candidate set. Carries the same two
+   positive controls every other gap here does -- the register as a bare
+   NAME, and the value inlined as a literal, are both reported
+   (`test_a_declared_side_computed_from_a_register_is_not_reached`). Left as
+   it is rather than reshaped: the alternative writes the ten expected
+   results a second time, and two copies of one register cannot check each
+   other.
+
+## The origin tracking is itself form-dependent
+
+The list above says which SHAPES the pattern cannot see. This says something
+narrower and easier to miss: for the shapes it CAN see, whether it sees them
+depends on HOW the measured value travelled from the repository to the
+assertion. The same measurement, carried three ways, was reported twice and
+dropped once -- a direct `len(items)` and a dict comprehension were found, and
+`for i in items: tally[i] = ...` was not, because a Subscript target binds no
+`ast.Name` and so inherited nothing from the loop it sits in (WI-0133 T2b;
+`test_external_tool_exit_status.py`'s `test_classification_counts` accumulates
+its disposition register exactly that way and carried only its total).
+
+That gap is closed. The property it revealed is not, and cannot be: the tracker
+ENUMERATES the ways a value can travel, so a way nobody has written down yet is
+invisible -- and invisible SILENTLY, because a dropped pin produces no output at
+all. **Do not read the closed gap as completeness.** Three further forms are
+known not to hold today (`out.append(i)`, `seen.add(i)`, `tally.update(...)` in
+a loop -- accumulation by method call binds no target either), and they are
+recorded rather than repaired.
+
+This clause is a check and not an enumeration, and
+`OriginTrackingIsFormDependentTest` is what makes the difference:
+
+* it measures ten forms and pins the RESULT of each, so a form that changes
+  behaviour -- in either direction -- fails;
+* it keeps the three forms that do NOT hold inside the series, because a
+  control series pruned down to the forms that pass stops being able to fail;
+* and each reached form carries its OWN cause-removing control, because a
+  control that does not grip reports "passed". The first draft used one global
+  fixture swap for every form; `helper-function-return` never reads the swapped
+  name, so its control left the cause fully intact and the series would have
+  called that form evidence.
+
+The obligation on anyone adding a pin in a shape not in that table is to add
+the shape to the table first and read what it says.
 
 ## Both sides of the comparison run over AST shapes beyond `ast.Name`
 
@@ -508,6 +557,13 @@ PENDING = frozenset({
      'test_no_stale_known_findings', 'T3'),
     ('test_agent_frontmatter.py', 'AgentCountTest',
      'test_agent_file_count_is_pinned', 'T2'),
+    # Newly reachable since WI-0133 T2b widened the origin tracking to
+    # subscript accumulation: `invokers[self_name] = invoked` inside a loop
+    # over `_iter_agent_files()`, compared against a declared dict literal --
+    # the anchor case's shape exactly. It was a pin the whole time; the
+    # inventory simply could not see it.
+    ('test_agent_frontmatter.py', 'BodyInvocationDetectionTest',
+     'test_exactly_one_agent_body_directs_invoking_another', 'T3'),
     ('test_agent_frontmatter.py', 'ProjectMemoryContractHistoricalRedProofTest',
      'test_removing_the_global_contract_does_not_clear_the_rule', 'T3'),
     ('test_agent_frontmatter.py', 'ProjectMemoryContractHistoricalRedProofTest',
@@ -646,6 +702,11 @@ PENDING = frozenset({
      'test_a_class_body_literal_is_a_declaration_and_not_a_fixture', 'T4'),
     ('test_pin_inventory.py', 'PatternLimitsTest',
      'test_a_class_body_repo_path_is_not_a_fixture_root', 'T4'),
+    # Constructed input like its PatternLimitsTest siblings, so not a pin: its
+    # two positive controls compare against source strings the test itself
+    # wrote, which cannot age.
+    ('test_pin_inventory.py', 'PatternLimitsTest',
+     'test_a_declared_side_computed_from_a_register_is_not_reached', 'T4'),
     ('test_pin_inventory.py', 'PatternLimitsTest',
      'test_a_number_in_a_docstring_is_not_reached', 'T4'),
     ('test_pin_inventory.py', 'PatternLimitsTest',
@@ -660,6 +721,13 @@ PENDING = frozenset({
      'test_a_floor_whose_subject_carries_no_set_is_reported', 'T4'),
     ('test_pin_inventory.py', 'FloorRequiresASetTest',
      'test_the_pairing_is_per_file_and_not_per_bare_id', 'T4'),
+    # A pin, and unmarked on purpose: it stores an exact COUNT over a
+    # repository-derived population (how many pin-shaped assertions the anchor
+    # method carries), which is precisely the shape T2 measured 15 instances of
+    # and found no truthful group for. Marking it `set` would put the same
+    # false statement at a site that T2 declined to write.
+    ('test_pin_inventory.py', 'OriginTrackingIsFormDependentTest',
+     'test_the_anchor_case_carries_both_of_its_assertions', 'T4'),
     ('test_quality_scan.py', 'CompletedHandlersBindingTest',
      'test_both_dicts_are_pinned_at_4_entries', 'T4'),
     ('test_quality_scan.py', 'CompletedHandlersRemovalRedProofTest',
@@ -785,6 +853,8 @@ class PinMarkerInventoryTest(unittest.TestCase):
              ("test_pin_inventory.py", "derived", "fixture-corpus-site-counts"),
              ("test_pin_inventory.py", "set", "fixture-corpus-exclusion"),
              ("test_pin_inventory.py", "set", "named-live-pins-corpus"),
+             ("test_pin_inventory.py", "set", "origin-tracking-fixture-control"),
+             ("test_pin_inventory.py", "set", "origin-tracking-form-table"),
              ("test_pin_inventory.py", "set", "pending-transition-set"),
              ("test_pin_inventory.py", "set", "pin-marker-inventory"),
              ("test_pin_inventory.py", "set", "skip-budget-blind-spot"),
@@ -1186,6 +1256,49 @@ class PatternLimitsTest(unittest.TestCase):
             "positive control: the same 10, inlined, must be reported",
         )
 
+    def test_a_declared_side_computed_from_a_register_is_not_reached(self):
+        """Gap 8, with the two positive controls its clause claims.
+
+        A declared side that is COMPUTED -- here a set comprehension over a
+        declared register -- is neither a literal nor an `ast.Name` nor a
+        class-body attribute, so `stores_a_value` never fires and the site is
+        invisible even though it stores its value in `TABLE`.
+
+        This module's own `test_the_form_table_is_the_measured_behaviour` is a
+        live instance: it carries a `# pin:` marker and is absent from the
+        candidate set. That is why the gap is stated rather than closed --
+        writing the ten expected results out as a literal would put the same
+        register in the file twice, and two copies cannot check each other.
+
+        Both controls change ONLY the declared side, so a scanner that simply
+        reports nothing here cannot pass.
+        """
+        head = (
+            "from pathlib import Path\n"
+            "from pin_registry import assert_set_matches\n"
+            "REPO = Path(__file__).resolve().parents[2]\n"
+            "TABLE = (('a.md', True), ('b.md', False))\n"
+            "class T:\n"
+            "    def test_names(self):\n"
+            "        got = {(n, bool(REPO.glob(n))) for n, _ in TABLE}\n"
+        )
+        computed = "        assert_set_matches(self, {(n, v) for n, v in TABLE}, got, 's')\n"
+        self.assertEqual([], candidates_from_source(head + computed, "probe.py"))
+
+        by_name = "        assert_set_matches(self, TABLE, got, 's')\n"
+        self.assertEqual(
+            [("probe.py", "T", "test_names")],
+            [c.key() for c in candidates_from_source(head + by_name, "probe.py")],
+            "positive control 1: the same register as a bare NAME is reported",
+        )
+
+        inline = "        assert_set_matches(self, {('a.md', True)}, got, 's')\n"
+        self.assertEqual(
+            [("probe.py", "T", "test_names")],
+            [c.key() for c in candidates_from_source(head + inline, "probe.py")],
+            "positive control 2: the same value inlined as a literal is reported",
+        )
+
     def test_the_real_deeper_pin_is_absent_from_the_candidate_set(self):
         """The constructed instance above only shows the scanner CAN be blind
         this way. This shows it IS blind to the real one: the skip-budget
@@ -1199,6 +1312,183 @@ class PatternLimitsTest(unittest.TestCase):
             "the skip-budget module's reported methods changed; if "
             "test_skip_count_matches_the_pinned_per_source_budget now appears, "
             "gap 5 has been closed and this module's boundary clause is stale",
+        )
+
+
+# ---------------------------------------------------------------------------
+# The origin-tracking control series
+# ---------------------------------------------------------------------------
+# One measured collection, ten ways of carrying it to the assertion. The point
+# of the series is NOT "loops are missing" -- it is that the origin tracking in
+# `_taint`/`_local_sources` is FORM-DEPENDENT, so the boundary clause cannot be
+# stated as a list of shapes the pattern misses. See this module's docstring,
+# "The origin tracking is itself form-dependent".
+#
+# Every body below measures the SAME repository-derived `items`. A form that is
+# not reached is a finding recorded here, not a form removed from the series:
+# the series is only worth its lines if it also carries the shapes that fail.
+
+ORIGIN_TRACKING_PROBE_HEAD = (
+    "import collections\n"
+    "import functools\n"
+    "from pathlib import Path\n"
+    "REPO = Path(__file__).resolve().parents[2]\n"
+    "def collect():\n"
+    "    return [p.name for p in REPO.glob('*.md')]\n"
+    "def scratch():\n"
+    "    return ['a', 'b']\n"
+    "class T:\n"
+    "    def test_x(self):\n"
+    "        items = [p.name for p in REPO.glob('*.md')]\n"
+)
+
+# The head above, with the ONLY difference that `items` is built by a fixture
+# helper instead of from the repository. Every form the series reports as
+# reached must go silent under ITS OWN control, or it was reached for a reason
+# that has nothing to do with the measurement.
+ORIGIN_TRACKING_FIXTURE_HEAD = ORIGIN_TRACKING_PROBE_HEAD.replace(
+    "        items = [p.name for p in REPO.glob('*.md')]\n",
+    "        items = self.scratch_names()\n")
+
+# (name, reached, body, control_body). `reached` is measured, never intended.
+#
+# `control_body` is the SAME form with this form's own repository origin taken
+# out, and it is per-form rather than one global head swap because the swap
+# must actually remove the cause. Writing it as a head swap alone let
+# `helper-function-return` pass a control that never touched it: that form
+# never reads `items`, it reads `collect()`, so rebuilding `items` as a fixture
+# left its cause fully intact. A control that does not grip reports "passed"
+# (WI-0133 T2b).
+ORIGIN_TRACKING_FORMS = (
+    # --- the three forms that opened WI-0133 T2b -------------------------
+    ("direct-len", True,
+     "        self.assertEqual(7, len(items))\n", None),
+    ("dict-comprehension", True,
+     "        tally = {i: 1 for i in items}\n"
+     "        self.assertEqual({'a': 1}, tally)\n", None),
+    # The anchor case's own shape: origin survived the comprehension and was
+    # lost here, because the assignment target is a Subscript and the tracker
+    # only bound `ast.Name` targets.
+    ("loop-subscript-assign", True,
+     "        tally = {}\n"
+     "        for i in items:\n"
+     "            tally[i] = tally.get(i, 0) + 1\n"
+     "        self.assertEqual({'a': 1}, tally)\n", None),
+    # --- forms added open-endedly, outcome unknown when written ---------
+    ("loop-subscript-augassign", True,
+     "        tally = {}\n"
+     "        for i in items:\n"
+     "            tally.setdefault(i, 0)\n"
+     "            tally[i] += 1\n"
+     "        self.assertEqual({'a': 1}, tally)\n", None),
+    ("stdlib-call-counter", True,
+     "        tally = collections.Counter(items)\n"
+     "        self.assertEqual({'a': 1}, tally)\n", None),
+    ("stdlib-call-reduce", True,
+     "        total = functools.reduce(lambda a, b: a + len(b), items, 0)\n"
+     "        self.assertEqual(7, total)\n", None),
+    # Origin over a FUNCTION boundary. Holds, but not through `_local_sources`:
+    # `collect` reaches `REPO`, so the module-level fixpoint puts the FUNCTION
+    # NAME itself in `repo`. Gap 5 of the boundary clause is the same boundary
+    # crossed the other way -- a literal inside the helper stays invisible.
+    ("helper-function-return", True,
+     "        got = collect()\n"
+     "        self.assertEqual(7, len(got))\n",
+     # Its own control: the helper stops reading the repository. Swapping
+     # `items` would leave this form untouched.
+     "        got = scratch()\n"
+     "        self.assertEqual(7, len(got))\n"),
+    # --- forms added open-endedly that did NOT hold ---------------------
+    # Accumulation by METHOD CALL. `out.append(i)` is an `ast.Expr`, not an
+    # assignment, so no target binds `out` to the loop it sits in and the
+    # origin is lost. Reported to the decision-maker rather than repaired in
+    # the same pass as the subscript form (WI-0133 T2b, PO: report, do not
+    # widen the boundary unasked).
+    ("loop-list-append", False,
+     "        out = []\n"
+     "        for i in items:\n"
+     "            out.append(i)\n"
+     "        self.assertEqual(7, len(out))\n", None),
+    ("loop-set-add", False,
+     "        seen = set()\n"
+     "        for i in items:\n"
+     "            seen.add(i)\n"
+     "        self.assertEqual({'a'}, seen)\n", None),
+    ("loop-dict-update", False,
+     "        tally = {}\n"
+     "        for i in items:\n"
+     "            tally.update({i: 1})\n"
+     "        self.assertEqual({'a': 1}, tally)\n", None),
+)
+
+
+class OriginTrackingIsFormDependentTest(unittest.TestCase):
+    """The evidence behind the boundary clause's form-dependence sentence.
+
+    A clause that only names shapes is an enumeration and ages into a lie the
+    moment someone writes an eleventh form. This series makes the clause a
+    check: it measures each form, and the three that do not hold stay in it as
+    recorded findings rather than being quietly dropped.
+    """
+
+    def test_the_form_table_is_the_measured_behaviour(self):
+        measured = {
+            (name, bool(candidates_from_source(
+                ORIGIN_TRACKING_PROBE_HEAD + body, "probe.py")))
+            for name, _, body, _ in ORIGIN_TRACKING_FORMS
+        }
+        assert_set_matches(  # pin: set origin-tracking-form-table
+            self,
+            {(name, reached) for name, reached, _, _ in ORIGIN_TRACKING_FORMS},
+            measured,
+            "the origin-tracking form table",
+        )
+
+    def test_every_reached_form_is_reached_because_of_the_measurement(self):
+        """The discriminating control, and the reason the series is worth more
+        than the fix. `reached` on its own does not say the tracker followed
+        the measurement -- a form can be reported because some unrelated name
+        in it happens to be repo-derived. Rebuilding `items` as a fixture
+        removes the cause; anything still reported was never evidence.
+
+        This control has already caught one: `from collections import Counter`
+        makes `Counter` a non-allowlisted import and therefore repo-derived all
+        by itself, so `Counter(items)` over a PURE LITERAL is reported. The
+        series uses the `collections.Counter` attribute form, and the
+        from-import defect is reported to the decision-maker unfixed.
+        """
+        wrongly_reached = sorted(
+            name for name, reached, body, control_body in ORIGIN_TRACKING_FORMS
+            if reached and candidates_from_source(
+                ORIGIN_TRACKING_FIXTURE_HEAD + (control_body or body),
+                "probe.py"))
+        self.assertEqual(  # pin: set origin-tracking-fixture-control
+            [], wrongly_reached,
+            "form(s) still reported when the measurement they carry is a "
+            "fixture -- they are reported for some other reason: {}".format(
+                wrongly_reached),
+        )
+
+    def test_the_anchor_case_carries_both_of_its_assertions(self):
+        """The live instance the constructed series stands for.
+
+        `ExternalToolExitStatusTest.test_classification_counts` asserts a total
+        (`assertEqual(161, len(invocations))`) AND a per-disposition register
+        over the same live scan. The register is accumulated with
+        `by_disposition[inv.disposition] = ...` inside a `for`, and before
+        WI-0133 T2b the candidate carried only the first of the two lines --
+        the method was in the inventory, but the assertion that names WHICH
+        dispositions moved was not.
+        """
+        rel = "test_external_tool_exit_status.py"
+        found = [c for c in find_candidates(TESTS_DIR / rel, rel)
+                 if c.class_name == "ExternalToolExitStatusTest"
+                 and c.method_name == "test_classification_counts"]
+        self.assertEqual(1, len(found), "the anchor candidate went missing")
+        self.assertEqual(
+            2, len(found[0].assert_linenos),
+            "the anchor case must carry BOTH the total and the disposition "
+            "register; it carries {}".format(found[0].assert_linenos),
         )
 
 

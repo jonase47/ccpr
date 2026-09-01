@@ -296,6 +296,39 @@ def _bound_names(target):
     return []
 
 
+def _mutated_names(target):
+    """The name an assignment MUTATES rather than rebinds: `tally[i] = ...`
+    and `tally[i] += 1` both write into `tally`.
+
+    Kept apart from `_bound_names` on purpose. `_bound_names` also feeds
+    `_module_scope`, where `assignments[name] = stmt.value` keeps the LAST
+    binding of a name; folding subscript targets in there would let
+    `REGISTRY['a'] = 1` overwrite `REGISTRY = {...}`'s declared binding and
+    silently reclassify a module-level constant. Only `_local_sources` needs
+    this, and only to ADD a source to a name that already has one.
+
+    `self.counts[k] = ...` is deliberately not matched: its base is an
+    `ast.Attribute`, and `self` is a fixture root that is never followed. The
+    exclusion is in fact structurally inert, which is the stronger reason:
+    `_taint` handles a `self.<attr>` node in its own branch and `continue`s
+    without ever consulting `local_sources`, and it skips the bare name `self`
+    as well -- so matching that shape here could not change a verdict either
+    way. Measured too: the corpus has two `self.<attr>[k] = ...` sites, both in
+    `workitems/fake_youtrack_transport.py` and neither inside a `test*` method.
+    Widening this function to EVERY subscript base (`self.<attr>[k]`, `f()[k]`,
+    nested) was probed over the whole corpus and moved nothing: zero additions,
+    zero removals.
+    """
+    if isinstance(target, ast.Subscript) and isinstance(target.value, ast.Name):
+        return [target.value.id]
+    if isinstance(target, (ast.Tuple, ast.List)):
+        out = []
+        for element in target.elts:
+            out.extend(_mutated_names(element))
+        return out
+    return []
+
+
 def _names_used(node):
     return {n.id for n in ast.walk(node) if isinstance(n, ast.Name)}
 
@@ -404,6 +437,22 @@ def _local_sources(function):
     counter in test_handover_epilogue_bullet.py:112-119 is `bare_count = 0`
     plus `bare_count += 1` inside `for path in COMMANDS_DIR.glob(...)`, so
     without the control-dependence edge it looks like a pure literal.
+
+    That edge only fires for a name an assignment TARGET names, which is why
+    it also has to run over `_mutated_names`: an accumulator built as
+    `tally[key] = ...` inside the loop is written through a Subscript, binds
+    no `ast.Name`, and so inherited nothing. That is not a corner case --
+    test_external_tool_exit_status.py's `test_classification_counts`
+    accumulates its per-disposition register exactly that way, and the
+    candidate carried only its total assertion until WI-0133 T2b.
+
+    WHAT THIS STILL DOES NOT SEE, AND IT IS THE SAME MECHANISM: accumulation
+    by METHOD CALL. `out.append(i)`, `seen.add(i)` and `tally.update(...)`
+    inside a loop are `ast.Expr` statements with no assignment target at all,
+    so nothing binds their container to the loop. Measured, not assumed --
+    `OriginTrackingIsFormDependentTest` in test_pin_inventory.py carries all
+    three as recorded findings. Closing them is a scope decision (a call whose
+    receiver is a local name mutates that local), deliberately not taken here.
     """
     sources = {}
 
@@ -420,12 +469,13 @@ def _local_sources(function):
             return
         if isinstance(node, ast.Assign):
             for target in node.targets:
-                for name in _bound_names(target):
+                for name in (_bound_names(target) + _mutated_names(target)):
                     record(name, node.value)
                     for guard in guards:
                         record(name, guard)
         elif isinstance(node, ast.AugAssign):
-            for name in _bound_names(node.target):
+            for name in (_bound_names(node.target)
+                         + _mutated_names(node.target)):
                 record(name, node.value)
                 for guard in guards:
                     record(name, guard)
