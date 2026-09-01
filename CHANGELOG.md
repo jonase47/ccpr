@@ -8,6 +8,32 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Added
 
+- **`scripts/doc-volume-check.sh` gains a second corpus: the documents Claude Code
+  autoloads into every session.** Its existing scan of `docs/` answers "what shipped
+  documentation is oversized"; nothing measured the separate, smaller question of what
+  every session pays context for regardless of topic. The new corpus is DERIVED per
+  ADR-0012, not typed: starting at `<project-root>/CLAUDE.md`, it follows `^@<path>$`
+  import lines transitively, each resolved relative to the file that imports it — a file
+  merely named like `CLAUDE.md` (`templates/CLAUDE_LEAN_TEMPLATE.md`, a template no
+  session ever imports) stays out of scope by construction, with nothing to maintain when
+  the import graph changes shape. Like the `docs/` scan, this corpus IS restricted to
+  git-tracked files — this tool judges the SHIPPED state a fresh clone of a given commit
+  loads, not one machine's local, possibly-uncommitted `@import` lines; the import graph
+  still decides which files are CANDIDATES (unrestricted, always counted in "Autoloaded
+  context files found"), tracking decides which of those candidates can raise a FINDING or
+  move the exit code. Measured directly: an untracked 59 KB file reached via
+  `@autoload-probe.md` turned a clean run into "1 critical" / exit 2 with no change to the
+  repository at all — the same class of false failure `46fbcf9` (30.08.2026) removed from
+  the `docs/` scan, reached this time through the autoload corpus. Same 25/40/50 KB
+  thresholds, reported in a new "Autoloaded Context" section and folded into the existing
+  combined exit code (info alone still does not raise it — confirmed against this
+  repository's own `CLAUDE.md` at 25 KB, which reports and stays exit 0). 8 tests in
+  `scripts/tests/test_doc_volume_check.py`'s `AutoloadedContextScopeTest` cover the
+  positive case, the transitive/relative-resolution case, three negative controls (an
+  unimported `CLAUDE`-named file, a non-imported root file, no `CLAUDE.md` at all), that
+  adding a single `@import` line brings its target into scope with no list anywhere to
+  edit, and that an untracked candidate over 50 KB is counted but raises zero findings.
+
 - **`hooks/agent-monitor.py` warns, before the fact, when a Bash command reads an exit
   status a pipe already took away.** Built against a real defect class seen twice in one
   day — `bash install.sh --verify 2>&1 | tail -6; echo "EXIT=$?"` reported the wrong exit

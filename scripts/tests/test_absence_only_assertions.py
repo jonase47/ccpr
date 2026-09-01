@@ -873,7 +873,7 @@ class NoStaleKnownFindingsTest(unittest.TestCase):
 
 class ClassificationCountsTest(unittest.TestCase):
     def test_classification_counts(self):
-        """Regression pin on the measured baseline: 1219 `test_*` methods
+        """Regression pin on the measured baseline: 1227 `test_*` methods
         across the corpus call something shaped like a subprocess invocation
         and are therefore in scope for this check; 0 of those are currently
         absence-only-needs-exemption -- `KNOWN_FINDINGS` above is empty for
@@ -887,6 +887,24 @@ class ClassificationCountsTest(unittest.TestCase):
         growing paragraph:
 
           in-scope / flagged   when
+          1227 / 0             01.09.2026: doc-volume-check.sh gained a
+                               second, DIFFERENT corpus -- the documents
+                               Claude Code autoloads into every session
+                               (<project-root>/CLAUDE.md and its `^@<path>$`
+                               import chain), derived per ADR-0012 rather
+                               than typed. All +8 come from
+                               AutoloadedContextScopeTest in
+                               test_doc_volume_check.py, whose methods drive
+                               the script as a subprocess via self.run_check
+                               and assert on result.stdout/result.returncode.
+                               Proven a pure addition rather than a swap by
+                               differencing scan_tree()'s (file, class,
+                               method) sets against a worktree of e47587f:
+                               8 additions, 0 removals, all in one existing
+                               module (the file counter does not move).
+                               None flagged -- every "not reported" negative
+                               assertion sits beside a returncode/stdout
+                               positive in the same method.
           1219 / 0             31.08.2026: --verify gained an origin-freshness
                                answer (BEHIND / DIVERGED-ORIGIN) beside the
                                installed-tree comparison. All +6 come from
@@ -1575,7 +1593,7 @@ class ClassificationCountsTest(unittest.TestCase):
         count."""
         recs = scan_tree()
         flagged = [r for r in recs if r.disposition in NEEDS_EXEMPTION]
-        self.assertEqual(1219, len(recs))
+        self.assertEqual(1227, len(recs))
         self.assertEqual(0, len(flagged))
 
 

@@ -422,5 +422,188 @@ class TrackedOnlyScopeTest(DocVolumeCheckTestBase):
         )
 
 
+class AutoloadedContextScopeTest(DocVolumeCheckTestBase):
+    """A DIFFERENT corpus from DOCS_ROOT: the documents Claude Code actually
+    loads into every session. Derived (ADR-0012), not typed: starting at
+    <project-root>/CLAUDE.md and following `^@<path>$` import lines
+    transitively, each resolved relative to the FILE THAT IMPORTS IT --
+    never a name glob (a file merely NAMED like CLAUDE.md, e.g.
+    templates/CLAUDE_LEAN_TEMPLATE.md, is not autoloaded unless something
+    actually imports it).
+
+    <project-root> is one directory ABOVE <docs-root> -- the mirror image
+    of TrackedOnlyScopeTest's git-root note, since this script is always
+    invoked with <project>/docs.
+
+    Like DOCS_ROOT, this corpus IS restricted to git-tracked files (reversed
+    01.09.2026, PO override, no work item): this tool judges the SHIPPED state --
+    what `check-all.sh` sees from a fresh clone of a given commit -- not one
+    machine's local Claude Code setup. An untracked file reachable only
+    through someone's own uncommitted `@import` line is real context cost on
+    THEIR machine, but it is not part of the shipped commit, so a
+    `check-all.sh` run against that same commit from a different machine
+    would never see it -- see
+    test_an_untracked_autoload_source_over_50kb_produces_zero_findings,
+    which replaces this class's former
+    test_an_untracked_claude_md_is_still_reported (the test that encoded the
+    now-overturned "always reported" decision). The import graph still
+    decides WHICH FILES ARE CANDIDATES (unchanged, still exercised by every
+    other test in this class); tracking now additionally decides which of
+    those candidates GET REPORTED.
+    """
+
+    def fresh_project_root(self):
+        root = Path(tempfile.mkdtemp(prefix="ccpr-doc-volume-autoload-"))
+        self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+        docs_root = root / "docs"
+        docs_root.mkdir()
+        return root, docs_root
+
+    @staticmethod
+    def write_project_file(project_root, rel_path, text):
+        path = project_root / rel_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+        return path
+
+    def test_an_oversized_root_claude_md_is_reported(self):
+        project_root, docs_root = self.fresh_project_root()
+        claude = self.write_project_file(project_root, "CLAUDE.md", doc_without_h2(INFO_BYTES))
+
+        result = self.run_check(docs_root)
+
+        self.assertEqual("", result.stderr, result.stderr)
+        self.assertEqual(0, result.returncode, result.stdout)
+        self.assertIn(
+            f"CLAUDE.md ({self.reported_kb(claude)} KB, info) → "
+            "no obvious splitting point (0 H2 sections) — review content",
+            result.stdout,
+        )
+
+    def test_import_chain_is_followed_transitively_and_reported_as_critical(self):
+        project_root, docs_root = self.fresh_project_root()
+        self.write_project_file(project_root, "CLAUDE.md", "# Root\n\n@extra.md\n")
+        extra = self.write_project_file(project_root, "extra.md", doc_without_h2(ERROR_BYTES))
+
+        result = self.run_check(docs_root)
+
+        self.assertEqual("", result.stderr, result.stderr)
+        self.assertEqual(2, result.returncode, result.stdout)
+        self.assertIn(
+            f"extra.md ({self.reported_kb(extra)} KB, critical) → "
+            "no obvious splitting point (0 H2 sections) — review content",
+            result.stdout,
+        )
+
+    def test_nested_import_resolves_relative_to_the_importing_file(self):
+        # @deep.md sits inside sub/inner.md -- it must resolve to
+        # sub/deep.md, not project_root/deep.md (which does not exist). A
+        # resolver that always resolves against project_root would miss it
+        # entirely, which is exactly what this test would catch.
+        project_root, docs_root = self.fresh_project_root()
+        self.write_project_file(project_root, "CLAUDE.md", "# Root\n\n@sub/inner.md\n")
+        self.write_project_file(project_root, "sub/inner.md", "# Inner\n\n@deep.md\n")
+        deep = self.write_project_file(project_root, "sub/deep.md", doc_without_h2(WARNING_BYTES))
+
+        result = self.run_check(docs_root)
+
+        self.assertEqual("", result.stderr, result.stderr)
+        self.assertEqual(1, result.returncode, result.stdout)
+        self.assertIn(
+            f"sub/deep.md ({self.reported_kb(deep)} KB, warning) → "
+            "no obvious splitting point (0 H2 sections) — review content",
+            result.stdout,
+        )
+
+    def test_a_claude_named_file_that_is_not_imported_is_not_reported(self):
+        # templates/CLAUDE_LEAN_TEMPLATE.md's real-world shape: matches a
+        # naive "CLAUDE*.md" glob but nothing imports it -- only the import
+        # graph, never a name pattern, decides membership.
+        project_root, docs_root = self.fresh_project_root()
+        self.write_project_file(project_root, "CLAUDE.md", "# Root\n\nNo imports here.\n")
+        self.write_project_file(
+            project_root, "templates/CLAUDE_LEAN_TEMPLATE.md", doc_without_h2(ERROR_BYTES)
+        )
+
+        result = self.run_check(docs_root)
+
+        self.assertEqual("", result.stderr, result.stderr)
+        self.assertEqual(0, result.returncode, result.stdout)
+        self.assertIn("**Autoloaded context files found:** 1", result.stdout)
+        self.assertNotIn("CLAUDE_LEAN_TEMPLATE", result.stdout)
+
+    def test_a_non_imported_root_file_is_not_reported(self):
+        project_root, docs_root = self.fresh_project_root()
+        self.write_project_file(project_root, "CLAUDE.md", "# Root\n\nNo imports here.\n")
+        self.write_project_file(project_root, "CHANGELOG.md", doc_without_h2(ERROR_BYTES))
+
+        result = self.run_check(docs_root)
+
+        self.assertEqual("", result.stderr, result.stderr)
+        self.assertEqual(0, result.returncode, result.stdout)
+        self.assertIn("**Autoloaded context files found:** 1", result.stdout)
+        self.assertNotIn("CHANGELOG.md", result.stdout)
+
+    def test_adding_an_at_import_line_brings_its_target_into_scope(self):
+        # No list to edit anywhere -- the import line itself is the only
+        # thing that changes between the two runs (ADR-0012).
+        project_root, docs_root = self.fresh_project_root()
+        self.write_project_file(project_root, "CLAUDE.md", "# Root\n\nNo imports yet.\n")
+        extra = self.write_project_file(project_root, "extra.md", doc_without_h2(INFO_BYTES))
+
+        before = self.run_check(docs_root)
+        self.assertEqual(0, before.returncode, before.stdout)
+        self.assertNotIn("extra.md", before.stdout)
+
+        self.write_project_file(project_root, "CLAUDE.md", "# Root\n\n@extra.md\n")
+        after = self.run_check(docs_root)
+
+        self.assertEqual(0, after.returncode, after.stdout)
+        self.assertIn(
+            f"extra.md ({self.reported_kb(extra)} KB, info) → "
+            "no obvious splitting point (0 H2 sections) — review content",
+            after.stdout,
+        )
+
+    def test_no_claude_md_at_project_root_reports_zero_scope_without_crashing(self):
+        project_root, docs_root = self.fresh_project_root()
+        self.write_doc("small.md", "# Title\n\nShort.\n", docs_root)
+
+        result = self.run_check(docs_root)
+
+        self.assertEqual("", result.stderr, result.stderr)
+        self.assertEqual(0, result.returncode, result.stdout)
+        self.assertIn("**Autoloaded context files found:** 0", result.stdout)
+
+    def test_an_untracked_autoload_source_over_50kb_produces_zero_findings(self):
+        """The PO's probe case (01.09.2026): an untracked file over 50 KB,
+        imported via CLAUDE.md, is a real thing on the machine that authored
+        it but not part of the SHIPPED commit -- a `check-all.sh` run
+        against the same commit from a different machine would never see
+        it. Before the tracked-only restriction on the autoload corpus,
+        this exact fixture reported "1 critical" and drove the exit code to
+        2 (measured directly, RED); after it, zero findings, exit 0 (GREEN).
+        Replaces test_an_untracked_claude_md_is_still_reported, which
+        asserted the opposite of this."""
+        project_root, docs_root = self.fresh_project_root()
+        subprocess.run(["git", "init", "-q"], cwd=project_root, check=True)
+        subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=project_root, check=True)
+        subprocess.run(["git", "config", "user.name", "Test"], cwd=project_root, check=True)
+        self.write_project_file(project_root, "CLAUDE.md", doc_without_h2(ERROR_BYTES))
+        # Deliberately never `git add`/`git commit` -- CLAUDE.md stays
+        # untracked.
+
+        result = self.run_check(docs_root)
+
+        self.assertEqual("", result.stderr, result.stderr)
+        self.assertEqual(0, result.returncode, result.stdout)
+        # The import graph still finds it as a candidate (unaffected --
+        # tracking narrows REPORTING, not the candidate set)...
+        self.assertIn("**Autoloaded context files found:** 1", result.stdout)
+        # ...but it raises no finding and appears in no bullet.
+        self.assertEqual([], self.bullets(result.stdout), result.stdout)
+        self.assertIn("**Autoloaded summary:** 0 critical, 0 warning, 0 info.", result.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()
