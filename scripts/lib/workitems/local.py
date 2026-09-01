@@ -500,18 +500,23 @@ def _append_to_section(body, heading, text):
     being embedded (see `_escape_heading_lookalikes`) so it can never forge a section
     boundary on the next read."""
     lines = body.split("\n")
-    new_line = f"- {_escape_heading_lookalikes(text)}"
+    escaped_lines = _escape_heading_lookalikes(text).split("\n")
+    new_entry = [f"- {escaped_lines[0]}"] + escaped_lines[1:]
     heading_idx = _find_heading(lines, heading)
 
     if heading_idx is None:
         prefix = body.rstrip("\n")
         if prefix:
             prefix += "\n\n"
-        return f"{prefix}{heading}\n{new_line}\n"
+        return f"{prefix}{heading}\n" + "\n".join(new_entry) + "\n"
 
     end_idx = _section_end(lines, heading_idx)
-    existing = [_strip_bullet(line) for line in _section_lines(lines, heading, heading_idx, end_idx)]
-    new_section = [heading] + [f"- {item}" for item in existing] + [new_line]
+    # Existing entries are kept as their own raw lines (not re-derived from stripped
+    # text) so a previously written multi-line entry is reproduced byte-identical
+    # instead of being flattened back to one bullet per physical line (finding #44).
+    existing_entries = _section_entries(lines, heading, heading_idx, end_idx)
+    existing_lines = [line for entry in existing_entries for line in entry]
+    new_section = [heading] + existing_lines + new_entry
     return "\n".join(lines[:heading_idx] + new_section + lines[end_idx:])
 
 
@@ -529,20 +534,3 @@ def _section_end(lines, heading_idx):
     return len(lines)
 
 
-def _section_lines(lines, heading, heading_idx=None, end_idx=None):
-    if heading_idx is None:
-        heading_idx = _find_heading(lines, heading)
-        if heading_idx is None:
-            return []
-        end_idx = _section_end(lines, heading_idx)
-    return [
-        line for line in lines[heading_idx + 1:end_idx]
-        if line.strip() and not line.strip().startswith("<!--")
-    ]
-
-
-def _strip_bullet(line):
-    stripped = line.strip()
-    if stripped.startswith("- "):
-        return stripped[2:].strip()
-    return stripped

@@ -280,6 +280,22 @@ class WorkItemsContractTestCase:
         self.assertEqual(item["comments"], [text])
         self.assertEqual(self.backend.get(item_id)["comments"], [text])
 
+    def test_multiline_comment_survives_a_later_append(self):
+        """finding #44: appending a SECOND comment must not re-flatten a previously
+        written multi-line entry -- every append rewrites the whole section, and the
+        old rewrite reduced every existing entry back to one bullet per physical
+        line."""
+        item_id = self.create_item()
+        first_text = "First line.\n\nThird line after a blank line."
+
+        self.backend.comment(item_id, first_text)
+        item = self.backend.comment(item_id, "Second note.")
+
+        self.assertEqual(item["comments"], [first_text, "Second note."])
+        self.assertEqual(
+            self.backend.get(item_id)["comments"], [first_text, "Second note."],
+        )
+
     def test_comment_does_not_appear_in_result_link(self):
         item_id = self.create_item()
 
