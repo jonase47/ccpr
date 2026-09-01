@@ -105,7 +105,7 @@ Once the domain is clear: **hand off with bundled context** to the responsible a
 
 During the status snapshot, proactively check:
 
-- **HANDOVER.md > 5 KB / >150 lines** (cap per `templates/HANDOVER_TEMPLATE.md`) → hint "recommend HANDOVER archival (`docs/.handover-archive/<YYYY-MM-DD>-<slug>.md`)".
+- **HANDOVER.md reaches the point where `hooks/agent-monitor.py` warns — 80% of its cap on either bytes or lines** (cap defaults to ≤5 KB / ~150 lines per its own header, see `templates/HANDOVER_TEMPLATE.md`) → hint "recommend HANDOVER archival (`docs/.handover-archive/<YYYY-MM-DD>-<slug>.md`)".
 - **Inbox entries in HANDOVER.md** (usually under `## Open Points`) → count them with the **Grep
   tool** in count mode, pattern `^- INBOX [|]` over `docs/HANDOVER.md`, and hint "N inbox entries
   → `/cleanup` triages them". You have no shell; this is a Grep-tool call, not a `grep -c` command.

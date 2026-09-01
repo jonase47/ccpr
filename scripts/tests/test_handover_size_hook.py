@@ -751,16 +751,24 @@ class ThresholdDerivationTest(HandoverSizeHookTestCase):
 
 
 class ProjectGuideCleanupHintPinTest(unittest.TestCase):
-    """Pins agents/project-guide.md's cleanup-hint threshold to the hook's declared cap.
+    """Pins agents/project-guide.md's cleanup-hint threshold to the hook's declared warn point.
 
-    WI-0135: the HANDOVER size cap is declared in four registers —
-    templates/HANDOVER_TEMPLATE.md, hooks/agent-monitor.py's HANDOVER_DEFAULT_CAP_BYTES /
-    HANDOVER_DEFAULT_CAP_LINES, this module's DEFAULT_CAP_BYTES / DEFAULT_CAP_LINES
-    restatement, and agents/project-guide.md's cleanup-awareness hint. Three registers
-    agree; project-guide.md's byte value could drift from them with nothing here to catch
-    it, because no test read that file. This class does: it holds project-guide.md's own
-    line against AGENT_MONITOR's constants (the same module already loaded above for
-    HANDOVER_WRITE_TOOLS), not against a fifth restated literal.
+    WI-0135 (PO follow-up decision, 01.09.2026): the hint is a preventive recommendation
+    ("archive now"), so it must fire at the hook's *warn* threshold, not at its *over* cap
+    — by the time the cap is breached the recommended action is already overdue. The line
+    therefore names the point where hooks/agent-monitor.py actually warns: HANDOVER_WARN_PCT
+    percent of the cap, on whichever of bytes or lines reaches it first, with the cap itself
+    stated as the file-header default (templates/HANDOVER_TEMPLATE.md) that
+    HANDOVER_DEFAULT_CAP_BYTES / HANDOVER_DEFAULT_CAP_LINES restate.
+
+    No new literal is introduced: this class holds project-guide.md's own line against
+    AGENT_MONITOR's constants directly (the same module already loaded above for
+    HANDOVER_WRITE_TOOLS) — HANDOVER_WARN_PCT and both cap constants — not against a
+    restated literal of its own. AGENT_MONITOR.DERIVED_WARN_PCT (this module's own,
+    independently-derived expectation of what the 80 % *should* be, used by
+    ThresholdDerivationTest) is deliberately not touched here: this class checks that
+    project-guide.md's prose matches what the hook *declares*, not that the hook's
+    declaration is itself correctly derived — that is a separate question with its own test.
 
     This does not use HandoverSizeHookTestCase — no hook subprocess, HOME redirection, or
     session id is involved, only a static read of agents/project-guide.md.
@@ -768,13 +776,20 @@ class ProjectGuideCleanupHintPinTest(unittest.TestCase):
 
     PROJECT_GUIDE_PATH = REPO_ROOT / "agents" / "project-guide.md"
 
-    # Matches "HANDOVER.md > <bytes> KB / ><lines> lines" in that order, within one line
-    # (re.DOTALL is deliberately not set, so `.`-free `\s*` cannot cross a newline).
-    # Does NOT match: a decimal KB value ("8.0 KB"), a byte-unit written as "B" or a bare
-    # "8192" instead of "KB", the two numbers swapped (a line-count-first phrasing), or
-    # the sentence split across two lines.
+    # Matches, on one line: "<pct>%" then, further along the same line, "<=<bytes> KB /
+    # ~<lines> lines" (in that order — cap-bytes before cap-lines). Character classes
+    # exclude "\n" throughout (rather than relying on "." not matching newlines by
+    # default while "\s" still would), so no group can be satisfied by text that spans
+    # two lines.
+    #
+    # Does NOT match: a decimal KB value ("8.0 KB" — the digit run before "KB" would stop
+    # at the fractional part but the literal "." breaks the required digit-then-KB
+    # adjacency); a byte-unit written as "B" instead of "KB"; a bare "8192" with no "KB"
+    # unit; the byte/line pair swapped (a lines-then-bytes phrasing); the percentage
+    # written as a decimal ("80.0%"); or the sentence split across two lines.
     CLEANUP_HINT_PATTERN = re.compile(
-        r"HANDOVER\.md\s*>\s*(\d+)\s*KB\s*/\s*>\s*(\d+)\s*lines"
+        r"HANDOVER\.md[^\n%]*?(\d+)%[^\n]*?"
+        r"[≤<][ \t]*(\d+)[ \t]*KB[ \t]*/[ \t]*~?[ \t]*(\d+)[ \t]*lines"
     )
 
     def _find_cleanup_hint(self, text: str):
@@ -783,26 +798,38 @@ class ProjectGuideCleanupHintPinTest(unittest.TestCase):
     def test_cleanup_hint_line_is_found(self):
         """Names the "not found" case on its own, ahead of the value comparisons.
 
-        The two comparison tests below each guard their own `match.group(...)` call with
-        the same assertIsNotNone, so neither of them can pass on a match failure — this
+        The three comparison tests below each guard their own `match.group(...)` call
+        with the same assertIsNotNone, so none of them can pass on a match failure — this
         test is not what stops that. Its purpose is diagnostic ordering: if the pattern
         stops matching (e.g. the line's phrasing changes), this test fails first, with a
-        message about the pattern, instead of two tests failing with a message about a
+        message about the pattern, instead of three tests failing with a message about a
         threshold number that was never actually read.
         """
         text = self.PROJECT_GUIDE_PATH.read_text(encoding="utf-8")
         match = self._find_cleanup_hint(text)
         self.assertIsNotNone(
             match,
-            "CLEANUP_HINT_PATTERN found no 'HANDOVER.md > N KB / >N lines' line in "
-            "agents/project-guide.md",
+            "CLEANUP_HINT_PATTERN found no 'HANDOVER.md ... N% ... <=N KB / ~N lines' "
+            "line in agents/project-guide.md",
+        )
+
+    def test_cleanup_hint_percentage_matches_the_hooks_declared_warn_pct(self):
+        text = self.PROJECT_GUIDE_PATH.read_text(encoding="utf-8")
+        match = self._find_cleanup_hint(text)
+        self.assertIsNotNone(match, "see test_cleanup_hint_line_is_found")
+        found_pct = int(match.group(1))
+        self.assertEqual(
+            AGENT_MONITOR.HANDOVER_WARN_PCT, found_pct,
+            f"agents/project-guide.md declares {found_pct}%, but hooks/agent-monitor.py's "
+            f"HANDOVER_WARN_PCT declares {AGENT_MONITOR.HANDOVER_WARN_PCT}% — the hint must "
+            f"fire at the warn threshold, not at some other percentage",
         )
 
     def test_cleanup_hint_byte_threshold_matches_the_hooks_declared_cap(self):
         text = self.PROJECT_GUIDE_PATH.read_text(encoding="utf-8")
         match = self._find_cleanup_hint(text)
         self.assertIsNotNone(match, "see test_cleanup_hint_line_is_found")
-        found_kb = int(match.group(1))
+        found_kb = int(match.group(2))
         declared_kb = AGENT_MONITOR.HANDOVER_DEFAULT_CAP_BYTES // 1024
         self.assertEqual(
             declared_kb, found_kb,
@@ -815,10 +842,10 @@ class ProjectGuideCleanupHintPinTest(unittest.TestCase):
         text = self.PROJECT_GUIDE_PATH.read_text(encoding="utf-8")
         match = self._find_cleanup_hint(text)
         self.assertIsNotNone(match, "see test_cleanup_hint_line_is_found")
-        found_lines = int(match.group(2))
+        found_lines = int(match.group(3))
         self.assertEqual(
             AGENT_MONITOR.HANDOVER_DEFAULT_CAP_LINES, found_lines,
-            f"agents/project-guide.md declares >{found_lines} lines, but "
+            f"agents/project-guide.md declares ~{found_lines} lines, but "
             f"hooks/agent-monitor.py's HANDOVER_DEFAULT_CAP_LINES declares "
             f"{AGENT_MONITOR.HANDOVER_DEFAULT_CAP_LINES}",
         )
