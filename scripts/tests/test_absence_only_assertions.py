@@ -887,6 +887,34 @@ class ClassificationCountsTest(unittest.TestCase):
         growing paragraph:
 
           in-scope / flagged   when
+          1227 / 0             01.09.2026 (WI-0133 T1): UNCHANGED, and that
+                               is the finding rather than the absence of one.
+                               Two files joined scripts/tests/ --
+                               pin_registry.py and test_pin_inventory.py, the
+                               ADR-0012 obligation-1 machinery -- and neither
+                               contributes an in-scope method: every test in
+                               them is pure-Python AST work, so
+                               `_calls_a_subprocess` correctly matches nothing.
+                               The FILE-count pin below moved instead, 63 ->
+                               65, exactly as WI-0126 tranche 2's row further
+                               down records for the same shape of change.
+                               Proven unchanged rather than assumed, by a SET
+                               comparison over (file, class, method) --
+                               deliberately NOT over (file, line, ...) -- with
+                               scan_tree() run in-process against a real `git
+                               worktree` of a996ec3 and against this tree: 1227
+                               records both sides, set size 1227 both sides, 0
+                               additions, 0 removals. A count that does not
+                               move is exactly the case a count comparison
+                               cannot certify (it cannot tell "nothing
+                               happened" from "one in, one out"), which is why
+                               the set proof is the evidence here and not a
+                               formality. The record attributes were read off
+                               `dir()` before use: cc48f6c records a probe that
+                               read a NON-EXISTENT attribute, got None for
+                               every record, collapsed the set to unique
+                               filenames and reported a believable number for a
+                               different question.
           1227 / 0             01.09.2026: doc-volume-check.sh gained a
                                second, DIFFERENT corpus -- the documents
                                Claude Code autoloads into every session
@@ -1773,18 +1801,128 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
         library and its consumers through `self.run_bash` /
         `self.run_script`, both of which `RUN_HELPER_RE` recognises. See
         ClassificationCountsTest's own entry for the per-method
-        reasoning."""
+        reasoning.
+
+        Bumped 63 -> 65 AND converted from a count to a SET, 01.09.2026
+        (WI-0133 T1): added scripts/tests/pin_registry.py and
+        scripts/tests/test_pin_inventory.py, the machinery that makes
+        ADR-0012 obligation 1 ("a pin names itself as a pin, at its own
+        site") enforceable. The conversion is the point, not the bump: a
+        count pin makes every legitimate change cost a measuring round to
+        argue, because the number alone cannot distinguish an addition from
+        a swap (ADR-0012 obligation 2). As a set, the failure message IS the
+        set proof -- it names what arrived and what left -- so the next bump
+        is read off the diff instead of re-derived. The floor assertion
+        beside it is not a leftover: a floor sees a scope going blind and
+        nothing else, a set sees a swap and a shrink; neither covers the
+        other's case. In-scope count above did NOT move -- see its own
+        trajectory row for the set proof against a996ec3."""
         files = sorted(TESTS_DIR.glob("*.py")) + sorted((TESTS_DIR / "workitems").glob("*.py"))
         names = sorted(f.relative_to(TESTS_DIR).as_posix() for f in files if f.name != "__init__.py")
-        self.assertEqual(63, len(names))
-        self.assertIn("test_absence_only_assertions.py", names)
-        self.assertIn("test_run_tests_heredoc_injection.py", names)
-        self.assertIn("test_heredoc_interpolation_scan.py", names)
-        self.assertIn("test_phase_docs_lint.py", names)
-        self.assertIn("test_install_protected_path_rm_guard.py", names)
-        self.assertIn("test_shellcheck_run.py", names)
-        self.assertIn("test_ci_workflow.py", names)
-        self.assertIn("workitems/test_migrate.py", names)
+        # The floor first, and it does exactly one job: it catches this glob
+        # going BLIND -- an empty or truncated scope reported as a pass, which
+        # is the failure mode conformance-run.sh's Rule C2 names and the reason
+        # an absence assertion over an empty parse is vacuous. It is silent
+        # while the corpus grows, and it structurally cannot see a SWAP (one
+        # file out, one in, count unchanged). That is not a defect in the
+        # floor; it is why the set pin below stands beside it. Keeping both is
+        # the decision (WI-0133 T1), not redundancy left in by accident.
+        self.assertGreaterEqual(  # pin: floor tests-corpus-files
+            len(names), 65,
+            "the scripts/tests corpus glob reached {} file(s); it reached 65 "
+            "when this floor was measured (01.09.2026). A SHRINKING scope is "
+            "a blind scanner, not a clean tree.".format(len(names)),
+        )
+        # The set pin, replacing a bare count (WI-0133 T1). A count cannot
+        # tell "one added" from "one added, one gone" (ADR-0012 obligation 2),
+        # so the bump had to be argued in a measuring round every time. Named,
+        # the diff itself is the set proof: the failure message says what
+        # arrived and what left. Same shape as
+        # test_external_tool_exit_status.py:1236-1261's 21-name list.
+        #
+        # Local import rather than a module-level one: CONTRIBUTING.md:85-102
+        # pins in prose how many modules fail to import without `-t .`, and a
+        # new module-level import edge moves those numbers.
+        import sys as _sys
+        _sys.path.insert(0, str(TESTS_DIR))
+        from pin_registry import assert_set_matches
+
+        assert_set_matches(  # pin: set tests-corpus-files
+            self,
+            [
+            "pin_registry.py",
+            "test_absence_only_assertions.py",
+            "test_adr_status_mapping.py",
+            "test_agent_frontmatter.py",
+            "test_agent_monitor.py",
+            "test_anchor.py",
+            "test_anchor_ci_template.py",
+            "test_artifact_gate.py",
+            "test_baseline_archive_directory.py",
+            "test_bash_exit_status_pipe_hook.py",
+            "test_bootstrap_instincts_section.py",
+            "test_bsd_gnu_portability.py",
+            "test_check_all.py",
+            "test_ci_workflow.py",
+            "test_command_check.py",
+            "test_command_frontmatter.py",
+            "test_conformance_run.py",
+            "test_doc_volume_check.py",
+            "test_docs_dotfile_gitignore_coverage.py",
+            "test_external_tool_exit_status.py",
+            "test_freeze_phase_docs.py",
+            "test_frontmatter_crlf.py",
+            "test_frontmatter_examples_match_the_lint.py",
+            "test_gitattributes_crlf_guard.py",
+            "test_handover_epilogue_bullet.py",
+            "test_handover_inbox_contract.py",
+            "test_handover_size_hook.py",
+            "test_heredoc_interpolation_scan.py",
+            "test_install_docs_boundary.py",
+            "test_install_protected_path_rm_guard.py",
+            "test_install_provenance.py",
+            "test_instinct_registers_agree.py",
+            "test_live_status_claims.py",
+            "test_log_cleanup_behavior.py",
+            "test_manual_lint.py",
+            "test_memory_lint.py",
+            "test_memory_lint_checklist_binding.py",
+            "test_memory_lint_commonmark_corpus.py",
+            "test_memory_sync_promote.py",
+            "test_memory_sync_transport_errors.py",
+            "test_migrate_review_headers.py",
+            "test_next_steps_lists.py",
+            "test_next_steps_placement.py",
+            "test_phase_docs_lint.py",
+            "test_pin_inventory.py",
+            "test_platform_conditional_skip_budget.py",
+            "test_quality_scan.py",
+            "test_quality_scan_sast_patterns.py",
+            "test_run_tests_argument_quoting.py",
+            "test_run_tests_heredoc_injection.py",
+            "test_run_tests_mktemp_templates.py",
+            "test_shell_script_syntax.py",
+            "test_shellcheck_run.py",
+            "test_workitems_cli.py",
+            "workitems/contract.py",
+            "workitems/fake_youtrack_transport.py",
+            "workitems/test_duration.py",
+            "workitems/test_frontmatter.py",
+            "workitems/test_lift.py",
+            "workitems/test_local.py",
+            "workitems/test_migrate.py",
+            "workitems/test_status_vocabulary.py",
+            "workitems/test_sweep.py",
+            "workitems/test_validation.py",
+            "workitems/test_youtrack.py",
+            ],
+            names,
+            "the scripts/tests corpus (63 -> 65, 01.09.2026, WI-0133 T1: "
+            "pin_registry.py and test_pin_inventory.py added; proven an "
+            "addition rather than a swap by `git status --porcelain "
+            "scripts/tests` -- two `??` lines plus one ` M`, this module "
+            "itself carrying the pin; nothing deleted, nothing renamed)",
+        )
 
 
 class ExemptionMarkersAreWellFormedTest(unittest.TestCase):
