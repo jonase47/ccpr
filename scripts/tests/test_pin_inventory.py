@@ -11,9 +11,36 @@ produced this module seven guesses produced seven different totals (117 / 126 /
 124 / 363 / 480 / 85 / 8).
 
 This module closes that. It derives the candidate population from the sources
-(`pin_registry.find_candidates`), derives the declared population from the
-`# pin:` markers actually present (`pin_registry.find_markers`), and fails on
-any candidate that is neither marked nor listed in `PENDING` below.
+(`pin_registry.find_sites`), derives the declared population from the `# pin:`
+markers actually present (`pin_registry.find_markers`), binds each marker to
+the assertion it stands over (`pin_registry.bind_markers`), and fails on any
+pin-shaped assertion that is neither marked nor listed in `PENDING` below.
+
+## The unit is one ASSERTION, not the method around it (WI-0133 T2c)
+
+Until T2c a method carrying two pin-shaped assertions was ONE record, and the
+completeness check asked only whether some marker fell anywhere inside that
+method's span. One marker therefore vouched for every assertion in it -- and
+the marker's first field is a GROUP, which T3 and T4 read. A marker covering
+two subjects of different groups makes the group a false statement exactly
+where it is consulted, and no later pass can resolve it.
+
+The corpus at the time of the change: 174 pin-shaped assertions in 147
+methods; **25 methods carry more than one**, and **4 of those carry two
+different declared shapes** (a scalar on one side, a collection on the other).
+Those 4 are the ones a single marker could not describe truthfully. The other
+21 are not a problem and were deliberately left alone -- splitting a method
+that merely repeats one shape is accounting work with no gain in what the
+inventory can say. `DeclaredShapeDivergenceTest` is where that distinction is
+checked, in both directions, rather than intended.
+
+Splitting the four mixed methods into separate test methods was considered and
+REJECTED (PO): it is an edit to foreign test code for a bookkeeping reason,
+carrying its own regression risk and improving none of those tests.
+
+Identity had to get finer without getting a line number in it. See
+`pin_registry.subject_of` for what the fourth component is and why an ordinal
+inside the method would have reintroduced the exact defect a line number has.
 
 ## Why the marker shape is borrowed rather than invented
 
@@ -39,7 +66,7 @@ or convert a count pin into a set pin, where the diff itself names what moved
 
 ## What this module's pattern does NOT reach
 
-`find_candidates` recognises exactly one shape: an equality-family assertion,
+`find_sites` recognises exactly one shape: an equality-family assertion,
 inside a `test*` method, in which one side is a declared value (a non-trivial
 literal, or a module-level constant bound to a literal) and the other side is
 measured from the repository and not from a fixture. Everything below is a pin
@@ -78,7 +105,7 @@ asserting the gap in prose only.
    is no instance of it in the corpus today, so it is named here rather than
    tested.)
 7. **A pin inside a helper method rather than a `test*` method.**
-   `find_candidates` only walks methods whose name starts with `test`, because
+   `find_sites` only walks methods whose name starts with `test`, because
    that is what unittest runs. A pin placed in a shared helper -- e.g.
    `test_handover_size_hook.py:783`'s `assert_level`, which every level test
    routes through -- is invisible, even though it runs on every one of those
@@ -98,6 +125,37 @@ asserting the gap in prose only.
    it is rather than reshaped: the alternative writes the ten expected
    results a second time, and two copies of one register cannot check each
    other.
+
+9. **The one entry that points the OTHER way: a name imported FROM the
+   standard library is treated as repository-derived.** Gaps 1-8 are all
+   silent failures -- a pin the pattern cannot see. This one is not, and it is
+   carried here as its own clause rather than mixed in with them so the
+   direction is not lost. `STDLIB_IMPORT_NAMES` is an allowlist of MODULE
+   names, so `from collections import Counter` leaves `Counter` outside it and
+   therefore inside `repo`; `Counter(<a pure literal>)` is then reported as a
+   candidate although no repository value is measured anywhere in it. The
+   harmless direction: it reports where nothing is, instead of staying quiet
+   where something is.
+
+   The precise part, and the reason it is a clause rather than a footnote:
+   `ORIGIN_TRACKING_FORMS` carries `stdlib-call-counter` with `reached=True`,
+   and **that verdict is correct while its reason is not**. The series uses the
+   `collections.Counter` ATTRIBUTE form, which is reached through the
+   measurement it carries; the from-import form is reached through the name
+   `Counter` alone. A table that pins only "reached / not reached" cannot tell
+   those two apart -- it would stay green if someone repaired the true carrier
+   and deleted the false one.
+   `test_every_reached_form_is_reached_because_of_the_measurement` is what
+   surfaced it, and no test in this module distinguishes the two reasons
+   today.
+
+   Deliberately NOT repaired here (WI-0133 T2c, PO): closing it means deciding
+   what `STDLIB_IMPORT_NAMES` is an allowlist OF, which is a scope decision and
+   not this tranche's. It is carried in the round's finding register as #38 --
+   and THIS CLAUSE IS ITS ONLY RECORD INSIDE THE REPOSITORY, which is said out
+   loud because a bare "#38" would be a reference to nothing a later reader can
+   follow. The clause therefore states the defect in full above rather than
+   deferring to the number.
 
 ## The origin tracking is itself form-dependent
 
@@ -162,13 +220,20 @@ the two tests red and leaves the other green.
 ## PENDING has an expiry date, in the test, not in a promise
 
 T1 can only place markers in the two sites it is allowed to write
-(`test_absence_only_assertions.py`'s two pins). Every other candidate is
-declared in `PENDING` with the tranche that removes it. `test_pending_is_
-exhausted` fails for any entry whose tranche already appears in
-`LANDED_TRANCHES`. In T1 `LANDED_TRANCHES` is empty, so it reports nothing --
-but it exists and has been seen red, because a transition set with no expiry
-becomes the next hand-maintained list, and this repository already carries two
-of those.
+(`test_absence_only_assertions.py`'s two pins). Every other pin-shaped
+assertion is declared in `PENDING` with the tranche that removes it.
+`test_pending_is_exhausted` fails for any entry whose tranche already appears
+in `LANDED_TRANCHES`. In T1 `LANDED_TRANCHES` is empty, so it reports nothing
+-- but it exists and has been seen red, because a transition set with no
+expiry becomes the next hand-maintained list, and this repository already
+carries two of those.
+
+Since T2c an entry is (file, class, method, SUBJECT, tranche): the identity
+had to follow the marker down to the assertion, or a method with two subjects
+could not be half-marked and half-pending. The subject is
+`pin_registry.subject_of`'s rendering of the measured expression and contains
+no line number, by the same argument that keeps one out of the first three
+fields.
 """
 
 import ast
@@ -188,26 +253,35 @@ from pin_registry import (  # noqa: E402
     PIN_GROUPS,
     TESTS_DIR,
     Marker,
-    corpus_files,
-    all_candidates,
     all_markers,
+    all_sites,
     assert_set_matches,
-    candidates_from_source,
-    find_candidates,
+    bind_markers,
+    corpus_files,
     find_markers,
+    find_sites,
     floors_without_a_set,
+    methods_with_divergent_declared_shapes,
+    methods_with_multiple_sites,
+    sites_from_source,
+    subject_of,
 )
 
 
 # ---------------------------------------------------------------------------
-# Acceptance corpus for find_candidates
+# Acceptance corpus for find_sites
 # ---------------------------------------------------------------------------
-# Identity is (file, class, method) and NEVER a line number. A line-bearing
-# identity reports every insertion above a site as one removal plus one
-# addition; test_external_tool_exit_status.py:1173-1178 records the same change
-# measured both ways -- 7 additions / 4 removals line-bearing, 3 / 0 line-free.
+# The two registers below name METHODS -- they were assembled by reading the
+# corpus by hand, and a method is what a person reads. They are matched on
+# `PinSite.method_key()`. PENDING, which is machine-derived, names ASSERTIONS
+# (WI-0133 T2c).
+#
+# Neither identity contains a line number. A line-bearing identity reports
+# every insertion above a site as one removal plus one addition;
+# test_external_tool_exit_status.py:1173-1178 records the same change measured
+# both ways -- 7 additions / 4 removals line-bearing, 3 / 0 line-free.
 
-# Live pins that find_candidates MUST reach. Each was read at its site and
+# Live pins that find_sites MUST reach. Each was read at its site and
 # confirmed to store a value derived from this repository.
 NAMED_LIVE_PINS = frozenset({
     ("test_absence_only_assertions.py", "ClassificationCountsTest",
@@ -263,7 +337,7 @@ NAMED_LIVE_PINS = frozenset({
 })
 
 
-# Fixture assertions that find_candidates MUST NOT report. They measure an
+# Fixture assertions that find_sites MUST NOT report. They measure an
 # input the test itself constructed (a `mkdtemp` scratch tree, a subprocess
 # result over it), so their expected value follows from the construction and
 # cannot age. They are not pins in ADR-0012's sense, and a detector that
@@ -335,7 +409,7 @@ def _fixture_assertion_lines(rel, base_classes=None, excluded_classes=()):
 # nevertheless NOT fixture assertions: both read the shipped source from disk,
 # so their expected value ages with that source. They were transcribed into
 # this MUST-NOT half by mistake when the corpus was assembled (WI-0133 T1) and
-# `find_candidates` was right to report them. What T1 recorded as a corpus/
+# `find_sites` was right to report them. What T1 recorded as a corpus/
 # detector disagreement was therefore never one, and the construct that held
 # it -- a register conserving a premise that had already been refuted -- is
 # gone. The correction is to the corpus; the detector is unchanged.
@@ -371,7 +445,7 @@ def fixture_assertion_sites():
 
 # One further live pin, found by code review AFTER the acceptance corpus above
 # was fixed, and kept separate from it so the record of what came from where
-# stays readable. The first version of `find_candidates` dropped it silently:
+# stays readable. The first version of `find_sites` dropped it silently:
 # its expected value is a class-body literal reached as `self.EXPECTED_FLAGGED`
 # (a shape the declared-side test did not recognise, since it only accepted a
 # bare Name), and its measurement runs through `self.FIXTURE`, a class-body
@@ -394,11 +468,13 @@ class NamedLivePinsAreReachedTest(unittest.TestCase):
     reports nothing at all passes the fixture half below."""
 
     def test_every_named_live_pin_is_a_candidate(self):
-        found = {c.key() for c in all_candidates()}
+        """The corpus names METHODS, so it is matched on `method_key()`. A pin
+        the inventory reaches through any one of its assertions is reached."""
+        found = {s.method_key() for s in all_sites()}
         missing = sorted((NAMED_LIVE_PINS | LIVE_PINS_FOUND_IN_REVIEW) - found)
         self.assertEqual(  # pin: set named-live-pins-corpus
             [], missing,
-            "find_candidates no longer reaches {} of the {} named live "
+            "find_sites no longer reaches {} of the {} named live "
             "pins:\n  {}".format(
                 len(missing), len(NAMED_LIVE_PINS | LIVE_PINS_FOUND_IN_REVIEW),
                 "\n  ".join(map(str, missing))),
@@ -443,18 +519,17 @@ class FixtureAssertionsAreNotReportedTest(unittest.TestCase):
         )
 
     def test_no_fixture_assertion_is_reported_as_a_candidate(self):
-        sites = fixture_assertion_sites()
+        forbidden_by_rel = fixture_assertion_sites()
         offenders = []
-        for candidate in all_candidates():
-            forbidden = sites.get(candidate.rel)
+        for site in all_sites():
+            forbidden = forbidden_by_rel.get(site.rel)
             if not forbidden:
                 continue
-            overlap = sorted(set(candidate.assert_linenos) & forbidden)
-            if overlap:
-                offenders.append((candidate.key(), overlap))
+            if site.lineno in forbidden:
+                offenders.append((site.key(), site.lineno))
         self.assertEqual(
             [], offenders,
-            "find_candidates reported {} fixture assertion(s) as pins:\n  {}".format(
+            "find_sites reported {} fixture assertion(s) as pins:\n  {}".format(
                 len(offenders), "\n  ".join(map(str, offenders))),
         )
 
@@ -507,7 +582,7 @@ class AssertSetMatchesIsItselfAPinShapeTest(unittest.TestCase):
         # carried in PENDING (T4) rather than marked, because the marker
         # vocabulary has four groups and none of them means "not a pin" --
         # naming that gap is T4's job, not this file's.
-        found = [c.key() for c in candidates_from_source(self.SOURCE, "probe.py")]
+        found = [s.method_key() for s in sites_from_source(self.SOURCE, "probe.py")]
         self.assertEqual([("probe.py", "T", "test_names")], found)
 
     def test_the_same_method_without_the_call_is_not_a_candidate(self):
@@ -516,7 +591,7 @@ class AssertSetMatchesIsItselfAPinShapeTest(unittest.TestCase):
         without = self.SOURCE.replace(
             "        assert_set_matches(self, EXPECTED, names, 'the corpus')\n",
             "        self.assertTrue(names)\n")
-        self.assertEqual([], candidates_from_source(without, "probe.py"))
+        self.assertEqual([], sites_from_source(without, "probe.py"))
 
 
 # ---------------------------------------------------------------------------
@@ -552,278 +627,526 @@ DECLARED_TRANCHES = ("T2", "T3", "T4")
 # named live pin (its neighbours, judged in the same pass); T4 = the rest.
 PENDING = frozenset({
     ('test_absence_only_assertions.py', 'ClassificationCountsTest',
-     'test_classification_counts', 'T2'),
+     'test_classification_counts',
+     'len+recs:call', 'T2'),
     ('test_absence_only_assertions.py', 'NoStaleKnownFindingsTest',
-     'test_no_stale_known_findings', 'T3'),
+     'test_no_stale_known_findings',
+     'stale:name', 'T3'),
     ('test_agent_frontmatter.py', 'AgentCountTest',
-     'test_agent_file_count_is_pinned', 'T2'),
+     'test_agent_file_count_is_pinned',
+     'files+len:call', 'T2'),
     # Newly reachable since WI-0133 T2b widened the origin tracking to
     # subscript accumulation: `invokers[self_name] = invoked` inside a loop
     # over `_iter_agent_files()`, compared against a declared dict literal --
     # the anchor case's shape exactly. It was a pin the whole time; the
     # inventory simply could not see it.
     ('test_agent_frontmatter.py', 'BodyInvocationDetectionTest',
-     'test_exactly_one_agent_body_directs_invoking_another', 'T3'),
+     'test_exactly_one_agent_body_directs_invoking_another',
+     'invokers:name', 'T3'),
     ('test_agent_frontmatter.py', 'ProjectMemoryContractHistoricalRedProofTest',
-     'test_removing_the_global_contract_does_not_clear_the_rule', 'T3'),
+     'test_removing_the_global_contract_does_not_clear_the_rule',
+     '.count+CONTRACT_SENTENCE_OWN_SILO+current:call', 'T3'),
     ('test_agent_frontmatter.py', 'ProjectMemoryContractHistoricalRedProofTest',
-     'test_the_two_states_differ_only_by_the_inserted_sentence', 'T3'),
+     'test_removing_the_global_contract_does_not_clear_the_rule',
+     '.count+GLOBAL_SILO_CONTRACT_TOKEN+current:call', 'T3'),
+    ('test_agent_frontmatter.py', 'ProjectMemoryContractHistoricalRedProofTest',
+     'test_the_two_states_differ_only_by_the_inserted_sentence',
+     '.count+current+sentence:call', 'T3'),
     ('test_agent_frontmatter.py', 'Tier1WriteDirectiveDetectionTest',
-     'test_exactly_one_agent_is_obliged_by_neither_trigger', 'T3'),
+     'test_exactly_one_agent_is_obliged_by_neither_trigger',
+     'stating:name', 'T3'),
     ('test_bsd_gnu_portability.py', 'ClassificationCountsTest',
-     'test_classification_counts', 'T2'),
+     'test_classification_counts',
+     'exempted+len:call', 'T2'),
+    ('test_bsd_gnu_portability.py', 'ClassificationCountsTest',
+     'test_classification_counts',
+     'exempted:setcomp', 'T2'),
+    ('test_bsd_gnu_portability.py', 'ClassificationCountsTest',
+     'test_classification_counts',
+     'len+scanned_files:call', 'T2'),
     ('test_bsd_gnu_portability.py', 'EveryMarkerNamesARegisteredCategoryTest',
-     'test_every_category_in_the_tree_is_registered', 'T3'),
+     'test_every_category_in_the_tree_is_registered',
+     'unregistered:name', 'T3'),
     ('test_bsd_gnu_portability.py', 'EveryMarkerNamesARegisteredCategoryTest',
-     'test_every_registered_category_is_used', 'T3'),
+     'test_every_registered_category_is_used',
+     'EXEMPTION_CATEGORIES+set+sorted+used:call', 'T3'),
     ('test_bsd_gnu_portability.py', 'HistoricalMktempTemplatesAreFlaggedTest',
-     'test_the_current_run_tests_carries_no_mktemp_finding', 'T3'),
+     'test_the_current_run_tests_carries_no_mktemp_finding',
+     '.rule+MKTEMP_RULE_NAME+current:listcomp', 'T3'),
     ('test_bsd_gnu_portability.py', 'ScannedFilesCoverTheShippedScopeTest',
-     'test_an_empty_scope_is_never_a_pass', 'T2'),
+     'test_an_empty_scope_is_never_a_pass',
+     'files+len:call', 'T2'),
     ('test_bsd_gnu_portability.py', 'ScannedFilesCoverTheShippedScopeTest',
-     'test_scanned_files_cover_the_shipped_scope', 'T3'),
+     'test_scanned_files_cover_the_shipped_scope',
+     'names:name', 'T3'),
     ('test_check_all.py', 'CompareAgainstZeroInsteadOfBaselineRedProofTest',
-     'test_comparing_against_exit_zero_breaks_the_two_by_design_nonzero_checks', 'T3'),
+     'test_comparing_against_exit_zero_breaks_the_two_by_design_nonzero_checks',
+     '.count+needle+original:call', 'T3'),
     ('test_check_all.py', 'CouldNotRunCountsAsPassRedProofTest',
-     'test_could_not_run_folded_into_match_breaks_both_pins', 'T3'),
+     'test_could_not_run_folded_into_match_breaks_both_pins',
+     'occurrences:name', 'T3'),
     ('test_check_all.py', 'DroppedBaselineEntryRedProofTest',
-     'test_a_baseline_missing_one_entry_is_caught_by_the_contract_comparison', 'T2'),
+     'test_a_baseline_missing_one_entry_is_caught_by_the_contract_comparison',
+     'dropped+len:call', 'T2'),
     ('test_check_all.py', 'InstallVerifyCouldNotRunRedProofTest',
-     'test_without_the_report_match_a_no_op_verify_reads_as_a_divergence', 'T3'),
+     'test_without_the_report_match_a_no_op_verify_reads_as_a_divergence',
+     '.NEEDLE+.count+original:call', 'T3'),
     ('test_check_all.py', 'NoteColumnQuantityRedProofTest',
-     'test_a_reintroduced_quantity_is_caught_in_both_number_forms', 'T2'),
+     'test_a_reintroduced_quantity_is_caught_in_both_number_forms',
+     '.count+injected+mutated:call', 'T2'),
+    ('test_check_all.py', 'NoteColumnQuantityRedProofTest',
+     'test_a_reintroduced_quantity_is_caught_in_both_number_forms',
+     'hosts+len:call', 'T2'),
     ('test_ci_workflow.py', 'RealWorkflowStructureTest',
-     'test_job_names_and_runners', 'T4'),
+     'test_job_names_and_runners',
+     '.keys+jobs+set:call', 'T4'),
     ('test_ci_workflow.py', 'RealWorkflowStructureTest',
-     'test_step_counts_per_job', 'T4'),
+     'test_step_counts_per_job',
+     '[check-all-macos]+_find_steps+jobs+len+lines:call', 'T4'),
+    ('test_ci_workflow.py', 'RealWorkflowStructureTest',
+     'test_step_counts_per_job',
+     '[python-tests]+_find_steps+jobs+len+lines:call', 'T4'),
     ('test_command_check.py', 'CommandPrerequisitesEmptyFilesEntriesRemovalStructuralProofTest',
-     'test_removal_is_a_check_command_no_op_but_shrinks_the_dict', 'T3'),
+     'test_removal_is_a_check_command_no_op_but_shrinks_the_dict',
+     '.COMMAND_PREREQUISITES+cc+len:call', 'T3'),
     ('test_command_check.py', 'CommandPrerequisitesEmptyFilesEntriesRemovalStructuralProofTest',
-     'test_the_two_empty_files_entries_are_exactly_these_two', 'T3'),
+     'test_the_two_empty_files_entries_are_exactly_these_two',
+     'empty_files_entries:name', 'T3'),
     ('test_command_check.py', 'CommandPrerequisitesFilesRemovalRedProofTest',
-     'test_removing_the_entry_drops_its_file_reason', 'T3'),
+     'test_removing_the_entry_drops_its_file_reason',
+     '.COMMAND_PREREQUISITES+cc+len:call', 'T3'),
+    ('test_command_check.py', 'CommandPrerequisitesFilesRemovalRedProofTest',
+     'test_removing_the_entry_drops_its_file_reason',
+     'entries_with_files+len:call', 'T3'),
     ('test_command_check.py', 'CommandPrerequisitesP7DeployPointsAtPrepareArtifactTest',
-     'test_p7_deploy_prerequisite_is_exactly_the_prepare_artifact', 'T3'),
+     'test_p7_deploy_prerequisite_is_exactly_the_prepare_artifact',
+     '.COMMAND_PREREQUISITES+[files]+[p7-deploy]+cc:item', 'T3'),
     ('test_command_check.py', 'CommandPrerequisitesSchemaTest',
-     'test_entry_count_is_pinned_at_16', 'T3'),
+     'test_entry_count_is_pinned_at_16',
+     '.COMMAND_PREREQUISITES+cc+len:call', 'T3'),
     ('test_command_check.py', 'GateFileClaimsStructuralTest',
-     'test_all_eight_gates_claim_an_artifact', 'T3'),
+     'test_all_eight_gates_claim_an_artifact',
+     'claims+set:call', 'T3'),
     ('test_command_check.py', 'GateFileClaimsStructuralTest',
-     'test_claimed_paths_match_the_phase_folder_convention', 'T3'),
+     'test_claimed_paths_match_the_phase_folder_convention',
+     'claims:name', 'T3'),
     ('test_command_check.py', 'GateFileClaimsStructuralTest',
-     'test_gate_p5_claims_sprint_md_not_a_phase_folder_gate_file', 'T3'),
+     'test_gate_p5_claims_sprint_md_not_a_phase_folder_gate_file',
+     '[gate-p5]+claims:item', 'T3'),
     ('test_command_check.py', 'GateP5UsesSprintMdTest',
-     'test_gate_p5_is_mapped_to_sprint_md', 'T3'),
+     'test_gate_p5_is_mapped_to_sprint_md',
+     '.GATE_FILE_PATHS+[gate-p5]+cc:item', 'T3'),
     ('test_command_check.py', 'TemplateTreeExcludesGateArtifactsTest',
-     'test_gate_p6_and_p7_are_absent_from_the_claim_set_for_a_different_reason', 'T3'),
+     'test_gate_p6_and_p7_are_absent_from_the_claim_set_for_a_different_reason',
+     '[gate-p6]+claims:item', 'T3'),
     ('test_command_check.py', 'TemplateTreeExcludesGateArtifactsTest',
-     'test_the_exclusion_has_real_work_to_do', 'T3'),
+     'test_gate_p6_and_p7_are_absent_from_the_claim_set_for_a_different_reason',
+     '[gate-p7]+claims:item', 'T3'),
+    ('test_command_check.py', 'TemplateTreeExcludesGateArtifactsTest',
+     'test_the_exclusion_has_real_work_to_do',
+     'excluded:name', 'T3'),
     ('test_command_check.py', 'UnknownCommandTest',
-     'test_every_shipped_command_name_is_not_rejected_as_unknown', 'T2'),
+     'test_every_shipped_command_name_is_not_rejected_as_unknown',
+     'len+shipped_names:call', 'T2'),
     ('test_command_frontmatter.py', 'MeasuredCorpusSizeTest',
-     'test_pattern_derived_count_is_pinned', 'T2'),
+     'test_pattern_derived_count_is_pinned',
+     'len+matched:call', 'T2'),
     ('test_command_frontmatter.py', 'MeasuredCorpusSizeTest',
-     'test_total_command_file_count_is_pinned', 'T2'),
+     'test_total_command_file_count_is_pinned',
+     'files+len:call', 'T2'),
     ('test_conformance_run.py', 'CheckTableAlignmentTest',
-     'test_all_seven_columns_are_five_entries_long', 'T3'),
+     'test_all_seven_columns_are_five_entries_long',
+     'columns+len:call', 'T3'),
+    ('test_conformance_run.py', 'CheckTableAlignmentTest',
+     'test_all_seven_columns_are_five_entries_long',
+     'len+values:call', 'T3'),
     ('test_conformance_run.py', 'CheckTableUncoveredColumnsValuesTest',
-     'test_check_arg_shape_is_a_three_two_split', 'T3'),
+     'test_check_arg_shape_is_a_three_two_split',
+     '[CHECK_ARG_SHAPE]+parse_full_check_table:item', 'T3'),
     ('test_conformance_run.py', 'CheckTableUncoveredColumnsValuesTest',
-     'test_check_c2_exempt_only_anchor_is_exempt', 'T3'),
+     'test_check_c2_exempt_only_anchor_is_exempt',
+     '[CHECK_C2_EXEMPT]+parse_full_check_table:item', 'T3'),
     ('test_conformance_run.py', 'CheckTableUncoveredColumnsValuesTest',
-     'test_check_has_summary_line_only_anchor_lacks_one', 'T3'),
+     'test_check_has_summary_line_only_anchor_lacks_one',
+     '[CHECK_HAS_SUMMARY_LINE]+parse_full_check_table:item', 'T3'),
     ('test_conformance_run.py', 'CheckTableUncoveredColumnsValuesTest',
-     'test_check_subcmd_only_anchor_carries_a_subcommand', 'T3'),
+     'test_check_subcmd_only_anchor_carries_a_subcommand',
+     '[CHECK_SUBCMD]+parse_full_check_table:item', 'T3'),
     ('test_conformance_run.py', 'RequiredSkeletonLineCountPinTest',
-     'test_anchor_branch_requires_two_lines', 'T3'),
+     'test_anchor_branch_requires_two_lines',
+     '[anchor]+len+parse_rule3_required_lines:call', 'T3'),
     ('test_conformance_run.py', 'RequiredSkeletonLineCountPinTest',
-     'test_generic_branch_requires_three_lines', 'T3'),
+     'test_generic_branch_requires_three_lines',
+     '[generic]+len+parse_rule3_required_lines:call', 'T3'),
     ('test_conformance_run.py', 'RequiredSkeletonLineCountPinTest',
-     'test_the_required_lines_are_the_documented_ones', 'T3'),
+     'test_the_required_lines_are_the_documented_ones',
+     'parse_rule3_required_lines:call', 'T3'),
     ('test_external_tool_exit_status.py', 'ExternalToolExitStatusTest',
-     'test_classification_counts', 'T2'),
+     'test_classification_counts',
+     'by_disposition:name', 'T2'),
+    ('test_external_tool_exit_status.py', 'ExternalToolExitStatusTest',
+     'test_classification_counts',
+     'invocations+len:call', 'T2'),
     ('test_handover_epilogue_bullet.py', 'EpilogueOpenBulletTest',
-     'test_104_files_carry_the_disambiguated_wording', 'T2'),
+     'test_104_files_carry_the_disambiguated_wording',
+     'bare_count:name', 'T2'),
+    ('test_handover_epilogue_bullet.py', 'EpilogueOpenBulletTest',
+     'test_104_files_carry_the_disambiguated_wording',
+     'suffixed_count:name', 'T2'),
     ('test_handover_size_hook.py', 'WriteGateCoverageTest',
-     'test_every_declared_write_tool_warns', 'T4'),
+     'test_every_declared_write_tool_warns',
+     '.HANDOVER_WRITE_TOOLS+AGENT_MONITOR:attr', 'T4'),
     ('test_heredoc_interpolation_scan.py', 'ClassificationCountsTest',
-     'test_classification_counts', 'T2'),
+     'test_classification_counts',
+     'findings+len:call', 'T2'),
+    ('test_heredoc_interpolation_scan.py', 'ClassificationCountsTest',
+     'test_classification_counts',
+     'len+sites:call', 'T2'),
     ('test_heredoc_interpolation_scan.py', 'FiveOriginalRunTestsSitesAreNoLongerFlaggedTest',
-     'test_run_tests_sh_carries_no_finding_after_the_wi_0129_fix', 'T3'),
+     'test_run_tests_sh_carries_no_finding_after_the_wi_0129_fix',
+     'heredoc_openers+len:call', 'T3'),
     ('test_heredoc_interpolation_scan.py', 'ScannedFilesCoverTheShippedScopeTest',
-     'test_scanned_files_cover_the_shipped_scope', 'T2'),
+     'test_scanned_files_cover_the_shipped_scope',
+     'files+len:call', 'T2'),
     ('test_instinct_registers_agree.py', 'ClassificationCountsTest',
-     'test_classification_counts', 'T2'),
+     'test_classification_counts',
+     'index_ids+len:call', 'T2'),
+    ('test_instinct_registers_agree.py', 'ClassificationCountsTest',
+     'test_classification_counts',
+     'len+sampler_ids:call', 'T2'),
     ('test_instinct_registers_agree.py', 'ExclusionRegressionPinTest',
-     'test_mention_only_ids_are_not_parsed_as_index_entries', 'T3'),
+     'test_mention_only_ids_are_not_parsed_as_index_entries',
+     'leaked:name', 'T3'),
     ('test_instinct_registers_agree.py', 'ExclusionRegressionPinTest',
-     'test_mention_only_ids_are_not_parsed_as_sampler_entries', 'T3'),
+     'test_mention_only_ids_are_not_parsed_as_sampler_entries',
+     'leaked:name', 'T3'),
     ('test_live_status_claims.py', 'DriftedRegisterHistoricalRedProofTest',
-     'test_the_same_file_in_the_working_tree_is_clean', 'T4'),
+     'test_the_same_file_in_the_working_tree_is_clean',
+     'DRIFTED_REGISTER_PATH+current+scan_text:call', 'T4'),
     ('test_live_status_claims.py', 'HistoryIsLetThroughTest',
-     'test_the_whole_history_carrying_files_are_clean_at_the_pinned_commit', 'T4'),
+     'test_the_whole_history_carrying_files_are_clean_at_the_pinned_commit',
+     'rel+scan_text+text:call', 'T4'),
     ('test_manual_lint.py', 'KindVocabularyExhaustiveTest',
-     'test_valid_kinds_count_is_pinned_at_nineteen', 'T2'),
+     'test_valid_kinds_count_is_pinned_at_nineteen',
+     'VALID_KINDS+len:call', 'T2'),
     ('test_memory_lint_checklist_binding.py', 'RedProofAddingAnUndefinedChapterBulletTest',
-     'test_adding_a_z_bullet_reports_z_as_stale', 'T4'),
+     'test_adding_a_z_bullet_reports_z_as_stale',
+     'chapter_letters+script_letters:binop', 'T4'),
     ('test_memory_lint_checklist_binding.py', 'RedProofRemovingAChapterBulletTest',
-     'test_removing_the_g_bullet_reports_g_as_undocumented', 'T4'),
+     'test_removing_the_g_bullet_reports_g_as_undocumented',
+     'chapter_letters+script_letters:binop', 'T4'),
     ('test_next_steps_lists.py', 'GateTransitionsCountTest',
-     'test_gate_count_is_pinned_at_8', 'T4'),
+     'test_gate_count_is_pinned_at_8',
+     'GATE_TRANSITIONS+len:call', 'T4'),
     ('test_next_steps_lists.py', 'GateTransitionsRemovalRedProofTest',
-     'test_removing_one_gate_breaks_the_count_pin', 'T4'),
+     'test_removing_one_gate_breaks_the_count_pin',
+     'GATE_TRANSITIONS+len:call', 'T4'),
     ('test_next_steps_lists.py', 'PhaseCountRemovalRedProofTest',
-     'test_removing_one_phase_breaks_the_phase_count_pin', 'T4'),
+     'test_removing_one_phase_breaks_the_phase_count_pin',
+     'PHASE_SEQUENCES+len:call', 'T4'),
     ('test_next_steps_lists.py', 'PhaseSequencesExistenceTest',
-     'test_phase_count_is_pinned_at_9', 'T4'),
+     'test_phase_count_is_pinned_at_9',
+     'PHASE_SEQUENCES+len:call', 'T4'),
     ('test_next_steps_lists.py', 'PhaseSequencesExistenceTest',
-     'test_total_command_count_is_pinned_at_50', 'T4'),
+     'test_total_command_count_is_pinned_at_50',
+     'total:name', 'T4'),
     ('test_next_steps_lists.py', 'PhaseSequencesRemovalRedProofTest',
-     'test_removing_one_command_breaks_the_total_count_pin', 'T4'),
+     'test_removing_one_command_breaks_the_total_count_pin',
+     'total:name', 'T4'),
     ('test_next_steps_lists.py', 'UtilityCommandsRedProofTest',
-     'test_removing_one_entry_changes_the_length_by_one', 'T4'),
+     'test_removing_one_entry_changes_the_length_by_one',
+     'len+mutated:call', 'T4'),
     ('test_next_steps_lists.py', 'UtilityCommandsVocabularyTest',
-     'test_total_command_count_is_pinned_at_8', 'T4'),
+     'test_total_command_count_is_pinned_at_8',
+     'UTILITY_COMMANDS+len:call', 'T4'),
     ('test_phase_docs_lint.py', 'CheckCPhaseEnumTest',
-     'test_valid_phases_count_is_pinned_at_nine', 'T4'),
+     'test_valid_phases_count_is_pinned_at_nine',
+     'VALID_PHASES+len:call', 'T4'),
     ('test_phase_docs_lint.py', 'CheckDStatusEnumTest',
-     'test_valid_statuses_count_is_pinned_at_six', 'T4'),
+     'test_valid_statuses_count_is_pinned_at_six',
+     'VALID_STATUSES+len:call', 'T4'),
     ('test_phase_docs_lint.py', 'CheckKGateVerdictTest',
-     'test_valid_gate_verdicts_count_is_pinned_at_five', 'T4'),
+     'test_valid_gate_verdicts_count_is_pinned_at_five',
+     'VALID_GATE_VERDICTS_ENUM+len:call', 'T4'),
     ('test_phase_docs_lint.py', 'CheckKGateVerdictTest',
-     'test_valid_sprint_verdicts_count_is_pinned_at_four', 'T4'),
+     'test_valid_sprint_verdicts_count_is_pinned_at_four',
+     'VALID_SPRINT_VERDICTS_ENUM+len:call', 'T4'),
     ('test_phase_docs_lint.py', 'LivingFilesSkipTest',
-     'test_living_file_names_count_is_pinned_at_six', 'T4'),
+     'test_living_file_names_count_is_pinned_at_six',
+     'LIVING_FILE_NAMES+len:call', 'T4'),
     ('test_phase_docs_lint.py', 'LivingFilesSkipTest',
-     'test_other_living_filenames_are_skipped_even_with_broken_frontmatter', 'T4'),
+     'test_other_living_filenames_are_skipped_even_with_broken_frontmatter',
+     'len+non_sprint_names:call', 'T4'),
     ('test_phase_docs_lint.py', 'PhaseFoldersSweepTest',
-     'test_every_phase_folder_is_reached_by_the_default_scan', 'T4'),
-    ('test_pin_inventory.py', 'PatternLimitsTest',
-     'test_a_class_body_literal_is_a_declaration_and_not_a_fixture', 'T4'),
-    ('test_pin_inventory.py', 'PatternLimitsTest',
-     'test_a_class_body_repo_path_is_not_a_fixture_root', 'T4'),
-    # Constructed input like its PatternLimitsTest siblings, so not a pin: its
-    # two positive controls compare against source strings the test itself
-    # wrote, which cannot age.
-    ('test_pin_inventory.py', 'PatternLimitsTest',
-     'test_a_declared_side_computed_from_a_register_is_not_reached', 'T4'),
-    ('test_pin_inventory.py', 'PatternLimitsTest',
-     'test_a_number_in_a_docstring_is_not_reached', 'T4'),
-    ('test_pin_inventory.py', 'PatternLimitsTest',
-     'test_a_pin_inside_a_helper_method_is_not_reached', 'T4'),
-    ('test_pin_inventory.py', 'PatternLimitsTest',
-     'test_a_value_one_function_level_deeper_is_not_reached', 'T4'),
-    ('test_pin_inventory.py', 'PinMarkerInventoryTest',
-     'test_a_marker_with_an_unknown_group_is_rejected', 'T4'),
+     'test_every_phase_folder_is_reached_by_the_default_scan',
+     'folders+len:call', 'T4'),
     ('test_pin_inventory.py', 'AssertSetMatchesIsItselfAPinShapeTest',
-     'test_an_assert_set_matches_call_is_a_candidate', 'T4'),
+     'test_an_assert_set_matches_call_is_a_candidate',
+     'found:name', 'T4'),
+    ('test_pin_inventory.py', 'DeclaredShapeDivergenceTest',
+     'test_a_same_shape_pair_is_not_a_divergence',
+     'len+sites:call', 'T4'),
+    ('test_pin_inventory.py', 'DeclaredShapeDivergenceTest',
+     'test_a_same_shape_pair_is_not_a_divergence',
+     'methods_with_multiple_sites+sites:call', 'T4'),
+    ('test_pin_inventory.py', 'DeclaredShapeDivergenceTest',
+     'test_a_scalar_against_a_collection_is_a_divergence',
+     'methods_with_divergent_declared_shapes+sites:call', 'T4'),
     ('test_pin_inventory.py', 'FloorRequiresASetTest',
-     'test_a_floor_whose_subject_carries_no_set_is_reported', 'T4'),
+     'test_a_floor_whose_subject_carries_no_set_is_reported',
+     'floors_without_a_set+markers:call', 'T4'),
     ('test_pin_inventory.py', 'FloorRequiresASetTest',
-     'test_the_pairing_is_per_file_and_not_per_bare_id', 'T4'),
+     'test_the_pairing_is_per_file_and_not_per_bare_id',
+     'floors_without_a_set+markers:call', 'T4'),
+    ('test_pin_inventory.py', 'MarkerBindsToOneAssertionTest',
+     'test_a_marker_covers_only_the_assertion_it_sits_on',
+     '.key+bound+sites+sorted:call', 'T4'),
+    ('test_pin_inventory.py', 'MarkerBindsToOneAssertionTest',
+     'test_a_marker_covers_only_the_assertion_it_sits_on',
+     'bound+sorted:call', 'T4'),
+    ('test_pin_inventory.py', 'MarkerBindsToOneAssertionTest',
+     'test_a_marker_naming_no_assertion_is_reported_and_not_dropped',
+     'unbound:name', 'T4'),
+    ('test_pin_inventory.py', 'MarkerBindsToOneAssertionTest',
+     'test_a_marker_on_the_line_above_binds_to_the_assertion_below',
+     'bound+sorted:call', 'T4'),
     # A pin, and unmarked on purpose: it stores an exact COUNT over a
     # repository-derived population (how many pin-shaped assertions the anchor
     # method carries), which is precisely the shape T2 measured 15 instances of
     # and found no truthful group for. Marking it `set` would put the same
     # false statement at a site that T2 declined to write.
     ('test_pin_inventory.py', 'OriginTrackingIsFormDependentTest',
-     'test_the_anchor_case_carries_both_of_its_assertions', 'T4'),
+     'test_the_anchor_case_carries_both_of_its_assertions',
+     'found+len:call', 'T4'),
+    ('test_pin_inventory.py', 'PatternLimitsTest',
+     'test_a_class_body_literal_is_a_declaration_and_not_a_fixture',
+     '.method_key+declared_in_class_body+sites_from_source:listcomp', 'T4'),
+    ('test_pin_inventory.py', 'PatternLimitsTest',
+     'test_a_class_body_repo_path_is_not_a_fixture_root',
+     '.method_key+repo_path_in_class_body+sites_from_source:listcomp', 'T4'),
+    # Constructed input like its PatternLimitsTest siblings, so not a pin: its
+    # two positive controls compare against source strings the test itself
+    # wrote, which cannot age.
+    ('test_pin_inventory.py', 'PatternLimitsTest',
+     'test_a_declared_side_computed_from_a_register_is_not_reached',
+     '.method_key+by_name+head+sites_from_source:listcomp', 'T4'),
+    ('test_pin_inventory.py', 'PatternLimitsTest',
+     'test_a_declared_side_computed_from_a_register_is_not_reached',
+     '.method_key+head+inline+sites_from_source:listcomp', 'T4'),
+    ('test_pin_inventory.py', 'PatternLimitsTest',
+     'test_a_number_in_a_docstring_is_not_reached',
+     '.method_key+seeing+sites_from_source:listcomp', 'T4'),
+    ('test_pin_inventory.py', 'PatternLimitsTest',
+     'test_a_pin_inside_a_helper_method_is_not_reached',
+     '.method_key+seeing+sites_from_source:listcomp', 'T4'),
+    ('test_pin_inventory.py', 'PatternLimitsTest',
+     'test_a_value_one_function_level_deeper_is_not_reached',
+     '.method_key+seeing+sites_from_source:listcomp', 'T4'),
+    ('test_pin_inventory.py', 'PinMarkerInventoryTest',
+     'test_a_marker_with_an_unknown_group_is_rejected',
+     '.group+.pin_id+markers:listcomp', 'T4'),
+    ('test_pin_inventory.py', 'PinSiteIdentityTest',
+     'test_an_assertion_inserted_between_two_sites_moves_neither',
+     'after+before+len:call', 'T4'),
+    # WI-0133 T2c's own sites. All four are constructed or structural rather
+    # than stored values, and are carried here for the same reason every other
+    # PatternLimitsTest sibling is: the marker vocabulary has no group meaning
+    # "not a pin", and inventing one is not this tranche's job.
+    ('test_pin_inventory.py', 'PinSiteIdentityTest',
+     'test_the_anchor_method_is_two_sites_with_different_subjects',
+     '.declared_shape+found:setcomp', 'T4'),
+    ('test_pin_inventory.py', 'PinSiteIdentityTest',
+     'test_the_anchor_method_is_two_sites_with_different_subjects',
+     '.subject+found+len:call', 'T4'),
+    ('test_pin_inventory.py', 'PinSiteIdentityTest',
+     'test_the_anchor_method_is_two_sites_with_different_subjects',
+     'found+len:call', 'T4'),
+    ('test_pin_inventory.py', 'PinSiteIdentityTest',
+     'test_the_identity_does_not_depend_on_the_interpreter',
+     '.subject+[0]+sites:attr', 'T4'),
+    ('test_pin_inventory.py', 'PinSiteIdentityTest',
+     'test_the_identity_does_not_depend_on_the_interpreter',
+     'len+sites:call', 'T4'),
+    ('test_pin_inventory.py', 'PinSiteIdentityTest',
+     'test_two_assertions_in_one_method_are_two_sites',
+     '.key+sites:setcomp', 'T4'),
+    ('test_pin_inventory.py', 'PinSiteIdentityTest',
+     'test_two_assertions_in_one_method_are_two_sites',
+     'len+sites:call', 'T4'),
     ('test_quality_scan.py', 'CompletedHandlersBindingTest',
-     'test_both_dicts_are_pinned_at_4_entries', 'T4'),
+     'test_both_dicts_are_pinned_at_4_entries',
+     '[COMPLETED]+len+ns:call', 'T4'),
+    ('test_quality_scan.py', 'CompletedHandlersBindingTest',
+     'test_both_dicts_are_pinned_at_4_entries',
+     '[HANDLERS]+len+ns:call', 'T4'),
     ('test_quality_scan.py', 'CompletedHandlersRemovalRedProofTest',
-     'test_removing_a_completed_entry_still_present_in_handlers_raises_keyerror', 'T4'),
+     'test_removing_a_completed_entry_still_present_in_handlers_raises_keyerror',
+     '.count+needle+source:call', 'T4'),
     ('test_quality_scan.py', 'ConfigFilenamesRemovalRedProofTest',
-     'test_removing_a_config_filename_makes_its_own_finding_disappear', 'T4'),
+     'test_removing_a_config_filename_makes_its_own_finding_disappear',
+     '.count+CONFIG_LOOP_NEEDLE+source:call', 'T4'),
     ('test_quality_scan.py', 'ConfigFilenamesShapeTest',
-     'test_config_filenames_list_is_pinned_at_6_entries', 'T4'),
+     'test_config_filenames_list_is_pinned_at_6_entries',
+     '.count+CONFIG_LOOP_NEEDLE+source:call', 'T4'),
     ('test_quality_scan.py', 'ConsentTermsRemovalRedProofTest',
-     'test_removing_a_consent_term_makes_the_finding_fire_again', 'T4'),
+     'test_removing_a_consent_term_makes_the_finding_fire_again',
+     '.count+CONSENT_LOOP_NEEDLE+source:call', 'T4'),
     ('test_quality_scan.py', 'ConsentTermsShapeTest',
-     'test_consent_terms_list_is_pinned_at_4_entries', 'T4'),
+     'test_consent_terms_list_is_pinned_at_4_entries',
+     '.count+CONSENT_LOOP_NEEDLE+source:call', 'T4'),
     ('test_quality_scan.py', 'PiiPatternsRemovalRedProofTest',
-     'test_removing_a_pii_pattern_entry_makes_its_own_finding_disappear', 'T4'),
+     'test_removing_a_pii_pattern_entry_makes_its_own_finding_disappear',
+     'len+lines:call', 'T4'),
     ('test_quality_scan.py', 'PiiPatternsShapeTest',
-     'test_pii_patterns_are_pinned_at_4_entries', 'T4'),
+     'test_pii_patterns_are_pinned_at_4_entries',
+     'len+names:call', 'T4'),
     ('test_quality_scan.py', 'SeveritiesRemovalRedProofTest',
-     'test_removing_a_severity_silently_drops_its_bucket_from_the_count', 'T4'),
+     'test_removing_a_severity_silently_drops_its_bucket_from_the_count',
+     '.SEVERITIES_NEEDLE+.count+source:call', 'T4'),
     ('test_quality_scan.py', 'SeveritiesShapeMatchesSourceTest',
-     'test_severities_shape_equals_the_extracted_source', 'T4'),
+     'test_severities_shape_equals_the_extracted_source',
+     '[SEVERITIES]+ns+tuple:call', 'T4'),
     ('test_quality_scan.py', 'SkipDirsDefinitionsStayEqualTest',
-     'test_both_skip_dirs_definitions_are_identical', 'T4'),
+     'test_both_skip_dirs_definitions_are_identical',
+     'first+len:call', 'T4'),
+    ('test_quality_scan.py', 'SkipDirsDefinitionsStayEqualTest',
+     'test_both_skip_dirs_definitions_are_identical',
+     'len+tuples:call', 'T4'),
     ('test_quality_scan.py', 'SkipDirsMatchesSastModuleTest',
-     'test_sast_module_skip_dirs_equals_both_quality_scan_sh_definitions', 'T4'),
+     'test_sast_module_skip_dirs_equals_both_quality_scan_sh_definitions',
+     'len+script_dirs:call', 'T4'),
     ('test_quality_scan.py', 'ToolReportCompletedShapeMatchesSourceTest',
-     'test_completed_shape_equals_the_extracted_source', 'T4'),
+     'test_completed_shape_equals_the_extracted_source',
+     '[COMPLETED]+ns:item', 'T4'),
     ('test_quality_scan_sast_patterns.py', 'ExtensionCountTest',
-     'test_total_extension_count_is_pinned_at_19', 'T4'),
+     'test_total_extension_count_is_pinned_at_19',
+     'total:name', 'T4'),
     ('test_quality_scan_sast_patterns.py', 'MissingKeyDoesNotRaiseTest',
-     'test_missing_key_is_swallowed_and_the_finding_is_dropped', 'T4'),
+     'test_missing_key_is_swallowed_and_the_finding_is_dropped',
+     '.keys+PATTERNS+rule_name+set:call', 'T4'),
     ('test_quality_scan_sast_patterns.py', 'MissingKeyPositionDependentTruncationTest',
-     'test_breaking_the_last_rule_in_dict_order_loses_only_the_tail', 'T4'),
+     'test_breaking_the_last_rule_in_dict_order_loses_only_the_tail',
+     '[0]+[line]+findings:item', 'T4'),
     ('test_quality_scan_sast_patterns.py', 'MissingKeyPositionDependentTruncationTest',
-     'test_control_finds_both_lines', 'T4'),
+     'test_breaking_the_last_rule_in_dict_order_loses_only_the_tail',
+     'findings+len:call', 'T4'),
+    ('test_quality_scan_sast_patterns.py', 'MissingKeyPositionDependentTruncationTest',
+     'test_control_finds_both_lines',
+     '[0]+[line]+findings:item', 'T4'),
+    ('test_quality_scan_sast_patterns.py', 'MissingKeyPositionDependentTruncationTest',
+     'test_control_finds_both_lines',
+     '[1]+[line]+findings:item', 'T4'),
+    ('test_quality_scan_sast_patterns.py', 'MissingKeyPositionDependentTruncationTest',
+     'test_control_finds_both_lines',
+     'findings+len:call', 'T4'),
     ('test_quality_scan_sast_patterns.py', 'PatternsRuleCountRemovalRedProofTest',
-     'test_removing_one_rule_breaks_the_count_pin', 'T4'),
+     'test_removing_one_rule_breaks_the_count_pin',
+     'PATTERNS+len:call', 'T4'),
     ('test_quality_scan_sast_patterns.py', 'PatternsRuleCountTest',
-     'test_rule_count_is_pinned_at_5', 'T4'),
+     'test_rule_count_is_pinned_at_5',
+     'PATTERNS+len:call', 'T4'),
     ('test_quality_scan_sast_patterns.py', 'PerExtensionPositiveFixtureTest',
-     'test_every_claimed_extension_fires_the_rule', 'T4'),
+     'test_every_claimed_extension_fires_the_rule',
+     'checked:name', 'T4'),
     ('test_quality_scan_sast_patterns.py', 'PerExtensionRemovalRedProofTest',
-     'test_removing_one_extension_silences_the_rule_for_that_extension', 'T4'),
+     'test_removing_one_extension_silences_the_rule_for_that_extension',
+     'checked:name', 'T4'),
+    ('test_quality_scan_sast_patterns.py', 'PerExtensionRemovalRedProofTest',
+     'test_removing_one_extension_silences_the_rule_for_that_extension',
+     'findings:name', 'T4'),
     ('test_quality_scan_sast_patterns.py', 'PerRuleForeignExtensionNegativeTest',
-     'test_foreign_extension_produces_no_finding_for_that_rule', 'T4'),
+     'test_foreign_extension_produces_no_finding_for_that_rule',
+     'findings:name', 'T4'),
     ('test_quality_scan_sast_patterns.py', 'PerRulePositiveFixtureTest',
-     'test_each_rule_fires_on_its_own_fixture', 'T4'),
+     'test_each_rule_fires_on_its_own_fixture',
+     '[line]+finding:item', 'T4'),
+    ('test_quality_scan_sast_patterns.py', 'PerRulePositiveFixtureTest',
+     'test_each_rule_fires_on_its_own_fixture',
+     'findings+len:call', 'T4'),
     ('test_quality_scan_sast_patterns.py', 'RuleShapeKeysTest',
-     'test_every_rule_has_exactly_the_four_keys', 'T4'),
+     'test_every_rule_has_exactly_the_four_keys',
+     '.keys+rule+set:call', 'T4'),
     ('test_quality_scan_sast_patterns.py', 'TruncationCapTest',
-     'test_exactly_50_matches_produce_50_with_no_marker', 'T4'),
+     'test_exactly_50_matches_produce_50_with_no_marker',
+     'findings+len:call', 'T4'),
     ('test_quality_scan_sast_patterns.py', 'TruncationCapTest',
-     'test_more_than_50_matches_are_capped_plus_one_truncation_marker', 'T4'),
+     'test_more_than_50_matches_are_capped_plus_one_truncation_marker',
+     '[type]+marker:item', 'T4'),
     ('test_quality_scan_sast_patterns.py', 'TruncationCapTest',
-     'test_the_50_real_findings_preceding_the_marker_are_unaffected', 'T4'),
+     'test_more_than_50_matches_are_capped_plus_one_truncation_marker',
+     'findings+len:call', 'T4'),
+    ('test_quality_scan_sast_patterns.py', 'TruncationCapTest',
+     'test_the_50_real_findings_preceding_the_marker_are_unaffected',
+     '[type]+finding:item', 'T4'),
+    ('test_quality_scan_sast_patterns.py', 'TruncationCapTest',
+     'test_the_50_real_findings_preceding_the_marker_are_unaffected',
+     'len+real:call', 'T4'),
     ('workitems/test_duration.py', 'ParseDurationSecondsTest',
-     'test_bare_integer_is_seconds', 'T4'),
+     'test_bare_integer_is_seconds',
+     'parse_duration_seconds:call', 'T4'),
     ('workitems/test_duration.py', 'ParseDurationSecondsTest',
-     'test_days_suffix', 'T4'),
+     'test_days_suffix',
+     'parse_duration_seconds:call', 'T4'),
     ('workitems/test_duration.py', 'ParseDurationSecondsTest',
-     'test_hours_suffix', 'T4'),
+     'test_hours_suffix',
+     'parse_duration_seconds:call', 'T4'),
     ('workitems/test_duration.py', 'ParseDurationSecondsTest',
-     'test_minutes_suffix', 'T4'),
+     'test_minutes_suffix',
+     'parse_duration_seconds:call', 'T4'),
     ('workitems/test_duration.py', 'ParseDurationSecondsTest',
-     'test_numeric_string_is_seconds', 'T4'),
+     'test_numeric_string_is_seconds',
+     'parse_duration_seconds:call', 'T4'),
     ('workitems/test_duration.py', 'ParseDurationSecondsTest',
-     'test_seconds_suffix', 'T4'),
+     'test_seconds_suffix',
+     'parse_duration_seconds:call', 'T4'),
     ('workitems/test_frontmatter.py', 'FrontmatterRoundTripTest',
-     'test_parses_genuine_inline_list', 'T4'),
+     'test_parses_genuine_inline_list',
+     '[refs]+parsed:item', 'T4'),
     ('workitems/test_frontmatter.py', 'FrontmatterRoundTripTest',
-     'test_round_trips_title_containing_a_literal_backslash', 'T4'),
+     'test_round_trips_title_containing_a_literal_backslash',
+     '[title]+parsed:item', 'T4'),
     ('workitems/test_frontmatter.py', 'FrontmatterRoundTripTest',
-     'test_round_trips_title_containing_hash', 'T4'),
+     'test_round_trips_title_containing_hash',
+     '[title]+parsed:item', 'T4'),
     ('workitems/test_frontmatter.py', 'FrontmatterRoundTripTest',
-     'test_round_trips_title_starting_with_bracket', 'T4'),
+     'test_round_trips_title_starting_with_bracket',
+     '[title]+parsed:item', 'T4'),
     ('workitems/test_frontmatter.py', 'FrontmatterRoundTripTest',
-     'test_round_trips_title_with_both_apostrophe_and_double_quote', 'T4'),
+     'test_round_trips_title_with_both_apostrophe_and_double_quote',
+     '[title]+parsed:item', 'T4'),
     ('workitems/test_sweep.py', 'SweepTest',
-     'test_stale_heartbeat_with_branch_commits_becomes_parked', 'T4'),
+     'test_stale_heartbeat_with_branch_commits_becomes_parked',
+     '[parked]+report:item', 'T4'),
     ('workitems/test_sweep.py', 'SweepTest',
-     'test_stale_heartbeat_without_branch_commits_stays_in_progress', 'T4'),
+     'test_stale_heartbeat_without_branch_commits_stays_in_progress',
+     '[left_in_progress]+report:item', 'T4'),
     ('workitems/test_youtrack.py', 'HttpTransportTest',
-     'test_sends_bearer_auth_header_and_returns_parsed_json', 'T4'),
+     'test_sends_bearer_auth_header_and_returns_parsed_json',
+     'result:name', 'T4'),
     ('workitems/test_youtrack.py', 'YouTrackClaimingTest',
-     'test_a_non_utc_aware_clock_is_normalized_to_utc_in_the_written_heartbeat', 'T4'),
+     'test_a_non_utc_aware_clock_is_normalized_to_utc_in_the_written_heartbeat',
+     '[heartbeat]+claimed:item', 'T4'),
     ('workitems/test_youtrack.py', 'YouTrackCreateFactoryTest',
-     'test_env_token_with_trailing_newline_is_stripped', 'T4'),
+     'test_env_token_with_trailing_newline_is_stripped',
+     '.token+backend:attr', 'T4'),
     ('workitems/test_youtrack.py', 'YouTrackCreateFactoryTest',
-     'test_happy_path_reads_token_from_environment_not_config', 'T4'),
+     'test_happy_path_reads_token_from_environment_not_config',
+     '.token+backend:attr', 'T4'),
     ('workitems/test_youtrack.py', 'YouTrackCreateRollbackTest',
-     'test_create_does_not_delete_when_initial_state_is_accepted', 'T4'),
+     'test_create_does_not_delete_when_initial_state_is_accepted',
+     '._issues+len+transport:call', 'T4'),
+    ('workitems/test_youtrack.py', 'YouTrackCreateRollbackTest',
+     'test_create_does_not_delete_when_initial_state_is_accepted',
+     '[status]+item:item', 'T4'),
     ('workitems/test_youtrack.py', 'YouTrackLinkTypeNameMapTest',
-     'test_renamed_link_type_name_resolves_via_config', 'T4'),
+     'test_renamed_link_type_name_resolves_via_config',
+     '[links]+item:item', 'T4'),
     ('workitems/test_youtrack.py', 'YouTrackPaginationTest',
-     'test_list_returns_everything_even_when_the_fake_caps_page_size', 'T4'),
+     'test_list_returns_everything_even_when_the_fake_caps_page_size',
+     'items+len:call', 'T4'),
     ('workitems/test_youtrack.py', 'YouTrackSetEstimateTest',
-     'test_scalar_estimate_is_not_confused_with_an_enum_shaped_field', 'T4'),
+     'test_scalar_estimate_is_not_confused_with_an_enum_shaped_field',
+     '[estimate]+updated:item', 'T4'),
 })
 
 
@@ -837,10 +1160,13 @@ class PinMarkerInventoryTest(unittest.TestCase):
             self,
             {("test_absence_only_assertions.py", "floor", "tests-corpus-files"),
              ("test_absence_only_assertions.py", "set", "parent-state-flagged"),
-             ("test_absence_only_assertions.py", "set", "parent-state-not-flagged"),
+             ("test_absence_only_assertions.py", "set",
+              "parent-state-not-flagged"),
              ("test_absence_only_assertions.py", "set", "tests-corpus-files"),
-             ("test_bsd_gnu_portability.py", "set", "portability-exempted-sites"),
-             ("test_bsd_gnu_portability.py", "set", "portability-known-findings"),
+             ("test_bsd_gnu_portability.py", "set",
+              "portability-exempted-sites"),
+             ("test_bsd_gnu_portability.py", "set",
+              "portability-known-findings"),
              ("test_conformance_run.py", "set", "check-table-column-names"),
              ("test_docs_dotfile_gitignore_coverage.py", "set",
               "docs-dotfile-block-patterns"),
@@ -851,13 +1177,17 @@ class PinMarkerInventoryTest(unittest.TestCase):
              ("test_heredoc_interpolation_scan.py", "set",
               "heredoc-known-findings"),
              ("test_pin_inventory.py", "derived", "fixture-corpus-site-counts"),
+             ("test_pin_inventory.py", "set", "divergent-shape-methods"),
              ("test_pin_inventory.py", "set", "fixture-corpus-exclusion"),
              ("test_pin_inventory.py", "set", "named-live-pins-corpus"),
-             ("test_pin_inventory.py", "set", "origin-tracking-fixture-control"),
+             ("test_pin_inventory.py", "set",
+              "origin-tracking-fixture-control"),
              ("test_pin_inventory.py", "set", "origin-tracking-form-table"),
              ("test_pin_inventory.py", "set", "pending-transition-set"),
              ("test_pin_inventory.py", "set", "pin-marker-inventory"),
+             ("test_pin_inventory.py", "set", "same-shape-multi-site-methods"),
              ("test_pin_inventory.py", "set", "skip-budget-blind-spot"),
+             ("test_pin_inventory.py", "set", "unbound-markers"),
              ("test_platform_conditional_skip_budget.py", "set",
               "registered-skip-decorator-files"),
              ("test_shell_script_syntax.py", "set",
@@ -984,22 +1314,28 @@ class PinCompletenessTest(unittest.TestCase):
     declared in PENDING with the tranche that removes it. Nothing sits
     unaccounted for."""
 
-    def test_every_candidate_is_marked_or_pending(self):
-        markers = all_markers()
-        pending_keys = {(rel, cls, method) for rel, cls, method, _ in PENDING}
+    def test_every_assertion_is_marked_or_pending(self):
+        """Per ASSERTION since WI-0133 T2c, not per method.
+
+        The predecessor asked whether SOME marker fell anywhere inside the
+        method's span, so one marker vouched for every pin-shaped assertion in
+        it. `MarkerBindsToOneAssertionTest` is the red proof that it no longer
+        does; this is the check that consumes the binding."""
+        bound, _unbound = bind_markers(all_sites(), all_markers())
+        pending_keys = {(rel, cls, method, subject)
+                        for rel, cls, method, subject, _ in PENDING}
         unaccounted = []
-        for candidate in all_candidates():
-            marked = any(
-                m.rel == candidate.rel and candidate.lineno <= m.lineno <= candidate.end_lineno
-                for m in markers)
-            if marked or candidate.key() in pending_keys:
+        for site in all_sites():
+            if site.key() in bound or site.key() in pending_keys:
                 continue
-            unaccounted.append(candidate.key())
+            unaccounted.append(site.key())
         self.assertEqual(
             [], sorted(unaccounted),
             "{} pin-shaped assertion(s) name themselves neither as a pin nor "
             "as pending (ADR-0012 obligation 1). For each one, EITHER add a "
-            "`# pin: <group> <id>` marker on the assertion -- groups: {} -- OR, "
+            "`# pin: <group> <id>` marker ON THAT ASSERTION -- a marker on a "
+            "sibling assertion in the same method does not cover it -- "
+            "groups: {} -- OR, "
             "if it is not a pin (its expected value follows from an input the "
             "test itself built, so it cannot age), say so at the site and add "
             "it to PENDING with the tranche that resolves it:\n  {}".format(
@@ -1010,19 +1346,34 @@ class PinCompletenessTest(unittest.TestCase):
     def test_no_pending_entry_is_stale(self):
         """Drift in the other direction: an entry that is no longer a
         candidate has either been fixed without being removed from PENDING, or
-        the detector stopped seeing it. Both need a look."""
-        candidate_keys = {c.key() for c in all_candidates()}
+        the detector stopped seeing it. Both need a look.
+
+        A third cause is neither, and it is the one that sends people to the
+        wrong file: a PENDING entry is identified by (file, class, method,
+        subject), and `subject` renders the MEASURED EXPRESSION. Renaming a
+        local variable inside a pinned assertion therefore moves the key, and
+        the rename happened in another module while the red test lives here.
+        That radius is the deliberate price of an identity that hangs on the
+        expression rather than on its position -- a key that survives a rename
+        is a key that cannot see a swap. The message below says so, because a
+        red result without the connection is a false alarm and the same result
+        with it is an instruction."""
+        site_keys = {s.key() for s in all_sites()}
         stale = sorted(key for key in
-                       {(rel, cls, m) for rel, cls, m, _ in PENDING}
-                       if key not in candidate_keys)
+                       {(rel, cls, m, subject) for rel, cls, m, subject, _ in PENDING}
+                       if key not in site_keys)
         self.assertEqual(  # pin: set pending-transition-set
             [], stale,
-            "PENDING entr(ies) that find_candidates no longer reports:\n  {}"
+            "PENDING entr(ies) that all_sites() no longer reports. Either the "
+            "site is gone (remove the entry), or its IDENTITY moved -- the key "
+            "ends in the rendered MEASURED EXPRESSION, so renaming a local "
+            "variable inside the pinned assertion changes it. In that case the "
+            "edit is in the other module and the repair is this tuple:\n  {}"
             .format("\n  ".join(map(str, stale))),
         )
 
     def test_every_pending_entry_names_a_declared_tranche(self):
-        undeclared = sorted({tranche for _, _, _, tranche in PENDING}
+        undeclared = sorted({tranche for *_, tranche in PENDING}
                             - set(DECLARED_TRANCHES))
         self.assertEqual([], undeclared)
 
@@ -1031,8 +1382,8 @@ class PinCompletenessTest(unittest.TestCase):
         next hand-maintained list; this repository already carries two. Every
         entry names the tranche that removes it, and once that tranche is in
         LANDED_TRANCHES the entry must be gone."""
-        overdue = sorted((rel, cls, method, tranche)
-                         for rel, cls, method, tranche in PENDING
+        overdue = sorted((rel, cls, method, subject, tranche)
+                         for rel, cls, method, subject, tranche in PENDING
                          if tranche in LANDED_TRANCHES)
         self.assertEqual(
             [], overdue,
@@ -1071,14 +1422,14 @@ class PatternLimitsTest(unittest.TestCase):
             "        names = sorted(p.name for p in REPO.glob('*.sh'))\n"
             "        self.assertTrue(names)\n"
         )
-        self.assertEqual([], candidates_from_source(blind, "probe.py"))
+        self.assertEqual([], sites_from_source(blind, "probe.py"))
 
         seeing = blind.replace(
             "        self.assertTrue(names)\n",
             "        self.assertEqual(18, len(names))\n")
         self.assertEqual(
             [("probe.py", "T", "test_scope")],
-            [c.key() for c in candidates_from_source(seeing, "probe.py")],
+            [s.method_key() for s in sites_from_source(seeing, "probe.py")],
             "positive control: the same 18, as an assertion, must be reported",
         )
 
@@ -1098,7 +1449,7 @@ class PatternLimitsTest(unittest.TestCase):
             "        names = sorted(p.name for p in REPO.glob('*.sh'))\n"
             "        self.assertTrue(names)\n"
         )
-        self.assertEqual([], candidates_from_source(blind, "probe.py"))
+        self.assertEqual([], sites_from_source(blind, "probe.py"))
 
     def test_a_pin_inside_a_helper_method_is_not_reached(self):
         """Gap 7. The scanner walks `test*` methods only. A pin in a shared
@@ -1115,13 +1466,13 @@ class PatternLimitsTest(unittest.TestCase):
             "    def test_scope(self):\n"
             "        self.assert_scope()\n"
         )
-        self.assertEqual([], candidates_from_source(helper, "probe.py"))
+        self.assertEqual([], sites_from_source(helper, "probe.py"))
 
         seeing = helper.replace("    def assert_scope(self):",
                                 "    def test_assert_scope(self):")
         self.assertEqual(
             [("probe.py", "T", "test_assert_scope")],
-            [c.key() for c in candidates_from_source(seeing, "probe.py")],
+            [s.method_key() for s in sites_from_source(seeing, "probe.py")],
             "positive control: the identical body, renamed to test_*, must be "
             "reported -- the blindness is the NAME, not the assertion",
         )
@@ -1131,7 +1482,7 @@ class PatternLimitsTest(unittest.TestCase):
 
         A class-body constant is written `self.EXPECTED` at the assertion,
         i.e. an `ast.Attribute` whose value is `Name("self")`. The first
-        version of `find_candidates` only accepted a bare `ast.Name` there and
+        version of `find_sites` only accepted a bare `ast.Name` there and
         silently dropped `ParentStateDiscriminationTest`, a real pin, without
         reporting a gap -- it took a reviewer reading the corpus by hand to
         surface it. Named in the boundary clause and tested here so the next
@@ -1154,7 +1505,7 @@ class PatternLimitsTest(unittest.TestCase):
         )
         self.assertEqual(
             [("probe.py", "T", "test_names")],
-            [c.key() for c in candidates_from_source(declared_in_class_body,
+            [s.method_key() for s in sites_from_source(declared_in_class_body,
                                                      "probe.py")],
             "a class-body literal reached as self.EXPECTED is a DECLARATION; "
             "recognising only ast.Name on the declared side drops it",
@@ -1165,7 +1516,7 @@ class PatternLimitsTest(unittest.TestCase):
             "    def setUp(self):\n"
             "        self.EXPECTED = frozenset({'a.sh', 'b.sh'})\n")
         self.assertEqual(
-            [], candidates_from_source(bound_in_setup, "probe.py"),
+            [], sites_from_source(bound_in_setup, "probe.py"),
             "negative control: the same name bound in setUp is a fixture the "
             "test built, and must stay unreported",
         )
@@ -1196,7 +1547,7 @@ class PatternLimitsTest(unittest.TestCase):
         )
         self.assertEqual(
             [("probe.py", "T", "test_lines")],
-            [c.key() for c in candidates_from_source(repo_path_in_class_body,
+            [s.method_key() for s in sites_from_source(repo_path_in_class_body,
                                                      "probe.py")],
             "a class-body path into the repository is not scratch; treating "
             "every self.<attr> as a fixture drops the pin measured through it",
@@ -1207,7 +1558,7 @@ class PatternLimitsTest(unittest.TestCase):
             "    def setUp(self):\n"
             "        self.FIXTURE = Path(tempfile.mkdtemp()) / 'sample.txt'\n")
         self.assertEqual(
-            [], candidates_from_source(scratch_in_setup, "probe.py"),
+            [], sites_from_source(scratch_in_setup, "probe.py"),
             "negative control: the same attribute built in setUp is scratch, "
             "and must stay unreported",
         )
@@ -1245,14 +1596,14 @@ class PatternLimitsTest(unittest.TestCase):
             "        names = sorted(p.name for p in REPO.glob('*.sh'))\n"
             "        self.assertEqual(expected(), len(names))\n"
         )
-        self.assertEqual([], candidates_from_source(blind, "probe.py"))
+        self.assertEqual([], sites_from_source(blind, "probe.py"))
 
         seeing = blind.replace(
             "        self.assertEqual(expected(), len(names))\n",
             "        self.assertEqual(10, len(names))\n")
         self.assertEqual(
             [("probe.py", "T", "test_budget")],
-            [c.key() for c in candidates_from_source(seeing, "probe.py")],
+            [s.method_key() for s in sites_from_source(seeing, "probe.py")],
             "positive control: the same 10, inlined, must be reported",
         )
 
@@ -1283,19 +1634,19 @@ class PatternLimitsTest(unittest.TestCase):
             "        got = {(n, bool(REPO.glob(n))) for n, _ in TABLE}\n"
         )
         computed = "        assert_set_matches(self, {(n, v) for n, v in TABLE}, got, 's')\n"
-        self.assertEqual([], candidates_from_source(head + computed, "probe.py"))
+        self.assertEqual([], sites_from_source(head + computed, "probe.py"))
 
         by_name = "        assert_set_matches(self, TABLE, got, 's')\n"
         self.assertEqual(
             [("probe.py", "T", "test_names")],
-            [c.key() for c in candidates_from_source(head + by_name, "probe.py")],
+            [s.method_key() for s in sites_from_source(head + by_name, "probe.py")],
             "positive control 1: the same register as a bare NAME is reported",
         )
 
         inline = "        assert_set_matches(self, {('a.md', True)}, got, 's')\n"
         self.assertEqual(
             [("probe.py", "T", "test_names")],
-            [c.key() for c in candidates_from_source(head + inline, "probe.py")],
+            [s.method_key() for s in sites_from_source(head + inline, "probe.py")],
             "positive control 2: the same value inlined as a literal is reported",
         )
 
@@ -1304,11 +1655,11 @@ class PatternLimitsTest(unittest.TestCase):
         this way. This shows it IS blind to the real one: the skip-budget
         module is a candidate only through its registration-set assertions
         (:208, :217), never through the count assertion at :193."""
-        budget = [c for c in all_candidates()
-                  if c.rel == "test_platform_conditional_skip_budget.py"]
+        budget = [s for s in all_sites()
+                  if s.rel == "test_platform_conditional_skip_budget.py"]
         self.assertEqual(  # pin: set skip-budget-blind-spot
             ["test_no_unregistered_skip_decorator_file_exists"],
-            sorted(c.method_name for c in budget),
+            sorted({s.method_name for s in budget}),
             "the skip-budget module's reported methods changed; if "
             "test_skip_count_matches_the_pinned_per_source_budget now appears, "
             "gap 5 has been closed and this module's boundary clause is stale",
@@ -1433,7 +1784,7 @@ class OriginTrackingIsFormDependentTest(unittest.TestCase):
 
     def test_the_form_table_is_the_measured_behaviour(self):
         measured = {
-            (name, bool(candidates_from_source(
+            (name, bool(sites_from_source(
                 ORIGIN_TRACKING_PROBE_HEAD + body, "probe.py")))
             for name, _, body, _ in ORIGIN_TRACKING_FORMS
         }
@@ -1459,7 +1810,7 @@ class OriginTrackingIsFormDependentTest(unittest.TestCase):
         """
         wrongly_reached = sorted(
             name for name, reached, body, control_body in ORIGIN_TRACKING_FORMS
-            if reached and candidates_from_source(
+            if reached and sites_from_source(
                 ORIGIN_TRACKING_FIXTURE_HEAD + (control_body or body),
                 "probe.py"))
         self.assertEqual(  # pin: set origin-tracking-fixture-control
@@ -1476,21 +1827,428 @@ class OriginTrackingIsFormDependentTest(unittest.TestCase):
         (`assertEqual(161, len(invocations))`) AND a per-disposition register
         over the same live scan. The register is accumulated with
         `by_disposition[inv.disposition] = ...` inside a `for`, and before
-        WI-0133 T2b the candidate carried only the first of the two lines --
+        WI-0133 T2b the inventory carried only the first of the two lines --
         the method was in the inventory, but the assertion that names WHICH
         dispositions moved was not.
+
+        Since T2c the two are two SITES rather than one record with two lines,
+        which is what makes the difference between them expressible; the shape
+        divergence they carry is `DeclaredShapeDivergenceTest`'s subject.
         """
         rel = "test_external_tool_exit_status.py"
-        found = [c for c in find_candidates(TESTS_DIR / rel, rel)
-                 if c.class_name == "ExternalToolExitStatusTest"
-                 and c.method_name == "test_classification_counts"]
-        self.assertEqual(1, len(found), "the anchor candidate went missing")
+        found = [s for s in find_sites(TESTS_DIR / rel, rel)
+                 if s.class_name == "ExternalToolExitStatusTest"
+                 and s.method_name == "test_classification_counts"]
         self.assertEqual(
-            2, len(found[0].assert_linenos),
+            2, len(found),
             "the anchor case must carry BOTH the total and the disposition "
-            "register; it carries {}".format(found[0].assert_linenos),
+            "register; it carries {}".format(sorted(s.subject for s in found)),
         )
 
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# The methods whose pin-shaped assertions do NOT agree on their declared shape
+# -- one asserts a scalar (a count, a bound), another a collection. These are
+# the ones a single method-wide marker could not describe truthfully, because
+# the group it named would have to be true of both.
+#
+# Measured, never typed. FOUR of them predate WI-0133 T2c and are the reason
+# the tranche exists; the other three are this module's own new tests, which is
+# self-application working rather than a coincidence.
+DIVERGENT_SHAPE_METHODS = frozenset({
+    ('test_absence_only_assertions.py', 'ScannedFilesCoverTheShippedScopeTest',
+     'test_scanned_files_cover_the_shipped_scope'),
+    ('test_bsd_gnu_portability.py', 'ClassificationCountsTest',
+     'test_classification_counts'),
+    ('test_external_tool_exit_status.py', 'ExternalToolExitStatusTest',
+     'test_classification_counts'),
+    ('test_pin_inventory.py', 'DeclaredShapeDivergenceTest',
+     'test_a_same_shape_pair_is_not_a_divergence'),
+    ('test_pin_inventory.py', 'PinSiteIdentityTest',
+     'test_the_anchor_method_is_two_sites_with_different_subjects'),
+    ('test_pin_inventory.py', 'PinSiteIdentityTest',
+     'test_two_assertions_in_one_method_are_two_sites'),
+    ('test_quality_scan_sast_patterns.py', 'PerExtensionRemovalRedProofTest',
+     'test_removing_one_extension_silences_the_rule_for_that_extension'),
+})
+
+# The counter-half, and the reason T2c is not a rewrite of every
+# multi-assertion method in the corpus (WI-0133 T2c, PO): these methods carry
+# more than one pin-shaped assertion and every one of them declares the SAME
+# shape. Nothing about them is untruthful, so nothing about them changed -- no
+# marker moved, no assertion was split, and no foreign test module was written
+# to.
+#
+# The set reconciles as 20 + 2 = 22. 21 methods carried this property at HEAD:
+# 20 of them are below unchanged, and the 21st is this module's own
+# `test_the_anchor_case_carries_both_of_its_assertions`, which dropped out
+# because T2c rewrote its body from two assertions down to one. The remaining
+# 2 are new tests of this tranche that happen to carry two same-shape
+# assertions each -- self-application, exactly as in the sibling register
+# above.
+SAME_SHAPE_MULTI_SITE_METHODS = frozenset({
+    ('test_absence_only_assertions.py', 'ParentStateDiscriminationTest',
+     'test_the_six_named_methods_are_flagged_and_the_five_siblings_are_not'),
+    ('test_agent_frontmatter.py', 'ProjectMemoryContractHistoricalRedProofTest',
+     'test_removing_the_global_contract_does_not_clear_the_rule'),
+    ('test_check_all.py', 'NoteColumnQuantityRedProofTest',
+     'test_a_reintroduced_quantity_is_caught_in_both_number_forms'),
+    ('test_ci_workflow.py', 'RealWorkflowStructureTest',
+     'test_step_counts_per_job'),
+    ('test_command_check.py', 'CommandPrerequisitesFilesRemovalRedProofTest',
+     'test_removing_the_entry_drops_its_file_reason'),
+    ('test_command_check.py', 'TemplateTreeExcludesGateArtifactsTest',
+     'test_gate_p6_and_p7_are_absent_from_the_claim_set_for_a_different_reason'),
+    ('test_conformance_run.py', 'CheckTableAlignmentTest',
+     'test_all_seven_columns_are_five_entries_long'),
+    ('test_handover_epilogue_bullet.py', 'EpilogueOpenBulletTest',
+     'test_104_files_carry_the_disambiguated_wording'),
+    ('test_heredoc_interpolation_scan.py', 'ClassificationCountsTest',
+     'test_classification_counts'),
+    ('test_instinct_registers_agree.py', 'ClassificationCountsTest',
+     'test_classification_counts'),
+    ('test_pin_inventory.py', 'MarkerBindsToOneAssertionTest',
+     'test_a_marker_covers_only_the_assertion_it_sits_on'),
+    ('test_pin_inventory.py', 'PatternLimitsTest',
+     'test_a_declared_side_computed_from_a_register_is_not_reached'),
+    ('test_pin_inventory.py', 'PinSiteIdentityTest',
+     'test_the_identity_does_not_depend_on_the_interpreter'),
+    ('test_platform_conditional_skip_budget.py', 'PlatformConditionalSkipBudgetTest',
+     'test_no_unregistered_skip_decorator_file_exists'),
+    ('test_quality_scan.py', 'CompletedHandlersBindingTest',
+     'test_both_dicts_are_pinned_at_4_entries'),
+    ('test_quality_scan.py', 'SkipDirsDefinitionsStayEqualTest',
+     'test_both_skip_dirs_definitions_are_identical'),
+    ('test_quality_scan_sast_patterns.py', 'MissingKeyPositionDependentTruncationTest',
+     'test_breaking_the_last_rule_in_dict_order_loses_only_the_tail'),
+    ('test_quality_scan_sast_patterns.py', 'MissingKeyPositionDependentTruncationTest',
+     'test_control_finds_both_lines'),
+    ('test_quality_scan_sast_patterns.py', 'PerRulePositiveFixtureTest',
+     'test_each_rule_fires_on_its_own_fixture'),
+    ('test_quality_scan_sast_patterns.py', 'TruncationCapTest',
+     'test_more_than_50_matches_are_capped_plus_one_truncation_marker'),
+    ('test_quality_scan_sast_patterns.py', 'TruncationCapTest',
+     'test_the_50_real_findings_preceding_the_marker_are_unaffected'),
+    ('workitems/test_youtrack.py', 'YouTrackCreateRollbackTest',
+     'test_create_does_not_delete_when_initial_state_is_accepted'),
+})
+
+# Markers that name no pin-shaped assertion at all. LEGAL, and the register is
+# here so the population is visible rather than merely permitted: a marker must
+# be allowed on a pin `find_sites` cannot see (boundary clause gap 8), and both
+# entries below are exactly that. Nothing enforces marker-implies-site and
+# nothing should -- but an unbound marker is also what a MISPLACED marker looks
+# like from here, so the two have to be told apart by a person, once, and
+# recorded.
+UNBOUND_MARKERS = frozenset({
+    ('test_pin_inventory.py', 'set', 'fixture-corpus-exclusion'),
+    ('test_pin_inventory.py', 'set', 'origin-tracking-form-table'),
+})
+
+
+class PinSiteIdentityTest(unittest.TestCase):
+    """The unit of the inventory is one ASSERTION, and its identity carries no
+    line number.
+
+    Both halves matter and they pull against each other, which is why they are
+    tested together. Making the unit finer is easy with a line number and
+    useless: `test_external_tool_exit_status.py:1173-1178` records the same
+    change measured both ways, 7 additions / 4 removals line-bearing against
+    3 / 0 line-free. `subject_of` is the alternative that keeps the finer unit
+    without buying the churn back.
+    """
+
+    TWO_SUBJECTS = (
+        "from pathlib import Path\n"
+        "REPO = Path(__file__).resolve().parents[2]\n"
+        "class T:\n"
+        "    def test_two(self):\n"
+        "        names = sorted(p.name for p in REPO.glob('*.md'))\n"
+        "        self.assertEqual(7, len(names))\n"
+        "        self.assertEqual(['a.md'], names)\n"
+    )
+
+    def test_two_assertions_in_one_method_are_two_sites(self):
+        """Constructed input, so not a pin; carried in PENDING (T4)."""
+        sites = sites_from_source(self.TWO_SUBJECTS, "probe.py")
+        self.assertEqual(2, len(sites))
+        assert_set_matches(
+            self,
+            {("probe.py", "T", "test_two", "len+names:call"),
+             ("probe.py", "T", "test_two", "names:name")},
+            {s.key() for s in sites},
+            "the two sites of one method",
+        )
+
+    def test_an_inserted_line_does_not_move_any_identity(self):
+        """The property a line number cannot have. An ORDINAL within the
+        method would pass a weaker version of this test -- inserting ABOVE the
+        method leaves ordinals alone -- and fail the sibling below, which
+        inserts a whole assertion BETWEEN the two sites."""
+        before = {s.key() for s in sites_from_source(self.TWO_SUBJECTS, "probe.py")}
+        shifted = self.TWO_SUBJECTS.replace(
+            "class T:\n", "# an unrelated comment\nclass T:\n")
+        after = {s.key() for s in sites_from_source(shifted, "probe.py")}
+        assert_set_matches(self, before, after, "the site identities")
+
+    def test_an_assertion_inserted_between_two_sites_moves_neither(self):
+        """The case that separates this identity from an ordinal. A third
+        pin-shaped assertion wedged between the two existing ones is one
+        ADDITION and zero removals; with an ordinal it would be one addition
+        and one removal, which is the churn the line-free rule exists to
+        avoid."""
+        before = {s.key() for s in sites_from_source(self.TWO_SUBJECTS, "probe.py")}
+        wedged = self.TWO_SUBJECTS.replace(
+            "        self.assertEqual(['a.md'], names)\n",
+            "        self.assertEqual(3, len(set(names)))\n"
+            "        self.assertEqual(['a.md'], names)\n")
+        after = {s.key() for s in sites_from_source(wedged, "probe.py")}
+        self.assertEqual(set(), before - after, "an insertion removed a site")
+        self.assertEqual(1, len(after - before))
+
+    def test_every_site_in_the_corpus_has_a_unique_identity(self):
+        """Uniqueness is what makes the identity usable as a key at all. It is
+        not free: the bare set of names read by the measured expression
+        collided five times over this corpus (`len(ns['COMPLETED'])` against
+        `len(ns['HANDLERS'])`, `len(found)` against
+        `len(found[0].assert_linenos)`, ...), which is why `subject_of` also
+        carries attribute names and constant subscript keys."""
+        keys = [s.key() for s in all_sites()]
+        self.assertEqual(
+            len(keys), len(set(keys)),
+            "two pin sites share one identity; PENDING cannot name them "
+            "apart: {}".format(sorted(k for k in keys if keys.count(k) > 1)),
+        )
+
+    def test_the_identity_does_not_depend_on_the_interpreter(self):
+        """`ast.unparse` was the obvious way to render the subject and is the
+        wrong one: its output is interpreter-dependent. 3.9 writes a
+        comprehension's tuple target parenthesised and 3.12+ does not, which
+        over this corpus differs for eleven operands -- one of them a live pin
+        site (test_bsd_gnu_portability.py:1923). CI is pinned to 3.11 and the
+        machine that writes PENDING is not, so an interpreter-dependent
+        identity goes stale on one and not on the other.
+
+        Tested on the shape that actually differs, rather than by asserting a
+        version number: whatever this interpreter does with the target, the
+        subject must be the same."""
+        source = (
+            "from pathlib import Path\n"
+            "REPO = Path(__file__).resolve().parents[2]\n"
+            "PAIRS = (('a.md', 1),)\n"
+            "class T:\n"
+            "    def test_pairs(self):\n"
+            "        found = {(n, len(list(REPO.glob(n)))) for n, _v in PAIRS}\n"
+            "        self.assertEqual({('a.md', 1)}, found)\n"
+        )
+        sites = sites_from_source(source, "probe.py")
+        self.assertEqual(1, len(sites))
+        self.assertEqual("found:name", sites[0].subject)
+
+    def test_the_subject_is_a_token_set_and_not_a_rendering(self):
+        """The two ways `subject_of` is deliberately not injective, as a check
+        rather than as a sentence in its docstring (code review, T2c).
+
+        Both are latent: neither has an instance in the corpus, and neither can
+        misbind a marker silently -- the failure mode of both is two sites
+        sharing one key, which
+        `test_every_site_in_the_corpus_has_a_unique_identity` reports over the
+        whole corpus. Pinned here so that a later sharpening of the renderer is
+        a decision someone makes, not a side effect they discover.
+
+        Each case carries a control that keeps the property being given up, so
+        a renderer that collapsed EVERYTHING would fail the second half.
+        """
+        def subject(expression):
+            return subject_of(ast.parse(expression, mode="eval").body)
+
+        # (a) a token set carries no order.
+        self.assertEqual(subject("f(a, b)"), subject("f(b, a)"))
+        self.assertEqual(subject("a - b"), subject("b - a"))
+        self.assertNotEqual(
+            subject("f(a, b)"), subject("f(a, c)"),
+            "control: a different NAME must still be a different subject")
+
+        # (b) the bound-name subtraction is scope-blind: `x` is subtracted
+        #     everywhere because it is a comprehension target somewhere.
+        self.assertEqual("sum+y:binop", subject("sum(x for x in y) + x"))
+        self.assertEqual(
+            "sum+x+y:binop", subject("sum(z for z in y) + x"),
+            "control: the free `x` is kept when it does not collide with the "
+            "comprehension target -- the loss above is the collision, not a "
+            "blanket drop of free names")
+
+    def test_the_anchor_method_is_two_sites_with_different_subjects(self):
+        """The live case the whole tranche is for.
+
+        `ExternalToolExitStatusTest.test_classification_counts` pins a COUNT
+        (`assertEqual(161, len(invocations))`) on one line and a MEMBERSHIP
+        register (`assertEqual({...}, by_disposition)`) on the next. Before
+        T2c they were one record; a marker on that record would have had to
+        name one group for both, and T3/T4 read that group.
+        """
+        rel = "test_external_tool_exit_status.py"
+        found = [s for s in find_sites(TESTS_DIR / rel, rel)
+                 if s.class_name == "ExternalToolExitStatusTest"
+                 and s.method_name == "test_classification_counts"]
+        self.assertEqual(2, len(found))
+        self.assertEqual({"scalar", "collection"},
+                         {s.declared_shape for s in found})
+        self.assertEqual(2, len({s.subject for s in found}))
+
+
+class MarkerBindsToOneAssertionTest(unittest.TestCase):
+    """A marker names the assertion it stands over -- not the method.
+
+    The predecessor rule asked whether any marker fell inside the METHOD's
+    span. One marker therefore vouched for every pin-shaped assertion in that
+    method, including one of a different declared shape, and the group it named
+    became a false statement at the site where T3 and T4 read it.
+    """
+
+    def test_a_marker_covers_only_the_assertion_it_sits_on(self):
+        """The mechanism, on a constructed method with two subjects.
+
+        Constructed input, so not a pin; carried in PENDING (T4)."""
+        source = PinSiteIdentityTest.TWO_SUBJECTS.replace(
+            "        self.assertEqual(7, len(names))\n",
+            "        self.assertEqual(7, len(names))  # " + "pin: floor probe-count\n")
+        sites = sites_from_source(source, "probe.py")
+        bound, unbound = bind_markers(sites, _markers_in_source(source))
+        self.assertEqual([], unbound)
+        self.assertEqual([("probe.py", "T", "test_two", "len+names:call")],
+                         sorted(bound))
+        self.assertEqual(
+            [("probe.py", "T", "test_two", "names:name")],
+            sorted(s.key() for s in sites if s.key() not in bound),
+            "the sibling assertion must stay uncovered -- that is the whole "
+            "difference between T2c and its predecessor",
+        )
+
+    def test_a_marker_on_the_line_above_binds_to_the_assertion_below(self):
+        """The second accepted placement. Every one of the 22 markers in the
+        corpus today is a trailing comment on its assertion's own first line,
+        so without this test the "line directly above" branch would be code
+        nothing exercises."""
+        source = PinSiteIdentityTest.TWO_SUBJECTS.replace(
+            "        self.assertEqual(['a.md'], names)\n",
+            "        # " + "pin: set probe-names\n"
+            "        self.assertEqual(['a.md'], names)\n")
+        sites = sites_from_source(source, "probe.py")
+        bound, unbound = bind_markers(sites, _markers_in_source(source))
+        self.assertEqual([], unbound)
+        self.assertEqual([("probe.py", "T", "test_two", "names:name")],
+                         sorted(bound))
+
+    def test_a_marker_naming_no_assertion_is_reported_and_not_dropped(self):
+        """A marker on a site `find_sites` cannot see is legal (gap 8), so
+        `bind_markers` returns it instead of failing. Silently discarding it
+        would also silently discard a misplaced one."""
+        source = ("class T:\n"
+                  "    def test_nothing(self):\n"
+                  "        pass  # " + "pin: set stray-id\n")
+        bound, unbound = bind_markers(sites_from_source(source, "probe.py"),
+                                      _markers_in_source(source))
+        self.assertEqual({}, bound)
+        self.assertEqual([("probe.py", 3, "set", "stray-id")], unbound)
+
+    def test_the_unbound_markers_in_the_corpus_are_the_registered_ones(self):
+        """The live half. Both entries sit on gap-8 sites -- a declared side
+        computed from a register, which carries a marker and is not a
+        candidate. Registered rather than merely tolerated, because an unbound
+        marker and a MISPLACED marker look identical from here."""
+        _bound, unbound = bind_markers(all_sites(), all_markers())
+        assert_set_matches(  # pin: set unbound-markers
+            self, UNBOUND_MARKERS,
+            {(rel, group, pin_id) for rel, _lineno, group, pin_id in unbound},
+            "the set of `# pin:` markers naming no pin-shaped assertion",
+        )
+
+
+class DeclaredShapeDivergenceTest(unittest.TestCase):
+    """"More than one subject" and "more than one subject of a different kind"
+    are two different findings, and only the second one is a problem.
+
+    The distinction is the reason T2c is not a rewrite of the corpus. 22
+    methods carry several pin-shaped assertions that all declare the same
+    shape; splitting them would be accounting work with no gain in what the
+    inventory can say, and the PO ruled it out. The five that DO diverge are
+    the ones a single marker could not describe truthfully.
+
+    `declared_shape` is deliberately coarser than a group: scalar against
+    collection. It is the one property the four `PIN_GROUPS` disagree about
+    that can be derived without doing the classification -- a `set` pin's
+    declared side IS the collection, a count or a floor is a scalar -- and
+    guessing anything finer here would put the same kind of false statement in
+    the mechanism that a wrong marker puts at a site.
+    """
+
+    def test_a_same_shape_pair_is_not_a_divergence(self):
+        """The negative control. Without it a discriminator that simply
+        reported every multi-assertion method would pass the positive half,
+        and 22 methods would be dragged into a rewrite for nothing."""
+        source = PinSiteIdentityTest.TWO_SUBJECTS.replace(
+            "        self.assertEqual(7, len(names))\n",
+            "        self.assertEqual(['b.md'], sorted(names))\n")
+        sites = sites_from_source(source, "probe.py")
+        self.assertEqual(2, len(sites), "the control needs two sites to be one")
+        self.assertEqual([("probe.py", "T", "test_two")],
+                         methods_with_multiple_sites(sites))
+        self.assertEqual([], methods_with_divergent_declared_shapes(sites))
+
+    def test_a_scalar_against_a_collection_is_a_divergence(self):
+        """The positive control, on the same two-assertion shape."""
+        sites = sites_from_source(PinSiteIdentityTest.TWO_SUBJECTS, "probe.py")
+        self.assertEqual([("probe.py", "T", "test_two")],
+                         methods_with_divergent_declared_shapes(sites))
+
+    def test_the_divergent_methods_in_the_corpus_are_the_registered_ones(self):
+        """The live half of the positive control."""
+        assert_set_matches(  # pin: set divergent-shape-methods
+            self, DIVERGENT_SHAPE_METHODS,
+            set(methods_with_divergent_declared_shapes(all_sites())),
+            "the methods whose pin-shaped assertions disagree on their shape",
+        )
+
+    def test_the_same_shape_multi_site_methods_stay_silent(self):
+        """The live half of the NEGATIVE control, and the one that would go
+        red if the discriminator were ever widened to mere multiplicity: this
+        set would collapse to empty and name all 22 as gone.
+
+        It is also the record of what T2c did NOT touch. None of these methods
+        gained, lost or moved a marker."""
+        sites = all_sites()
+        silent = (set(methods_with_multiple_sites(sites))
+                  - set(methods_with_divergent_declared_shapes(sites)))
+        assert_set_matches(  # pin: set same-shape-multi-site-methods
+            self, SAME_SHAPE_MULTI_SITE_METHODS, silent,
+            "the multi-assertion methods that carry only one declared shape",
+        )
+
+    def test_every_marked_multi_site_method_carries_a_marker_per_assertion(self):
+        """What the conversion actually moved, as a check rather than as a
+        sentence in a report: nothing.
+
+        Measured before the change and pinned after it. Every marker in this
+        corpus is a trailing comment on its own assertion's first line, so the
+        three multi-assertion methods that carry markers were already marked
+        per assertion; the method-wide rule had never in fact been used to
+        cover a second subject. Had even one been covered that way, its
+        sibling would appear here and the tranche would have had to write a
+        marker into a foreign test module."""
+        sites = all_sites()
+        bound, _unbound = bind_markers(sites, all_markers())
+        marked_methods = {key[:3] for key in bound}
+        half_marked = sorted(s.key() for s in sites
+                             if s.method_key() in marked_methods
+                             and s.key() not in bound)
+        self.assertEqual(
+            [], half_marked,
+            "assertion(s) inside a method that carries a marker, but with no "
+            "marker of their own. Under the pre-T2c rule these were covered "
+            "by a sibling's marker:\n  {}".format(
+                "\n  ".join(map(str, half_marked))),
+        )

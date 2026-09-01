@@ -10,8 +10,10 @@ Three things live here:
 
 * `PIN_GROUPS` + `MARKER_RE` -- the marker vocabulary a pin uses to name
   itself at its own site, per ADR-0012 obligation 1.
-* `find_candidates` -- the AST-derived population of assertions that LOOK like
-  pins, so a pin that never named itself can still be found and reported.
+* `find_sites` -- the AST-derived population of assertions that LOOK like
+  pins, so a pin that never named itself can still be found and reported. Its
+  unit is the ASSERTION, not the method around it (WI-0133 T2c); `bind_markers`
+  says which assertion a marker names.
 * `assert_set_matches` -- the house set-comparison idiom, generalised.
 
 ## The marker
@@ -97,41 +99,168 @@ class Marker:
         self.pin_id = pin_id
 
     def key(self):
-        """Line-free identity -- see find_candidates' docstring."""
+        """Line-free identity -- see `subject_of`."""
         return (self.rel, self.group, self.pin_id)
 
     def __repr__(self):
         return "Marker{}".format((self.rel, self.lineno, self.group, self.pin_id))
 
 
-class PinCandidate:
-    """An assertion shaped like a pin, identified WITHOUT a line number.
+# The outermost node of a measured expression, as a stable word. It is what
+# separates `len(names)` from `names`: the same name, a different measurement.
+# Rendered from the node TYPE rather than from `ast.unparse`, and the
+# difference is not stylistic -- see `subject_of`.
+SUBJECT_TAGS = {
+    ast.Attribute: "attr", ast.BinOp: "binop", ast.BoolOp: "boolop",
+    ast.Call: "call", ast.Compare: "compare", ast.Constant: "const",
+    ast.Dict: "dict", ast.DictComp: "dictcomp", ast.GeneratorExp: "genexp",
+    ast.IfExp: "ifexp", ast.JoinedStr: "fstring", ast.Lambda: "lambda",
+    ast.List: "list", ast.ListComp: "listcomp", ast.Name: "name",
+    ast.Set: "set", ast.SetComp: "setcomp", ast.Starred: "starred",
+    ast.Subscript: "item", ast.Tuple: "tuple", ast.UnaryOp: "unaryop",
+}
 
-    A line-bearing identity turns every insertion above a site into one removal
-    plus one addition; the same change measured both ways gave 7 additions and
-    4 removals line-bearing versus 3 and 0 line-free (recorded in
-    test_external_tool_exit_status.py:1173-1178). `lineno`/`end_lineno` are
-    kept for matching a marker to the method that carries it, and are never
-    part of `key()`.
+
+def subject_of(expr):
+    """A line-free name for WHAT one assertion measures (WI-0133 T2c).
+
+    Since T2c a marker belongs to an ASSERTION, not to the method around it,
+    so the identity of a pin site has to separate two assertions inside one
+    method -- and it still must not contain a line number. The lesson that
+    forbids the line is recorded in test_external_tool_exit_status.py:1173-1178:
+    the same change measured both ways gave 7 additions / 4 removals with a
+    line-bearing identity and 3 / 0 without, because every insertion above a
+    site reads as one removal plus one addition.
+
+    The fourth component is therefore the measured expression itself, rendered
+    as a sorted token set plus the kind of its outermost node:
+
+        len(invocations)  ->  "invocations+len:call"
+        by_disposition    ->  "by_disposition:name"
+
+    Why this is line-free AND stable, which are two different claims:
+
+    * **Line-free**: it is derived from the expression, not from its position.
+      Inserting a line, a docstring or a whole sibling assertion above a site
+      leaves it untouched. An ORDINAL within the method would also avoid the
+      word "line" while keeping exactly the defect -- inserting an assertion
+      renumbers every one below it -- so an ordinal was rejected.
+    * **Sensitive in the right place**: it moves when the assertion's measured
+      side is edited. That is the correct sensitivity, not noise: the site
+      being measured has changed, and a PENDING entry going stale is the
+      signal someone should look. The line number's defect is that it moves
+      for edits that are not about the site at all.
+
+    Why the tokens are rendered here rather than by `ast.unparse`, which would
+    be one line: `ast.unparse` output is INTERPRETER-DEPENDENT. Measured over
+    this corpus on 3.9.6 and on 3.14.4, eleven operands differ -- 3.9 writes
+    `{path for (path, _line, _rule, _cat) in exempted}` and 3.12+ writes the
+    same target without parentheses -- and one of them is a live pin site
+    (test_bsd_gnu_portability.py:1923). An identity that changes with the
+    interpreter would make PENDING go stale on CI (pinned to 3.11) while
+    staying green on the machine that wrote it. The token rendering below uses
+    only node types, `Attribute.attr` and `Constant.value`, and produced
+    byte-identical output on both interpreters.
+
+    Tokens, and why each is needed:
+
+    * free `ast.Name` ids -- the names the expression reads. Comprehension and
+      lambda targets are subtracted: renaming a loop variable is not a change
+      of subject. `self` is dropped, it names no subject.
+    * `.attr` for every attribute access -- without it
+      `len(found)` and `len(found[0].assert_linenos)` collide.
+    * `[<const>]` for every constant subscript key -- without it
+      `len(ns['COMPLETED'])` and `len(ns['HANDLERS'])` collide.
+
+    Measured over the whole corpus: 174 sites, 174 distinct keys. The bare
+    name set alone collided 5 times; adding the two token kinds above removed
+    all five.
+
+    TWO WAYS THIS IS DELIBERATELY NOT INJECTIVE, both latent today and both
+    pinned by `test_the_subject_is_a_token_set_and_not_a_rendering`:
+
+    * a TOKEN SET carries no order, so `f(a, b)` and `f(b, a)` -- and `a - b`
+      and `b - a` -- render the same. Rendering order would fix it and would
+      re-introduce the interpreter dependence the token set exists to avoid.
+    * the bound-name subtraction is SCOPE-BLIND: `bound` and `tokens` are both
+      collected over the whole expression, so a name that is a comprehension
+      target in one sub-expression is subtracted even where it occurs free in
+      another (`sum(x for x in y) + x` loses `x` entirely).
+
+    Neither can misbind a marker silently. The failure mode of both is two
+    sites sharing one key, and
+    `test_every_site_in_the_corpus_has_a_unique_identity` fails loudly on
+    exactly that over the whole corpus. Sharpening the renderer is the answer
+    if that test ever goes red -- not before, because every sharpening costs
+    stability against edits that are not about the subject.
+    """
+    bound = set()
+    for node in ast.walk(expr):
+        if isinstance(node, ast.comprehension):
+            bound.update(_bound_names(node.target))
+        elif isinstance(node, ast.Lambda):
+            arguments = node.args
+            for group in (getattr(arguments, "posonlyargs", []),
+                          arguments.args, arguments.kwonlyargs):
+                bound.update(argument.arg for argument in group)
+            for single in (arguments.vararg, arguments.kwarg):
+                if single is not None:
+                    bound.add(single.arg)
+    tokens = set()
+    for node in ast.walk(expr):
+        if isinstance(node, ast.Name):
+            tokens.add(node.id)
+        elif isinstance(node, ast.Attribute):
+            tokens.add("." + node.attr)
+        elif isinstance(node, ast.Subscript):
+            key = node.slice
+            if isinstance(key, ast.Constant) and isinstance(key.value, (str, int)):
+                tokens.add("[{}]".format(key.value))
+    tokens -= bound
+    tokens.discard("self")
+    tag = SUBJECT_TAGS.get(type(expr), type(expr).__name__.lower())
+    return "{}:{}".format("+".join(sorted(tokens)) or "-", tag)
+
+
+class PinSite:
+    """ONE assertion shaped like a pin, identified WITHOUT a line number.
+
+    Until WI-0133 T2c the unit was the METHOD (`PinSite`), and a method
+    carrying two pin-shaped assertions was one record with a tuple of lines.
+    That made the marker's group statement unresolvable exactly where it is
+    needed: `ExternalToolExitStatusTest.test_classification_counts` pins a
+    count on one line and a membership register on the next, and one marker
+    over both would have to call them the same group. 25 methods in this
+    corpus carry more than one pin-shaped assertion and 4 of those carry two
+    different declared shapes.
+
+    `key()` is (file, class, method, subject) -- see `subject_of` for why the
+    fourth component is the measured expression and not an ordinal.
+    `lineno`/`end_lineno` are the ASSERTION CALL's span, kept so a marker can
+    be bound to the assertion it sits on, and never part of `key()`.
     """
 
-    __slots__ = ("rel", "class_name", "method_name", "lineno", "end_lineno",
-                 "assert_linenos")
+    __slots__ = ("rel", "class_name", "method_name", "subject",
+                 "declared_shape", "lineno", "end_lineno")
 
-    def __init__(self, rel, class_name, method_name, lineno, end_lineno,
-                 assert_linenos):
+    def __init__(self, rel, class_name, method_name, subject, declared_shape,
+                 lineno, end_lineno):
         self.rel = rel
         self.class_name = class_name
         self.method_name = method_name
+        self.subject = subject
+        self.declared_shape = declared_shape
         self.lineno = lineno
         self.end_lineno = end_lineno
-        self.assert_linenos = tuple(assert_linenos)
 
     def key(self):
+        return (self.rel, self.class_name, self.method_name, self.subject)
+
+    def method_key(self):
         return (self.rel, self.class_name, self.method_name)
 
     def __repr__(self):
-        return "PinCandidate{}".format(self.key())
+        return "PinSite{}".format(self.key())
 
 
 # ---------------------------------------------------------------------------
@@ -334,7 +463,7 @@ def _names_used(node):
 
 
 def _module_scope(tree):
-    """(repo_derived_names, declared_constant_names) at module level.
+    """(repo_derived_names, declared_constant_names, declared_shapes).
 
     `declared` = bound to a literal. An EMPTY collection literal still counts:
     `KNOWN_FINDINGS = set()` (test_bsd_gnu_portability.py:1065) is a declared
@@ -363,10 +492,12 @@ def _module_scope(tree):
                 imported.add(alias.asname or alias.name.split(".")[0])
 
     declared = set()
+    declared_shapes = {}
     for name, value in assignments.items():
         is_literal, is_collection, is_nonzero_scalar = _literal_shape(value)
         if is_literal and (is_collection or is_nonzero_scalar):
             declared.add(name)
+            declared_shapes[name] = "collection" if is_collection else "scalar"
 
     repo = {name for name in imported if name not in STDLIB_IMPORT_NAMES}
     changed = True
@@ -386,11 +517,12 @@ def _module_scope(tree):
             if "__file__" in used or (used & repo):
                 repo.add(name)
                 changed = True
-    return repo - declared, declared
+    return repo - declared, declared, declared_shapes
 
 
 def _class_attribute_roots(class_def, repo):
-    """Class-body names that are NOT fixtures: (declared_literals, repo_derived).
+    """Class-body names that are NOT fixtures: (declared_literals,
+    repo_derived, literal_shapes).
 
     Two shapes, both reached through `self` and neither built in `setUp`:
 
@@ -407,6 +539,7 @@ def _class_attribute_roots(class_def, repo):
       ParentStateDiscriminationTest, a real pin, without reporting it as a gap.
     """
     literals = set()
+    literal_shapes = {}
     repo_derived = set()
     for stmt in class_def.body:
         if not isinstance(stmt, ast.Assign):
@@ -415,11 +548,13 @@ def _class_attribute_roots(class_def, repo):
         names = _bound_names_of_targets(stmt.targets)
         if is_literal and (is_collection or is_nonzero_scalar):
             literals.update(names)
+            for name in names:
+                literal_shapes[name] = "collection" if is_collection else "scalar"
             continue
         used = _names_used(stmt.value)
         if used and used <= repo:
             repo_derived.update(names)
-    return literals, repo_derived
+    return literals, repo_derived, literal_shapes
 
 
 def _bound_names_of_targets(targets):
@@ -562,20 +697,49 @@ def _assertion_operands(node):
     return None
 
 
-def _candidates_from_tree(tree, rel):
-    repo, declared = _module_scope(tree)
+def _declared_shape(declared_side, declared_shapes, class_shapes):
+    """"scalar" or "collection" for the DECLARED side of one assertion.
+
+    The coarsest property of a pin that the four `PIN_GROUPS` disagree about,
+    and the only one derivable without doing the classification work itself: a
+    `set` pin's declared side IS the collection, while a count or a floor is a
+    scalar. WI-0133 T2c uses it to tell "a method with two subjects" from "a
+    method with two subjects a single marker could not describe truthfully",
+    which is the distinction the per-assertion rule exists for.
+
+    Deliberately NOT a group. It cannot decide `derived` against `set`, and it
+    is not meant to: the classification is the later tranches' work, and a
+    discriminator that guessed a group here would put the same false statement
+    in the mechanism that a wrong marker puts at a site.
+    """
+    is_literal, is_collection, is_nonzero_scalar = _literal_shape(declared_side)
+    if is_literal and is_collection:
+        return "collection"
+    if is_literal and is_nonzero_scalar:
+        return "scalar"
+    if isinstance(declared_side, ast.Name):
+        return declared_shapes.get(declared_side.id, "other")
+    if (isinstance(declared_side, ast.Attribute)
+            and isinstance(declared_side.value, ast.Name)
+            and declared_side.value.id == "self"):
+        return class_shapes.get(declared_side.attr, "other")
+    return "other"
+
+
+def _sites_from_tree(tree, rel):
+    repo, declared, declared_shapes = _module_scope(tree)
     out = []
     for class_def in ast.walk(tree):
         if not isinstance(class_def, ast.ClassDef):
             continue
-        class_literals, class_repo_attrs = _class_attribute_roots(class_def, repo)
+        class_literals, class_repo_attrs, class_shapes = _class_attribute_roots(
+            class_def, repo)
         for function in class_def.body:
             if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
             if not function.name.startswith("test"):
                 continue
             local_sources = _local_sources(function)
-            hits = []
             for call in ast.walk(function):
                 operands = _assertion_operands(call)
                 if operands is None:
@@ -610,27 +774,121 @@ def _candidates_from_tree(tree, rel):
                         or (is_literal and is_collection and reaches_declared)
                     )
                     if stores_a_value:
-                        hits.append(call.lineno)
+                        out.append(PinSite(
+                            rel, class_def.name, function.name,
+                            subject_of(measured_side),
+                            _declared_shape(declared_side, declared_shapes,
+                                            class_shapes),
+                            call.lineno, call.end_lineno or call.lineno))
                         break
-            if hits:
-                out.append(PinCandidate(
-                    rel, class_def.name, function.name,
-                    function.lineno, function.end_lineno or function.lineno,
-                    sorted(set(hits))))
     return out
 
 
-def candidates_from_source(source, rel="<source>"):
-    """find_candidates against a source string -- used to test the pattern's
+def sites_from_source(source, rel="<source>"):
+    """find_sites against a source string -- used to test the pattern's
     documented limits against a constructed instance without adding a fixture
     file to the very corpus this module enumerates."""
-    return _candidates_from_tree(ast.parse(source), rel)
+    return _sites_from_tree(ast.parse(source), rel)
 
 
-def find_candidates(path, rel=None):
-    """Every pin-shaped assertion in one file, as PinCandidate records."""
-    return _candidates_from_tree(
+def find_sites(path, rel=None):
+    """Every pin-shaped assertion in one file, as PinSite records."""
+    return _sites_from_tree(
         ast.parse(path.read_text(encoding="utf-8")), rel or path.name)
+
+
+# ---------------------------------------------------------------------------
+# Binding a marker to the assertion it names
+# ---------------------------------------------------------------------------
+
+def bind_markers(sites, markers):
+    """(bound, unbound) -- which assertion each `# pin:` marker names.
+
+    Returns a dict from `PinSite.key()` to the markers on that assertion, and
+    a sorted list of `(rel, lineno, group, pin_id)` for markers that name no
+    pin-shaped assertion at all.
+
+    A MARKER NAMES AN ASSERTION, NOT A METHOD (WI-0133 T2c). Before T2c the
+    completeness check asked only whether some marker fell anywhere inside the
+    method's span, so one marker silently vouched for every pin-shaped
+    assertion in it -- and a group named once for two subjects of different
+    groups is a false statement exactly where the group is consulted.
+
+    Two placements are accepted, and both are the same relation ("the marker
+    stands over this assertion"):
+
+    * INSIDE the assertion's own span, which in this corpus means as a
+      trailing comment on the call's first line
+      (`self.assertEqual(  # pin: <group> <id>`). All 22 markers live today
+      use this form -- measured, not assumed. The example is written with
+      PLACEHOLDERS and not with a real group and id, because `find_markers` is
+      a line regex with no notion of Python strings: a complete marker inside
+      this docstring would be a live, unregistered marker in the corpus this
+      module enumerates. The first draft of this docstring planted one.
+    * on the line DIRECTLY ABOVE the assertion's first line, for an assertion
+      whose first line has no room left.
+
+    The span match wins when both could apply, and the innermost span wins if
+    two assertions were ever nested, so the binding is total and deterministic.
+
+    UNBOUND MARKERS ARE LEGAL AND ARE RETURNED RATHER THAN REJECTED. A marker
+    must be allowed on a pin this scanner cannot see -- gap 8 of the boundary
+    clause is exactly that, and two markers in this corpus sit on such sites.
+    Nothing enforces marker-implies-site and nothing should; returning them
+    makes the set visible so it can be pinned instead of drifting.
+    """
+    by_rel = {}
+    for site in sites:
+        by_rel.setdefault(site.rel, []).append(site)
+
+    bound = {}
+    unbound = []
+    for marker in markers:
+        in_file = by_rel.get(marker.rel, ())
+        containing = sorted(
+            (site for site in in_file
+             if site.lineno <= marker.lineno <= site.end_lineno),
+            key=lambda site: (site.end_lineno - site.lineno, site.lineno))
+        target = containing[0] if containing else None
+        if target is None:
+            below = sorted((site for site in in_file
+                            if site.lineno == marker.lineno + 1),
+                           key=lambda site: site.end_lineno)
+            target = below[0] if below else None
+        if target is None:
+            unbound.append((marker.rel, marker.lineno, marker.group,
+                            marker.pin_id))
+            continue
+        bound.setdefault(target.key(), []).append(marker)
+    return bound, sorted(unbound)
+
+
+def methods_with_multiple_sites(sites):
+    """Sorted (rel, class, method) keys carrying more than one pin-shaped
+    assertion. Mere multiplicity -- NOT a problem on its own."""
+    return sorted(key for key, group in _sites_by_method(sites).items()
+                  if len(group) > 1)
+
+
+def methods_with_divergent_declared_shapes(sites):
+    """Sorted (rel, class, method) keys carrying pin-shaped assertions of MORE
+    THAN ONE declared shape -- the subset of `methods_with_multiple_sites`
+    that a single marker could not describe truthfully.
+
+    The two are kept apart on purpose (WI-0133 T2c, PO). Splitting a method
+    that merely repeats one shape would be work with no gain in what the
+    inventory can say; splitting a method whose subjects disagree about their
+    shape is the whole reason the marker's unit moved to the assertion.
+    """
+    return sorted(key for key, group in _sites_by_method(sites).items()
+                  if len({site.declared_shape for site in group}) > 1)
+
+
+def _sites_by_method(sites):
+    out = {}
+    for site in sites:
+        out.setdefault(site.method_key(), []).append(site)
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -646,10 +904,10 @@ def corpus_files(tests_dir=TESTS_DIR):
             for f in files if f.name != "__init__.py"]
 
 
-def all_candidates(tests_dir=TESTS_DIR):
+def all_sites(tests_dir=TESTS_DIR):
     out = []
     for path, rel in corpus_files(tests_dir):
-        out.extend(find_candidates(path, rel))
+        out.extend(find_sites(path, rel))
     return out
 
 
