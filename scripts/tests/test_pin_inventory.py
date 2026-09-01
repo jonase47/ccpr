@@ -612,6 +612,27 @@ class AssertSetMatchesIsItselfAPinShapeTest(unittest.TestCase):
 # rather than resolved here (PIN_GROUPS was declared ahead of the
 # classification work, see pin_registry.py's docstring). Setting this to
 # ("T2",) is the last step of the tranche that answers it, not of this one.
+#
+# STILL EMPTY AFTER T3's FIRST TRANCHE, and for the same reason plus one more.
+# T3 is cut at MODULE boundaries rather than by a count, so it runs over
+# several passes; the first covered four whole modules
+# (test_absence_only_assertions.py, test_bsd_gnu_portability.py,
+# test_conformance_run.py, test_instinct_registers_agree.py) and left the
+# other four T3 modules untouched. "T3" therefore still names entries this
+# repository intends to remove, which is what an entry in PENDING claims.
+#
+# The count-shaped candidates inside the four covered modules KEEP their T3
+# label rather than moving to a tranche of their own. They are the same
+# population as the entries T2 left behind -- an exact number over a
+# repository-derived population -- and splitting one open question across two
+# labels is the register-drift shape this module exists to catch. Whichever
+# tranche answers the vocabulary question moves all of them at once, and that
+# is also the moment "T3" may be added here.
+#
+# No count is written here on purpose. The paragraph above records what a
+# hand-written total costs: "T2 left fifteen behind" was true in the METHOD
+# unit and has been false since T2c, and a number in a comment is not derived
+# from the register it sits above.
 LANDED_TRANCHES = ()
 
 DECLARED_TRANCHES = ("T2", "T3", "T4")
@@ -625,13 +646,19 @@ DECLARED_TRANCHES = ("T2", "T3", "T4")
 # NAMED_LIVE_PINS above (they are read and confirmed, so they only need a
 # marker); T3 = every other candidate inside a module that already carries a
 # named live pin (its neighbours, judged in the same pass); T4 = the rest.
+#
+# The tranche label is a property of that DERIVATION, not of the site. A
+# candidate discovered later inside one of the eight T3 modules is T3 for the
+# same reason, and a candidate of the identical shape in a module with no
+# named live pin is T4. Reading a per-tranche count as "how much work is
+# left" therefore measures the assignment rule, not the population -- which
+# is exactly how "33 T3 entries" survived two commits past being true (T2b
+# added one method, T2c re-cut the unit from the method to the assertion; the
+# same 34 methods now carry 38 assertions).
 PENDING = frozenset({
     ('test_absence_only_assertions.py', 'ClassificationCountsTest',
      'test_classification_counts',
      'len+recs:call', 'T2'),
-    ('test_absence_only_assertions.py', 'NoStaleKnownFindingsTest',
-     'test_no_stale_known_findings',
-     'stale:name', 'T3'),
     ('test_agent_frontmatter.py', 'AgentCountTest',
      'test_agent_file_count_is_pinned',
      'files+len:call', 'T2'),
@@ -664,21 +691,9 @@ PENDING = frozenset({
     ('test_bsd_gnu_portability.py', 'ClassificationCountsTest',
      'test_classification_counts',
      'len+scanned_files:call', 'T2'),
-    ('test_bsd_gnu_portability.py', 'EveryMarkerNamesARegisteredCategoryTest',
-     'test_every_category_in_the_tree_is_registered',
-     'unregistered:name', 'T3'),
-    ('test_bsd_gnu_portability.py', 'EveryMarkerNamesARegisteredCategoryTest',
-     'test_every_registered_category_is_used',
-     'EXEMPTION_CATEGORIES+set+sorted+used:call', 'T3'),
-    ('test_bsd_gnu_portability.py', 'HistoricalMktempTemplatesAreFlaggedTest',
-     'test_the_current_run_tests_carries_no_mktemp_finding',
-     '.rule+MKTEMP_RULE_NAME+current:listcomp', 'T3'),
     ('test_bsd_gnu_portability.py', 'ScannedFilesCoverTheShippedScopeTest',
      'test_an_empty_scope_is_never_a_pass',
      'files+len:call', 'T2'),
-    ('test_bsd_gnu_portability.py', 'ScannedFilesCoverTheShippedScopeTest',
-     'test_scanned_files_cover_the_shipped_scope',
-     'names:name', 'T3'),
     ('test_check_all.py', 'CompareAgainstZeroInsteadOfBaselineRedProofTest',
      'test_comparing_against_exit_zero_breaks_the_two_by_design_nonzero_checks',
      '.count+needle+original:call', 'T3'),
@@ -760,27 +775,12 @@ PENDING = frozenset({
     ('test_conformance_run.py', 'CheckTableAlignmentTest',
      'test_all_seven_columns_are_five_entries_long',
      'len+values:call', 'T3'),
-    ('test_conformance_run.py', 'CheckTableUncoveredColumnsValuesTest',
-     'test_check_arg_shape_is_a_three_two_split',
-     '[CHECK_ARG_SHAPE]+parse_full_check_table:item', 'T3'),
-    ('test_conformance_run.py', 'CheckTableUncoveredColumnsValuesTest',
-     'test_check_c2_exempt_only_anchor_is_exempt',
-     '[CHECK_C2_EXEMPT]+parse_full_check_table:item', 'T3'),
-    ('test_conformance_run.py', 'CheckTableUncoveredColumnsValuesTest',
-     'test_check_has_summary_line_only_anchor_lacks_one',
-     '[CHECK_HAS_SUMMARY_LINE]+parse_full_check_table:item', 'T3'),
-    ('test_conformance_run.py', 'CheckTableUncoveredColumnsValuesTest',
-     'test_check_subcmd_only_anchor_carries_a_subcommand',
-     '[CHECK_SUBCMD]+parse_full_check_table:item', 'T3'),
     ('test_conformance_run.py', 'RequiredSkeletonLineCountPinTest',
      'test_anchor_branch_requires_two_lines',
      '[anchor]+len+parse_rule3_required_lines:call', 'T3'),
     ('test_conformance_run.py', 'RequiredSkeletonLineCountPinTest',
      'test_generic_branch_requires_three_lines',
      '[generic]+len+parse_rule3_required_lines:call', 'T3'),
-    ('test_conformance_run.py', 'RequiredSkeletonLineCountPinTest',
-     'test_the_required_lines_are_the_documented_ones',
-     'parse_rule3_required_lines:call', 'T3'),
     ('test_external_tool_exit_status.py', 'ExternalToolExitStatusTest',
      'test_classification_counts',
      'by_disposition:name', 'T2'),
@@ -814,12 +814,6 @@ PENDING = frozenset({
     ('test_instinct_registers_agree.py', 'ClassificationCountsTest',
      'test_classification_counts',
      'len+sampler_ids:call', 'T2'),
-    ('test_instinct_registers_agree.py', 'ExclusionRegressionPinTest',
-     'test_mention_only_ids_are_not_parsed_as_index_entries',
-     'leaked:name', 'T3'),
-    ('test_instinct_registers_agree.py', 'ExclusionRegressionPinTest',
-     'test_mention_only_ids_are_not_parsed_as_sampler_entries',
-     'leaked:name', 'T3'),
     ('test_live_status_claims.py', 'DriftedRegisterHistoricalRedProofTest',
      'test_the_same_file_in_the_working_tree_is_clean',
      'DRIFTED_REGISTER_PATH+current+scan_text:call', 'T4'),
@@ -1159,6 +1153,8 @@ class PinMarkerInventoryTest(unittest.TestCase):
         assert_set_matches(  # pin: set pin-marker-inventory
             self,
             {("test_absence_only_assertions.py", "floor", "tests-corpus-files"),
+             ("test_absence_only_assertions.py", "set",
+              "absence-only-known-findings"),
              ("test_absence_only_assertions.py", "set", "parent-state-flagged"),
              ("test_absence_only_assertions.py", "set",
               "parent-state-not-flagged"),
@@ -1166,8 +1162,19 @@ class PinMarkerInventoryTest(unittest.TestCase):
              ("test_bsd_gnu_portability.py", "set",
               "portability-exempted-sites"),
              ("test_bsd_gnu_portability.py", "set",
+              "portability-exemption-categories"),
+             ("test_bsd_gnu_portability.py", "set",
               "portability-known-findings"),
+             ("test_bsd_gnu_portability.py", "set",
+              "portability-scanned-scope"),
+             ("test_bsd_gnu_portability.py", "set", "run-tests-mktemp-free"),
+             ("test_conformance_run.py", "set", "check-table-arg-shape"),
+             ("test_conformance_run.py", "set", "check-table-c2-exempt"),
              ("test_conformance_run.py", "set", "check-table-column-names"),
+             ("test_conformance_run.py", "set",
+              "check-table-has-summary-line"),
+             ("test_conformance_run.py", "set", "check-table-subcmd"),
+             ("test_conformance_run.py", "set", "rule3-required-lines"),
              ("test_docs_dotfile_gitignore_coverage.py", "set",
               "docs-dotfile-block-patterns"),
              ("test_docs_dotfile_gitignore_coverage.py", "set",
@@ -1176,6 +1183,10 @@ class PinMarkerInventoryTest(unittest.TestCase):
               "external-tool-scanned-scripts"),
              ("test_heredoc_interpolation_scan.py", "set",
               "heredoc-known-findings"),
+             ("test_instinct_registers_agree.py", "set",
+              "mention-only-ids-index"),
+             ("test_instinct_registers_agree.py", "set",
+              "mention-only-ids-sampler"),
              ("test_pin_inventory.py", "derived", "fixture-corpus-site-counts"),
              ("test_pin_inventory.py", "set", "divergent-shape-methods"),
              ("test_pin_inventory.py", "set", "fixture-corpus-exclusion"),
@@ -2129,10 +2140,15 @@ class MarkerBindsToOneAssertionTest(unittest.TestCase):
         )
 
     def test_a_marker_on_the_line_above_binds_to_the_assertion_below(self):
-        """The second accepted placement. Every one of the 22 markers in the
-        corpus today is a trailing comment on its assertion's own first line,
-        so without this test the "line directly above" branch would be code
-        nothing exercises."""
+        """The second accepted placement. Every marker in the corpus today is
+        a trailing comment on its assertion's own first line, so without this
+        test the "line directly above" branch would be code nothing
+        exercises.
+
+        Deliberately without a count: the number that used to stand here was
+        wrong before it was stale. See `pin_registry.bind_markers`' docstring
+        for the measurement and for why the total was removed rather than
+        corrected."""
         source = PinSiteIdentityTest.TWO_SUBJECTS.replace(
             "        self.assertEqual(['a.md'], names)\n",
             "        # " + "pin: set probe-names\n"

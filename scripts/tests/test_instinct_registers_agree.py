@@ -193,11 +193,19 @@ class ExclusionRegressionPinTest(unittest.TestCase):
     `G-\\d{3}` mentions (e.g. the ten IDs both files reference in bold
     prose under "Intentionally NOT...") instead of structural entries.
     See mutation (c) in the module docstring: a mentions-grep parser turns
-    both assertions here red."""
+    both assertions here red.
+
+    WI-0133 T3: two `set` pins, one id each. The pinned value is the whole
+    leaked collection rather than a count of it, so the failure message can
+    name which ID leaked -- the property the group claims. Two ids and not
+    one shared id, because the two assertions measure two different parsers
+    over two different files (instincts.md and templates/
+    STARTER_INSTINCTS.md); a shared id would let one file's regression be
+    read as the other's."""
 
     def test_mention_only_ids_are_not_parsed_as_index_entries(self):
         leaked = sorted(EXCLUDED_MENTION_ONLY_IDS & set(read_index_entries()))
-        self.assertEqual(
+        self.assertEqual(  # pin: set mention-only-ids-index
             [],
             leaked,
             "instincts.md's parser picked up a bold-prose-only mention as "
@@ -206,7 +214,7 @@ class ExclusionRegressionPinTest(unittest.TestCase):
 
     def test_mention_only_ids_are_not_parsed_as_sampler_entries(self):
         leaked = sorted(EXCLUDED_MENTION_ONLY_IDS & set(read_sampler_entries()))
-        self.assertEqual(
+        self.assertEqual(  # pin: set mention-only-ids-sampler
             [],
             leaked,
             "templates/STARTER_INSTINCTS.md's parser picked up a "

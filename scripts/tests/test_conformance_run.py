@@ -1581,7 +1581,16 @@ class RequiredSkeletonLineCountPinTest(unittest.TestCase):
     parse_full_check_table / _parse_paren_array above) rather than
     hardcoded as a bare 2/3 -- a line added to either branch later moves
     this pin and forces a deliberate look, the same standard
-    CheckTableAlignmentTest already holds the seven CHECK_* columns to."""
+    CheckTableAlignmentTest already holds the seven CHECK_* columns to.
+
+    WI-0133 T3: only the third method carries a `# pin:` marker. It is a
+    `set` -- the pinned value is the whole {branch: lines} mapping, so
+    renaming one required line changes the assertion. The two counts above
+    (2 and 3) are exact numbers over a repository-derived population, the
+    shape none of the four registered groups describes truthfully; they
+    stay in test_pin_inventory.py's PENDING until that vocabulary question
+    is decided, rather than being called `floor` (they are equalities, not
+    lower bounds) or `set` (a count cannot see a swap)."""
 
     def test_anchor_branch_requires_two_lines(self):
         self.assertEqual(2, len(parse_rule3_required_lines()["anchor"]))
@@ -1590,7 +1599,7 @@ class RequiredSkeletonLineCountPinTest(unittest.TestCase):
         self.assertEqual(3, len(parse_rule3_required_lines()["generic"]))
 
     def test_the_required_lines_are_the_documented_ones(self):
-        self.assertEqual(
+        self.assertEqual(  # pin: set rule3-required-lines
             {
                 "anchor": ("**Anchors:**", "**Last production-code commit:**"),
                 "generic": ("**Files scanned:**", "**Summary:**", "**Exit:**"),
@@ -2009,19 +2018,32 @@ class CheckTableUncoveredColumnsValuesTest(unittest.TestCase):
     weak alone (list-coverage.md's house-pattern ranking, level 1: a
     hardcoded expectation catches narrowing but proves nothing about
     whether the value actually DRIVES behaviour), paired below with one
-    transposition-proof class per column that supplies the missing half."""
+    transposition-proof class per column that supplies the missing half.
+
+    WI-0133 T3: each of the four is a `set` pin (pin_registry.PIN_GROUPS).
+    The pinned value IS the column -- the whole tuple, position by
+    position -- so swapping two entries inside one column changes the
+    assertion, which is the property the group claims and a count over the
+    same column provably cannot have. One id per column rather than one for
+    the class: the four columns are four independent registers in
+    conformance-run.sh, and a shared id would let a rename in one of them
+    be satisfied by another."""
 
     def test_check_subcmd_only_anchor_carries_a_subcommand(self):
-        self.assertEqual(("", "", "", "", "status"), parse_full_check_table()["CHECK_SUBCMD"])
+        self.assertEqual(  # pin: set check-table-subcmd
+            ("", "", "", "", "status"), parse_full_check_table()["CHECK_SUBCMD"])
 
     def test_check_arg_shape_is_a_three_two_split(self):
-        self.assertEqual(("project", "project", "docs", "docs", "project"), parse_full_check_table()["CHECK_ARG_SHAPE"])
+        self.assertEqual(  # pin: set check-table-arg-shape
+            ("project", "project", "docs", "docs", "project"), parse_full_check_table()["CHECK_ARG_SHAPE"])
 
     def test_check_c2_exempt_only_anchor_is_exempt(self):
-        self.assertEqual(("0", "0", "0", "0", "1"), parse_full_check_table()["CHECK_C2_EXEMPT"])
+        self.assertEqual(  # pin: set check-table-c2-exempt
+            ("0", "0", "0", "0", "1"), parse_full_check_table()["CHECK_C2_EXEMPT"])
 
     def test_check_has_summary_line_only_anchor_lacks_one(self):
-        self.assertEqual(("1", "1", "1", "1", "0"), parse_full_check_table()["CHECK_HAS_SUMMARY_LINE"])
+        self.assertEqual(  # pin: set check-table-has-summary-line
+            ("1", "1", "1", "1", "0"), parse_full_check_table()["CHECK_HAS_SUMMARY_LINE"])
 
 
 class CheckArgShapeTranspositionTest(ConformanceRunTestBase):

@@ -863,8 +863,24 @@ class NoStaleKnownFindingsTest(unittest.TestCase):
             "below would pass vacuously against an empty corpus",
         )
 
+        # WI-0133 T3: a `set` pin over KNOWN_FINDINGS. The pinned value is
+        # the stale collection itself and not a count of it, so the failure
+        # names which baseline entry went stale. `stale` is one direction;
+        # the other (a newly flagged method with neither entry nor marker)
+        # is enforced by EveryAbsenceOnlyTestIsAccountedForTest.test_every_
+        # absence_only_test_is_exempted_or_baselined above, which is why
+        # this one is not the two-marker pair shape
+        # test_bsd_gnu_portability.py's category register uses.
+        #
+        # KNOWN_FINDINGS is currently EMPTY, so the group's "a swap changes
+        # the assertion" cannot be demonstrated here -- an empty collection
+        # has no interior to swap. What was demonstrated is the weaker half
+        # the empty state admits: adding one baseline entry that no longer
+        # matches a flagged method turns this assertion red and names it.
+        # The vacuity itself is guarded by the assertGreater above, not by
+        # this marker.
         stale = sorted(key for key in KNOWN_FINDINGS if key not in currently_flagged)
-        self.assertEqual(
+        self.assertEqual(  # pin: set absence-only-known-findings
             [],
             stale,
             "KNOWN_FINDINGS entry no longer matches a currently-flagged method "

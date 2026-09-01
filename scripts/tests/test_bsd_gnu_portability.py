@@ -1245,10 +1245,19 @@ class HistoricalMktempTemplatesAreFlaggedTest(unittest.TestCase):
         )
 
     def test_the_current_run_tests_carries_no_mktemp_finding(self):
+        """WI-0133 T3: a `set` pin whose pinned collection is empty. The
+        measured side is the live scan of the shipped scripts/run-tests.sh
+        filtered to the mktemp rule; the declared side is the whole
+        collection, not a count of it, so any finding that reappears changes
+        the assertion and the failure names it. There is nothing to swap it
+        against -- an empty collection has no interior -- which is why the
+        group holds here without the two-direction split the sibling
+        register pairs need."""
         current = _scan_text(
             (SCRIPTS_DIR / "run-tests.sh").read_text(), "scripts/run-tests.sh"
         )
-        self.assertEqual([], [f for f in current if f.rule == MKTEMP_RULE_NAME])
+        self.assertEqual(  # pin: set run-tests-mktemp-free
+            [], [f for f in current if f.rule == MKTEMP_RULE_NAME])
 
 
 # --------------------------------------------------------------------------
@@ -1832,11 +1841,26 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
     """Pins the enumeration, mirroring the identically named test in
     test_shell_script_syntax.py / test_heredoc_interpolation_scan.py: a file
     silently dropped from a glob would make this gate blind to it without
-    failing first."""
+    failing first.
+
+    WI-0133 T3: `test_scanned_files_cover_the_shipped_scope` carries the
+    `set` marker -- the pinned value is the file list itself, so one script
+    swapped for another changes the assertion and the failure names both
+    sides. `test_an_empty_scope_is_never_a_pass` below deliberately carries
+    no marker on either of its two assertions. Only ONE of them is in the
+    inventory at all: `assertEqual(29, len(files))`, which pins an exact
+    COUNT over the same repository-derived population -- the shape none of
+    the four registered groups describes truthfully, so it stays in
+    test_pin_inventory.py's PENDING until that vocabulary question is
+    decided. The `assertGreater(len(files), 0)` above it is the floor in
+    substance, but it is not a candidate: its declared side is the literal
+    0, and a zero literal is not a stored value. When the question is
+    answered, the count assertion is the natural `floor` partner for this
+    `set`, under this same id."""
 
     def test_scanned_files_cover_the_shipped_scope(self):
         names = sorted(f.relative_to(REPO_ROOT).as_posix() for f in scanned_files())
-        self.assertEqual(
+        self.assertEqual(  # pin: set portability-scanned-scope
             [
                 "install.sh",
                 "scripts/anchor.sh",
@@ -2001,7 +2025,18 @@ class ExemptedSitesArePinnedTest(unittest.TestCase):
 
 class EveryMarkerNamesARegisteredCategoryTest(unittest.TestCase):
     """A marker's reason token has to resolve to a written-down reason. A free
-    text token would satisfy the grammar and record nothing reviewable."""
+    text token would satisfy the grammar and record nothing reviewable.
+
+    WI-0133 T3: the two methods are the two directions of one `set` pin over
+    `EXEMPTION_CATEGORIES` and therefore share one id. Same shape and same
+    reasoning as test_platform_conditional_skip_budget.py:208/:217, whose
+    own new/stale pair already carries two markers in the group `set` under
+    the single id `registered-skip-decorator-files` -- spelled apart here
+    because a marker written whole inside a docstring becomes a live,
+    unregistered marker in the corpus this repository scans (find_markers is
+    a line regex with no notion of Python strings). Split across two methods
+    on purpose: one
+    combined assertion would name only the direction that fired first."""
 
     def test_every_category_in_the_tree_is_registered(self):
         unregistered = sorted(
@@ -2009,13 +2044,15 @@ class EveryMarkerNamesARegisteredCategoryTest(unittest.TestCase):
             for path, line, _rule, category in exemptions_tree()
             if category not in EXEMPTION_CATEGORIES
         )
-        self.assertEqual([], unregistered)
+        self.assertEqual(  # pin: set portability-exemption-categories
+            [], unregistered)
 
     def test_every_registered_category_is_used(self):
         """The other direction: a category nobody carries any more is a dead
         reason, and dead entries are how a register starts lying."""
         used = {category for _p, _l, _r, category in exemptions_tree()}
-        self.assertEqual([], sorted(set(EXEMPTION_CATEGORIES) - used))
+        self.assertEqual(  # pin: set portability-exemption-categories
+            [], sorted(set(EXEMPTION_CATEGORIES) - used))
 
     def test_every_registered_reason_is_substantial(self):
         thin = [k for k, v in EXEMPTION_CATEGORIES.items() if len(v) < 200]

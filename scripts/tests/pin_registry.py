@@ -819,8 +819,17 @@ def bind_markers(sites, markers):
 
     * INSIDE the assertion's own span, which in this corpus means as a
       trailing comment on the call's first line
-      (`self.assertEqual(  # pin: <group> <id>`). All 22 markers live today
-      use this form -- measured, not assumed. The example is written with
+      (`self.assertEqual(  # pin: <group> <id>`). EVERY marker live in this
+      corpus uses this form -- measured, not assumed.
+
+      No count stands in this sentence, on purpose. The figure that used to
+      ("22") was a hand-written total with no mechanism behind it, and it was
+      already wrong before the tranche that would have bumped it: measured on
+      01.09.2026, HEAD carried 25 markers, 23 of them bound. Bumping it to 34
+      would only have restarted the same clock. A total belongs in an
+      assertion or nowhere -- which is this module's own subject matter, and
+      the reason this placement property is still prose is that no test
+      derives it yet. The example is written with
       PLACEHOLDERS and not with a real group and id, because `find_markers` is
       a line regex with no notion of Python strings: a complete marker inside
       this docstring would be a live, unregistered marker in the corpus this
