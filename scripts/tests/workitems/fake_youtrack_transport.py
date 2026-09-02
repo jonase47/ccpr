@@ -224,10 +224,25 @@ class FakeYouTrackTransport:
             return [self._tag_public(tag) for tag in self._tags.values()]
 
         if method == "POST" and path == "/api/tags":
-            self.explicit_tag_creation_calls.append(body["name"])
+            name = body["name"]
+            if name in self._tags:
+                # Measured against a live instance (code-review finding,
+                # 02.09.2026): a second POST /api/tags for a name that
+                # already exists is REJECTED (HTTP 400 invalid_properties),
+                # not silently handed back the existing tag -- the tag count
+                # for that name stays at one either way, but via a refusal,
+                # not a quiet no-op. _ensure_tag_registered stays permissive
+                # (create-if-absent) for its OTHER caller, the Command API's
+                # implicit `tag <name>` registration, which has no POST
+                # /api/tags request of its own to reject.
+                raise WorkItemError(
+                    f"YouTrack tag creation rejected (HTTP 400 "
+                    f"invalid_properties): a tag named {name!r} already exists"
+                )
+            self.explicit_tag_creation_calls.append(name)
             if self.corrupt_tag_creation_response:
                 return {}
-            return self._tag_public(self._ensure_tag_registered(body["name"]))
+            return self._tag_public(self._ensure_tag_registered(name))
 
         if method == "POST" and path.startswith("/api/tags/"):
             tag_id = path.rsplit("/", 1)[-1]

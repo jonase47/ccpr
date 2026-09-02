@@ -1234,6 +1234,47 @@ class YouTrackCreateTagVisibilityTest(unittest.TestCase):
         self.assertIn("security", captured_stderr.getvalue())
 
 
+class FakeYouTrackTransportTagCreationHonestyTest(unittest.TestCase):
+    """FakeYouTrackTransport must not accept anything the live instance
+    forbids (code-review finding, measured live 02.09.2026): a fresh
+    POST /api/tags for a name is created (visibleFor: null); a SECOND
+    POST /api/tags for the SAME name is REJECTED (HTTP 400
+    invalid_properties), and the tag count for that name stays at one --
+    it is not silently treated as "already exists, here it is again". No
+    production code path currently issues a second POST for the same name
+    (_ensure_tag_visibility's own cache add happens before this could ever
+    be reached -- see youtrack.py), so this exercises the transport's
+    request() dispatch directly, the same way the read-back assertions
+    elsewhere in this file do."""
+
+    def setUp(self):
+        self.transport = FakeYouTrackTransport(project_short_name="TEST")
+
+    def _post_tag(self, name):
+        return self.transport.request(
+            "POST", "https://faketrack.example.org/api/tags", "fake-token",
+            body={"name": name},
+        )
+
+    def test_first_post_for_a_name_creates_a_private_tag(self):
+        created = self._post_tag("security")
+
+        self.assertEqual(created["visibleFor"], None)
+        self.assertEqual(self.transport.explicit_tag_creation_calls, ["security"])
+
+    def test_second_post_for_the_same_name_is_rejected_not_returned(self):
+        self._post_tag("security")
+
+        with self.assertRaises(WorkItemError):
+            self._post_tag("security")
+
+        # Rejected, not silently duplicated: still exactly one tag named
+        # "security", and the rejected call never reached the registry.
+        matching = [t for t in self.transport._tags.values() if t["name"] == "security"]
+        self.assertEqual(len(matching), 1)
+        self.assertEqual(self.transport.explicit_tag_creation_calls, ["security"])
+
+
 class YouTrackQueryTest(unittest.TestCase):
     """`--query` is a project-scoped passthrough to YouTrack's own query language
     (ADR-0002 2nd addendum, 09.07.2026): the `project: <PROJ> ` prefix is always
