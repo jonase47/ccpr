@@ -308,9 +308,28 @@ class YouTrackBackend:
         if owner:
             self._apply_optional_create_field(item_id, f"for {owner}", "owner", owner)
         for tag in tags:
-            self._apply_optional_create_field(item_id, f"tag {tag}", "tag", tag)
+            self._apply_tag_with_visibility(item_id, tag)
 
         return self.get(item_id)
+
+    def _apply_tag_with_visibility(self, item_id, tag):
+        """create()'s best-effort tag application (see the comment above this
+        loop for why type/owner/tag are all best-effort here) is the OTHER
+        entry point -- besides add_tag -- that can bring a fresh tag into
+        existence, so it needs the same _ensure_tag_visibility step first. A
+        visibility failure must not fail create() itself, same rule as every
+        other best-effort field at create time: warn and continue, since the
+        issue already exists by this point."""
+        try:
+            self._ensure_tag_visibility(tag)
+        except WorkItemError as exc:
+            print(
+                f"Warning: could not set visibility for tag {tag!r} on new "
+                f"issue {item_id}: {exc}. Continuing; tag will be applied with "
+                "its current visibility.",
+                file=sys.stderr,
+            )
+        self._apply_optional_create_field(item_id, f"tag {tag}", "tag", tag)
 
     def _apply_optional_create_field(self, item_id, query, field_name, value):
         """Runs a create-time field command that must never fail create() itself --

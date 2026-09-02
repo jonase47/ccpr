@@ -1144,6 +1144,46 @@ class YouTrackTagVisibilityFailureTest(unittest.TestCase):
             backend.add_tag(item["id"], "security")
 
 
+class YouTrackCreateTagVisibilityTest(unittest.TestCase):
+    """create(..., tags=[...])'s best-effort tag loop is the OTHER entry point
+    that must ensure tag visibility before applying a tag -- add_tag is not the
+    only caller that can create a fresh tag."""
+
+    def setUp(self):
+        self.transport = FakeYouTrackTransport(project_short_name="TEST")
+        self.backend = youtrack.YouTrackBackend(
+            base_url="https://faketrack.example.org", project="TEST",
+            token="fake-token", transport=self.transport,
+            tag_visibility_group="All Users",
+        )
+
+    def test_create_with_a_new_tag_makes_it_visible_to_the_configured_group(self):
+        item = self.backend.create(title="New feature", tags=["security"])
+
+        tag = self.transport._tags["security"]
+        readback = self.transport.request(
+            "GET", f"https://faketrack.example.org/api/tags/{tag['id']}", "fake-token",
+        )
+        self.assertEqual(readback["visibleFor"], {"id": "102-0", "name": "All Users"})
+        self.assertIn("security", item["tags"])
+
+    def test_create_visibility_failure_still_leaves_no_orphan(self):
+        """Same "must not fail an already-committed create()" rule as the
+        existing type/owner/tag best-effort handling: a visibility failure
+        (here, a rejected set call) is reported on stderr and swallowed, not
+        allowed to raise out of create() -- the issue already exists by the
+        time tags are applied."""
+        self.transport.fail_tag_visibility_set_at(0)
+
+        captured_stderr = io.StringIO()
+        with contextlib.redirect_stderr(captured_stderr):
+            item = self.backend.create(title="New feature", tags=["security"])
+
+        self.assertEqual(len(self.transport._issues), 1)
+        self.assertIn("security", item["tags"])
+        self.assertIn("security", captured_stderr.getvalue())
+
+
 class YouTrackQueryTest(unittest.TestCase):
     """`--query` is a project-scoped passthrough to YouTrack's own query language
     (ADR-0002 2nd addendum, 09.07.2026): the `project: <PROJ> ` prefix is always
