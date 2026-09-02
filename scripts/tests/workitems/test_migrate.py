@@ -1041,6 +1041,33 @@ class ResultProseMigrationTest(_MigrateFixtureMixin, unittest.TestCase):
         )
         self.assertTrue(report["fully_migrated"])
 
+    def test_a_comment_and_a_prose_entry_with_byte_identical_text_both_survive(self):
+        # Code-review finding on the phase split above: if the comments and
+        # result-prose phases each ran their OWN independent
+        # _first_unmatched_source_index walk against the target's CURRENT
+        # comments list, a text that is byte-identical between the two
+        # phases' own source lists would be mis-attributed -- the comments
+        # phase posts its "Done." first; an independent prose walk starting
+        # its own pointer fresh at 0 then matches THAT already-posted
+        # "Done." against its own "Done." entry, so the real prose "Done."
+        # is never posted, and the (also independent) prose postcondition
+        # walk passes anyway for the identical reason. Two genuinely
+        # distinct entries must both survive, exactly like
+        # test_duplicate_comment_texts_within_one_items_list_both_survive_a_
+        # resume already proves for two identical texts within comments
+        # alone -- this is the same guarantee, extended across the phase
+        # boundary the two phases now share.
+        third = self.source_backend.create(title="Third item")
+        self.source_backend.comment(third["id"], "Done.")
+        self.source_backend.append_result(third["id"], "Done.")
+
+        report = self.run_migrate()
+
+        idmap = migrate.read_idmap(str(self.idmap_path))
+        target_item = self.target_backend.get(idmap[third["id"]].target_id)
+        self.assertEqual(target_item["comments"], ["Done.", "Done."])
+        self.assertTrue(report["fully_migrated"])
+
 
 class TagMigrationTest(_MigrateFixtureMixin, unittest.TestCase):
     """Tags: applied at create() time only (create(tags=[...]), youtrack.py:248)
