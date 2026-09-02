@@ -1110,6 +1110,40 @@ class YouTrackTagVisibilityGroupAmbiguousTest(unittest.TestCase):
         self.assertEqual(self.transport.explicit_tag_creation_calls, [])
 
 
+class YouTrackTagVisibilityFailureTest(unittest.TestCase):
+    """A set call that RETURNED is not evidence -- only the read-back is (PO
+    instruction, on the record). Both ways the instance can lie about a
+    visibility write: the set call itself gets rejected outright, or it
+    reports success but the read-back shows the value didn't actually take."""
+
+    def test_readback_mismatch_after_set_is_a_failure_not_a_success(self):
+        transport = FakeYouTrackTransport(
+            project_short_name="TEST", corrupt_tag_visibility_readback=True,
+        )
+        backend = youtrack.YouTrackBackend(
+            base_url="https://faketrack.example.org", project="TEST",
+            token="fake-token", transport=transport,
+            tag_visibility_group="All Users",
+        )
+        item = backend.create(title="New feature")
+
+        with self.assertRaises(WorkItemError):
+            backend.add_tag(item["id"], "security")
+
+    def test_rejected_visibility_set_call_raises(self):
+        transport = FakeYouTrackTransport(project_short_name="TEST")
+        backend = youtrack.YouTrackBackend(
+            base_url="https://faketrack.example.org", project="TEST",
+            token="fake-token", transport=transport,
+            tag_visibility_group="All Users",
+        )
+        item = backend.create(title="New feature")
+        transport.fail_tag_visibility_set_at(0)
+
+        with self.assertRaises(WorkItemError):
+            backend.add_tag(item["id"], "security")
+
+
 class YouTrackQueryTest(unittest.TestCase):
     """`--query` is a project-scoped passthrough to YouTrack's own query language
     (ADR-0002 2nd addendum, 09.07.2026): the `project: <PROJ> ` prefix is always
