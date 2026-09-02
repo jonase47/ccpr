@@ -506,77 +506,96 @@ def _comment_source_texts(item):
 
 
 def _comments_and_prose_progress(source_item, target_backend, target_id):
-    """ONE ordered-subsequence walk (_first_unmatched_source_index) over the
-    FULL combined comments+prose source list against the target's CURRENT
-    comments channel -- shared by _migrate_comments/_verify_comments_migrated
-    AND _migrate_result_prose/_verify_result_prose_migrated, so the two
-    phases can never independently mis-attribute a target occurrence.
+    """ONE PASS over the target's CURRENT comments channel, tracking TWO
+    INDEPENDENT pointers -- `comment_pointer` into source_comments,
+    `prose_pointer` into source_prose -- so EACH phase's own progress can be
+    read off without either phase's progress depending on the OTHER ever
+    reaching ITS OWN end. Shared by _migrate_comments/
+    _verify_comments_migrated (which only ever look at `comment_pointer`)
+    and _migrate_result_prose/_verify_result_prose_migrated (which only ever
+    look at `prose_pointer`).
 
-    Returns (pointer, boundary, combined): `combined` is
-    `_comment_source_texts(item) + _prose_result_entries(item)` (comments
-    FIRST, then prose, each keeping its own relative order); `boundary` is
-    `len(source_comments)` -- combined[:boundary] is the comments sub-list,
-    combined[boundary:] is the prose sub-list. `pointer` is where the walk's
-    single, shared cursor landed: comments are complete once
-    `pointer >= boundary`, prose is complete once `pointer >= len(combined)`.
+    For each target text, in order: try to match it against
+    `source_comments[comment_pointer]` first; if it matches, advance
+    `comment_pointer`. Otherwise try `source_prose[prose_pointer]`; if THAT
+    matches, advance `prose_pointer`. A text matching neither current
+    pointer is foreign (human, or not yet reached) and is simply skipped --
+    the same "skip, never remove from consideration" discipline
+    _first_unmatched_source_index already uses for a single list.
 
-    WHY shared, not two independent walks (a code-review finding on an
-    earlier version of this phase split): two phases each running their OWN
-    from-scratch _first_unmatched_source_index against the SAME,
-    already-partially-populated target list can mis-attribute a text that is
-    byte-identical between the two phases' own source lists -- e.g. a plain
-    comment "Done." and a classified `## Result` PROSE entry "Done." on the
-    same item. The comments phase posts its "Done." first; an INDEPENDENT
-    prose walk starting its own pointer fresh at 0 then matches that
-    already-posted "Done." against ITS OWN "Done." -- so the real prose entry
-    never gets posted, and the (also independent) prose postcondition walk
-    passes anyway, for the identical reason: it re-derives the same wrong
-    match. A single walk over the COMBINED list does not have this ambiguity:
-    _first_unmatched_source_index already guarantees (see its own docstring,
-    and test_duplicate_comment_texts_within_one_items_list_both_survive_a_
-    resume) that N identical texts within ONE ordered source list require N
-    distinct target occurrences -- regardless of which conceptual phase
-    supplied which occurrence. Splitting comments and prose into two
-    independent walks threw that guarantee away across the phase boundary;
-    this restores it while still letting the two phases record separate
-    idmap markers (see PHASE_RESULT_PROSE's own docstring for why the
-    markers themselves must stay separate).
+    WHY two independent pointers in one pass, not a single shared pointer
+    over the combined list (an earlier version of this function, itself a
+    fix for a code-review finding -- see git history): a single shared
+    pointer makes prose's own completion depend on WALKING CONTIGUOUSLY
+    THROUGH THE ENTIRE comments segment first. If a plain comment is later
+    deleted from the target (an accepted, documented limitation for the
+    comments phase alone -- see _migrate_comments' own "known limit 3") AND
+    PHASE_COMMENTS was already recorded from an earlier run (so
+    migrate()'s loop never re-invokes the comments phase to notice), the
+    shared pointer would get PERMANENTLY stuck at the gap the deleted
+    comment left -- and since the prose phase's own progress was computed
+    as an OFFSET from that same stuck pointer, it could never advance past
+    it either, even though the comments phase's own completeness is no
+    longer relevant (it isn't re-checked) and the target's actual prose
+    entries are genuinely still there. Two independent pointers do not have
+    this coupling: `comment_pointer` can get stuck at a gap in the comments
+    segment without ever blocking `prose_pointer`'s own, separate progress
+    through whatever prose text the walk encounters.
 
-    Legacy resume (an idmap where PHASE_COMMENTS is complete under its OLD,
-    narrower meaning -- see PHASE_RESULT_PROSE's own docstring -- but
-    PHASE_RESULT_PROSE was never recorded): still correct to run this same
-    combined walk unconditionally. The genuinely-posted comments from that
-    earlier run are still on the target (comments are append-only -- see
-    _migrate_comments' own docstring), so this walk matches them first (they
-    lead the combined list) before ever reaching into prose -- the pointer
-    this computes is never less accurate than a comments-only re-verify
-    would have found; it is a strict superset of that check."""
+    WHY two pointers in ONE pass (not two fully independent
+    _first_unmatched_source_index calls, the ORIGINAL, pre-code-review
+    design): running comments' and prose's matching as two SEPARATE walks,
+    each starting fresh at its own pointer=0 against the SAME target list,
+    can mis-attribute a text that is byte-identical between the two phases'
+    own source lists -- e.g. a plain comment "Done." and a classified
+    `## Result` PROSE entry "Done." on the same item. The comments phase
+    posts its "Done." first; an independent prose walk starting its own
+    pointer fresh at 0 then matches that ALREADY-POSTED "Done." against ITS
+    OWN "Done." entry, so the real prose entry never gets posted, and the
+    (also independent) prose postcondition passes anyway, for the identical
+    reason. A SINGLE pass with comments given priority at each step does not
+    have this ambiguity: each target occurrence can advance AT MOST ONE of
+    the two pointers (comments is tried first, so a genuinely ambiguous text
+    is attributed to whichever phase's occurrences the append order actually
+    reflects -- comments always post before prose within a given run, per
+    migrate()'s own per-item ordering, so trying comments first at each step
+    matches write order). This preserves the SAME guarantee
+    _first_unmatched_source_index already gives within one list (N
+    identical texts need N distinct target occurrences -- see
+    test_duplicate_comment_texts_within_one_items_list_both_survive_a_resume)
+    across the phase boundary too, without coupling either phase's progress
+    to the OTHER'S ever reaching completion."""
     source_comments = _comment_source_texts(source_item)
     source_prose = _prose_result_entries(source_item)
-    combined = source_comments + source_prose
     target_texts = target_backend.get(target_id).get("comments") or []
-    pointer = _first_unmatched_source_index(combined, target_texts)
-    return pointer, len(source_comments), combined
+    comment_pointer = 0
+    prose_pointer = 0
+    for text in target_texts:
+        if comment_pointer < len(source_comments) and text == source_comments[comment_pointer]:
+            comment_pointer += 1
+        elif prose_pointer < len(source_prose) and text == source_prose[prose_pointer]:
+            prose_pointer += 1
+    return comment_pointer, prose_pointer, source_comments, source_prose
 
 
 def _migrate_comments(source_item, target_backend, target_id):
     """Copies source_item's plain comments (`item["comments"]` only -- see
     _comment_source_texts; classified `## Result` prose is a separate phase,
-    _migrate_result_prose, sharing this function's combined walk via
-    _comments_and_prose_progress) to target_id, resuming from wherever a
-    prior attempt left off. comment() has no dedup of its own (unlike
-    set_status, which plainly overwrites, or add_tag/add_link, which check
-    membership before writing), so a mid-item abort must be survivable
-    without risking a duplicate post.
+    _migrate_result_prose, sharing this function's target read via
+    _comments_and_prose_progress but never its OWN progress) to target_id,
+    resuming from wherever a prior attempt left off. comment() has no dedup
+    of its own (unlike set_status, which plainly overwrites, or
+    add_tag/add_link, which check membership before writing), so a mid-item
+    abort must be survivable without risking a duplicate post.
 
     Re-derives progress LIVE from the target's own current comments (rather
     than a persisted per-comment checkpoint in the idmap) via
-    _comments_and_prose_progress -- the longest prefix of the COMBINED
-    comments+prose source list that is an ordered subsequence of what's
-    already on the target -- and posts only the tail that falls within THIS
-    phase's own boundary (up to `len(source_comments)`), in source order,
-    never spilling into the prose sub-list (that is
-    _migrate_result_prose's own job, using the SAME walk).
+    _comments_and_prose_progress's `comment_pointer` -- the longest prefix
+    of source_comments matched, in order, against the target -- and posts
+    only the remaining TAIL, in source order. This phase's own progress
+    never depends on whether ANY prose has been posted or matched (see
+    _comments_and_prose_progress's own docstring for why that independence
+    matters).
 
     This is deliberately NOT "compare against the target's TOTAL comment
     count" (an earlier, defective version of this function): that
@@ -591,7 +610,7 @@ def _migrate_comments(source_item, target_backend, target_id):
     matches the pointer's current source text, so it is skipped over
     rather than mistaken for progress.
 
-    Three known limits of this rule, accepted rather than fixed:
+    Four known limits of this rule, accepted rather than fixed:
 
     1. YouTrack's comments endpoint is append-only -- comment() and
        append_result() both POST a new comment; neither this backend nor a real
@@ -619,13 +638,27 @@ def _migrate_comments(source_item, target_backend, target_id):
        result-links), which is out of scope here. This is distinct from the
        comments/prose collision _comments_and_prose_progress's own docstring
        describes -- THAT one is closed (both are this migration's own known
-       source texts); this one is a genuinely foreign (human, or another
-       process') comment, which this code has no way to distinguish from its
-       own.
-    3. A comment deleted from the target AFTER this code transferred it makes a
-       later resume re-post it: the check only ever sees what is CURRENTLY
-       present on the target, it has no memory of what it posted in an earlier
-       run beyond what survives on the target itself.
+       source texts, and the two-pointer design keeps them from colliding);
+       this one is a genuinely foreign (human, or another process') comment,
+       which this code has no way to distinguish from its own.
+    3. A comment deleted from the target AFTER this code transferred it makes
+       a later resume re-post it -- but ONLY if the comments phase itself
+       gets a chance to run again, which it does not once PHASE_COMMENTS is
+       recorded (migrate()'s loop skips a completed phase outright). In that
+       case a deletion is simply invisible to this phase from then on: no
+       re-post, no error, no further action. The two-pointer design in
+       _comments_and_prose_progress exists specifically so this SAME
+       deletion does not also block the (separately resumable)
+       result-prose phase's own, independent progress.
+    4. A comment deleted from the target BEFORE PHASE_COMMENTS is ever
+       recorded (i.e. still mid-resume, this phase's own postcondition has
+       not yet passed) makes `comment_pointer` permanently unable to reach
+       `len(source_comments)` for as long as the gap remains -- every
+       subsequent call re-posts source_comments[comment_pointer:], which
+       includes texts already on the target elsewhere (past the gap),
+       producing duplicates on each retry. This is the SAME accepted
+       shape limit #3 already describes for a POST-completion deletion,
+       just reachable a step earlier; not otherwise different in kind.
 
     Read-back soundness: get()'s full comment list was verified against a real
     YouTrack instance at 600 comments (and a 60-comment probe) with no
@@ -638,10 +671,10 @@ def _migrate_comments(source_item, target_backend, target_id):
     source_comments = _comment_source_texts(source_item)
     if not source_comments:
         return
-    pointer, boundary, combined = _comments_and_prose_progress(
+    comment_pointer, _prose_pointer, source_comments, _source_prose = _comments_and_prose_progress(
         source_item, target_backend, target_id,
     )
-    for text in combined[pointer:boundary]:
+    for text in source_comments[comment_pointer:]:
         target_backend.comment(target_id, text)
 
 
@@ -650,21 +683,21 @@ def _verify_comments_migrated(source_item, target_backend, target_id):
     read, not the one _migrate_comments already made -- the whole point is not
     to trust that call's own view of what it accomplished) and confirms every
     text in source_item's comment source (see _comment_source_texts) is
-    present as an ordered subsequence, using the SAME combined walk
+    present as an ordered subsequence, using the SAME two-pointer walk
     _migrate_comments uses to decide what to post
-    (_comments_and_prose_progress). If anything within this phase's own
-    boundary is still missing, raises -- uncaught, exactly like a comment()
+    (_comments_and_prose_progress, reading only `comment_pointer`). If
+    anything is still missing, raises -- uncaught, exactly like a comment()
     failure already does (see migrate()'s own docstring) -- rather than
     letting the caller record PHASE_COMMENTS for an item that only APPEARED
     to finish because posting didn't raise."""
     source_comments = _comment_source_texts(source_item)
     if not source_comments:
         return
-    pointer, boundary, combined = _comments_and_prose_progress(
+    comment_pointer, _prose_pointer, source_comments, _source_prose = _comments_and_prose_progress(
         source_item, target_backend, target_id,
     )
-    if pointer < boundary:
-        missing = combined[pointer:boundary]
+    if comment_pointer < len(source_comments):
+        missing = source_comments[comment_pointer:]
         raise WorkItemError(
             f"comments migration postcondition failed for target {target_id!r}: "
             f"{len(missing)} of {len(source_comments)} source comment(s) not "
@@ -679,52 +712,47 @@ def _migrate_result_prose(source_item, target_backend, target_id):
     channel _migrate_comments writes to, not a new one (a prose entry has no
     dedicated channel of its own on the target, unlike a ref -- see
     _migrate_result_refs). Own phase (PHASE_RESULT_PROSE), own resume
-    bookkeeping, but the SAME combined ordered-subsequence walk
-    _migrate_comments uses (_comments_and_prose_progress) -- deliberately not
-    an independent walk of prose alone, since two independent walks over one
-    shared channel can mis-attribute a text that is byte-identical between
-    the two phases' own source lists (see _comments_and_prose_progress's own
-    docstring for the exact failure this closes).
+    bookkeeping, reading only `prose_pointer` from the SAME two-pointer walk
+    _migrate_comments uses (_comments_and_prose_progress) -- deliberately
+    NOT a walk that requires the comments segment to match contiguously
+    first (see _comments_and_prose_progress's own docstring for why that
+    coupling was itself a bug), and NOT an independent from-scratch walk of
+    prose alone either (see the same docstring for the collision that
+    creates).
 
     Ordering: migrate()'s per-item loop runs the comments phase before this
     one, so on an uninterrupted run source_item's plain comments always
     precede its prose in the target's comments list -- matching the order the
-    two classes were combined in before this phase split existed. `start`
-    is clamped to at least the comments boundary (`max(pointer, boundary)`)
-    so this phase never re-posts into the comments sub-list even if it
-    somehow ran before the comments phase's own postcondition confirmed
-    completion -- in the normal control flow that never happens (an
-    uncaught comments-phase failure propagates before this phase is ever
-    reached), but the clamp costs nothing and removes the possibility by
-    construction rather than by call-order alone."""
+    two classes were combined in before this phase split existed, and
+    matching the priority _comments_and_prose_progress gives comments at
+    each step of its single pass."""
     source_prose = _prose_result_entries(source_item)
     if not source_prose:
         return
-    pointer, boundary, combined = _comments_and_prose_progress(
+    _comment_pointer, prose_pointer, _source_comments, source_prose = _comments_and_prose_progress(
         source_item, target_backend, target_id,
     )
-    start = max(pointer, boundary)
-    for text in combined[start:]:
+    for text in source_prose[prose_pointer:]:
         target_backend.comment(target_id, text)
 
 
 def _verify_result_prose_migrated(source_item, target_backend, target_id):
     """Hard postcondition for the result-prose phase, mirroring
-    _verify_comments_migrated exactly, against the SAME combined walk
-    (_comments_and_prose_progress): re-reads the target (a FRESH read) and
-    confirms every classified prose entry is present as an ordered
-    subsequence, counting only occurrences beyond the comments boundary.
-    Raises -- uncaught, same discipline as every other phase's postcondition
-    -- rather than letting the caller record PHASE_RESULT_PROSE for an item
-    that only APPEARED to finish because comment() didn't raise."""
+    _verify_comments_migrated exactly, against the SAME two-pointer walk
+    (_comments_and_prose_progress, reading only `prose_pointer`): re-reads
+    the target (a FRESH read) and confirms every classified prose entry is
+    present as an ordered subsequence. Raises -- uncaught, same discipline
+    as every other phase's postcondition -- rather than letting the caller
+    record PHASE_RESULT_PROSE for an item that only APPEARED to finish
+    because comment() didn't raise."""
     source_prose = _prose_result_entries(source_item)
     if not source_prose:
         return
-    pointer, boundary, combined = _comments_and_prose_progress(
+    _comment_pointer, prose_pointer, _source_comments, source_prose = _comments_and_prose_progress(
         source_item, target_backend, target_id,
     )
-    if pointer < len(combined):
-        missing = combined[max(pointer, boundary):]
+    if prose_pointer < len(source_prose):
+        missing = source_prose[prose_pointer:]
         raise WorkItemError(
             f"result-prose migration postcondition failed for target {target_id!r}: "
             f"{len(missing)} of {len(source_prose)} classified result-prose "

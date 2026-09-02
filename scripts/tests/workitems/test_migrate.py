@@ -1068,6 +1068,55 @@ class ResultProseMigrationTest(_MigrateFixtureMixin, unittest.TestCase):
         self.assertEqual(target_item["comments"], ["Done.", "Done."])
         self.assertTrue(report["fully_migrated"])
 
+    def test_prose_still_completes_after_an_interior_comment_is_deleted_between_runs(self):
+        # Second code-review finding, on the FIX for the collision above: a
+        # single shared pointer walking the combined comments+prose list
+        # makes prose's own progress depend on matching CONTIGUOUSLY through
+        # the whole comments segment first. If PHASE_COMMENTS is already
+        # recorded (so the comments phase itself never re-runs -- see
+        # _migrate_comments' "known limit 3", an ACCEPTED gap for the
+        # comments phase alone) and an interior comment is then deleted from
+        # the target, a shared-pointer design gets stuck at that gap
+        # forever -- and since prose read its own progress as an OFFSET from
+        # that same stuck pointer, it could never complete either, even
+        # though the deleted comment has nothing to do with whether the
+        # prose text is genuinely present. The two-pointer design in
+        # _comments_and_prose_progress must not have this coupling:
+        # comment_pointer getting stuck at a gap must never block
+        # prose_pointer's own, independent progress.
+        third = self.source_backend.create(title="Third item")
+        self.source_backend.comment(third["id"], "c1")
+        self.source_backend.comment(third["id"], "c2")
+        self.source_backend.comment(third["id"], "c3")
+        self.source_backend.append_result(third["id"], "A prose result note.")
+
+        # Comments (calls #0-#2) succeed; the prose phase's own first post
+        # (call #3) fails -- PHASE_COMMENTS gets recorded, PHASE_RESULT_PROSE
+        # does not, exactly the boundary
+        # test_resumes_the_prose_phase_independently_once_comments_have_
+        # already_completed already exercises for the non-deletion case.
+        self.transport.fail_comment_at(3)
+        with self.assertRaises(WorkItemError):
+            self.run_migrate()
+
+        idmap = migrate.read_idmap(str(self.idmap_path))
+        target_id = idmap[third["id"]].target_id
+        self.assertIn(migrate.PHASE_COMMENTS, idmap[third["id"]].phases)
+        self.assertNotIn(migrate.PHASE_RESULT_PROSE, idmap[third["id"]].phases)
+
+        # An interior comment ("c2") is deleted from the target directly --
+        # bypassing this migration entirely, the way a human editing the
+        # issue in YouTrack's own UI would. FakeYouTrackTransport stores
+        # comments as {"text": ...} dicts under _issues[id]["comments"].
+        issue = self.transport._issues[target_id]
+        issue["comments"] = [c for c in issue["comments"] if c["text"] != "c2"]
+
+        report = self.run_migrate()
+
+        target_item = self.target_backend.get(target_id)
+        self.assertEqual(target_item["comments"].count("A prose result note."), 1)
+        self.assertTrue(report["fully_migrated"])
+
 
 class TagMigrationTest(_MigrateFixtureMixin, unittest.TestCase):
     """Tags: applied at create() time only (create(tags=[...]), youtrack.py:248)
