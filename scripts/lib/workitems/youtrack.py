@@ -117,10 +117,16 @@ TAG_VISIBILITY_GROUP_AMBIGUOUS = "group_ambiguous"
 # itself rejects the visibility write or the read-back doesn't match what was
 # requested (see _ensure_tag_visibility's own docstring) -- a genuine
 # instance-level failure, not a missing setting. On the add_tag path this
-# still propagates uncaught (nothing to report it to -- see add_tag's
-# docstring). On the create(..., tags=[...]) path, _apply_tag_with_visibility
-# catches it and records THIS reason, carrying the instance's own message
-# (see last_create_tag_visibility_outcomes' docstring on the "message" key) --
+# still propagates uncaught to add_tag()'s OWN caller (unchanged -- add_tag
+# has nothing else to protect via atomicity, see its own docstring), but the
+# outcome is ALSO recorded into last_add_tag_visibility_outcome before the
+# raise (02.09.2026, closing a second gap the PO found live: an adopted item's
+# tags travel through add_tag(), and migrate.py's _apply_tags_to_adopted_item
+# already wraps every add_tag() call in its own try/except for the best-effort
+# behaviour that path needs -- that catch can now read this reason). On the
+# create(..., tags=[...]) path, _apply_tag_with_visibility catches it and
+# records THIS reason into last_create_tag_visibility_outcomes, carrying the
+# instance's own message (see that method's docstring on the "message" key) --
 # unlike the three reasons above, whose stderr warning already says
 # everything a reader needs (a config key to add), this one is a live
 # instance problem the reader cannot diagnose from the reason code alone.
@@ -290,6 +296,11 @@ class YouTrackBackend:
         # reset at the start of every create() call, never accumulated
         # across calls.
         self._last_create_tag_visibility_outcomes = []
+        # Same idea for the MOST RECENT add_tag() call -- a separate channel,
+        # not shared with the one above (see last_add_tag_visibility_
+        # outcome's own docstring for why), reset at the start of every
+        # add_tag() call.
+        self._last_add_tag_visibility_outcome = None
 
     def create(self, title, item_type=None, owner=None, description=None, tags=None):
         # Reset, not appended to -- see last_create_tag_visibility_outcomes'
@@ -744,15 +755,74 @@ class YouTrackBackend:
         unexpected visibility failure (a rejected set call, or a read-back
         mismatch) is allowed to propagate uncaught rather than being
         downgraded to a warning -- unlike create()'s best-effort tag loop,
-        which already committed the issue by the time tags are applied."""
+        which already committed the issue by the time tags are applied.
+
+        Records the _ensure_tag_visibility outcome into its own side channel
+        (see last_add_tag_visibility_outcome) BEFORE deciding whether to warn
+        or raise -- add_tag has its own caller-facing contract (raise on an
+        unexpected failure) that this must not change, but a caller wrapping
+        add_tag() in its own try/except (migrate.py's
+        _apply_tags_to_adopted_item, adopting a crash-recovered item) has
+        nowhere else to learn WHY visibility wasn't set, unlike create()'s
+        best-effort tag loop which already has last_create_tag_visibility_
+        outcomes for that. Reset as the FIRST thing this method does (same
+        reset-ordering lesson already applied to create(), see its own
+        comment): every exit path -- the idempotent early return, a
+        genuinely successful call, or a raise -- must leave this channel
+        reflecting THIS call alone, never a prior one's leftovers."""
+        self._last_add_tag_visibility_outcome = None
         validate_item_id(item_id)
         validate_tag(tag)
         current = self.get(item_id)
         if tag in current["tags"]:
             return current
-        self._ensure_tag_visibility(tag)
+        try:
+            outcome_reason = self._ensure_tag_visibility(tag)
+        except WorkItemError as exc:
+            self._last_add_tag_visibility_outcome = {
+                "tag": tag, "reason": TAG_VISIBILITY_WRITE_REJECTED, "message": str(exc)
+            }
+            raise
+        if outcome_reason is not None:
+            self._last_add_tag_visibility_outcome = {"tag": tag, "reason": outcome_reason}
         self._run_command(item_id, f"tag {tag}")
         return self.get(item_id)
+
+    def last_add_tag_visibility_outcome(self):
+        """The tag-visibility outcome of the MOST RECENT add_tag() call --
+        reset at the start of every add_tag() call (see add_tag's own body),
+        so this always reflects that call alone. A separate side channel
+        from last_create_tag_visibility_outcomes, not a shared one, for two
+        reasons: add_tag() applies exactly one tag per call (a single
+        Optional[dict] fits that shape better than a list built for create()'s
+        own multi-tag loop), and keeping the two independent means add_tag()
+        calls interleaved with create() calls on the same backend instance
+        (as migrate()'s main loop does, one item at a time) can never leave a
+        stale entry in the OTHER channel -- the exact defect class already
+        fixed once for create() itself (see create()'s own reset-ordering
+        comment).
+
+        Returns None (no outcome to report: visibility was set and
+        confirmed, or the tag already existed, or add_tag() returned early
+        because the tag was already on the item) OR `{"tag": name, "reason":
+        one of TAG_VISIBILITY_NOT_CONFIGURED / _GROUP_NOT_FOUND /
+        _GROUP_AMBIGUOUS / _WRITE_REJECTED}` -- a TAG_VISIBILITY_
+        WRITE_REJECTED entry additionally carries a "message" key, same
+        shape as last_create_tag_visibility_outcomes' own entries (PO
+        decision: the two channels' entries are shaped identically on
+        purpose, so a consumer reading either one -- migrate.py reads both --
+        never needs to special-case which side channel an entry came from).
+
+        Set even when add_tag() itself is about to raise (WRITE_REJECTED):
+        the outcome is recorded before the raise, not swallowed by it -- a
+        caller that catches the raise (migrate.py's _apply_tags_to_adopted_
+        item) can still read this method afterwards. NOT set when a LATER
+        step in add_tag() (the Command API's own `tag <name>` call) raises
+        instead -- that failure has nothing to do with visibility, and must
+        not be misattributed to it (see _apply_tags_to_adopted_item's own
+        docstring on why the two failure classes are read apart)."""
+        outcome = self._last_add_tag_visibility_outcome
+        return dict(outcome) if outcome is not None else None
 
     def _known_tag_names(self):
         """The full set of tag names that already exist on this instance,
@@ -843,10 +913,12 @@ class YouTrackBackend:
         TAG_VISIBILITY_GROUP_NOT_FOUND / TAG_VISIBILITY_GROUP_AMBIGUOUS for
         the three reported outcomes above, so a caller (see
         _apply_tag_with_visibility) can surface WHICH of the three applied,
-        not just that visibility wasn't set. add_tag ignores this return
-        value -- it has nothing to report it to (see add_tag's own
-        docstring on why an unexpected failure there is allowed to
-        propagate uncaught instead).
+        not just that visibility wasn't set. add_tag() records this return
+        value too (see its own docstring and last_add_tag_visibility_
+        outcome) -- it still lets an unexpected (raising) failure propagate
+        uncaught to ITS OWN caller, same as always, but no longer discards
+        the information a caller further up (migrate.py) needs to report
+        it.
         """
         if tag_name in self._known_tag_names():
             return None

@@ -1639,6 +1639,132 @@ class TagVisibilityReportTest(_MigrateFixtureMixin, unittest.TestCase):
         self.assertGreater(report["tags"]["total_visibility_not_set"], 0)
         self.assertTrue(report["fully_migrated"])
 
+    def test_visibility_not_set_is_reported_for_an_adopted_item_too(self):
+        # The gap this closes (found in a live dry run, 02.09.2026): an
+        # adopted (crash-recovered) item's tags travel through add_tag() (see
+        # _apply_tags_to_adopted_item), which never threaded a visibility
+        # outcome anywhere before this fix -- the SAME "tagVisibilityGroup
+        # unset" failure that reaches visibility_not_set on the create()
+        # path (test_unconfigured_group_reports_every_tag_as_visibility_not_
+        # set, above) reported an empty list here, for identical input.
+        self.source_backend.add_tag(self.first_id, "security")
+        pre_existing = self.target_backend.create(
+            title="First item", owner="alice",
+            description=f"Desc one.\n\nMigrated from {self.first_id}.",
+        )
+        self.target_backend.set_status(pre_existing["id"], "In Progress")
+
+        report = self.run_migrate()
+
+        [entry] = [e for e in report["tags"]["items"] if e["source_id"] == self.first_id]
+        self.assertEqual(entry["applied"], ["security"])
+        self.assertEqual(
+            entry["visibility_not_set"],
+            [{"tag": "security", "reason": youtrack.TAG_VISIBILITY_NOT_CONFIGURED}],
+        )
+        self.assertEqual(report["tags"]["total_visibility_not_set"], 1)
+
+    def test_write_rejected_is_reported_for_an_adopted_item_with_its_own_reason_and_message(self):
+        # The heavier half of the same gap: a genuine instance failure while
+        # setting visibility (not just a missing config key) must also reach
+        # the report on the adoption path, carrying the instance's own
+        # message -- mirrors test_write_rejected_is_reported_with_its_own_
+        # reason_and_message above, on the create() path.
+        self.transport = FakeYouTrackTransport(project_short_name="TEST")
+        self.transport.fail_tag_visibility_set_at(0)
+        self.target_backend = youtrack.YouTrackBackend(
+            base_url="https://faketrack.example.org", project="TEST",
+            token="fake-token", transport=self.transport,
+            tag_visibility_group="All Users",
+        )
+        self.source_backend.add_tag(self.first_id, "security")
+        pre_existing = self.target_backend.create(
+            title="First item", owner="alice",
+            description=f"Desc one.\n\nMigrated from {self.first_id}.",
+        )
+        self.target_backend.set_status(pre_existing["id"], "In Progress")
+
+        report = self.run_migrate()
+
+        [entry] = [e for e in report["tags"]["items"] if e["source_id"] == self.first_id]
+        [outcome] = entry["visibility_not_set"]
+        self.assertEqual(outcome["tag"], "security")
+        self.assertEqual(outcome["reason"], youtrack.TAG_VISIBILITY_WRITE_REJECTED)
+        self.assertIn("rejected", outcome["message"])
+        self.assertEqual(report["tags"]["total_visibility_not_set"], 1)
+
+    def test_a_correctly_resolved_group_reports_nothing_as_not_set_for_an_adopted_item(self):
+        # Counter-proof for both tests above: when visibility genuinely gets
+        # set and confirmed, the adopted path reports exactly what the
+        # create() path already does for the same case -- an empty list, the
+        # field present (not absent), and fully_migrated untouched.
+        self.transport = FakeYouTrackTransport(project_short_name="TEST")
+        self.target_backend = youtrack.YouTrackBackend(
+            base_url="https://faketrack.example.org", project="TEST",
+            token="fake-token", transport=self.transport,
+            tag_visibility_group="All Users",
+        )
+        self.source_backend.add_tag(self.first_id, "security")
+        pre_existing = self.target_backend.create(
+            title="First item", owner="alice",
+            description=f"Desc one.\n\nMigrated from {self.first_id}.",
+        )
+        self.target_backend.set_status(pre_existing["id"], "In Progress")
+
+        report = self.run_migrate()
+
+        [entry] = [e for e in report["tags"]["items"] if e["source_id"] == self.first_id]
+        self.assertIn("visibility_not_set", entry)
+        self.assertEqual(entry["visibility_not_set"], [])
+        self.assertEqual(report["tags"]["total_visibility_not_set"], 0)
+        self.assertTrue(report["fully_migrated"])
+
+    def test_visibility_not_set_is_identical_for_a_freshly_created_and_an_adopted_item(self):
+        # The defect itself, proved directly rather than by asserting each
+        # side separately against a hardcoded expectation: same tag, same
+        # (unset) tagVisibilityGroup, one item freshly created and one
+        # adopted -- the two runs must produce the SAME visibility_not_set
+        # entry. Two fully independent migrate() runs, not two items sharing
+        # one target backend instance: _known_tag_names_cache would make the
+        # SECOND occurrence of the same tag name within one run a no-op (see
+        # _ensure_tag_visibility's own "already exists -> left untouched"
+        # rule), which would test the cache, not the divergence under test.
+        def run_migration(*, adopt):
+            tmp_dir = tempfile.mkdtemp(prefix="ccpr-migrate-equiv-")
+            self.addCleanup(shutil.rmtree, tmp_dir, ignore_errors=True)
+            source_dir = Path(tmp_dir) / "workitems"
+            source_backend = local.create({"workitems_dir": str(source_dir)})
+            source_item = source_backend.create(title="Tagged item", tags=["security"])
+
+            transport = FakeYouTrackTransport(project_short_name="TEST")
+            target_backend = youtrack.YouTrackBackend(
+                base_url="https://faketrack.example.org", project="TEST",
+                token="fake-token", transport=transport,
+            )
+            if adopt:
+                pre_existing = target_backend.create(
+                    title="Tagged item",
+                    description=f"Desc.\n\nMigrated from {source_item['id']}.",
+                )
+                target_backend.set_status(pre_existing["id"], "Backlog")
+
+            idmap_path = Path(tmp_dir) / "workitems-idmap.yml"
+            report = migrate.migrate(
+                source_backend, target_backend, str(idmap_path),
+                source_workitems_dir=str(source_dir), clock=FIXED_CLOCK,
+            )
+            [entry] = [e for e in report["tags"]["items"] if e["source_id"] == source_item["id"]]
+            return entry
+
+        fresh_entry = run_migration(adopt=False)
+        adopted_entry = run_migration(adopt=True)
+
+        self.assertEqual(adopted_entry["visibility_not_set"], fresh_entry["visibility_not_set"])
+        self.assertEqual(
+            fresh_entry["visibility_not_set"],
+            [{"tag": "security", "reason": youtrack.TAG_VISIBILITY_NOT_CONFIGURED}],
+        )
+
 
 class PriorityMigrationTest(_MigrateFixtureMixin, unittest.TestCase):
     """Priority: a plain overwrite via set_priority() -- idempotent, so it

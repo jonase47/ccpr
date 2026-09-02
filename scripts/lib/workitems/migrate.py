@@ -994,6 +994,18 @@ def _tag_visibility_outcomes(target_backend):
     return accessor()
 
 
+def _adopted_tag_visibility_outcome(target_backend):
+    """Reads the tag-visibility outcome of the add_tag() call just made (see
+    youtrack.py's last_add_tag_visibility_outcome), if the target backend
+    tracks it at all. Same "no such concept, nothing to report" carve-out as
+    _tag_visibility_outcomes -- a backend with no tag-visibility concept
+    (e.g. `local`) has no such method."""
+    accessor = getattr(target_backend, "last_add_tag_visibility_outcome", None)
+    if accessor is None:
+        return None
+    return accessor()
+
+
 def _apply_tags_to_adopted_item(report, target_backend, source_id, target_id, requested_tags):
     """Applies an adopted (crash-recovered) item's source tags one at a time
     via add_tag() -- create(tags=...) is not available here, the target item
@@ -1016,16 +1028,29 @@ def _apply_tags_to_adopted_item(report, target_backend, source_id, target_id, re
     warned about on stderr and left out of `applied`, never raised.
 
     Does not thread through _tag_visibility_outcomes: that accessor reads
-    create()'s own last_create_tag_visibility_outcomes side channel (see its
-    docstring), populated only inside create()'s tag loop -- reading it here
-    would return either stale data from an earlier create() call or nothing
-    at all, neither of which reflects an add_tag() call. A tag applied via
-    this path can therefore go visible/private without that fact surfacing
-    in `visibility_not_set` -- a known, narrower gap than the one this
-    function closes, left as `[]` here rather than fixed, since add_tag()
-    itself has nowhere to report a visibility outcome to (see
-    _ensure_tag_visibility's own docstring: "add_tag ignores this return
-    value").
+    create()'s own last_create_tag_visibility_outcomes side channel, which
+    create() never touches on this path. Instead reads
+    _adopted_tag_visibility_outcome (youtrack.py's own add_tag()-shaped
+    channel, see last_add_tag_visibility_outcome's docstring) right after
+    EVERY add_tag() attempt, success or failure -- both matter: a warn-and-
+    continue reason (TAG_VISIBILITY_NOT_CONFIGURED and siblings) is recorded
+    even though the tag command below still ran and the tag IS applied
+    (mirrors create()'s own tag loop, which records the same outcome
+    regardless of whether the LATER, unrelated tag-command step then also
+    fails); a TAG_VISIBILITY_WRITE_REJECTED reason is recorded even though
+    add_tag() then raises and the tag ends up in `missing` instead of
+    `applied` -- unlike create()'s path (which still applies the tag despite
+    a write-rejected visibility), add_tag()'s own contract (see its
+    docstring) does not attempt the tag command after a visibility failure,
+    so `visibility_not_set` and `applied`/`missing` are not mutually
+    exclusive here the way _record_tag_diff's own docstring describes for
+    the create() path -- a write-rejected tag can appear in BOTH
+    `visibility_not_set` and `missing` on this path specifically. The
+    accessor is duck-typed (add_tag()'s own workflow-rejection raise, from
+    _run_command, is a SEPARATE failure with nothing to do with visibility
+    -- see last_add_tag_visibility_outcome's own docstring on why that
+    failure never reaches this channel; the "not-permitted" tag test below
+    proves this stays empty for that case).
 
     add_tag() is idempotent (reads the item and returns early if the tag is
     already present) and does its own read per tag -- at the real corpus's
@@ -1033,6 +1058,7 @@ def _apply_tags_to_adopted_item(report, target_backend, source_id, target_id, re
     the common case tags travel through; negligible today, worth
     reconsidering only if adoption ever stopped being the exception."""
     applied = []
+    visibility_not_set = []
     for tag in requested_tags:
         try:
             target_backend.add_tag(target_id, tag)
@@ -1044,7 +1070,10 @@ def _apply_tags_to_adopted_item(report, target_backend, source_id, target_id, re
             )
         else:
             applied.append(tag)
-    _record_tag_diff(report, source_id, target_id, requested_tags, applied, [])
+        outcome = _adopted_tag_visibility_outcome(target_backend)
+        if outcome is not None:
+            visibility_not_set.append(outcome)
+    _record_tag_diff(report, source_id, target_id, requested_tags, applied, visibility_not_set)
 
 
 def _record_tag_diff(report, source_id, target_id, requested, applied, visibility_not_set):
@@ -1065,7 +1094,13 @@ def _record_tag_diff(report, source_id, target_id, requested, applied, visibilit
     from `missing`: a tag can be `applied` (present on the item) and still
     have its visibility never set (created private, PO decision -- see
     migrate()'s own docstring on report["tags"] for why this is reported,
-    never gated)."""
+    never gated). On the adopted-item path specifically (see
+    _apply_tags_to_adopted_item's own docstring), a TAG_VISIBILITY_
+    WRITE_REJECTED entry is the ONE case where the two axes are not
+    independent: add_tag() never attempts the tag command after its own
+    visibility write fails, so that tag lands in BOTH `visibility_not_set`
+    AND `missing` -- unlike every other entry in either list, which only
+    ever appears in one."""
     missing = [tag for tag in requested if tag not in applied]
     report["tags"]["items"].append({
         "source_id": source_id, "target_id": target_id,
