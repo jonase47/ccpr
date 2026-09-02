@@ -126,6 +126,13 @@ class FakeYouTrackTransport:
         # matching the measured live-instance shape.
         self._tags = {}  # name -> {"id", "name", "visibleFor", "updateableBy"}
         self._next_tag_number = 1
+        # Test hook: names created via an EXPLICIT POST /api/tags call (as
+        # opposed to a tag springing into existence implicitly via a `tag <name>`
+        # Command-API call, see _ensure_tag_registered) -- lets a test prove a
+        # tag that already exists was left untouched (no explicit POST at all),
+        # distinct from asserting the shared Command-API request log stayed the
+        # same shape.
+        self.explicit_tag_creation_calls = []
         self._groups = (
             list(known_groups) if known_groups is not None else list(self._DEFAULT_GROUPS)
         )
@@ -210,6 +217,7 @@ class FakeYouTrackTransport:
             return [self._tag_public(tag) for tag in self._tags.values()]
 
         if method == "POST" and path == "/api/tags":
+            self.explicit_tag_creation_calls.append(body["name"])
             return self._tag_public(self._ensure_tag_registered(body["name"]))
 
         if method == "POST" and path.startswith("/api/tags/"):

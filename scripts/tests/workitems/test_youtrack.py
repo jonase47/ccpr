@@ -992,6 +992,36 @@ class YouTrackTagVisibilityTest(unittest.TestCase):
         )
         self.assertEqual(readback["visibleFor"], {"id": "102-0", "name": "All Users"})
 
+    def test_add_tag_on_an_existing_tag_does_not_re_create_it(self):
+        # Simulates one of the 8/20 tags measured already correctly shared on the
+        # live instance -- add_tag must not touch it (no re-create, no re-set):
+        # a write with no statement, per _ensure_tag_visibility's own docstring.
+        self.transport._ensure_tag_registered("already-shared")
+        self.transport._set_tag_visibility(
+            self.transport._tags["already-shared"]["id"],
+            {"visibleFor": {"id": "102-0"}, "updateableBy": {"id": "102-0"}},
+        )
+        item = self.backend.create(title="New feature")
+
+        self.backend.add_tag(item["id"], "already-shared")
+
+        self.assertEqual(self.transport.explicit_tag_creation_calls, [])
+        self.assertEqual(
+            self.transport._tags["already-shared"]["visibleFor"], {"id": "102-0", "name": "All Users"},
+        )
+
+    def test_add_tag_on_an_existing_but_private_tag_leaves_it_private(self):
+        # A tag that already exists but is PRIVATE (12/20 on the probed instance)
+        # is a DIFFERENT decision this method does not make -- see the class
+        # docstring. Confirms add_tag does not "fix" it along the way.
+        self.transport._ensure_tag_registered("already-private")
+        item = self.backend.create(title="New feature")
+
+        self.backend.add_tag(item["id"], "already-private")
+
+        self.assertEqual(self.transport.explicit_tag_creation_calls, [])
+        self.assertIsNone(self.transport._tags["already-private"]["visibleFor"])
+
 
 class YouTrackQueryTest(unittest.TestCase):
     """`--query` is a project-scoped passthrough to YouTrack's own query language
