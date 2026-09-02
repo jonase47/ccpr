@@ -1183,6 +1183,14 @@ class YouTrackTagVisibilityFailureTest(unittest.TestCase):
         with self.assertRaises(WorkItemError):
             backend.add_tag(item["id"], "security")
 
+        # The ordering (_ensure_tag_visibility before the Command API's
+        # `tag <name>`) is correct today -- but only asserting the raise
+        # (as this test did before) would stay green even if that ordering
+        # were ever reversed, leaving the issue tagged after the caller saw
+        # an exception. Assert the negative directly.
+        fetched = backend.get(item["id"])
+        self.assertNotIn("security", fetched["tags"])
+
     def test_rejected_visibility_set_call_raises(self):
         transport = FakeYouTrackTransport(project_short_name="TEST")
         backend = youtrack.YouTrackBackend(
@@ -1195,6 +1203,9 @@ class YouTrackTagVisibilityFailureTest(unittest.TestCase):
 
         with self.assertRaises(WorkItemError):
             backend.add_tag(item["id"], "security")
+
+        fetched = backend.get(item["id"])
+        self.assertNotIn("security", fetched["tags"])
 
     def test_readback_failure_after_successful_creation_does_not_retry_creation(self):
         """Code-review follow-up: POST /api/tags can succeed (the tag genuinely
