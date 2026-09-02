@@ -70,7 +70,7 @@ class MigrateLocalToYouTrackTest(unittest.TestCase):
         self.run_migrate()
 
         idmap = migrate.read_idmap(str(self.idmap_path))
-        target_item = self.target_backend.get(idmap[self.first_id])
+        target_item = self.target_backend.get(idmap[self.first_id].target_id)
         self.assertIn(self.first_id, target_item["description"])
 
     def test_archives_the_source_directory_not_deletes_it(self):
@@ -114,7 +114,12 @@ class MigrateLocalToYouTrackTest(unittest.TestCase):
         # source not yet archived.
         pre_existing = self.target_backend.create(title="First item", owner="alice")
         self.target_backend.set_status(pre_existing["id"], "In Progress")
-        migrate.write_idmap(str(self.idmap_path), {self.first_id: pre_existing["id"]})
+        migrate.write_idmap(str(self.idmap_path), {
+            self.first_id: migrate.IdmapEntry(
+                pre_existing["id"],
+                frozenset({migrate.PHASE_CREATED, migrate.PHASE_STATUS}),
+            ),
+        })
 
         report = self.run_migrate()
 
@@ -143,7 +148,7 @@ class MigrateLocalToYouTrackTest(unittest.TestCase):
         # item -- NOT a duplicate "First item" created alongside it.
         self.assertEqual(len(self.target_backend.list()), 2)
         idmap = migrate.read_idmap(str(self.idmap_path))
-        self.assertEqual(idmap[self.first_id], pre_existing["id"])
+        self.assertEqual(idmap[self.first_id].target_id, pre_existing["id"])
         self.assertEqual([source_id for source_id, _ in report["migrated"]],
                           [self.first_id, self.second_id])
 
@@ -200,6 +205,81 @@ class MigrateLocalToYouTrackTest(unittest.TestCase):
 
         self.assertTrue(report["fully_migrated"])
         self.assertFalse(report["archived"])
+
+
+class IdmapPhaseFormatTest(unittest.TestCase):
+    """`read_idmap`/`write_idmap` in isolation (WI-0141): the idmap is no longer a
+    flat `source-id: target-id` line -- it now records, per item, which phases of
+    the migration completed (`created`, `status`, and later `comments`), so a
+    resumed run can tell "created but comments not yet copied" apart from "fully
+    done" instead of treating idmap-presence as a single yes/no flag."""
+
+    def setUp(self):
+        self.tmp_dir = tempfile.mkdtemp(prefix="ccpr-idmap-")
+        self.addCleanup(shutil.rmtree, self.tmp_dir, ignore_errors=True)
+        self.idmap_path = str(Path(self.tmp_dir) / "workitems-idmap.yml")
+
+    def test_round_trips_target_id_and_completed_phases(self):
+        entry = migrate.IdmapEntry(
+            target_id="CT-1", phases=frozenset({migrate.PHASE_CREATED, migrate.PHASE_STATUS}),
+        )
+        migrate.write_idmap(self.idmap_path, {"WI-0001": entry})
+
+        idmap = migrate.read_idmap(self.idmap_path)
+
+        self.assertEqual(idmap["WI-0001"].target_id, "CT-1")
+        self.assertEqual(idmap["WI-0001"].phases, entry.phases)
+
+    def test_round_trips_a_third_phase_not_yet_used_by_migrate_itself(self):
+        # Proves the format is extensible (per the task's "later phases slot in
+        # without another format change" requirement) without migrate() itself
+        # having to know about a "comments" phase yet.
+        entry = migrate.IdmapEntry(
+            target_id="CT-7",
+            phases=frozenset({migrate.PHASE_CREATED, migrate.PHASE_STATUS, migrate.PHASE_COMMENTS}),
+        )
+        migrate.write_idmap(self.idmap_path, {"WI-0007": entry})
+
+        idmap = migrate.read_idmap(self.idmap_path)
+
+        self.assertEqual(idmap["WI-0007"].phases, entry.phases)
+
+    def test_a_phase_less_line_on_disk_reads_as_created_and_status_complete(self):
+        # Simulates a file left over from BEFORE phase-tracking existed at all --
+        # not written by this version's write_idmap, but by hand / an older
+        # release. migrate.py never recorded an idmap entry before both create()
+        # and set_status() had already succeeded (the single write happened after
+        # both), so a bare "source: target" line can only ever mean those two
+        # phases are done.
+        Path(self.idmap_path).write_text("WI-0001: CT-1\n", encoding="utf-8")
+
+        idmap = migrate.read_idmap(self.idmap_path)
+
+        self.assertEqual(idmap["WI-0001"].target_id, "CT-1")
+        self.assertEqual(idmap["WI-0001"].phases, frozenset({migrate.PHASE_CREATED, migrate.PHASE_STATUS}))
+
+    def test_a_line_with_extra_whitespace_around_the_phase_list_still_parses_cleanly(self):
+        # Defends against a hand-edited file (the module docstring explicitly
+        # anticipates one) -- stray spaces between target-id and the phase list,
+        # or around individual phase names, must not corrupt a phase name (e.g.
+        # produce " created" with a leading space, which would never again match
+        # PHASE_CREATED anywhere it's checked).
+        Path(self.idmap_path).write_text("WI-0001: CT-1   created, status \n", encoding="utf-8")
+
+        idmap = migrate.read_idmap(self.idmap_path)
+
+        self.assertEqual(idmap["WI-0001"].target_id, "CT-1")
+        self.assertEqual(idmap["WI-0001"].phases, frozenset({migrate.PHASE_CREATED, migrate.PHASE_STATUS}))
+
+    def test_write_idmap_refuses_an_entry_with_no_completed_phases(self):
+        # An empty phases set would round-trip indistinguishably from a legacy
+        # phase-less line (read back as "created+status done" -- see the test
+        # above) -- silently turning "nothing done yet" into a false completion
+        # claim. write_idmap must reject it outright rather than write it.
+        entry = migrate.IdmapEntry(target_id="CT-1", phases=frozenset())
+
+        with self.assertRaises(ValueError):
+            migrate.write_idmap(self.idmap_path, {"WI-0001": entry})
 
 
 if __name__ == "__main__":
