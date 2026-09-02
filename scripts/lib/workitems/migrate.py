@@ -46,6 +46,8 @@ import os
 import re
 import shutil
 
+from workitems import WorkItemError
+
 _PROVENANCE_PATTERN = re.compile(r"^Migrated from (.+)\.$", re.MULTILINE)
 
 PHASE_CREATED = "created"
@@ -145,7 +147,11 @@ def migrate(source_backend, target_backend, idmap_path, source_workitems_dir=Non
     Comment failures propagate uncaught, exactly like create()/set_status() always
     have (matching a real process crash) -- comment() has no dedup of its own, so a
     caller resuming after such a crash relies on the idmap's per-item phase record
-    (see the module docstring), not on the target rejecting a duplicate.
+    (see the module docstring), not on the target rejecting a duplicate. A failed
+    POSTCONDITION check (see _verify_comments_migrated) propagates uncaught the
+    same way: PHASE_COMMENTS is only ever recorded once the target has actually
+    been re-read and shown to carry every source comment, not merely once
+    _migrate_comments returned without an exception.
 
     Returns a report dict: migrated ([(source_id, target_id), ...]),
     skipped_already_migrated ([source_id, ...]), archived (bool), and archive_path
@@ -202,6 +208,12 @@ def migrate(source_backend, target_backend, idmap_path, source_workitems_dir=Non
         # today (WI-0141); a future phase slots in the same way.
         if PHASE_COMMENTS not in entry.phases:
             _migrate_comments(item, target_backend, entry.target_id)
+            # Hard postcondition, not a trust of _migrate_comments' own return:
+            # re-read the target and confirm every source comment actually
+            # landed before PHASE_COMMENTS is recorded. Raises uncaught (see
+            # migrate()'s own docstring) rather than recording a phase that
+            # only LOOKS complete because posting didn't raise.
+            _verify_comments_migrated(item, target_backend, entry.target_id)
             entry = IdmapEntry(target_id=entry.target_id, phases=entry.phases | {PHASE_COMMENTS})
             idmap[source_id] = entry
             write_idmap(idmap_path, idmap)
@@ -241,16 +253,64 @@ def _all_phases_complete(idmap, source_items):
 
     Defense in depth, not the sole guard: migrate()'s loop never returns a report
     at all while an item it attempted this run is left incomplete (an uncaught
-    comment failure raises instead, exactly like create()/set_status() always
-    have -- see migrate()'s own docstring) -- so at today's one call site, this
-    formula and the old id-presence check agree on every reachable input. It earns
-    its keep the day a phase ever becomes best-effort (warn-and-continue instead of
-    raise): id-presence alone would then silently accept an item that never
-    finished, and this formula would not."""
+    comment failure OR a failed postcondition verification raises instead, exactly
+    like create()/set_status() always have -- see migrate()'s own docstring and
+    _verify_comments_migrated) -- so at today's one call site, this formula and
+    the old id-presence check agree on every reachable input. This was NOT always
+    true: before the postcondition check existed, `_migrate_comments` could return
+    without raising while having silently left a source comment un-posted (a
+    foreign comment landing on the target between an aborted run and its resume
+    could make the old count-based resume logic skip a real, still-unposted
+    source comment -- see _migrate_comments' docstring) -- an item PHASE_COMMENTS
+    then got recorded for that had not actually completed, exactly the gap
+    id-presence-alone could never catch either. The postcondition check closes
+    that gap by construction: PHASE_COMMENTS is only ever recorded after the
+    target has been re-read and shown to carry every source comment. This formula
+    earns its keep independently of that fix the day a phase ever becomes
+    best-effort (warn-and-continue instead of raise): id-presence alone would
+    then silently accept an item that never finished, and this formula would
+    not."""
     return all(
         item["id"] in idmap and _REQUIRED_PHASES <= idmap[item["id"]].phases
         for item in source_items
     )
+
+
+def _first_unmatched_source_index(source_comments, target_texts):
+    """The core "how much of source is already on the target" walk, shared by
+    _migrate_comments (to find what to post) and _verify_comments_migrated (to
+    confirm nothing is missing): the longest PREFIX of source_comments that is an
+    ORDERED SUBSEQUENCE of target_texts. Walks target_texts once, advancing a
+    pointer into source_comments only when the current unmatched source text is
+    seen -- a text on the target that does not match the pointer's current
+    source text is simply skipped (it is either a foreign comment, e.g. left by
+    a human, or one that hasn't been reached yet), never counted against the
+    match and never removed from consideration.
+
+    Returns the pointer's final position: source_comments[:pointer] is what's
+    already present (matched, in order); source_comments[pointer:] is what
+    still needs posting. Because the pointer only ever advances forward and
+    only checks its OWN current position (never scans ahead into the rest of
+    source_comments), the unmatched remainder is always a contiguous TAIL of
+    source_comments, never comments scattered out of a prefix -- this is what
+    lets both callers below simply slice at `pointer`.
+
+    Deliberately order-aware (subsequence), not membership-aware (set): the real
+    140-item work-item corpus contains exactly one pair of byte-identical
+    comment texts within a single item's own comment list (WI-0077, a repeated
+    "|---|---|---|" table-separator row, measured 02.09.2026). A set-based "is
+    this text already present on the target" check would treat the second
+    occurrence as already covered by the first and never post it -- silently
+    dropping one of two genuinely distinct (if textually identical) comments.
+    The subsequence walk above does not have this problem: each target
+    occurrence can only ever advance the pointer past ONE corresponding source
+    occurrence, so N identical source texts require N distinct target
+    occurrences to be considered matched."""
+    pointer = 0
+    for text in target_texts:
+        if pointer < len(source_comments) and text == source_comments[pointer]:
+            pointer += 1
+    return pointer
 
 
 def _migrate_comments(source_item, target_backend, target_id):
@@ -260,18 +320,95 @@ def _migrate_comments(source_item, target_backend, target_id):
     writing), so a mid-item abort must be survivable without risking a duplicate
     post.
 
-    Re-derives progress LIVE from the target's own comment count (rather than a
-    persisted per-comment checkpoint in the idmap): comments are appended in order
-    and never edited or removed by this code, so "how many are already there" is
-    exactly "how many of the source's list still need posting" -- no separate
-    counter to keep in sync. Posts only the not-yet-posted TAIL, in source order, so
-    a caller's assertion on ordering (not just count) holds after a resume."""
+    Re-derives progress LIVE from the target's own current comments (rather than
+    a persisted per-comment checkpoint in the idmap) via
+    _first_unmatched_source_index -- the longest prefix of source_comments that
+    is an ordered subsequence of what's already on the target -- and posts only
+    the remaining TAIL, in source order.
+
+    This is deliberately NOT "compare against the target's TOTAL comment count"
+    (the earlier, defective version of this function): that comparison is only
+    correct while nothing but this migration ever writes a comment to the
+    target. A human (or any other process) commenting on the target between an
+    aborted run and its resume inflates the total count without being one of
+    source_comments -- the count-based version would then skip past a real,
+    still-unposted source comment as if it had already been copied, LOSING IT
+    permanently once the phase was (incorrectly) recorded complete. The
+    subsequence walk does not have this problem: a foreign comment is simply a
+    target text that never matches the pointer's current source text, so it is
+    skipped over rather than mistaken for progress.
+
+    Three known limits of this rule, accepted rather than fixed:
+
+    1. YouTrack's comments endpoint is append-only -- comment() and
+       append_result() both POST a new comment; neither this backend nor a real
+       YouTrack instance offers a way to insert one BETWEEN two that already
+       exist. A newly posted comment (human or this code's own) therefore always
+       lands strictly AFTER every comment already on the issue at that moment,
+       and FakeYouTrackTransport's `_render_issue` returns `issue["comments"]`
+       in that same append order (mirrored by the real backend's
+       `_item_from_issue`, which iterates `issue.get("comments", [])` verbatim
+       -- see youtrack.py). This is the basis on which the subsequence walk is
+       safe: because nothing can be inserted retroactively into the middle of
+       the target's comment list, the pointer never needs to "look back" past a
+       text it already skipped. If this ever became false (some path could
+       reorder or insert a comment out of append order), a foreign comment
+       could land BETWEEN two already-transferred source comments and either be
+       mismatched against the wrong pointer position or cause the walk to skip
+       a real match -- the whole algorithm depends on read-back order being
+       exactly write order.
+    2. A foreign comment whose text happens to be byte-identical to the NEXT
+       unposted source comment will be mistaken for it -- the subsequence walk
+       matches on text alone, it has no way to know which process wrote a given
+       comment. This is a known, accepted limitation, not something this rule
+       tries to fix: closing it would require tagging every comment this code
+       posts (e.g. a hidden marker, the way append_result() already does for
+       result-links), which is out of scope here.
+    3. A comment deleted from the target AFTER this code transferred it makes a
+       later resume re-post it: the check only ever sees what is CURRENTLY
+       present on the target, it has no memory of what it posted in an earlier
+       run beyond what survives on the target itself.
+
+    Read-back soundness: get()'s full comment list was verified against a real
+    YouTrack instance at 600 comments (and a 60-comment probe) with no
+    pagination truncation on the comments sub-field -- unlike GET /api/issues,
+    which page_size_cap simulates truncating without an explicit "$top=-1" (see
+    fake_youtrack_transport.py). The largest item in the current 140-item corpus
+    has ~131 comments, well under the verified depth. Do not add `$top` handling
+    to comment reads on the suspicion that pagination might apply there too --
+    it doesn't; this was checked, not assumed."""
     source_comments = source_item.get("comments") or []
     if not source_comments:
         return
-    already_posted = len(target_backend.get(target_id).get("comments") or [])
-    for text in source_comments[already_posted:]:
+    target_texts = target_backend.get(target_id).get("comments") or []
+    pointer = _first_unmatched_source_index(source_comments, target_texts)
+    for text in source_comments[pointer:]:
         target_backend.comment(target_id, text)
+
+
+def _verify_comments_migrated(source_item, target_backend, target_id):
+    """Hard postcondition for the comments phase: re-reads the target (a FRESH
+    read, not the one _migrate_comments already made -- the whole point is not
+    to trust that call's own view of what it accomplished) and confirms every
+    text in source_item's comments is present as an ordered subsequence, using
+    the same walk _migrate_comments uses to decide what to post. If anything is
+    still missing, raises -- uncaught, exactly like a comment() failure already
+    does (see migrate()'s own docstring) -- rather than letting the caller
+    record PHASE_COMMENTS for an item that only APPEARED to finish because
+    posting didn't raise."""
+    source_comments = source_item.get("comments") or []
+    if not source_comments:
+        return
+    target_texts = target_backend.get(target_id).get("comments") or []
+    pointer = _first_unmatched_source_index(source_comments, target_texts)
+    if pointer != len(source_comments):
+        missing = source_comments[pointer:]
+        raise WorkItemError(
+            f"comments migration postcondition failed for target {target_id!r}: "
+            f"{len(missing)} of {len(source_comments)} source comment(s) not "
+            f"found on the target as an ordered subsequence after posting "
+            f"(first missing: {missing[0]!r})"
+        )
 
 
 def _existing_migration_markers(target_backend):

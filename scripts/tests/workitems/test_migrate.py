@@ -371,6 +371,136 @@ class CommentMigrationTest(_MigrateFixtureMixin, unittest.TestCase):
         self.assertEqual(len(matching), 1)
         self.assertEqual(self.target_backend.get(pre_existing["id"])["comments"], ["alpha"])
 
+    def _assert_source_order_preserved_as_subsequence(self, source_texts, target_texts):
+        """Asserts every text in `source_texts` appears in `target_texts`, in the
+        same relative order -- foreign texts interleaved on the target (planted
+        directly, not through this migration) are simply skipped over, not
+        counted against the match. Deliberately NOT calling into migrate.py's own
+        subsequence walk: an independent re-implementation here so this
+        acceptance check cannot pass merely because it shares a bug with the
+        production code it is checking."""
+        pointer = 0
+        for text in target_texts:
+            if pointer < len(source_texts) and text == source_texts[pointer]:
+                pointer += 1
+        self.assertEqual(
+            pointer, len(source_texts),
+            f"expected {source_texts} to appear as an ordered subsequence of "
+            f"{target_texts}, but only matched the first {pointer} entr{'y' if pointer == 1 else 'ies'}",
+        )
+
+    def test_resumes_past_a_foreign_comment_planted_between_runs_without_losing_any_source_comment(self):
+        # Reproduces the exact defect this task fixes: the OLD `_migrate_comments`
+        # compared the source's comment list against the target's TOTAL comment
+        # COUNT, so a human comment landing on the target between an aborted run
+        # and its resume inflated that count and made the old logic skip past a
+        # real, still-unposted source comment ("beta" here) as if it had already
+        # been copied -- "beta" was lost permanently.
+        third = self.source_backend.create(title="Third item")
+        self.source_backend.comment(third["id"], "alpha")
+        self.source_backend.comment(third["id"], "beta")
+        self.source_backend.comment(third["id"], "gamma")
+
+        # "alpha" (call #0) succeeds; "beta" (call #1) fails -- abort mid-item.
+        self.transport.fail_comment_at(1)
+        with self.assertRaises(WorkItemError):
+            self.run_migrate()
+
+        idmap = migrate.read_idmap(str(self.idmap_path))
+        target_id = idmap[third["id"]].target_id
+        self.assertEqual(self.target_backend.get(target_id)["comments"], ["alpha"])
+
+        # A human comments on the target directly, between the two runs -- exactly
+        # what the old "compare against the TOTAL count" resume logic could not
+        # tell apart from one of its own already-posted source comments.
+        self.target_backend.comment(target_id, "a human note")
+
+        self.run_migrate()
+
+        final_comments = self.target_backend.get(target_id)["comments"]
+        self._assert_source_order_preserved_as_subsequence(
+            ["alpha", "beta", "gamma"], final_comments,
+        )
+
+    def test_duplicate_comment_texts_within_one_items_list_both_survive_a_resume(self):
+        # WI-0077's real shape (measured across the 140-item corpus, see
+        # _migrate_comments' docstring): a repeated table-separator row,
+        # byte-identical, twice in the same item's own comment list. A
+        # membership/set-based resume rule would treat the second occurrence as
+        # "already there" the moment the first is seen and never post it.
+        third = self.source_backend.create(title="Third item")
+        self.source_backend.comment(third["id"], "|---|---|---|")
+        self.source_backend.comment(third["id"], "|---|---|---|")
+        self.source_backend.comment(third["id"], "gamma")
+
+        # Both copies of "|---|---|---|" (calls #0 and #1) succeed; "gamma"
+        # (call #2) fails -- abort mid-item.
+        self.transport.fail_comment_at(2)
+        with self.assertRaises(WorkItemError):
+            self.run_migrate()
+
+        idmap = migrate.read_idmap(str(self.idmap_path))
+        target_id = idmap[third["id"]].target_id
+        self.assertEqual(
+            self.target_backend.get(target_id)["comments"],
+            ["|---|---|---|", "|---|---|---|"],
+        )
+
+        self.run_migrate()
+
+        self.assertEqual(
+            self.target_backend.get(target_id)["comments"],
+            ["|---|---|---|", "|---|---|---|", "gamma"],
+        )
+
+    def test_a_postcondition_failure_leaves_the_phase_unrecorded_and_does_not_archive(self):
+        # The second required fix (WI-0141 follow-up): migrate() must not record
+        # PHASE_COMMENTS on the strength of `_migrate_comments` merely returning
+        # without raising -- it must re-read the target and confirm every source
+        # comment actually landed. Simulated with a target wrapper whose
+        # comment() ACKNOWLEDGES one write without persisting it -- a scenario
+        # `_migrate_comments` itself cannot detect from its own return value (the
+        # call it made "succeeded"), but the postcondition re-read does.
+        class _TargetThatSilentlyDropsOneComment:
+            """Wraps the real target backend: the `drop_at`-th (0-based, counted
+            across calls made through THIS wrapper only) `comment()` call
+            returns successfully but never actually writes the comment through
+            to the backend -- acknowledges a write it silently lost."""
+
+            def __init__(self, backend, drop_at):
+                self._backend = backend
+                self._drop_at = drop_at
+                self._call_count = 0
+
+            def comment(self, item_id, text):
+                index = self._call_count
+                self._call_count += 1
+                if index == self._drop_at:
+                    return {"text": text}
+                return self._backend.comment(item_id, text)
+
+            def __getattr__(self, name):
+                return getattr(self._backend, name)
+
+        third = self.source_backend.create(title="Third item")
+        self.source_backend.comment(third["id"], "alpha")
+        self.source_backend.comment(third["id"], "beta")
+
+        wrapped_target = _TargetThatSilentlyDropsOneComment(self.target_backend, drop_at=1)
+
+        with self.assertRaises(WorkItemError):
+            migrate.migrate(
+                self.source_backend, wrapped_target, str(self.idmap_path),
+                source_workitems_dir=str(self.source_dir), clock=FIXED_CLOCK,
+            )
+
+        idmap = migrate.read_idmap(str(self.idmap_path))
+        self.assertNotIn(migrate.PHASE_COMMENTS, idmap[third["id"]].phases)
+        self.assertFalse(migrate._all_phases_complete(idmap, self.source_backend.list()))
+        # No filesystem side effect from a partial phase -- the source must not
+        # have been archived.
+        self.assertTrue(self.source_dir.is_dir())
+
 
 class FullyMigratedRequiresEveryPhaseTest(unittest.TestCase):
     """`report["fully_migrated"]` gates archiving the source directory AND (in
