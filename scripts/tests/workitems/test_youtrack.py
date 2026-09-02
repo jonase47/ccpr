@@ -1298,6 +1298,130 @@ class YouTrackCreateTagVisibilityTest(unittest.TestCase):
         self.assertIn("security", captured_stderr.getvalue())
 
 
+class YouTrackCreateTagVisibilityOutcomesTest(unittest.TestCase):
+    """create()'s own return value cannot grow a "why wasn't this tag's
+    visibility set" field without changing the six-op contract's shape (PO
+    decision: migrate.py's report must carry this, but not by widening
+    create()'s return). last_create_tag_visibility_outcomes() is the side
+    channel migrate.py reads immediately after calling create() -- reset at
+    the start of every create() call, so it only ever reflects the MOST
+    RECENT call."""
+
+    def test_no_tags_means_no_outcomes(self):
+        transport = FakeYouTrackTransport(project_short_name="TEST")
+        backend = youtrack.YouTrackBackend(
+            base_url="https://faketrack.example.org", project="TEST",
+            token="fake-token", transport=transport,
+        )
+
+        backend.create(title="New feature")
+
+        self.assertEqual(backend.last_create_tag_visibility_outcomes(), [])
+
+    def test_a_successfully_shared_tag_produces_no_outcome(self):
+        transport = FakeYouTrackTransport(project_short_name="TEST")
+        backend = youtrack.YouTrackBackend(
+            base_url="https://faketrack.example.org", project="TEST",
+            token="fake-token", transport=transport,
+            tag_visibility_group="All Users",
+        )
+
+        backend.create(title="New feature", tags=["security"])
+
+        self.assertEqual(backend.last_create_tag_visibility_outcomes(), [])
+
+    def test_unconfigured_group_key_is_reported_as_not_configured(self):
+        transport = FakeYouTrackTransport(project_short_name="TEST")
+        backend = youtrack.YouTrackBackend(
+            base_url="https://faketrack.example.org", project="TEST",
+            token="fake-token", transport=transport,
+            # tag_visibility_group intentionally omitted.
+        )
+
+        with contextlib.redirect_stderr(io.StringIO()):
+            backend.create(title="New feature", tags=["security"])
+
+        self.assertEqual(
+            backend.last_create_tag_visibility_outcomes(),
+            [{"tag": "security", "reason": youtrack.TAG_VISIBILITY_NOT_CONFIGURED}],
+        )
+
+    def test_group_not_found_is_reported_as_group_not_found(self):
+        transport = FakeYouTrackTransport(project_short_name="TEST")
+        backend = youtrack.YouTrackBackend(
+            base_url="https://faketrack.example.org", project="TEST",
+            token="fake-token", transport=transport,
+            tag_visibility_group="Team Atlantis",
+        )
+
+        with contextlib.redirect_stderr(io.StringIO()):
+            backend.create(title="New feature", tags=["security"])
+
+        self.assertEqual(
+            backend.last_create_tag_visibility_outcomes(),
+            [{"tag": "security", "reason": youtrack.TAG_VISIBILITY_GROUP_NOT_FOUND}],
+        )
+
+    def test_ambiguous_group_is_reported_as_group_ambiguous(self):
+        transport = FakeYouTrackTransport(
+            project_short_name="TEST",
+            known_groups=[
+                {"id": "100-1", "name": "Support"},
+                {"id": "100-2", "name": "Support"},
+            ],
+        )
+        backend = youtrack.YouTrackBackend(
+            base_url="https://faketrack.example.org", project="TEST",
+            token="fake-token", transport=transport,
+            tag_visibility_group="Support",
+        )
+
+        with contextlib.redirect_stderr(io.StringIO()):
+            backend.create(title="New feature", tags=["security"])
+
+        self.assertEqual(
+            backend.last_create_tag_visibility_outcomes(),
+            [{"tag": "security", "reason": youtrack.TAG_VISIBILITY_GROUP_AMBIGUOUS}],
+        )
+
+    def test_outcomes_do_not_leak_across_create_calls(self):
+        transport = FakeYouTrackTransport(project_short_name="TEST")
+        backend = youtrack.YouTrackBackend(
+            base_url="https://faketrack.example.org", project="TEST",
+            token="fake-token", transport=transport,
+            # tag_visibility_group intentionally omitted.
+        )
+
+        with contextlib.redirect_stderr(io.StringIO()):
+            backend.create(title="First feature", tags=["alpha"])
+            backend.create(title="Second feature", tags=["beta"])
+
+        # Only the SECOND call's own outcome -- "alpha" (first call) must
+        # not still be sitting in the list.
+        self.assertEqual(
+            backend.last_create_tag_visibility_outcomes(),
+            [{"tag": "beta", "reason": youtrack.TAG_VISIBILITY_NOT_CONFIGURED}],
+        )
+
+    def test_a_tag_already_known_to_the_instance_produces_no_outcome(self):
+        """A tag that already exists is left untouched entirely (see
+        _ensure_tag_visibility's own docstring) -- visibility was never
+        attempted for it, so it must not appear as a "not set" outcome
+        either, even with the config key unset."""
+        transport = FakeYouTrackTransport(project_short_name="TEST")
+        transport._ensure_tag_registered("already-shared")
+        backend = youtrack.YouTrackBackend(
+            base_url="https://faketrack.example.org", project="TEST",
+            token="fake-token", transport=transport,
+            # tag_visibility_group intentionally omitted.
+        )
+
+        with contextlib.redirect_stderr(io.StringIO()):
+            backend.create(title="New feature", tags=["already-shared"])
+
+        self.assertEqual(backend.last_create_tag_visibility_outcomes(), [])
+
+
 class FakeYouTrackTransportTagCreationHonestyTest(unittest.TestCase):
     """FakeYouTrackTransport must not accept anything the live instance
     forbids (code-review finding, measured live 02.09.2026): a fresh

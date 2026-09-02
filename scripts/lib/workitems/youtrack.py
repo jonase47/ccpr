@@ -99,6 +99,20 @@ _RUNNER_TAG_PREFIX = "runner:"
 _HEARTBEAT_TAG_PREFIX = "heartbeat:"
 _HEARTBEAT_TAG_FORMAT = "%Y%m%dT%H%M%SZ"
 
+# _ensure_tag_visibility's three reported (not raised) outcomes -- a tag is
+# still created and applied with its default (private) visibility in every
+# one of these, only the STATED reason differs (PO decision: migrate.py's
+# report must distinguish them, see create()/last_create_tag_visibility_
+# outcomes' own docstrings). Deliberately NOT covering the fourth,
+# genuinely-raising failure mode (a rejected visibility-set call, or a
+# read-back mismatch) -- that one already propagates as WorkItemError
+# (add_tag) or its own distinct stderr warning (create()'s best-effort
+# loop, see _apply_tag_with_visibility), and was not named among these
+# three in the PO's decision.
+TAG_VISIBILITY_NOT_CONFIGURED = "not_configured"
+TAG_VISIBILITY_GROUP_NOT_FOUND = "group_not_found"
+TAG_VISIBILITY_GROUP_AMBIGUOUS = "group_ambiguous"
+
 
 def _stripped_or_none(value):
     """Trims a config string and treats whitespace-only values as unset, so
@@ -258,6 +272,11 @@ class YouTrackBackend:
         # distinct from an empty result once it has been.
         self._known_tag_names_cache = None
         self._all_groups_cache = None
+        # The tag-visibility outcomes from the MOST RECENT create() call
+        # only (see last_create_tag_visibility_outcomes' own docstring) --
+        # reset at the start of every create() call, never accumulated
+        # across calls.
+        self._last_create_tag_visibility_outcomes = []
 
     def create(self, title, item_type=None, owner=None, description=None, tags=None):
         if not title:
@@ -270,6 +289,10 @@ class YouTrackBackend:
         tags = list(tags or [])
         for tag in tags:
             validate_tag(tag)
+        # Reset, not appended to -- see last_create_tag_visibility_outcomes'
+        # own docstring for why this call's outcomes must never include a
+        # PRIOR call's leftovers.
+        self._last_create_tag_visibility_outcomes = []
 
         project_id = self._resolve_project_id()
         body = {"project": {"id": project_id}, "summary": title, "description": description or ""}
@@ -319,9 +342,16 @@ class YouTrackBackend:
         existence, so it needs the same _ensure_tag_visibility step first. A
         visibility failure must not fail create() itself, same rule as every
         other best-effort field at create time: warn and continue, since the
-        issue already exists by this point."""
+        issue already exists by this point.
+
+        Records a NOT-SET outcome (see last_create_tag_visibility_outcomes)
+        for the three REPORTED (not raised) reasons _ensure_tag_visibility
+        can return -- the fourth, genuinely-raising failure mode caught
+        below is a distinct class the PO's decision did not name among
+        these three (see TAG_VISIBILITY_NOT_CONFIGURED's own module-level
+        comment)."""
         try:
-            self._ensure_tag_visibility(tag)
+            outcome_reason = self._ensure_tag_visibility(tag)
         except WorkItemError as exc:
             print(
                 f"Warning: could not set visibility for tag {tag!r} on new "
@@ -329,7 +359,29 @@ class YouTrackBackend:
                 "its current visibility.",
                 file=sys.stderr,
             )
+        else:
+            if outcome_reason is not None:
+                self._last_create_tag_visibility_outcomes.append(
+                    {"tag": tag, "reason": outcome_reason}
+                )
         self._apply_optional_create_field(item_id, f"tag {tag}", "tag", tag)
+
+    def last_create_tag_visibility_outcomes(self):
+        """The tag-visibility outcomes from the MOST RECENT create() call --
+        reset at the start of every create() call (see create()'s own body),
+        so this always reflects that call alone, never an accumulation
+        across calls. Exists because create()'s own return value cannot grow
+        a new key without changing the six-op contract's shape (PO
+        decision) -- this is the side channel migrate.py reads immediately
+        after calling create(), before the next item's create() call.
+
+        Each entry is `{"tag": name, "reason": one of
+        TAG_VISIBILITY_NOT_CONFIGURED / TAG_VISIBILITY_GROUP_NOT_FOUND /
+        TAG_VISIBILITY_GROUP_AMBIGUOUS}` -- only for a tag create() itself
+        applied to a FRESH (not already-existing) name; a tag already known
+        to the instance is left untouched entirely (see
+        _ensure_tag_visibility's own docstring) and never appears here."""
+        return list(self._last_create_tag_visibility_outcomes)
 
     def _apply_optional_create_field(self, item_id, query, field_name, value):
         """Runs a create-time field command that must never fail create() itself --
@@ -663,13 +715,17 @@ class YouTrackBackend:
         """Resolves `group_name` (workitems.youtrack.tagVisibilityGroup) to a
         YouTrack group id via GET /api/groups, cached for the life of this
         backend instance (one extra round trip total, regardless of how many
-        tags need it). Returns None -- after printing a warning naming the
-        group -- if the name doesn't resolve to exactly one group: not found, or
-        ambiguous (more than one group sharing the name). Ambiguity was not
-        observed on the live instance this was measured against (every group
-        name, including "All Users", was unique there), but nothing in the API
-        rules it out for a different instance (e.g. two same-named project
-        teams), so the guard costs nothing to keep either way."""
+        tags need it). Returns the group id on success. On failure -- after
+        printing a warning naming the group -- returns TAG_VISIBILITY_
+        GROUP_NOT_FOUND or TAG_VISIBILITY_GROUP_AMBIGUOUS (never a bare
+        None; these are the caller's own reported-outcome vocabulary, see
+        _ensure_tag_visibility) if the name doesn't resolve to exactly one
+        group: not found, or ambiguous (more than one group sharing the
+        name). Ambiguity was not observed on the live instance this was
+        measured against (every group name, including "All Users", was
+        unique there), but nothing in the API rules it out for a different
+        instance (e.g. two same-named project teams), so the guard costs
+        nothing to keep either way."""
         if self._all_groups_cache is None:
             self._all_groups_cache = self._request("GET", "/api/groups", fields="id,name") or []
         matches = [g for g in self._all_groups_cache if g.get("name") == group_name]
@@ -680,7 +736,7 @@ class YouTrackBackend:
                 "their default (private) visibility.",
                 file=sys.stderr,
             )
-            return None
+            return TAG_VISIBILITY_GROUP_NOT_FOUND
         if len(matches) > 1:
             print(
                 f"Warning: workitems.youtrack.tagVisibilityGroup {group_name!r} "
@@ -689,7 +745,7 @@ class YouTrackBackend:
                 "visibility.",
                 file=sys.stderr,
             )
-            return None
+            return TAG_VISIBILITY_GROUP_AMBIGUOUS
         return matches[0]["id"]
 
     def _ensure_tag_visibility(self, tag_name):
@@ -721,9 +777,20 @@ class YouTrackBackend:
         the visibility POST, or the read-back mismatch below) is an unexpected
         instance-level failure and raises WorkItemError -- a set call that
         returned is not evidence; only the read-back is.
+
+        Returns None on success (visibility set and confirmed) OR when
+        tag_name already existed (nothing attempted, see the paragraph
+        above) -- OR one of TAG_VISIBILITY_NOT_CONFIGURED /
+        TAG_VISIBILITY_GROUP_NOT_FOUND / TAG_VISIBILITY_GROUP_AMBIGUOUS for
+        the three reported outcomes above, so a caller (see
+        _apply_tag_with_visibility) can surface WHICH of the three applied,
+        not just that visibility wasn't set. add_tag ignores this return
+        value -- it has nothing to report it to (see add_tag's own
+        docstring on why an unexpected failure there is allowed to
+        propagate uncaught instead).
         """
         if tag_name in self._known_tag_names():
-            return
+            return None
         group_name = self.tag_visibility_group
         if not group_name:
             print(
@@ -734,11 +801,11 @@ class YouTrackBackend:
                 file=sys.stderr,
             )
             self._known_tag_names_cache.add(tag_name)
-            return
+            return TAG_VISIBILITY_NOT_CONFIGURED
         group_id = self._resolve_tag_visibility_group_id(group_name)
-        if group_id is None:
+        if group_id in (TAG_VISIBILITY_GROUP_NOT_FOUND, TAG_VISIBILITY_GROUP_AMBIGUOUS):
             self._known_tag_names_cache.add(tag_name)
-            return
+            return group_id
 
         created = self._request("POST", "/api/tags", body={"name": tag_name}, fields="id,name") or {}
         tag_id = created.get("id")
@@ -770,6 +837,7 @@ class YouTrackBackend:
                 f"match the configured group {group_name!r} (id {group_id}): got "
                 f"{readback.get('visibleFor')!r}."
             )
+        return None
 
     def remove_tag(self, item_id, tag):
         validate_item_id(item_id)
