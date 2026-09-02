@@ -23,7 +23,7 @@ The archive timestamp comes from an injected `clock` (a zero-arg callable return
 datetime), never a bare `datetime.now()` call buried in the archiving logic, so tests
 get a deterministic archive directory name.
 
-## Idmap format (WI-0141)
+## Idmap format
 
 One line per item: `source-id: target-id phase1,phase2,...` — phases sorted
 alphabetically, comma-separated, no spaces. `created`/`status` are recorded as soon
@@ -64,7 +64,7 @@ PHASE_LINKS = "links"
 _PHASES_AFTER_CREATE_AND_STATUS = frozenset({PHASE_CREATED, PHASE_STATUS})
 
 # Every phase this run is responsible for completing, for `fully_migrated` (see
-# _all_phases_complete). Comments and links, for now (WI-0141) -- results/tags are
+# _all_phases_complete). Comments and links, for now -- results/tags are
 # deliberately out of scope; when they're added, they join this set, and NOTHING
 # else about the idmap format has to change (see the module docstring).
 _REQUIRED_PHASES = frozenset({PHASE_CREATED, PHASE_STATUS, PHASE_COMMENTS, PHASE_LINKS})
@@ -206,7 +206,7 @@ def migrate(source_backend, target_backend, idmap_path, source_workitems_dir=Non
         # Resume never re-attempts create()/set_status() above for an item already
         # in the idmap -- but its OWN remaining phase(s) still run every call, until
         # they're recorded done. Comments is the only phase beyond created/status
-        # today (WI-0141); a future phase slots in the same way.
+        # today; a future phase slots in the same way.
         if PHASE_COMMENTS not in entry.phases:
             _migrate_comments(item, target_backend, entry.target_id)
             # Hard postcondition, not a trust of _migrate_comments' own return:
@@ -267,17 +267,18 @@ def migrate(source_backend, target_backend, idmap_path, source_workitems_dir=Non
 
 def _all_phases_complete(idmap, source_items):
     """The definition `fully_migrated` needs once idmap entries track PER-PHASE
-    completion (WI-0141): bare id-presence ("item id in idmap") stopped being an
+    completion: bare id-presence ("item id in idmap") stopped being an
     accurate description the moment an item could sit in the idmap with its
     comments phase still pending. Gates archiving the source directory and (in
     scripts/workitems.py) flipping the active provider.
 
     Defense in depth, not the sole guard: migrate()'s loop never returns a report
-    at all while an item it attempted this run is left incomplete (an uncaught
-    comment failure OR a failed postcondition verification raises instead, exactly
-    like create()/set_status() always have -- see migrate()'s own docstring and
-    _verify_comments_migrated) -- so at today's one call site, this formula and
-    the old id-presence check agree on every reachable input. This was NOT always
+    at all while an item it attempted this run is left incomplete -- an uncaught
+    comment failure, an uncaught link failure, or a failed postcondition
+    verification for either phase raises instead, exactly like create()/set_status()
+    always have -- see migrate()'s own docstring, _verify_comments_migrated, and
+    _verify_links_migrated -- so at today's one call site, this formula and the old
+    id-presence check agree on every reachable input. This was NOT always
     true: before the postcondition check existed, `_migrate_comments` could return
     without raising while having silently left a source comment un-posted (a
     foreign comment landing on the target between an aborted run and its resume
@@ -440,17 +441,27 @@ def _resolve_link_target_id(link_target_source_id, idmap):
     the two numberings can drift apart). Raises loud rather than skipping: by the
     time the links pass runs, every item THIS run's own first pass attempted has
     an idmap entry (see migrate()'s docstring on the two-pass split), so a miss
-    here can only mean a resume whose idmap lost an entry for an item that pass
-    would otherwise have (re-)created -- silently dropping the link would hide
-    exactly that kind of data loss."""
+    here means one of two things -- either a resume whose idmap lost an entry for
+    an item that pass would otherwise have (re-)created, or the link's target
+    was never part of THIS run's source set at all because its own source file
+    is gone (`local.py`'s add_link validates both ids at write time, but has no
+    target-existence check on read and no delete operation of its own, so a
+    dangling link survives if the target item's file is removed by hand) --
+    silently dropping the link would hide either kind of data loss."""
     entry = idmap.get(link_target_source_id)
     if entry is None:
         raise WorkItemError(
             f"link target {link_target_source_id!r} is missing from the idmap -- "
             "cannot resolve it to a target-backend id. This should be unreachable "
             "within a single migrate() call (every source item gets an idmap entry "
-            "before the links pass starts); it means the idmap on disk lost an "
-            "entry for an item that should already have one."
+            "before the links pass starts); it means either the idmap on disk "
+            "lost an entry for an item that should already have one, or the "
+            "link's target no longer exists in the source store (a dangling "
+            "link left behind by a source file removed by hand) -- restore the "
+            "missing source item, or hand-edit the link-holding item's own "
+            "frontmatter to drop the dangling link entry (the `remove-link` "
+            "command validates both ids the same way `add_link` does, so it "
+            "cannot remove a link to a target that is already gone)."
         )
     return entry.target_id
 

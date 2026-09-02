@@ -100,9 +100,9 @@ class FakeYouTrackTransport:
         # not-yet-created issue will be assigned (see fail_comment_at's docstring).
         self._fail_comment_at_indices = set()
         self._comment_post_count = 0
-        # Same idea, for typed-link Command-API calls (migrate.py's links pass,
-        # WI-0141 follow-up): unlike the State/tag/Type/Sprint command branches
-        # above, an add-link command has no known-value set to reject against --
+        # Same idea, for typed-link Command-API calls (migrate.py's links pass):
+        # unlike the State/tag/Type/Sprint command branches above, an add-link
+        # command has no known-value set to reject against --
         # a caller resuming after a crash relies on the target rejecting or
         # dropping the write, which this hook simulates directly. Counted
         # globally (not per-issue), same rationale as `_fail_comment_at_indices`.

@@ -218,7 +218,7 @@ class MigrateLocalToYouTrackTest(_MigrateFixtureMixin, unittest.TestCase):
 
 
 class CommentMigrationTest(_MigrateFixtureMixin, unittest.TestCase):
-    """Comments (WI-0141 commit 2): the first non-idempotent field class migrate()
+    """Comments: the first non-idempotent field class migrate()
     carries over. Unlike create()/set_status()/add_tag()/add_link(), `comment()` has
     no dedup of its own -- POST /api/issues/<id>/comments has no pre-check -- so an
     abort mid-item's own comment list must be resumable without duplicating.
@@ -454,7 +454,7 @@ class CommentMigrationTest(_MigrateFixtureMixin, unittest.TestCase):
         )
 
     def test_a_postcondition_failure_leaves_the_phase_unrecorded_and_does_not_archive(self):
-        # The second required fix (WI-0141 follow-up): migrate() must not record
+        # The second required fix: migrate() must not record
         # PHASE_COMMENTS on the strength of `_migrate_comments` merely returning
         # without raising -- it must re-read the target and confirm every source
         # comment actually landed. Simulated with a target wrapper whose
@@ -503,7 +503,7 @@ class CommentMigrationTest(_MigrateFixtureMixin, unittest.TestCase):
 
 
 class LinkMigrationTest(_MigrateFixtureMixin, unittest.TestCase):
-    """Links (WI-0141 follow-up, second pass): `add_link` needs the PARTNER's
+    """Links (second pass): `add_link` needs the PARTNER's
     target id, which does not exist until the partner item has itself been
     created -- so links cannot ride along in the per-item loop the way
     created/status/comments do; they need their own pass after every item in
@@ -584,14 +584,16 @@ class LinkMigrationTest(_MigrateFixtureMixin, unittest.TestCase):
 
     def test_a_link_whose_target_is_missing_from_the_idmap_fails_loud(self):
         # add_link() itself refuses to create a dangling link (both ids must
-        # exist as real work items -- see local.py's add_link), so the only
-        # reachable way for the LINKS PASS to hit a missing idmap entry is the
-        # scenario this task's briefing names: a resume whose idmap lost the
-        # entry for an item that this run's own first pass would otherwise
-        # have (re-)created -- simulated here by planting a pre-existing,
-        # links-incomplete idmap entry for `third` and then removing `fourth`
-        # (the link's target) from THIS run's source directory entirely, so
-        # the first pass never sees it and never adds it back to the idmap.
+        # exist as real work items -- see local.py's add_link), so the missing
+        # idmap entry here has to be one of the two causes named in
+        # _resolve_link_target_id's own docstring. This constructs the SECOND
+        # one, not a resume with a lost entry: `fourth` (the link's target) is
+        # removed from THIS run's source directory entirely, so the first
+        # pass never sees it in source_items and never gives it an idmap
+        # entry in the first place -- there is nothing to lose, it was never
+        # there. `third`'s pre-existing, links-incomplete idmap entry is
+        # planted directly so the run reaches the links pass for `third` ->
+        # `fourth` without needing a full prior run first.
         third = self.source_backend.create(title="Third item")
         fourth = self.source_backend.create(title="Fourth item")
         self.source_backend.add_link(third["id"], "relates-to", fourth["id"])
@@ -789,7 +791,7 @@ class FullyMigratedRequiresEveryPhaseTest(unittest.TestCase):
 
 
 class IdmapPhaseFormatTest(unittest.TestCase):
-    """`read_idmap`/`write_idmap` in isolation (WI-0141): the idmap is no longer a
+    """`read_idmap`/`write_idmap` in isolation: the idmap is no longer a
     flat `source-id: target-id` line -- it now records, per item, which phases of
     the migration completed (`created`, `status`, and later `comments`), so a
     resumed run can tell "created but comments not yet copied" apart from "fully
