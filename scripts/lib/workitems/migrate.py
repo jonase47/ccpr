@@ -45,6 +45,7 @@ import datetime
 import os
 import re
 import shutil
+import sys
 
 from workitems import WorkItemError, normalize_result_ref
 
@@ -93,8 +94,10 @@ _PHASES_AFTER_CREATE_AND_STATUS = frozenset({PHASE_CREATED, PHASE_STATUS})
 # Every phase this run is responsible for completing, for `fully_migrated` (see
 # _all_phases_complete). Comments, result-prose, links and result-refs -- tags
 # and priority are DELIBERATELY excluded (see migrate()'s own docstring for
-# why): tags are best-effort by backend design (create()'s own contract, see
-# _apply_optional_create_field) and reported instead of gated; priority is a
+# why): tags are best-effort on every path that applies them -- create()'s
+# own contract (see _apply_optional_create_field) and, for an adopted item,
+# add_tag() wrapped the same way (see _apply_tags_to_adopted_item) -- and
+# reported instead of gated; priority is a
 # plain idempotent overwrite with nothing to resume. When another phase joins
 # this set, NOTHING else about the idmap format has to change (see the module
 # docstring).
@@ -284,12 +287,14 @@ def migrate(source_backend, target_backend, idmap_path, source_workitems_dir=Non
     source_items = source_backend.list()
     report = {
         "migrated": [], "skipped_already_migrated": [],
-        # Tags are best-effort at create() time (see _apply_optional_create_field
-        # in youtrack.py) -- a rejected tag simply vanishes from the created
-        # item, by design, with no exception to catch. This report is the ONLY
-        # place that vanishing becomes visible. Per item AND in total, always
-        # present (even all-zero: an absent field is not the same statement as
-        # a zero) -- see _record_tag_diff.
+        # Tags are best-effort, both at create() time (see
+        # _apply_optional_create_field in youtrack.py) and on the adopted-item
+        # path (see _apply_tags_to_adopted_item, which wraps add_tag() with
+        # the same discipline) -- a rejected tag simply vanishes, by design,
+        # with no exception propagating out of migrate(). This report is the
+        # ONLY place that vanishing becomes visible. Per item AND in total,
+        # always present (even all-zero: an absent field is not the same
+        # statement as a zero) -- see _record_tag_diff.
         #
         # total_visibility_not_set / each item's own "visibility_not_set" list
         # (PO decision, verbatim in substance): a tag counts as `applied` the
@@ -323,6 +328,19 @@ def migrate(source_backend, target_backend, idmap_path, source_workitems_dir=Non
         if entry is None:
             if source_id in existing_markers:
                 target_id = existing_markers[source_id]
+                # Same reasoning as status/priority just below: a crash could
+                # have happened before tags ran in the prior attempt, so an
+                # adopted item might still be sitting with none of its source
+                # tags applied. Unlike status/priority, create(tags=...) is
+                # not available here -- the target item already exists -- so
+                # this goes through add_tag() instead (see
+                # _apply_tags_to_adopted_item for why that also needs its own
+                # best-effort wrapping, unlike create()'s own tag loop, which
+                # already gets that for free).
+                requested_tags = item.get("tags") or []
+                _apply_tags_to_adopted_item(
+                    report, target_backend, source_id, target_id, requested_tags,
+                )
             else:
                 description = item.get("description") or ""
                 provenance = f"Migrated from {source_id}."
@@ -976,18 +994,72 @@ def _tag_visibility_outcomes(target_backend):
     return accessor()
 
 
+def _apply_tags_to_adopted_item(report, target_backend, source_id, target_id, requested_tags):
+    """Applies an adopted (crash-recovered) item's source tags one at a time
+    via add_tag() -- create(tags=...) is not available here, the target item
+    already exists. Same reasoning as status/priority's own unconditional
+    re-application on this path (see migrate()'s loop): a crash could have
+    happened before tags ran in the prior attempt, so an adopted item might
+    still carry none of its source tags.
+
+    Unlike create()'s own tag loop (_apply_tag_with_visibility in
+    youtrack.py), add_tag() is NOT best-effort by design -- it raises
+    uncaught on a rejected tag (see add_tag's own docstring: "nothing else to
+    protect via atomicity, unlike create()"). That reasoning does not carry
+    over here: from migrate()'s side, an adopted item's target ALSO already
+    exists, exactly like a freshly created one does by the time its tags are
+    applied -- so a tag rejected by the target project's own workflow must
+    not abort an item that already exists, and, at this call site
+    specifically, must not abort a whole migration run (potentially 100+
+    items) over one item's one tag. This function supplies that best-effort
+    wrapping itself, matching create()'s outcome exactly: a rejected tag is
+    warned about on stderr and left out of `applied`, never raised.
+
+    Does not thread through _tag_visibility_outcomes: that accessor reads
+    create()'s own last_create_tag_visibility_outcomes side channel (see its
+    docstring), populated only inside create()'s tag loop -- reading it here
+    would return either stale data from an earlier create() call or nothing
+    at all, neither of which reflects an add_tag() call. A tag applied via
+    this path can therefore go visible/private without that fact surfacing
+    in `visibility_not_set` -- a known, narrower gap than the one this
+    function closes, left as `[]` here rather than fixed, since add_tag()
+    itself has nowhere to report a visibility outcome to (see
+    _ensure_tag_visibility's own docstring: "add_tag ignores this return
+    value").
+
+    add_tag() is idempotent (reads the item and returns early if the tag is
+    already present) and does its own read per tag -- at the real corpus's
+    scale this is one extra GET per tag on a narrow crash-recovery path, not
+    the common case tags travel through; negligible today, worth
+    reconsidering only if adoption ever stopped being the exception."""
+    applied = []
+    for tag in requested_tags:
+        try:
+            target_backend.add_tag(target_id, tag)
+        except WorkItemError as exc:
+            print(
+                f"Warning: could not apply tag {tag!r} to adopted item {target_id} "
+                f"(source {source_id}): {exc}. Continuing without it.",
+                file=sys.stderr,
+            )
+        else:
+            applied.append(tag)
+    _record_tag_diff(report, source_id, target_id, requested_tags, applied, [])
+
+
 def _record_tag_diff(report, source_id, target_id, requested, applied, visibility_not_set):
-    """Appends one entry to report["tags"]["items"] for an item that just went
-    through target_backend.create(tags=requested) -- `applied` is what
-    create()'s own return value (already a fresh get(), see create()'s
-    docstring in youtrack.py) actually shows, NEVER an assumption that
-    `requested` landed unchanged. `missing` is requested-not-in-applied,
-    computed here rather than left for a report consumer to derive, so "zero
-    missing" and "no entry at all" can never be confused by a caller that
-    forgets to check for absence. Only called from the branch that actually
-    calls create() -- an adopted (crash-recovered) or already-idmapped item
-    gets no entry this run (see migrate()'s own docstring on why tags are not
-    re-diffed on resume).
+    """Appends one entry to report["tags"]["items"] for an item that just had
+    tags applied this run -- either through target_backend.create(tags=
+    requested) (a fresh item) or through _apply_tags_to_adopted_item (an
+    adopted, crash-recovered item; see that function's own docstring for why
+    it needs its own best-effort wrapping around add_tag()). `applied` is
+    what the target backend's own return value/state actually shows, NEVER
+    an assumption that `requested` landed unchanged. `missing` is
+    requested-not-in-applied, computed here rather than left for a report
+    consumer to derive, so "zero missing" and "no entry at all" can never be
+    confused by a caller that forgets to check for absence. Only an
+    already-idmapped (genuinely resumed) item gets no entry this run (see
+    migrate()'s own docstring on why tags are not re-diffed on resume).
 
     `visibility_not_set` (see _tag_visibility_outcomes) is a DIFFERENT axis
     from `missing`: a tag can be `applied` (present on the item) and still

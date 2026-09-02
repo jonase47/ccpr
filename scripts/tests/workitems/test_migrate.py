@@ -1315,13 +1315,18 @@ class ResultProseMigrationTest(_MigrateFixtureMixin, unittest.TestCase):
 
 
 class TagMigrationTest(_MigrateFixtureMixin, unittest.TestCase):
-    """Tags: applied at create() time only (create(tags=[...]), youtrack.py:248)
-    -- no second pass, no extra calls, no idmap phase (see migrate()'s own
-    docstring for why tags never gate `fully_migrated`). But create()'s tag
-    handling is BEST-EFFORT (_apply_optional_create_field warns and continues
-    on a rejected tag, see youtrack.py's create() docstring) -- a silently
-    swallowed tag must be visible in the report, even when nothing was
-    swallowed (an absent field is not the same statement as a zero)."""
+    """Tags: applied at create() time for a fresh item (create(tags=[...]),
+    youtrack.py:248) -- no idmap phase (see migrate()'s own docstring for why
+    tags never gate `fully_migrated`). An adopted (crash-recovered) item is
+    the one exception to "create() time only": it goes through a second
+    mechanism, add_tag() via _apply_tags_to_adopted_item, mirroring
+    PriorityMigrationTest's own "re-applied unconditionally ... fresh create
+    OR crash-recovered adoption" pattern -- see the adoption-specific tests
+    below. Both mechanisms are BEST-EFFORT (create()'s own
+    _apply_optional_create_field, and _apply_tags_to_adopted_item's own
+    try/except around add_tag(), see its docstring) -- a silently swallowed
+    tag must be visible in the report, even when nothing was swallowed (an
+    absent field is not the same statement as a zero)."""
 
     def test_tags_applied_at_create_are_reported_with_zero_missing(self):
         third = self.source_backend.create(title="Third item", tags=["backend", "urgent"])
@@ -1408,9 +1413,12 @@ class TagMigrationTest(_MigrateFixtureMixin, unittest.TestCase):
         #
         # This exercises the RESUMED half specifically (a pre-planted idmap
         # entry) -- see
-        # test_tags_are_never_reapplied_when_adopting_a_crash_recovered_item
+        # test_tags_are_applied_and_reported_when_adopting_a_crash_recovered_item
         # below for the ADOPTED half (found via provenance marker, no idmap
-        # entry at all) this method's own name also promises.
+        # entry at all), which behaves DIFFERENTLY from this one: adoption
+        # DOES apply and report tags (see _apply_tags_to_adopted_item),
+        # unlike a genuine resume, which never re-diffs an item already
+        # recorded in the idmap.
         pre_existing = self.target_backend.create(title="First item", owner="alice")
         self.target_backend.set_status(pre_existing["id"], "In Progress")
         migrate.write_idmap(str(self.idmap_path), {
@@ -1439,7 +1447,7 @@ class TagMigrationTest(_MigrateFixtureMixin, unittest.TestCase):
         # without touching tags for the resumed item.
         self.assertTrue(report["fully_migrated"])
 
-    def test_tags_are_never_reapplied_when_adopting_a_crash_recovered_item(self):
+    def test_tags_are_applied_and_reported_when_adopting_a_crash_recovered_item(self):
         # The ADOPTED half of the guarantee test_tags_are_never_reapplied_
         # on_a_resumed_or_adopted_item's name promises but never actually
         # exercises -- a pre-planted idmap entry there is the RESUMED path,
@@ -1449,6 +1457,16 @@ class TagMigrationTest(_MigrateFixtureMixin, unittest.TestCase):
         # marker (_existing_migration_markers) instead of an idmap lookup --
         # construction mirrors PriorityMigrationTest.
         # test_priority_is_reapplied_when_adopting_a_crash_recovered_item.
+        #
+        # Bug this replaces (found in a live dry run, 02.09.2026): tags used
+        # to be create()-only, so an adopted item's tags were silently
+        # dropped AND the report said nothing (no entry at all, not even an
+        # empty one) -- a run that lost tags looked exactly like one that had
+        # none to lose. status and priority were already re-applied
+        # unconditionally on this same path for the same reason (a crash
+        # could have happened before they ran); tags now match that
+        # discipline via add_tag() (see _apply_tags_to_adopted_item), since
+        # create(tags=...) does not exist for an item that already exists.
         self.source_backend.add_tag(self.first_id, "backend")
         pre_existing = self.target_backend.create(
             title="First item", owner="alice",
@@ -1458,15 +1476,62 @@ class TagMigrationTest(_MigrateFixtureMixin, unittest.TestCase):
 
         report = self.run_migrate()
 
-        self.assertNotIn(
-            self.first_id, [e["source_id"] for e in report["tags"]["items"]],
+        self.assertEqual(self.target_backend.get(pre_existing["id"])["tags"], ["backend"])
+        [entry] = [e for e in report["tags"]["items"] if e["source_id"] == self.first_id]
+        self.assertEqual(entry["target_id"], pre_existing["id"])
+        self.assertEqual(entry["requested"], ["backend"])
+        self.assertEqual(entry["applied"], ["backend"])
+        self.assertEqual(entry["missing"], [])
+        self.assertTrue(report["fully_migrated"])
+
+    def test_an_adopted_item_with_no_tags_still_gets_a_report_entry_with_empty_lists(self):
+        # Absence vs. zero, same rule test_an_item_with_no_tags_still_gets_a_
+        # report_entry_with_empty_lists already proves for a fresh create --
+        # an adopted item with genuinely no source tags must land on the
+        # "attempted, nothing to do" side of that line (three empty lists),
+        # never on the "no entry at all" side a missing report would imply.
+        pre_existing = self.target_backend.create(
+            title="First item", owner="alice",
+            description=f"Desc one.\n\nMigrated from {self.first_id}.",
         )
-        # Adoption is not a tag-application path at all (unlike status and
-        # priority, which ARE re-applied unconditionally on adoption -- see
-        # migrate()'s own docstring): create() is never called for an
-        # adopted item this run, so the target's tags stay exactly as they
-        # were found, genuinely untouched, not merely unreported.
-        self.assertEqual(self.target_backend.get(pre_existing["id"])["tags"], [])
+        self.target_backend.set_status(pre_existing["id"], "In Progress")
+
+        report = self.run_migrate()
+
+        [entry] = [e for e in report["tags"]["items"] if e["source_id"] == self.first_id]
+        self.assertEqual(entry["requested"], [])
+        self.assertEqual(entry["applied"], [])
+        self.assertEqual(entry["missing"], [])
+
+    def test_a_rejected_tag_on_an_adopted_item_is_swallowed_and_does_not_abort_the_run(self):
+        # Mirrors test_a_rejected_tag_is_swallowed_and_surfaces_in_the_report_
+        # as_a_difference for the create() path: add_tag() raises (unlike
+        # create()'s own best-effort tag loop, see add_tag's docstring in
+        # youtrack.py) -- migrate.py must catch that itself so one rejected
+        # tag on one adopted item cannot abort an entire migration run over a
+        # soft field, the same reasoning create() already applies to a
+        # freshly created item that already exists by the time tags are
+        # applied.
+        self.transport = FakeYouTrackTransport(project_short_name="TEST", known_tags={"backend"})
+        self.target_backend = youtrack.YouTrackBackend(
+            base_url="https://faketrack.example.org", project="TEST",
+            token="fake-token", transport=self.transport,
+        )
+        self.source_backend.add_tag(self.first_id, "backend")
+        self.source_backend.add_tag(self.first_id, "not-permitted")
+        pre_existing = self.target_backend.create(
+            title="First item", owner="alice",
+            description=f"Desc one.\n\nMigrated from {self.first_id}.",
+        )
+        self.target_backend.set_status(pre_existing["id"], "In Progress")
+
+        report = self.run_migrate()
+
+        self.assertEqual(self.target_backend.get(pre_existing["id"])["tags"], ["backend"])
+        [entry] = [e for e in report["tags"]["items"] if e["source_id"] == self.first_id]
+        self.assertEqual(sorted(entry["requested"]), ["backend", "not-permitted"])
+        self.assertEqual(entry["applied"], ["backend"])
+        self.assertEqual(entry["missing"], ["not-permitted"])
         self.assertTrue(report["fully_migrated"])
 
 
