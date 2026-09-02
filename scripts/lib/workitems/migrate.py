@@ -207,8 +207,30 @@ def migrate(source_backend, target_backend, idmap_path, source_workitems_dir=Non
     _migrate_comments returned without an exception.
 
     Returns a report dict: migrated ([(source_id, target_id), ...]),
-    skipped_already_migrated ([source_id, ...]), archived (bool), and archive_path
-    (only present if archived).
+    skipped_already_migrated ([source_id, ...]), archived (bool), archive_path
+    (only present if archived), tags (per-item + total requested/applied/missing,
+    see _record_tag_diff), sprint_dropped ([{"source_id", "value"}, ...] for every
+    source item that carried a sprint -- see below), and fully_migrated (bool).
+
+    `owner` and `type` go through the SAME create()-time best-effort path as tags
+    (see youtrack.py's create()/_apply_optional_create_field) but are deliberately
+    NOT given their own report entry: measured against the real corpus, `owner` is
+    empty on every one of the 141 items (nothing it could ever swallow today) and
+    `type` is set on every item with zero measured loss. Tags, by contrast, has a
+    demonstrated, reachable swallow path (test_create_with_an_unmappable_tag_
+    succeeds_and_leaves_no_orphan in test_youtrack.py) and a real corpus with 259
+    assignments across 35 distinct tags -- real risk earns a report, zero-measured
+    risk does not (YAGNI). If a future corpus or a project's own workflow ever
+    starts rejecting an owner/type value, the mechanism to report it is the exact
+    same shape as _record_tag_diff (create()'s return value already carries
+    "owner"/"type" for comparison) -- extend by adding a call, not by inventing a
+    new pattern.
+
+    Sprint is never migrated at all (a separate PO decision, not a best-effort
+    gap): the one sprint-carrying item's value has no home in the target's shared
+    Sprints bundle, and a dedicated bundle for a single item costs more than the
+    loss. `report["sprint_dropped"]` names every source item that carried one, so
+    the omission reads as a decision on the record, not a silently missing field.
     """
     clock = clock or default_clock
     idmap = read_idmap(idmap_path)
