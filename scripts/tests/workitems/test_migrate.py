@@ -896,6 +896,80 @@ class ResultRefMigrationTest(_MigrateFixtureMixin, unittest.TestCase):
         self.assertTrue(report["archived"])
 
 
+class ResultProseMigrationTest(_MigrateFixtureMixin, unittest.TestCase):
+    """Result prose (`## Result` entries classified as prose by rule C, i.e.
+    everything a `## Result` entry can be that is not a ref -- see
+    ResultRefClassificationTest): joins the comments channel via comment(), in a
+    deterministic order -- source comments FIRST, then classified result-link
+    prose, each sublist keeping its own relative order (see
+    _comment_source_texts's docstring). Re-uses the SAME resume/postcondition
+    machinery as CommentMigrationTest -- PHASE_COMMENTS, not a new phase -- since
+    the source list is just wider now, not a new kind of write."""
+
+    def test_a_prose_result_entry_migrates_as_a_comment_not_a_result_link(self):
+        third = self.source_backend.create(title="Third item")
+        self.source_backend.append_result(third["id"], "Commit: `15ca8cf` (see log)")
+
+        self.run_migrate()
+
+        idmap = migrate.read_idmap(str(self.idmap_path))
+        target_item = self.target_backend.get(idmap[third["id"]].target_id)
+        self.assertEqual(target_item["comments"], ["Commit: `15ca8cf` (see log)"])
+        self.assertEqual(target_item["result-link"], [])
+
+    def test_comments_precede_prose_result_entries_in_the_combined_order(self):
+        third = self.source_backend.create(title="Third item")
+        self.source_backend.comment(third["id"], "a plain comment")
+        self.source_backend.append_result(third["id"], "Some prose note about the result.")
+
+        self.run_migrate()
+
+        idmap = migrate.read_idmap(str(self.idmap_path))
+        target_item = self.target_backend.get(idmap[third["id"]].target_id)
+        self.assertEqual(
+            target_item["comments"],
+            ["a plain comment", "Some prose note about the result."],
+        )
+
+    def test_a_mixed_result_link_list_splits_refs_and_prose_onto_their_own_channels(self):
+        third = self.source_backend.create(title="Third item")
+        self.source_backend.append_result(third["id"], "aaa1111")
+        self.source_backend.append_result(third["id"], "A prose note.")
+        self.source_backend.append_result(third["id"], "bbb2222")
+
+        self.run_migrate()
+
+        idmap = migrate.read_idmap(str(self.idmap_path))
+        target_item = self.target_backend.get(idmap[third["id"]].target_id)
+        self.assertEqual(target_item["result-link"], ["aaa1111", "bbb2222"])
+        self.assertEqual(target_item["comments"], ["A prose note."])
+
+    def test_resumes_a_combined_comments_and_prose_list_interrupted_at_the_boundary(self):
+        third = self.source_backend.create(title="Third item")
+        self.source_backend.comment(third["id"], "alpha")
+        self.source_backend.append_result(third["id"], "A prose result note.")
+
+        # "alpha" (call #0) succeeds; the prose entry (call #1, posted through
+        # the same comment() endpoint once folded into the combined list) fails.
+        self.transport.fail_comment_at(1)
+        with self.assertRaises(WorkItemError):
+            self.run_migrate()
+
+        idmap = migrate.read_idmap(str(self.idmap_path))
+        target_id = idmap[third["id"]].target_id
+        self.assertEqual(self.target_backend.get(target_id)["comments"], ["alpha"])
+        self.assertNotIn(migrate.PHASE_COMMENTS, idmap[third["id"]].phases)
+
+        self.run_migrate()
+
+        self.assertEqual(
+            self.target_backend.get(target_id)["comments"],
+            ["alpha", "A prose result note."],
+        )
+        idmap_after = migrate.read_idmap(str(self.idmap_path))
+        self.assertIn(migrate.PHASE_COMMENTS, idmap_after[third["id"]].phases)
+
+
 class FullyMigratedRequiresEveryPhaseTest(unittest.TestCase):
     """`report["fully_migrated"]` gates archiving the source directory AND (in
     scripts/workitems.py's _run_migrate) flipping .claude/settings.json's active

@@ -396,9 +396,26 @@ def _first_unmatched_source_index(source_comments, target_texts):
     return pointer
 
 
+def _comment_source_texts(item):
+    """The comments phase's full source list: `item["comments"]` FIRST, then
+    `item`'s `## Result` entries classified as prose (see
+    _prose_result_entries / rule C), each sublist keeping its own relative
+    order. A `## Result` entry classified as prose has no dedicated channel of
+    its own on the target (unlike a ref, which goes to result-link via
+    append_result -- see _migrate_result_refs) -- it travels as an ordinary
+    comment instead, appended AFTER the item's real comments so a resume that
+    already matched a prefix of the plain comments never has to re-derive
+    where the prose entries start. Shared by _migrate_comments and
+    _verify_comments_migrated so the two can never see a different source
+    list for the same item."""
+    return (item.get("comments") or []) + _prose_result_entries(item)
+
+
 def _migrate_comments(source_item, target_backend, target_id):
-    """Copies source_item's plain comments to target_id, resuming from wherever a
-    prior attempt left off. comment() has no dedup of its own (unlike set_status,
+    """Copies source_item's plain comments (and, since this task, its
+    classified `## Result` PROSE -- see _comment_source_texts) to target_id,
+    resuming from wherever a prior attempt left off. comment() has no dedup of
+    its own (unlike set_status,
     which plainly overwrites, or add_tag/add_link, which check membership before
     writing), so a mid-item abort must be survivable without risking a duplicate
     post.
@@ -460,7 +477,7 @@ def _migrate_comments(source_item, target_backend, target_id):
     has ~131 comments, well under the verified depth. Do not add `$top` handling
     to comment reads on the suspicion that pagination might apply there too --
     it doesn't; this was checked, not assumed."""
-    source_comments = source_item.get("comments") or []
+    source_comments = _comment_source_texts(source_item)
     if not source_comments:
         return
     target_texts = target_backend.get(target_id).get("comments") or []
@@ -473,13 +490,13 @@ def _verify_comments_migrated(source_item, target_backend, target_id):
     """Hard postcondition for the comments phase: re-reads the target (a FRESH
     read, not the one _migrate_comments already made -- the whole point is not
     to trust that call's own view of what it accomplished) and confirms every
-    text in source_item's comments is present as an ordered subsequence, using
-    the same walk _migrate_comments uses to decide what to post. If anything is
-    still missing, raises -- uncaught, exactly like a comment() failure already
-    does (see migrate()'s own docstring) -- rather than letting the caller
-    record PHASE_COMMENTS for an item that only APPEARED to finish because
-    posting didn't raise."""
-    source_comments = source_item.get("comments") or []
+    text in source_item's combined comment source (see _comment_source_texts)
+    is present as an ordered subsequence, using the same walk _migrate_comments
+    uses to decide what to post. If anything is still missing, raises --
+    uncaught, exactly like a comment() failure already does (see migrate()'s
+    own docstring) -- rather than letting the caller record PHASE_COMMENTS for
+    an item that only APPEARED to finish because posting didn't raise."""
+    source_comments = _comment_source_texts(source_item)
     if not source_comments:
         return
     target_texts = target_backend.get(target_id).get("comments") or []

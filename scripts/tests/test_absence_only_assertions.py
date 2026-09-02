@@ -1639,7 +1639,7 @@ class ClassificationCountsTest(unittest.TestCase):
         count."""
         recs = scan_tree()
         flagged = [r for r in recs if r.disposition in NEEDS_EXEMPTION]
-        self.assertEqual(1247, len(recs))
+        self.assertEqual(1251, len(recs))
         self.assertEqual(0, len(flagged))
 
 
