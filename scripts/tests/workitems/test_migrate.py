@@ -1102,6 +1102,12 @@ class TagMigrationTest(_MigrateFixtureMixin, unittest.TestCase):
         # report entry this run (nothing was created, so there is nothing new
         # to diff); re-diffing would need a second create()-shaped call this
         # backend's contract doesn't offer.
+        #
+        # This exercises the RESUMED half specifically (a pre-planted idmap
+        # entry) -- see
+        # test_tags_are_never_reapplied_when_adopting_a_crash_recovered_item
+        # below for the ADOPTED half (found via provenance marker, no idmap
+        # entry at all) this method's own name also promises.
         pre_existing = self.target_backend.create(title="First item", owner="alice")
         self.target_backend.set_status(pre_existing["id"], "In Progress")
         migrate.write_idmap(str(self.idmap_path), {
@@ -1128,6 +1134,36 @@ class TagMigrationTest(_MigrateFixtureMixin, unittest.TestCase):
         # (first_id's comments/result-refs/links are all trivially empty, so
         # they complete on this very pass) -- not merely that it returned
         # without touching tags for the resumed item.
+        self.assertTrue(report["fully_migrated"])
+
+    def test_tags_are_never_reapplied_when_adopting_a_crash_recovered_item(self):
+        # The ADOPTED half of the guarantee test_tags_are_never_reapplied_
+        # on_a_resumed_or_adopted_item's name promises but never actually
+        # exercises -- a pre-planted idmap entry there is the RESUMED path,
+        # not this one. Crash recovery: create()/set_status() already
+        # succeeded in a prior (simulated) run, but the process died before
+        # the idmap write, so THIS run finds the item via its provenance
+        # marker (_existing_migration_markers) instead of an idmap lookup --
+        # construction mirrors PriorityMigrationTest.
+        # test_priority_is_reapplied_when_adopting_a_crash_recovered_item.
+        self.source_backend.add_tag(self.first_id, "backend")
+        pre_existing = self.target_backend.create(
+            title="First item", owner="alice",
+            description=f"Desc one.\n\nMigrated from {self.first_id}.",
+        )
+        self.target_backend.set_status(pre_existing["id"], "In Progress")
+
+        report = self.run_migrate()
+
+        self.assertNotIn(
+            self.first_id, [e["source_id"] for e in report["tags"]["items"]],
+        )
+        # Adoption is not a tag-application path at all (unlike status and
+        # priority, which ARE re-applied unconditionally on adoption -- see
+        # migrate()'s own docstring): create() is never called for an
+        # adopted item this run, so the target's tags stay exactly as they
+        # were found, genuinely untouched, not merely unreported.
+        self.assertEqual(self.target_backend.get(pre_existing["id"])["tags"], [])
         self.assertTrue(report["fully_migrated"])
 
 
