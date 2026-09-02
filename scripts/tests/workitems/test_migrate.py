@@ -731,6 +731,171 @@ class LinkMigrationTest(_MigrateFixtureMixin, unittest.TestCase):
         self.assertTrue(report["fully_migrated"])
 
 
+class ResultRefClassificationTest(unittest.TestCase):
+    """Unit tests of the classifier itself (rule C, decided by the PO): every
+    whitespace-separated token in a `## Result` entry must match a bare sha (with
+    an optional `user@` prefix) or a bare URL for the whole entry to count as a
+    REF; anything else is prose. Direct tests of a private helper -- same posture
+    as `_all_phases_complete` above, which this file already tests directly."""
+
+    def test_a_bare_sha_is_a_ref(self):
+        self.assertTrue(migrate._is_result_ref("15ca8cf"))
+
+    def test_a_bare_url_is_a_ref(self):
+        self.assertTrue(migrate._is_result_ref("https://example.org/commit/abc1234"))
+
+    def test_a_user_prefixed_sha_is_a_ref(self):
+        self.assertTrue(migrate._is_result_ref("bot@abc1234"))
+
+    def test_two_shas_on_one_line_are_both_refs(self):
+        # The corpus carries lines with two shas (measured 02.09.2026, see the
+        # module docstring) -- every token must match, not just the first.
+        self.assertTrue(migrate._is_result_ref("abc1234 def5678"))
+
+    def test_a_sha_embedded_in_prose_is_not_a_ref(self):
+        # The accepted gap (per the PO's decision, not to be closed): a sha
+        # wrapped in backticks/prose fails the whole-token rule and travels as
+        # a comment instead.
+        self.assertFalse(
+            migrate._is_result_ref("Commit: `15ca8cf` (`git rev-parse HEAD` = ...)")
+        )
+
+    def test_a_test_path_line_is_not_a_ref(self):
+        self.assertFalse(migrate._is_result_ref("Test: `path.py`"))
+
+    def test_an_empty_entry_is_not_a_ref(self):
+        self.assertFalse(migrate._is_result_ref(""))
+
+
+class ResultRefMigrationTest(_MigrateFixtureMixin, unittest.TestCase):
+    """Result refs (`## Result` entries classified as a ref by rule C): migrated
+    via `append_result()`, a distinct channel from comments/prose (ADR-0002
+    addendum's RESULT_MARKER partition). Re-uses MigrateLocalToYouTrackTest's
+    fixture (first_id/second_id, both with ZERO result-link entries -- proving
+    the phase is a no-op for them, not a crash). append_result() shares the SAME
+    comments endpoint as comment() in the fake (see fail_comment_at's own
+    docstring) -- resume/postcondition tests below reuse that hook, no new one
+    needed."""
+
+    def test_a_sha_result_entry_arrives_as_a_result_link_on_the_target(self):
+        third = self.source_backend.create(title="Third item")
+        self.source_backend.append_result(third["id"], "15ca8cf")
+
+        self.run_migrate()
+
+        idmap = migrate.read_idmap(str(self.idmap_path))
+        target_item = self.target_backend.get(idmap[third["id"]].target_id)
+        self.assertEqual(target_item["result-link"], ["15ca8cf"])
+        self.assertEqual(target_item["comments"], [])
+
+    def test_a_url_result_entry_arrives_as_a_result_link_on_the_target(self):
+        third = self.source_backend.create(title="Third item")
+        self.source_backend.append_result(third["id"], "https://example.org/pr/1")
+
+        self.run_migrate()
+
+        idmap = migrate.read_idmap(str(self.idmap_path))
+        target_item = self.target_backend.get(idmap[third["id"]].target_id)
+        self.assertEqual(target_item["result-link"], ["https://example.org/pr/1"])
+
+    def test_refs_migrate_in_source_order(self):
+        third = self.source_backend.create(title="Third item")
+        self.source_backend.append_result(third["id"], "aaa1111")
+        self.source_backend.append_result(third["id"], "bbb2222")
+        self.source_backend.append_result(third["id"], "ccc3333")
+
+        self.run_migrate()
+
+        idmap = migrate.read_idmap(str(self.idmap_path))
+        target_item = self.target_backend.get(idmap[third["id"]].target_id)
+        self.assertEqual(target_item["result-link"], ["aaa1111", "bbb2222", "ccc3333"])
+
+    def test_resumes_an_interrupted_result_ref_list_without_duplicating(self):
+        third = self.source_backend.create(title="Third item")
+        self.source_backend.append_result(third["id"], "aaa1111")
+        self.source_backend.append_result(third["id"], "bbb2222")
+        self.source_backend.append_result(third["id"], "ccc3333")
+
+        # first_id/second_id have zero result-links (a zero-call phase); "aaa1111"
+        # and "bbb2222" are this run's calls #0 and #1 -- fail #2 ("ccc3333").
+        self.transport.fail_comment_at(2)
+        with self.assertRaises(WorkItemError):
+            self.run_migrate()
+
+        idmap = migrate.read_idmap(str(self.idmap_path))
+        target_id = idmap[third["id"]].target_id
+        self.assertEqual(self.target_backend.get(target_id)["result-link"], ["aaa1111", "bbb2222"])
+        self.assertNotIn(migrate.PHASE_RESULT_REFS, idmap[third["id"]].phases)
+
+        self.run_migrate()
+
+        self.assertEqual(
+            self.target_backend.get(target_id)["result-link"], ["aaa1111", "bbb2222", "ccc3333"],
+        )
+        idmap_after = migrate.read_idmap(str(self.idmap_path))
+        self.assertIn(migrate.PHASE_RESULT_REFS, idmap_after[third["id"]].phases)
+
+    def test_a_result_ref_postcondition_failure_leaves_the_phase_unrecorded_and_does_not_archive(self):
+        # Mirrors CommentMigrationTest's/LinkMigrationTest's equivalent postcondition
+        # test: PHASE_RESULT_REFS must not be recorded on the strength of
+        # append_result() merely returning without raising -- it must re-read the
+        # target and confirm the ref actually landed.
+        class _TargetThatSilentlyDropsOneResultRef:
+            def __init__(self, backend, drop_at):
+                self._backend = backend
+                self._drop_at = drop_at
+                self._call_count = 0
+
+            def append_result(self, item_id, ref):
+                index = self._call_count
+                self._call_count += 1
+                if index == self._drop_at:
+                    return self._backend.get(item_id)
+                return self._backend.append_result(item_id, ref)
+
+            def __getattr__(self, name):
+                return getattr(self._backend, name)
+
+        third = self.source_backend.create(title="Third item")
+        self.source_backend.append_result(third["id"], "aaa1111")
+
+        wrapped_target = _TargetThatSilentlyDropsOneResultRef(self.target_backend, drop_at=0)
+
+        with self.assertRaises(WorkItemError):
+            migrate.migrate(
+                self.source_backend, wrapped_target, str(self.idmap_path),
+                source_workitems_dir=str(self.source_dir), clock=FIXED_CLOCK,
+            )
+
+        idmap = migrate.read_idmap(str(self.idmap_path))
+        self.assertNotIn(migrate.PHASE_RESULT_REFS, idmap[third["id"]].phases)
+        self.assertFalse(migrate._all_phases_complete(idmap, self.source_backend.list()))
+        self.assertTrue(self.source_dir.is_dir())
+
+    def test_a_result_prose_entry_does_not_arrive_as_a_result_link(self):
+        # Classification boundary: a prose entry (fails rule C) must never reach
+        # append_result() -- it belongs to the comments channel (next cycle), not
+        # this one. Asserted here as the negative half of THIS cycle's own scope:
+        # not a comment-channel assertion (that is ResultProseMigrationTest's job).
+        third = self.source_backend.create(title="Third item")
+        self.source_backend.append_result(third["id"], "Commit: `15ca8cf` (see log)")
+
+        self.run_migrate()
+
+        idmap = migrate.read_idmap(str(self.idmap_path))
+        target_item = self.target_backend.get(idmap[third["id"]].target_id)
+        self.assertEqual(target_item["result-link"], [])
+
+    def test_full_run_with_result_refs_present_completes_and_archives(self):
+        third = self.source_backend.create(title="Third item")
+        self.source_backend.append_result(third["id"], "aaa1111")
+
+        report = self.run_migrate()
+
+        self.assertTrue(report["fully_migrated"])
+        self.assertTrue(report["archived"])
+
+
 class FullyMigratedRequiresEveryPhaseTest(unittest.TestCase):
     """`report["fully_migrated"]` gates archiving the source directory AND (in
     scripts/workitems.py's _run_migrate) flipping .claude/settings.json's active
@@ -777,6 +942,7 @@ class FullyMigratedRequiresEveryPhaseTest(unittest.TestCase):
                 "CT-1", frozenset({
                     migrate.PHASE_CREATED, migrate.PHASE_STATUS,
                     migrate.PHASE_COMMENTS, migrate.PHASE_LINKS,
+                    migrate.PHASE_RESULT_REFS,
                 }),
             ),
         }

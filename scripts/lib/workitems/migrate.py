@@ -54,6 +54,20 @@ PHASE_CREATED = "created"
 PHASE_STATUS = "status"
 PHASE_COMMENTS = "comments"
 PHASE_LINKS = "links"
+PHASE_RESULT_REFS = "result-refs"
+
+# `## Result` entry classifier (rule C, PO decision): an entry is a REF only if
+# EVERY whitespace-separated token is a bare sha (7-40 lowercase hex chars, with
+# an optional "user@"-style prefix) or a bare URL -- anything else (including a
+# sha embedded in prose, e.g. "Commit: `15ca8cf` (...)") is prose and travels as
+# a comment instead. Deliberately narrow: widening it to catch embedded shas is
+# an explicit non-goal (measured 02.09.2026: 18 such entries in the real corpus,
+# left as comments on purpose). Matched against the real 141-item corpus: 142 of
+# 811 `## Result` entries classify as refs, carrying 153 tokens (some entries
+# hold two shas -- both must match, not just the first).
+_RESULT_REF_TOKEN_PATTERN = re.compile(
+    r"^(?:(?:[A-Za-z0-9._/-]+@)?[0-9a-f]{7,40}|https?://\S+)$"
+)
 
 # Two uses that happen to coincide, deliberately: (1) what a phase-less idmap line
 # (see module docstring) is assumed to mean -- read_idmap's default for an old-format
@@ -64,10 +78,47 @@ PHASE_LINKS = "links"
 _PHASES_AFTER_CREATE_AND_STATUS = frozenset({PHASE_CREATED, PHASE_STATUS})
 
 # Every phase this run is responsible for completing, for `fully_migrated` (see
-# _all_phases_complete). Comments and links, for now -- results/tags are
-# deliberately out of scope; when they're added, they join this set, and NOTHING
-# else about the idmap format has to change (see the module docstring).
-_REQUIRED_PHASES = frozenset({PHASE_CREATED, PHASE_STATUS, PHASE_COMMENTS, PHASE_LINKS})
+# _all_phases_complete). Comments, links and result-refs -- tags and priority are
+# DELIBERATELY excluded (see migrate()'s own docstring for why): tags are
+# best-effort by backend design (create()'s own contract, see
+# _apply_optional_create_field) and reported instead of gated; priority is a
+# plain idempotent overwrite with nothing to resume. When another phase joins
+# this set, NOTHING else about the idmap format has to change (see the module
+# docstring).
+_REQUIRED_PHASES = frozenset({
+    PHASE_CREATED, PHASE_STATUS, PHASE_COMMENTS, PHASE_LINKS, PHASE_RESULT_REFS,
+})
+
+
+def _is_result_ref(entry):
+    """Rule C (PO decision, see _RESULT_REF_TOKEN_PATTERN): True only if every
+    whitespace-separated token in `entry` matches the ref pattern. An entry with
+    no non-whitespace tokens at all is never a ref (there is nothing to migrate
+    as one)."""
+    tokens = entry.split()
+    if not tokens:
+        return False
+    return all(_RESULT_REF_TOKEN_PATTERN.match(token) for token in tokens)
+
+
+def _classify_result_entries(entries):
+    """Splits a source item's `result-link` entries into (refs, prose) by rule C,
+    preserving each sublist's own relative order from `entries`."""
+    refs = []
+    prose = []
+    for entry in entries:
+        (refs if _is_result_ref(entry) else prose).append(entry)
+    return refs, prose
+
+
+def _ref_result_entries(item):
+    refs, _ = _classify_result_entries(item.get("result-link") or [])
+    return refs
+
+
+def _prose_result_entries(item):
+    _, prose = _classify_result_entries(item.get("result-link") or [])
+    return prose
 
 IdmapEntry = collections.namedtuple("IdmapEntry", ["target_id", "phases"])
 
@@ -205,8 +256,8 @@ def migrate(source_backend, target_backend, idmap_path, source_workitems_dir=Non
 
         # Resume never re-attempts create()/set_status() above for an item already
         # in the idmap -- but its OWN remaining phase(s) still run every call, until
-        # they're recorded done. Comments is the only phase beyond created/status
-        # today; a future phase slots in the same way.
+        # they're recorded done. Comments and result-refs are the phases beyond
+        # created/status today; a future phase slots in the same way.
         if PHASE_COMMENTS not in entry.phases:
             _migrate_comments(item, target_backend, entry.target_id)
             # Hard postcondition, not a trust of _migrate_comments' own return:
@@ -216,6 +267,16 @@ def migrate(source_backend, target_backend, idmap_path, source_workitems_dir=Non
             # only LOOKS complete because posting didn't raise.
             _verify_comments_migrated(item, target_backend, entry.target_id)
             entry = IdmapEntry(target_id=entry.target_id, phases=entry.phases | {PHASE_COMMENTS})
+            idmap[source_id] = entry
+            write_idmap(idmap_path, idmap)
+
+        if PHASE_RESULT_REFS not in entry.phases:
+            _migrate_result_refs(item, target_backend, entry.target_id)
+            # Hard postcondition, same discipline as _verify_comments_migrated:
+            # re-read the target's OWN result-link channel and confirm every
+            # source ref actually landed before PHASE_RESULT_REFS is recorded.
+            _verify_result_refs_migrated(item, target_backend, entry.target_id)
+            entry = IdmapEntry(target_id=entry.target_id, phases=entry.phases | {PHASE_RESULT_REFS})
             idmap[source_id] = entry
             write_idmap(idmap_path, idmap)
 
@@ -428,6 +489,50 @@ def _verify_comments_migrated(source_item, target_backend, target_id):
         raise WorkItemError(
             f"comments migration postcondition failed for target {target_id!r}: "
             f"{len(missing)} of {len(source_comments)} source comment(s) not "
+            f"found on the target as an ordered subsequence after posting "
+            f"(first missing: {missing[0]!r})"
+        )
+
+
+def _migrate_result_refs(source_item, target_backend, target_id):
+    """Copies source_item's classified result REFS (see _classify_result_entries
+    / rule C) to target_id via append_result(), resuming from wherever a prior
+    attempt left off. Identical resume discipline to _migrate_comments:
+    append_result() posts to the SAME comments endpoint as comment() does (just
+    marker-prefixed -- see fail_comment_at's own docstring in
+    fake_youtrack_transport.py) and has no dedup of its own either, so the same
+    ordered-subsequence walk (_first_unmatched_source_index) applies -- but
+    against the target's OWN result-link channel, never its comments channel:
+    the two are already partitioned by RESULT_MARKER on read (see youtrack.py's
+    _item_from_issue), so a foreign result-link entry can never be mistaken for
+    a foreign comment or vice versa."""
+    source_refs = _ref_result_entries(source_item)
+    if not source_refs:
+        return
+    target_refs = target_backend.get(target_id).get("result-link") or []
+    pointer = _first_unmatched_source_index(source_refs, target_refs)
+    for ref in source_refs[pointer:]:
+        target_backend.append_result(target_id, ref)
+
+
+def _verify_result_refs_migrated(source_item, target_backend, target_id):
+    """Hard postcondition for the result-refs phase, mirroring
+    _verify_comments_migrated exactly, against the target's result-link
+    channel: re-reads the target (a FRESH read) and confirms every ref in
+    source_item's classified refs is present as an ordered subsequence. Raises
+    -- uncaught, same discipline as every other phase's postcondition -- rather
+    than letting the caller record PHASE_RESULT_REFS for an item that only
+    APPEARED to finish because append_result() didn't raise."""
+    source_refs = _ref_result_entries(source_item)
+    if not source_refs:
+        return
+    target_refs = target_backend.get(target_id).get("result-link") or []
+    pointer = _first_unmatched_source_index(source_refs, target_refs)
+    if pointer != len(source_refs):
+        missing = source_refs[pointer:]
+        raise WorkItemError(
+            f"result-ref migration postcondition failed for target {target_id!r}: "
+            f"{len(missing)} of {len(source_refs)} source result ref(s) not "
             f"found on the target as an ordered subsequence after posting "
             f"(first missing: {missing[0]!r})"
         )
