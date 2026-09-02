@@ -53,6 +53,7 @@ _PROVENANCE_PATTERN = re.compile(r"^Migrated from (.+)\.$", re.MULTILINE)
 PHASE_CREATED = "created"
 PHASE_STATUS = "status"
 PHASE_COMMENTS = "comments"
+PHASE_LINKS = "links"
 
 # Two uses that happen to coincide, deliberately: (1) what a phase-less idmap line
 # (see module docstring) is assumed to mean -- read_idmap's default for an old-format
@@ -63,10 +64,10 @@ PHASE_COMMENTS = "comments"
 _PHASES_AFTER_CREATE_AND_STATUS = frozenset({PHASE_CREATED, PHASE_STATUS})
 
 # Every phase this run is responsible for completing, for `fully_migrated` (see
-# _all_phases_complete). Comments only, for now (WI-0141) -- results/tags/links are
+# _all_phases_complete). Comments and links, for now (WI-0141) -- results/tags are
 # deliberately out of scope; when they're added, they join this set, and NOTHING
 # else about the idmap format has to change (see the module docstring).
-_REQUIRED_PHASES = frozenset({PHASE_CREATED, PHASE_STATUS, PHASE_COMMENTS})
+_REQUIRED_PHASES = frozenset({PHASE_CREATED, PHASE_STATUS, PHASE_COMMENTS, PHASE_LINKS})
 
 IdmapEntry = collections.namedtuple("IdmapEntry", ["target_id", "phases"])
 
@@ -215,6 +216,26 @@ def migrate(source_backend, target_backend, idmap_path, source_workitems_dir=Non
             # only LOOKS complete because posting didn't raise.
             _verify_comments_migrated(item, target_backend, entry.target_id)
             entry = IdmapEntry(target_id=entry.target_id, phases=entry.phases | {PHASE_COMMENTS})
+            idmap[source_id] = entry
+            write_idmap(idmap_path, idmap)
+
+    # Second pass, deliberately separate from the loop above: add_link() needs the
+    # PARTNER's target id, which does not exist until the partner item has itself
+    # been created -- so a link cannot be migrated inline the way comments can. By
+    # the time this pass starts, every item in source_items has an idmap entry (the
+    # loop above never returns without one, for every item it processed -- see
+    # migrate()'s own docstring on comment failures propagating uncaught, which
+    # applies here too), so every link's target is resolvable through the idmap.
+    for item in source_items:
+        source_id = item["id"]
+        entry = idmap[source_id]
+        if PHASE_LINKS not in entry.phases:
+            _migrate_links(item, target_backend, entry.target_id, idmap)
+            # Hard postcondition, same discipline as _verify_comments_migrated:
+            # re-read the target and confirm every source link actually landed
+            # before PHASE_LINKS is recorded.
+            _verify_links_migrated(item, target_backend, entry.target_id, idmap)
+            entry = IdmapEntry(target_id=entry.target_id, phases=entry.phases | {PHASE_LINKS})
             idmap[source_id] = entry
             write_idmap(idmap_path, idmap)
 
@@ -408,6 +429,71 @@ def _verify_comments_migrated(source_item, target_backend, target_id):
             f"{len(missing)} of {len(source_comments)} source comment(s) not "
             f"found on the target as an ordered subsequence after posting "
             f"(first missing: {missing[0]!r})"
+        )
+
+
+def _resolve_link_target_id(link_target_source_id, idmap):
+    """A source link's `target` field is a SOURCE id (e.g. `WI-0029`) -- never a
+    target-backend id -- so it must be resolved through the idmap, the only
+    trustworthy mapping table (WI-NNNN -> CCP-N numeric alignment is dead: a
+    failed create() burns a target-side number, measured in an earlier pilot, so
+    the two numberings can drift apart). Raises loud rather than skipping: by the
+    time the links pass runs, every item THIS run's own first pass attempted has
+    an idmap entry (see migrate()'s docstring on the two-pass split), so a miss
+    here can only mean a resume whose idmap lost an entry for an item that pass
+    would otherwise have (re-)created -- silently dropping the link would hide
+    exactly that kind of data loss."""
+    entry = idmap.get(link_target_source_id)
+    if entry is None:
+        raise WorkItemError(
+            f"link target {link_target_source_id!r} is missing from the idmap -- "
+            "cannot resolve it to a target-backend id. This should be unreachable "
+            "within a single migrate() call (every source item gets an idmap entry "
+            "before the links pass starts); it means the idmap on disk lost an "
+            "entry for an item that should already have one."
+        )
+    return entry.target_id
+
+
+def _migrate_links(source_item, target_backend, target_id, idmap):
+    """Recreates source_item's own links on target_id, one add_link() call per
+    source link, each resolved through the idmap (see _resolve_link_target_id).
+    add_link() is idempotent for the same direction (checks the current, already
+    direction-normalized links[] first -- see youtrack.py/local.py), so re-running
+    this on a resume never duplicates an edge already present on the target."""
+    source_links = source_item.get("links") or []
+    for link in source_links:
+        resolved_target_id = _resolve_link_target_id(link["target"], idmap)
+        target_backend.add_link(target_id, link["type"], resolved_target_id)
+
+
+def _verify_links_migrated(source_item, target_backend, target_id, idmap):
+    """Hard postcondition for the links phase, mirroring
+    _verify_comments_migrated: re-reads the target (a FRESH read) and confirms
+    every source link is PRESENT on the target -- deliberately not set equality.
+    A YouTrack-shaped target reports MORE links than the source: every edge shows
+    up on both endpoints, once as `depends-on` and once as the read-only inverse
+    `blocks` (verified against a live instance, see the senior-developer's
+    briefing for this task) -- so asserting the target's link set equals the
+    source's would fail on ordinary, correctly-migrated data. Raises -- uncaught,
+    exactly like a comments postcondition failure already does -- rather than
+    letting the caller record PHASE_LINKS for an item that only APPEARED to
+    finish because add_link() didn't raise."""
+    source_links = source_item.get("links") or []
+    if not source_links:
+        return
+    current_links = target_backend.get(target_id).get("links") or []
+    missing = []
+    for link in source_links:
+        resolved_target_id = _resolve_link_target_id(link["target"], idmap)
+        expected = {"type": link["type"], "target": resolved_target_id}
+        if expected not in current_links:
+            missing.append(link)
+    if missing:
+        raise WorkItemError(
+            f"links migration postcondition failed for target {target_id!r}: "
+            f"{len(missing)} of {len(source_links)} source link(s) not found on "
+            f"the target after migrating (first missing: {missing[0]!r})"
         )
 
 

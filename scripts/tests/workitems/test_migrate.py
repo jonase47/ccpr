@@ -502,6 +502,56 @@ class CommentMigrationTest(_MigrateFixtureMixin, unittest.TestCase):
         self.assertTrue(self.source_dir.is_dir())
 
 
+class LinkMigrationTest(_MigrateFixtureMixin, unittest.TestCase):
+    """Links (WI-0141 follow-up, second pass): `add_link` needs the PARTNER's
+    target id, which does not exist until the partner item has itself been
+    created -- so links cannot ride along in the per-item loop the way
+    created/status/comments do; they need their own pass after every item in
+    this run has been created. Re-uses MigrateLocalToYouTrackTest's fixture
+    (first_id/second_id, both with ZERO links -- proving the links phase is a
+    no-op for them, not a crash)."""
+
+    def test_plain_relates_to_and_depends_on_links_arrive_on_the_target(self):
+        third = self.source_backend.create(title="Third item")
+        fourth = self.source_backend.create(title="Fourth item")
+        self.source_backend.add_link(third["id"], "relates-to", fourth["id"])
+        self.source_backend.add_link(third["id"], "depends-on", fourth["id"])
+
+        self.run_migrate()
+
+        idmap = migrate.read_idmap(str(self.idmap_path))
+        third_target = idmap[third["id"]].target_id
+        fourth_target = idmap[fourth["id"]].target_id
+        target_links = self.target_backend.get(third_target)["links"]
+        self.assertIn({"type": "relates-to", "target": fourth_target}, target_links)
+        self.assertIn({"type": "depends-on", "target": fourth_target}, target_links)
+
+    def test_mutual_depends_on_pair_arrives_as_two_edges_each(self):
+        # WI-0005's real shape (measured across the 140-item corpus, see the
+        # senior-developer's briefing for this task): two items each record
+        # their OWN "depends-on" edge toward the other -- verified against a
+        # live instance to be two distinct, both-accepted edges, not a single
+        # relationship collapsed to one direction.
+        fifth = self.source_backend.create(title="Fifth item")
+        sixth = self.source_backend.create(title="Sixth item")
+        self.source_backend.add_link(fifth["id"], "depends-on", sixth["id"])
+        self.source_backend.add_link(sixth["id"], "depends-on", fifth["id"])
+
+        self.run_migrate()
+
+        idmap = migrate.read_idmap(str(self.idmap_path))
+        fifth_target = idmap[fifth["id"]].target_id
+        sixth_target = idmap[sixth["id"]].target_id
+        self.assertIn(
+            {"type": "depends-on", "target": sixth_target},
+            self.target_backend.get(fifth_target)["links"],
+        )
+        self.assertIn(
+            {"type": "depends-on", "target": fifth_target},
+            self.target_backend.get(sixth_target)["links"],
+        )
+
+
 class FullyMigratedRequiresEveryPhaseTest(unittest.TestCase):
     """`report["fully_migrated"]` gates archiving the source directory AND (in
     scripts/workitems.py's _run_migrate) flipping .claude/settings.json's active
@@ -545,7 +595,10 @@ class FullyMigratedRequiresEveryPhaseTest(unittest.TestCase):
         source_items = [{"id": "WI-0001"}]
         idmap = {
             "WI-0001": migrate.IdmapEntry(
-                "CT-1", frozenset({migrate.PHASE_CREATED, migrate.PHASE_STATUS, migrate.PHASE_COMMENTS}),
+                "CT-1", frozenset({
+                    migrate.PHASE_CREATED, migrate.PHASE_STATUS,
+                    migrate.PHASE_COMMENTS, migrate.PHASE_LINKS,
+                }),
             ),
         }
 
