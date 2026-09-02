@@ -11,9 +11,9 @@ import re
 from pathlib import Path
 
 from workitems import (
-    PRIORITY_VALUES, STATUS_VALUES, WorkItemError, frontmatter, reject_result_marker,
-    validate_estimate, validate_item_id, validate_link_type, validate_priority,
-    validate_tag, warn_if_filter_value_unknown,
+    PRIORITY_VALUES, STATUS_VALUES, WorkItemError, frontmatter, normalize_result_ref,
+    reject_result_marker, validate_estimate, validate_item_id, validate_link_type,
+    validate_priority, validate_tag, warn_if_filter_value_unknown,
 )
 
 RESULT_HEADING = "## Result"
@@ -183,6 +183,12 @@ class LocalBackend:
         return self._item_from_data(data, body)
 
     def append_result(self, item_id, ref):
+        """Normalizes `ref`'s edge whitespace before writing (review follow-up,
+        02.09.2026 -- see `normalize_result_ref`'s docstring for why). Existing
+        entries already on disk from before this fix are read back unchanged --
+        `_extract_section_items` stays deliberately byte-faithful (findings
+        #44/#45); this only changes what a NEW append_result call writes."""
+        ref = normalize_result_ref(ref)
         path, data, body = self._read(item_id)
         new_body = _append_to_section(body, RESULT_HEADING, ref)
         self._write(path, data, new_body)

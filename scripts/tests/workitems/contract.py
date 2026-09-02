@@ -251,6 +251,46 @@ class WorkItemsContractTestCase:
 
         self.assertEqual(item["description"], "Original description.")
 
+    def test_append_result_strips_leading_and_trailing_whitespace(self):
+        """A live migration dry run (02.09.2026) found the two channels of the same
+        backend disagreeing on whitespace: `comment()` stores text byte-faithfully,
+        `append_result()` must not carry incidental edge whitespace (a blank line
+        absorbed from source section layout, e.g.) into the target as content -- a
+        ref with a line break in it is visibly wrong in a tracker. Normalized at the
+        shared contract (`workitems.normalize_result_ref`), applied identically by
+        both backends, so `local` and `youtrack` never diverge on it again."""
+        item_id = self.create_item()
+
+        item = self.backend.append_result(item_id, "\n  https://example.org/pr/1  \n")
+
+        self.assertEqual(item["result-link"], ["https://example.org/pr/1"])
+        self.assertEqual(
+            self.backend.get(item_id)["result-link"], ["https://example.org/pr/1"],
+        )
+
+    def test_append_result_preserves_inner_whitespace(self):
+        """Edge whitespace is trimmed, but a newline INSIDE a ref is a different
+        shape than one at the edges -- it is not touched. Same distinction the
+        multiline-comment tests below draw for `comment()`."""
+        item_id = self.create_item()
+        ref = "first line\n\nthird line after a blank line"
+
+        item = self.backend.append_result(item_id, ref)
+
+        self.assertEqual(item["result-link"], [ref])
+        self.assertEqual(self.backend.get(item_id)["result-link"], [ref])
+
+    def test_append_result_rejects_a_whitespace_only_ref(self):
+        """`comment()` has always rejected empty text; `append_result()` never did
+        (a pre-existing gap, left alone in an earlier review). Normalizing edge
+        whitespace is what creates the all-whitespace-collapses-to-empty case, so
+        this closes the gap at the same time, on both backends."""
+        item_id = self.create_item()
+
+        with self.assertRaises(Exception):
+            self.backend.append_result(item_id, "   \n\t  ")
+        self.assertEqual(self.backend.get(item_id)["result-link"], [])
+
     # --- comment ---
     #
     # A plain human comment — a channel structurally separate from result-link (ADR-0002
@@ -295,6 +335,19 @@ class WorkItemsContractTestCase:
         self.assertEqual(
             self.backend.get(item_id)["comments"], [first_text, "Second note."],
         )
+
+    def test_comment_preserves_leading_and_trailing_whitespace(self):
+        """Edge whitespace is normalized for `append_result()` (02.09.2026) but NOT
+        for `comment()`: a comment is prose, a ref is a token -- trimming is right
+        for one and an edit of the author's own text for the other. This test fails
+        if a future change normalizes comments too."""
+        item_id = self.create_item()
+        text = "  leading and trailing spaces stay  "
+
+        item = self.backend.comment(item_id, text)
+
+        self.assertEqual(item["comments"], [text])
+        self.assertEqual(self.backend.get(item_id)["comments"], [text])
 
     def test_comment_does_not_appear_in_result_link(self):
         item_id = self.create_item()

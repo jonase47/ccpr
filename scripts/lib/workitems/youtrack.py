@@ -42,9 +42,9 @@ import urllib.request
 
 from workitems import (
     DEFAULT_STALE_AFTER_SECONDS, PRIORITY_VALUES, RESULT_MARKER, STATUS_VALUES,
-    WorkItemError, is_reserved_tag, reject_result_marker, safe_parse_datetime,
-    validate_estimate, validate_item_id, validate_link_type, validate_priority,
-    validate_tag, warn_if_filter_value_unknown,
+    WorkItemError, is_reserved_tag, normalize_result_ref, reject_result_marker,
+    safe_parse_datetime, validate_estimate, validate_item_id, validate_link_type,
+    validate_priority, validate_tag, warn_if_filter_value_unknown,
 )
 
 # `links(direction,linkType(name),issues(idReadable))` (ADR-0008) lets _item_from_issue
@@ -628,7 +628,18 @@ class YouTrackBackend:
         return self.get(item_id)
 
     def append_result(self, item_id, ref):
+        """Normalizes `ref`'s edge whitespace before posting (review follow-up,
+        02.09.2026 -- see `normalize_result_ref`'s docstring), the same rule
+        `local` applies. `_item_from_issue`'s `.strip()` on read stays -- and
+        is NOT made redundant by this: the write below always inserts a literal
+        separator space between `RESULT_MARKER` and `ref` (`f"{RESULT_MARKER}
+        {ref}"`), so `text[len(RESULT_MARKER):]` on read always carries a
+        leading space, for every future write too, not only legacy ones --
+        `.strip()` is load-bearing on every read, and additionally covers a
+        comment written by an older CCPR version or by hand in the YouTrack UI
+        (still unstripped on the wire)."""
         validate_item_id(item_id)
+        ref = normalize_result_ref(ref)
         self._request(
             "POST", f"/api/issues/{item_id}/comments",
             body={"text": f"{RESULT_MARKER} {ref}"},

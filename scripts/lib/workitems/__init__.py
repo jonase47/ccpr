@@ -92,6 +92,46 @@ def validate_item_id(item_id):
         raise WorkItemError(f"Invalid work-item id: {item_id!r}")
 
 
+def normalize_result_ref(ref):
+    """Shared guard + normalizer for every backend's `append_result` (review
+    follow-up, 02.09.2026): a live migration dry run found `comment()` and
+    `append_result()` -- two channels of the same backend -- disagreeing on
+    whitespace. `comment()` stores text byte-faithfully (a comment is prose);
+    `append_result()` must not carry incidental EDGE whitespace into the target
+    as content (a blank line a source section's layout legitimately absorbs
+    between an entry and the next heading, e.g.) -- a ref with a line break in
+    it is visibly wrong in a tracker. So this strips only the two edges, exactly
+    like `str.strip()`: a newline INSIDE a ref (not at an edge) is a different
+    shape, left untouched, same as a multi-line comment is left untouched.
+
+    Rejects a ref that is empty or becomes empty once edge whitespace is
+    stripped. `append_result` never validated this before (a pre-existing gap,
+    left alone in an earlier review) -- but normalizing edges is what turns an
+    all-whitespace ref into the empty-string case, so it is closed here, on
+    both backends, at the same time this normalization is introduced.
+
+    Applied identically by every backend before it writes a ref (`local` and
+    `youtrack` both call this), so the two can never diverge on it the way
+    `comment`/`append_result` diverged before this fix.
+
+    Type-checked before `.strip()` is called (same defensive pattern as
+    `validate_estimate`/`parse_duration_seconds` above): no current call site
+    passes anything but a `str` (the CLI's `args.ref` from argparse,
+    migrate.py's own `result-link` entries read back from a backend), but a
+    bare `.strip()` on a non-string would raise an unguarded `AttributeError`
+    that escapes the CLI's `except WorkItemError` boundary as a raw
+    traceback instead of a clean message.
+    """
+    if ref is not None and not isinstance(ref, str):
+        raise WorkItemError(f"Invalid append-result ref: {ref!r}")
+    stripped = (ref or "").strip()
+    if not stripped:
+        raise WorkItemError(
+            "append-result ref cannot be empty or whitespace-only"
+        )
+    return stripped
+
+
 def reject_result_marker(text):
     """Shared guard for every backend's `comment`: a human comment must never be able
     to forge a `result-link` entry by typing the marker `append-result` uses itself
