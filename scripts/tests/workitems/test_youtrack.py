@@ -1421,6 +1421,61 @@ class YouTrackCreateTagVisibilityOutcomesTest(unittest.TestCase):
 
         self.assertEqual(backend.last_create_tag_visibility_outcomes(), [])
 
+    def test_a_rejected_visibility_write_is_reported_as_write_rejected(self):
+        """The fourth way a tag ends up without confirmed visibility (PO
+        decision, 02.09.2026): unlike the three config-shaped reasons above,
+        this one is a genuine instance failure -- _ensure_tag_visibility
+        RAISES rather than returning a reason string, and create()'s
+        best-effort tag loop (_apply_tag_with_visibility) must turn that
+        raise into its own outcome instead of only printing to stderr."""
+        transport = FakeYouTrackTransport(project_short_name="TEST")
+        transport.fail_tag_visibility_set_at(0)
+        backend = youtrack.YouTrackBackend(
+            base_url="https://faketrack.example.org", project="TEST",
+            token="fake-token", transport=transport,
+            tag_visibility_group="All Users",
+        )
+
+        with contextlib.redirect_stderr(io.StringIO()):
+            item = backend.create(title="New feature", tags=["security"])
+
+        outcomes = backend.last_create_tag_visibility_outcomes()
+        # Same list-of-dict shape as the three existing reasons' own tests
+        # above -- "message" compared separately (assertIn), since its exact
+        # text is the fake transport's own wording, not this backend's.
+        self.assertEqual(
+            [{"tag": o["tag"], "reason": o["reason"]} for o in outcomes],
+            [{"tag": "security", "reason": youtrack.TAG_VISIBILITY_WRITE_REJECTED}],
+        )
+        self.assertIn("rejected", outcomes[0]["message"])
+        # Same best-effort guarantee as the three existing reasons: the tag
+        # is still applied to the item, just without confirmed visibility.
+        self.assertIn("security", item["tags"])
+
+    def test_a_readback_mismatch_is_reported_as_write_rejected(self):
+        """Same reason as a rejected set call -- a read-back mismatch is the
+        failure mode the read-back exists to catch in the first place, not a
+        fifth category."""
+        transport = FakeYouTrackTransport(
+            project_short_name="TEST", corrupt_tag_visibility_readback=True,
+        )
+        backend = youtrack.YouTrackBackend(
+            base_url="https://faketrack.example.org", project="TEST",
+            token="fake-token", transport=transport,
+            tag_visibility_group="All Users",
+        )
+
+        with contextlib.redirect_stderr(io.StringIO()):
+            item = backend.create(title="New feature", tags=["security"])
+
+        outcomes = backend.last_create_tag_visibility_outcomes()
+        self.assertEqual(
+            [{"tag": o["tag"], "reason": o["reason"]} for o in outcomes],
+            [{"tag": "security", "reason": youtrack.TAG_VISIBILITY_WRITE_REJECTED}],
+        )
+        self.assertIn("read-back", outcomes[0]["message"])
+        self.assertIn("security", item["tags"])
+
 
 class FakeYouTrackTransportTagCreationHonestyTest(unittest.TestCase):
     """FakeYouTrackTransport must not accept anything the live instance

@@ -99,19 +99,32 @@ _RUNNER_TAG_PREFIX = "runner:"
 _HEARTBEAT_TAG_PREFIX = "heartbeat:"
 _HEARTBEAT_TAG_FORMAT = "%Y%m%dT%H%M%SZ"
 
-# _ensure_tag_visibility's three reported (not raised) outcomes -- a tag is
-# still created and applied with its default (private) visibility in every
-# one of these, only the STATED reason differs (PO decision: migrate.py's
+# _ensure_tag_visibility's three REPORTED (returned, not raised) outcomes --
+# a tag is still created and applied with its default (private) visibility in
+# every one of these, only the STATED reason differs (PO decision: migrate.py's
 # report must distinguish them, see create()/last_create_tag_visibility_
-# outcomes' own docstrings). Deliberately NOT covering the fourth,
-# genuinely-raising failure mode (a rejected visibility-set call, or a
-# read-back mismatch) -- that one already propagates as WorkItemError
-# (add_tag) or its own distinct stderr warning (create()'s best-effort
-# loop, see _apply_tag_with_visibility), and was not named among these
-# three in the PO's decision.
+# outcomes' own docstrings). These three are all missing-CONFIGURATION
+# reasons: nothing on the instance rejected anything, the group name this
+# backend was told to use simply doesn't resolve.
 TAG_VISIBILITY_NOT_CONFIGURED = "not_configured"
 TAG_VISIBILITY_GROUP_NOT_FOUND = "group_not_found"
 TAG_VISIBILITY_GROUP_AMBIGUOUS = "group_ambiguous"
+
+# The fourth reason (PO decision, 02.09.2026, overriding the original three-
+# reason enumeration -- the PO's own words: "the throwing one was not
+# excluded, it was overlooked"): _ensure_tag_visibility RAISES WorkItemError,
+# rather than returning one of the three constants above, when the instance
+# itself rejects the visibility write or the read-back doesn't match what was
+# requested (see _ensure_tag_visibility's own docstring) -- a genuine
+# instance-level failure, not a missing setting. On the add_tag path this
+# still propagates uncaught (nothing to report it to -- see add_tag's
+# docstring). On the create(..., tags=[...]) path, _apply_tag_with_visibility
+# catches it and records THIS reason, carrying the instance's own message
+# (see last_create_tag_visibility_outcomes' docstring on the "message" key) --
+# unlike the three reasons above, whose stderr warning already says
+# everything a reader needs (a config key to add), this one is a live
+# instance problem the reader cannot diagnose from the reason code alone.
+TAG_VISIBILITY_WRITE_REJECTED = "write_rejected"
 
 
 def _stripped_or_none(value):
@@ -345,18 +358,17 @@ class YouTrackBackend:
         issue already exists by this point.
 
         Records a NOT-SET outcome (see last_create_tag_visibility_outcomes)
-        for the three REPORTED (not raised) reasons _ensure_tag_visibility
-        can return -- the fourth, genuinely-raising failure mode caught
-        below is a distinct class the PO's decision did not name among
-        these three (see TAG_VISIBILITY_NOT_CONFIGURED's own module-level
-        comment). Code-review note: that fourth case is therefore INVISIBLE
-        to migrate.py's structured report (no visibility_not_set entry,
-        total_visibility_not_set not incremented) -- stderr is its only
-        trace, same as before this feature existed. Do not read "no
-        visibility_not_set entries for this item" as "no visibility
-        problems for this item" -- it only means none of the three named,
-        reported reasons applied; a raised failure here is still possible
-        and still silent from the report's point of view."""
+        for all FOUR ways _ensure_tag_visibility can end without confirmed
+        visibility: the three it RETURNS (TAG_VISIBILITY_NOT_CONFIGURED /
+        _GROUP_NOT_FOUND / _GROUP_AMBIGUOUS), and the one it RAISES
+        (TAG_VISIBILITY_WRITE_REJECTED, PO decision 02.09.2026 -- see that
+        constant's own module-level comment for why it was added after the
+        other three, not folded into one of them). The raised case is the
+        heaviest of the four (a live instance problem, not a missing
+        setting), so its outcome also carries the instance's own message
+        (see last_create_tag_visibility_outcomes' docstring on the
+        "message" key) -- the other three don't need one, their reason code
+        alone already tells a reader what to do (add a config key)."""
         try:
             outcome_reason = self._ensure_tag_visibility(tag)
         except WorkItemError as exc:
@@ -365,6 +377,9 @@ class YouTrackBackend:
                 f"issue {item_id}: {exc}. Continuing; tag will be applied with "
                 "its current visibility.",
                 file=sys.stderr,
+            )
+            self._last_create_tag_visibility_outcomes.append(
+                {"tag": tag, "reason": TAG_VISIBILITY_WRITE_REJECTED, "message": str(exc)}
             )
         else:
             if outcome_reason is not None:
@@ -384,10 +399,16 @@ class YouTrackBackend:
 
         Each entry is `{"tag": name, "reason": one of
         TAG_VISIBILITY_NOT_CONFIGURED / TAG_VISIBILITY_GROUP_NOT_FOUND /
-        TAG_VISIBILITY_GROUP_AMBIGUOUS}` -- only for a tag create() itself
-        applied to a FRESH (not already-existing) name; a tag already known
-        to the instance is left untouched entirely (see
-        _ensure_tag_visibility's own docstring) and never appears here.
+        TAG_VISIBILITY_GROUP_AMBIGUOUS / TAG_VISIBILITY_WRITE_REJECTED}` --
+        only for a tag create() itself applied to a FRESH (not
+        already-existing) name; a tag already known to the instance is left
+        untouched entirely (see _ensure_tag_visibility's own docstring) and
+        never appears here. A TAG_VISIBILITY_WRITE_REJECTED entry additionally
+        carries a `"message"` key with the instance's own WorkItemError text
+        (PO decision, 02.09.2026: a bare reason code for a live instance
+        failure would send the reader back to the stderr this report exists
+        to replace) -- the other three reasons don't have one, since their
+        reason code alone already says what a reader needs to do.
 
         Code-review note: the "read immediately after calling create(),
         before the next create() call" ordering is not enforced by this

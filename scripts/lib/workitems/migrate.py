@@ -270,13 +270,19 @@ def migrate(source_backend, target_backend, idmap_path, source_workitems_dir=Non
         # ever set -- an unconfigured/unresolvable/ambiguous
         # tagVisibilityGroup still creates and applies the tag, just with its
         # default (private) visibility, and the only prior trace was a
-        # stderr warning this report never collected (see
-        # youtrack.py's TAG_VISIBILITY_NOT_CONFIGURED/_GROUP_NOT_FOUND/
-        # _GROUP_AMBIGUOUS). NEVER gated into fully_migrated (see
-        # _all_phases_complete / _REQUIRED_PHASES, which excludes tags
-        # entirely): a missing configuration is a state of the environment,
-        # not a failure of the migration, and visibility is repairable
-        # afterwards while a lost comment is not.
+        # stderr warning this report never collected (see youtrack.py's
+        # TAG_VISIBILITY_NOT_CONFIGURED/_GROUP_NOT_FOUND/_GROUP_AMBIGUOUS).
+        # A fourth reason, TAG_VISIBILITY_WRITE_REJECTED (PO decision,
+        # 02.09.2026, added after the original three-reason enumeration --
+        # see that constant's own module-level comment in youtrack.py), is a
+        # genuine instance failure rather than a missing setting; its entry
+        # additionally carries the instance's own message. NEVER gated into
+        # fully_migrated (see _all_phases_complete / _REQUIRED_PHASES, which
+        # excludes tags entirely): a missing configuration is a state of the
+        # environment, not a failure of the migration, and visibility is
+        # repairable afterwards while a lost comment is not -- the same
+        # holds for a write that was rejected once but would succeed on
+        # retry.
         "tags": {
             "items": [], "total_requested": 0, "total_applied": 0, "total_missing": 0,
             "total_visibility_not_set": 0,

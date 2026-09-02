@@ -1394,6 +1394,32 @@ class TagVisibilityReportTest(_MigrateFixtureMixin, unittest.TestCase):
             [{"tag": "backend", "reason": youtrack.TAG_VISIBILITY_GROUP_NOT_FOUND}],
         )
 
+    def test_write_rejected_is_reported_with_its_own_reason_and_message(self):
+        """The fourth reason (PO decision, 02.09.2026): a genuine instance
+        failure during the visibility write, distinct from the three
+        config-shaped reasons above -- and it carries the instance's own
+        message, not just a reason code."""
+        self.transport = FakeYouTrackTransport(project_short_name="TEST")
+        self.transport.fail_tag_visibility_set_at(0)
+        self.target_backend = youtrack.YouTrackBackend(
+            base_url="https://faketrack.example.org", project="TEST",
+            token="fake-token", transport=self.transport,
+            tag_visibility_group="All Users",
+        )
+        third = self.source_backend.create(title="Third item", tags=["backend"])
+
+        report = self.run_migrate()
+
+        [entry] = [e for e in report["tags"]["items"] if e["source_id"] == third["id"]]
+        [outcome] = entry["visibility_not_set"]
+        self.assertEqual(outcome["tag"], "backend")
+        self.assertEqual(outcome["reason"], youtrack.TAG_VISIBILITY_WRITE_REJECTED)
+        self.assertIn("rejected", outcome["message"])
+        self.assertEqual(report["tags"]["total_visibility_not_set"], 1)
+        # A tag is applied regardless of visibility outcome -- same rule as
+        # the three existing reasons.
+        self.assertIn("backend", self.target_backend.get(entry["target_id"])["tags"])
+
     def test_visibility_not_set_does_not_block_fully_migrated(self):
         # PO decision, on the record (migrate()'s own docstring): a missing
         # visibility configuration is a state of the environment, not a
