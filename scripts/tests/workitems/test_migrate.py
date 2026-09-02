@@ -1188,6 +1188,53 @@ class SprintReportingTest(_MigrateFixtureMixin, unittest.TestCase):
         self.assertTrue(report["fully_migrated"])
 
 
+class EndToEndAllFieldClassesTest(_MigrateFixtureMixin, unittest.TestCase):
+    """Acceptance: one item carrying every field class this task covers --
+    comments, result prose, result refs, tags, priority, links -- migrated in
+    a single uninterrupted run, asserted field by field on the target. Each
+    class already has its own dedicated coverage above; this is the
+    counter-proof that a full run carries every class exactly once, together,
+    without one phase's write disturbing another's."""
+
+    def test_an_item_with_every_field_class_migrates_correctly_in_one_run(self):
+        fourth = self.source_backend.create(title="Fourth item")
+        full = self.source_backend.create(
+            title="Full item", item_type="feat", owner="alice",
+            description="Full description.", tags=["backend", "urgent"],
+        )
+        self.source_backend.set_priority(full["id"], "High")
+        self.source_backend.comment(full["id"], "a plain comment")
+        self.source_backend.append_result(full["id"], "A prose note about the fix.")
+        self.source_backend.append_result(full["id"], "abc1234")
+        self.source_backend.add_link(full["id"], "relates-to", fourth["id"])
+
+        report = self.run_migrate()
+
+        self.assertTrue(report["fully_migrated"])
+        self.assertTrue(report["archived"])
+
+        idmap = migrate.read_idmap(str(self.idmap_path))
+        full_target_id = idmap[full["id"]].target_id
+        fourth_target_id = idmap[fourth["id"]].target_id
+        target_item = self.target_backend.get(full_target_id)
+
+        self.assertEqual(target_item["title"], "Full item")
+        self.assertIn("Full description.", target_item["description"])
+        self.assertIn(full["id"], target_item["description"])
+        self.assertEqual(target_item["owner"], "alice")
+        self.assertEqual(sorted(target_item["tags"]), ["backend", "urgent"])
+        self.assertEqual(target_item["priority"], "High")
+        self.assertEqual(target_item["comments"], ["a plain comment", "A prose note about the fix."])
+        self.assertEqual(target_item["result-link"], ["abc1234"])
+        self.assertIn(
+            {"type": "relates-to", "target": fourth_target_id}, target_item["links"],
+        )
+
+        [tags_entry] = [e for e in report["tags"]["items"] if e["source_id"] == full["id"]]
+        self.assertEqual(sorted(tags_entry["applied"]), ["backend", "urgent"])
+        self.assertEqual(tags_entry["missing"], [])
+
+
 class FullyMigratedRequiresEveryPhaseTest(unittest.TestCase):
     """`report["fully_migrated"]` gates archiving the source directory AND (in
     scripts/workitems.py's _run_migrate) flipping .claude/settings.json's active
