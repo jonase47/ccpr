@@ -42,7 +42,6 @@ ever mean `created` and `status` are done; nothing else is known.
 
 import collections
 import datetime
-import inspect
 import os
 import re
 import shutil
@@ -280,13 +279,11 @@ def migrate(source_backend, target_backend, idmap_path, source_workitems_dir=Non
                 description = f"{description}\n\n{provenance}" if description else provenance
 
                 requested_tags = item.get("tags") or []
-                create_kwargs = dict(
+                created = target_backend.create(
                     title=item["title"], item_type=item.get("type"),
                     owner=item.get("owner"), description=description,
+                    tags=requested_tags,
                 )
-                if _target_create_accepts_tags(target_backend):
-                    create_kwargs["tags"] = requested_tags
-                created = target_backend.create(**create_kwargs)
                 target_id = created["id"]
                 _record_tag_diff(
                     report, source_id, target_id, requested_tags, created.get("tags") or [],
@@ -782,29 +779,6 @@ def _verify_links_migrated(source_item, target_backend, target_id, idmap):
             f"{len(missing)} of {len(source_links)} source link(s) not found on "
             f"the target after migrating (first missing: {missing[0]!r})"
         )
-
-
-def _target_create_accepts_tags(target_backend):
-    """Tags are a 2nd-addendum EXTENSION to the six-op contract (ADR-0002), not
-    guaranteed by every conforming target -- unlike `item_type`/`owner`, which
-    every create() implementation in this codebase has declared (even as an
-    always-optional keyword) since the very first increment. Introspecting the
-    target's own create() signature (the only way to know without calling it
-    and risking a TypeError mid-migration) keeps migrate() usable against an
-    older or minimal target that only implements the original contract -- a
-    real, reachable case: scripts/tests/test_workitems_cli.py's own
-    hand-written migrate-target fakes predate the tags addendum and were never
-    widened (out of this task's write scope; see docs/memory/senior-developer
-    for the precedent -- widening create()'s signature already broke every
-    hardcoded fake once, when the addendum itself landed). A target that
-    doesn't accept `tags` simply never receives them; _record_tag_diff still
-    runs (requested vs. an empty `applied`) so that gap is as visible as any
-    other -- see migrate()'s own call site."""
-    try:
-        params = inspect.signature(target_backend.create).parameters
-    except (TypeError, ValueError):
-        return False
-    return "tags" in params
 
 
 def _record_tag_diff(report, source_id, target_id, requested, applied):
