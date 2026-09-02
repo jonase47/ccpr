@@ -292,6 +292,19 @@ class YouTrackBackend:
         self._last_create_tag_visibility_outcomes = []
 
     def create(self, title, item_type=None, owner=None, description=None, tags=None):
+        # Reset, not appended to -- see last_create_tag_visibility_outcomes'
+        # own docstring for why this call's outcomes must never include a
+        # PRIOR call's leftovers. This must be the FIRST thing create() does
+        # (code-review follow-up, 02.09.2026): it used to sit after the
+        # validate_tag(tag) loop below, so a call that raises during
+        # validation -- never reaching the tag loop -- left the PREVIOUS
+        # call's outcomes sitting in the side channel. Not reachable via
+        # migrate.py today (its loop has no try/except around
+        # target_backend.create(...), so such a raise aborts the whole run
+        # rather than continuing to read stale outcomes on a later item) --
+        # but any future caller that wraps create() and continues past a
+        # raise would hit exactly this.
+        self._last_create_tag_visibility_outcomes = []
         if not title:
             raise WorkItemError("title is required")
         # Charset/reserved-namespace violations are structural client-side errors,
@@ -302,10 +315,6 @@ class YouTrackBackend:
         tags = list(tags or [])
         for tag in tags:
             validate_tag(tag)
-        # Reset, not appended to -- see last_create_tag_visibility_outcomes'
-        # own docstring for why this call's outcomes must never include a
-        # PRIOR call's leftovers.
-        self._last_create_tag_visibility_outcomes = []
 
         project_id = self._resolve_project_id()
         body = {"project": {"id": project_id}, "summary": title, "description": description or ""}

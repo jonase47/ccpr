@@ -1403,6 +1403,40 @@ class YouTrackCreateTagVisibilityOutcomesTest(unittest.TestCase):
             [{"tag": "beta", "reason": youtrack.TAG_VISIBILITY_NOT_CONFIGURED}],
         )
 
+    def test_outcomes_are_reset_even_when_the_second_call_raises_before_the_tag_loop(self):
+        """Code-review follow-up: create() resets
+        _last_create_tag_visibility_outcomes AFTER the validate_tag(tag) loop,
+        not at its first line. If validate_tag raises for a malformed tag on a
+        LATER call, that call never reaches the reset, so the PREVIOUS call's
+        outcomes would still be sitting in the side channel -- exactly what
+        test_outcomes_do_not_leak_across_create_calls above already promises
+        never happens, just via a different path (a raise during validation
+        instead of a normal second call)."""
+        transport = FakeYouTrackTransport(project_short_name="TEST")
+        transport.fail_tag_visibility_set_at(0)
+        backend = youtrack.YouTrackBackend(
+            base_url="https://faketrack.example.org", project="TEST",
+            token="fake-token", transport=transport,
+            tag_visibility_group="All Users",
+        )
+
+        with contextlib.redirect_stderr(io.StringIO()):
+            backend.create(title="First feature", tags=["security"])
+        self.assertEqual(
+            [
+                {"tag": o["tag"], "reason": o["reason"]}
+                for o in backend.last_create_tag_visibility_outcomes()
+            ],
+            [{"tag": "security", "reason": youtrack.TAG_VISIBILITY_WRITE_REJECTED}],
+        )
+
+        with self.assertRaises(WorkItemError):
+            backend.create(title="Second feature", tags=["!!!not-a-valid-tag!!!"])
+
+        # The second call's own (empty, since it never reached the tag loop)
+        # outcomes -- not the first call's leftover write_rejected entry.
+        self.assertEqual(backend.last_create_tag_visibility_outcomes(), [])
+
     def test_a_tag_already_known_to_the_instance_produces_no_outcome(self):
         """A tag that already exists is left untouched entirely (see
         _ensure_tag_visibility's own docstring) -- visibility was never
@@ -1474,6 +1508,36 @@ class YouTrackCreateTagVisibilityOutcomesTest(unittest.TestCase):
             [{"tag": "security", "reason": youtrack.TAG_VISIBILITY_WRITE_REJECTED}],
         )
         self.assertIn("read-back", outcomes[0]["message"])
+        self.assertIn("security", item["tags"])
+
+    def test_a_malformed_tag_creation_response_is_reported_as_write_rejected(self):
+        """The third way _ensure_tag_visibility raises (see its own
+        docstring): POST /api/tags comes back without an "id" key. Same
+        WorkItemError catch in _apply_tag_with_visibility as the rejected-
+        write and readback-mismatch cases above -- this sub-case is caught
+        today too, but until this test existed nothing on the create(...,
+        tags=[...]) path proved it (the only other test for this raise,
+        test_a_malformed_tag_creation_response_raises_workitemerror_not_
+        keyerror, goes through add_tag and predates this reporting
+        mechanism)."""
+        transport = FakeYouTrackTransport(
+            project_short_name="TEST", corrupt_tag_creation_response=True,
+        )
+        backend = youtrack.YouTrackBackend(
+            base_url="https://faketrack.example.org", project="TEST",
+            token="fake-token", transport=transport,
+            tag_visibility_group="All Users",
+        )
+
+        with contextlib.redirect_stderr(io.StringIO()):
+            item = backend.create(title="New feature", tags=["security"])
+
+        outcomes = backend.last_create_tag_visibility_outcomes()
+        self.assertEqual(
+            [{"tag": o["tag"], "reason": o["reason"]} for o in outcomes],
+            [{"tag": "security", "reason": youtrack.TAG_VISIBILITY_WRITE_REJECTED}],
+        )
+        self.assertIn("did not return a tag id", outcomes[0]["message"])
         self.assertIn("security", item["tags"])
 
 
