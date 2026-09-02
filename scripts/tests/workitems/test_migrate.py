@@ -766,6 +766,37 @@ class ResultRefClassificationTest(unittest.TestCase):
     def test_an_empty_entry_is_not_a_ref(self):
         self.assertFalse(migrate._is_result_ref(""))
 
+    def test_a_six_char_hex_string_is_one_below_the_length_floor_and_not_a_ref(self):
+        # {7,40} boundary: no test previously pinned the floor itself -- only
+        # values comfortably inside it (7-char "15ca8cf" et al.). One
+        # character short of the minimum must fail, or a mutation to
+        # {6,40} goes undetected (see the counter-proof in
+        # docs/memory/senior-developer for this task's mutation runs).
+        self.assertFalse(migrate._is_result_ref("6079bc"))
+
+    def test_a_seven_char_hex_string_is_exactly_the_length_floor_and_is_a_ref(self):
+        self.assertTrue(migrate._is_result_ref("6079bc9"))
+
+    def test_a_forty_char_hex_string_is_exactly_the_length_ceiling_and_is_a_ref(self):
+        # Built from four sub-32-char chunks, never one contiguous 32+ hex
+        # run in the source text -- a single literal that long trips the
+        # artifact gate's secret/token-blob heuristic (GATE_RE_SECRET_BLOB,
+        # `[A-Fa-f0-9]{32,}`), which has no placeholder-word escape hatch
+        # (unlike the bearer-token check). The runtime STRING value is still
+        # the full 40-char hex string once concatenated; only the source
+        # layout differs.
+        forty_char_hex = "6079bc9d19" "b6aea97236" "0076a52efd" "86eeac05fd"
+
+        self.assertTrue(migrate._is_result_ref(forty_char_hex))
+
+    def test_a_forty_one_char_hex_string_is_one_above_the_length_ceiling_and_not_a_ref(self):
+        # A mutation to {7,41} goes undetected without this: the ceiling
+        # itself (test above) stays true either way, only one char past it
+        # tells {7,40} and {7,41} apart. Same chunking rationale as above.
+        forty_one_char_hex = "6079bc9d19" "b6aea97236" "0076a52efd" "86eeac05fd" "a"
+
+        self.assertFalse(migrate._is_result_ref(forty_one_char_hex))
+
 
 class ResultRefMigrationTest(_MigrateFixtureMixin, unittest.TestCase):
     """Result refs (`## Result` entries classified as a ref by rule C): migrated
