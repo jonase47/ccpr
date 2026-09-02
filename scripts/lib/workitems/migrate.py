@@ -554,17 +554,36 @@ def _comments_and_prose_progress(source_item, target_backend, target_id):
     OWN "Done." entry, so the real prose entry never gets posted, and the
     (also independent) prose postcondition passes anyway, for the identical
     reason. A SINGLE pass with comments given priority at each step does not
-    have this ambiguity: each target occurrence can advance AT MOST ONE of
-    the two pointers (comments is tried first, so a genuinely ambiguous text
-    is attributed to whichever phase's occurrences the append order actually
-    reflects -- comments always post before prose within a given run, per
-    migrate()'s own per-item ordering, so trying comments first at each step
-    matches write order). This preserves the SAME guarantee
-    _first_unmatched_source_index already gives within one list (N
-    identical texts need N distinct target occurrences -- see
+    have this ambiguity in the NO-GAP case: each target occurrence can
+    advance AT MOST ONE of the two pointers, and since comments always post
+    before prose within a given run (migrate()'s own per-item ordering),
+    trying comments first at each step matches write order. This preserves
+    the SAME guarantee _first_unmatched_source_index already gives within
+    one list (N identical texts need N distinct target occurrences -- see
     test_duplicate_comment_texts_within_one_items_list_both_survive_a_resume)
     across the phase boundary too, without coupling either phase's progress
-    to the OTHER'S ever reaching completion."""
+    to the OTHER'S ever reaching completion.
+
+    REMAINING GAP, not fully closed (a third code-review round; see git
+    history): if comment_pointer ever gets stuck below len(source_comments)
+    -- the deleted-interior-comment case above -- a LATER text that is
+    byte-identical to comment_pointer's CURRENT (unreachable) expectation is
+    genuinely ambiguous: it could be the comments-list entry that would have
+    matched had the gap not existed, or a coincidentally identical prose
+    entry. Pure text-value matching cannot tell these apart (the deleted
+    text is, by definition, no longer visible to distinguish them) -- a
+    sound fix needs the two phases' postings to carry a hidden identity
+    marker of their own (the way append_result() already tags result-refs
+    via RESULT_MARKER), which is a bigger design change (it touches what a
+    human sees in the comments channel) than a bugfix round should decide
+    unilaterally. The AMBIGUITY GUARD below closes the DANGEROUS half of
+    this gap without resolving it structurally: a text that could still
+    belong to a not-yet-matched comments entry is never silently donated to
+    prose (so `fully_migrated: True` never gets reported while data is
+    genuinely missing) -- but it also never resolves the ambiguity in
+    prose's favour either, so such an item stays stuck (raising on every
+    retry, safely, rather than silently succeeding) until a human
+    intervenes. Safer than the alternative, not a full close."""
     source_comments = _comment_source_texts(source_item)
     source_prose = _prose_result_entries(source_item)
     target_texts = target_backend.get(target_id).get("comments") or []
@@ -573,7 +592,14 @@ def _comments_and_prose_progress(source_item, target_backend, target_id):
     for text in target_texts:
         if comment_pointer < len(source_comments) and text == source_comments[comment_pointer]:
             comment_pointer += 1
-        elif prose_pointer < len(source_prose) and text == source_prose[prose_pointer]:
+            continue
+        # AMBIGUITY GUARD (see "REMAINING GAP" above): a text that could
+        # still satisfy a LATER, not-yet-matched comments entry is never
+        # let through to the prose check -- it stays unattributed to
+        # either pointer rather than being silently claimed by prose.
+        if text in source_comments[comment_pointer:]:
+            continue
+        if prose_pointer < len(source_prose) and text == source_prose[prose_pointer]:
             prose_pointer += 1
     return comment_pointer, prose_pointer, source_comments, source_prose
 
@@ -637,10 +663,15 @@ def _migrate_comments(source_item, target_backend, target_id):
        posts (e.g. a hidden marker, the way append_result() already does for
        result-links), which is out of scope here. This is distinct from the
        comments/prose collision _comments_and_prose_progress's own docstring
-       describes -- THAT one is closed (both are this migration's own known
-       source texts, and the two-pointer design keeps them from colliding);
-       this one is a genuinely foreign (human, or another process') comment,
-       which this code has no way to distinguish from its own.
+       describes -- that one is closed for the NO-GAP case (both are this
+       migration's own known source texts, and the two-pointer design keeps
+       them from colliding); it is NOT fully closed once combined with limit
+       #3/#4 below (a comments-list gap plus a byte-identical prose entry is
+       genuinely ambiguous from text alone -- see _comments_and_prose_
+       progress's own "REMAINING GAP" section for the accepted, bounded
+       mitigation). This limit #2 is a genuinely foreign (human, or another
+       process') comment, which this code has no way to distinguish from its
+       own regardless of any gap.
     3. A comment deleted from the target AFTER this code transferred it makes
        a later resume re-post it -- but ONLY if the comments phase itself
        gets a chance to run again, which it does not once PHASE_COMMENTS is

@@ -1117,6 +1117,59 @@ class ResultProseMigrationTest(_MigrateFixtureMixin, unittest.TestCase):
         self.assertEqual(target_item["comments"].count("A prose result note."), 1)
         self.assertTrue(report["fully_migrated"])
 
+    def test_a_deleted_comment_that_collides_with_a_prose_text_never_reports_silent_success(self):
+        # A second, narrower code-review finding on the fix above: the
+        # deletion case is only fully safe when the deleted comment's text
+        # does not COINCIDE with a prose entry's own text. If it does --
+        # here "Done." is both source_comments' own third entry AND the
+        # item's sole prose entry -- pure text-value matching cannot tell
+        # apart "this occurrence is the comments entry the gap left
+        # unreachable" from "this occurrence is genuinely the prose entry"
+        # (the deleted text is, by definition, no longer visible to
+        # disambiguate). A sound fix needs the two phases' postings to
+        # carry their own hidden identity marker (the way append_result()
+        # already tags refs) -- out of scope for this bugfix round (see
+        # _comments_and_prose_progress's own "REMAINING GAP" docstring
+        # section). What THIS test pins is the safety property that
+        # matters most: such an item must NEVER report `fully_migrated:
+        # True` while genuinely missing data -- it must fail loud (and stay
+        # failing, needing a human to resolve the corrupted comments
+        # segment) rather than silently claim success and risk triggering
+        # archival on incomplete data.
+        third = self.source_backend.create(title="Third item")
+        self.source_backend.comment(third["id"], "c1")
+        self.source_backend.comment(third["id"], "c2")
+        self.source_backend.comment(third["id"], "Done.")
+        self.source_backend.append_result(third["id"], "Done.")
+
+        # Comments (calls #0-#2) succeed; the prose phase's own first post
+        # (call #3, "Done.") fails -- PHASE_COMMENTS gets recorded,
+        # PHASE_RESULT_PROSE does not.
+        self.transport.fail_comment_at(3)
+        with self.assertRaises(WorkItemError):
+            self.run_migrate()
+
+        idmap = migrate.read_idmap(str(self.idmap_path))
+        target_id = idmap[third["id"]].target_id
+        self.assertIn(migrate.PHASE_COMMENTS, idmap[third["id"]].phases)
+        self.assertNotIn(migrate.PHASE_RESULT_PROSE, idmap[third["id"]].phases)
+
+        # "c2" -- NOT the colliding "Done." -- is deleted directly from the
+        # target, the same way the sibling deletion test does it.
+        issue = self.transport._issues[target_id]
+        issue["comments"] = [c for c in issue["comments"] if c["text"] != "c2"]
+
+        # Without the ambiguity guard, this resume would silently report
+        # fully_migrated: True while the prose "Done." was never actually
+        # posted (the target's own comments-phase "Done." gets
+        # mis-attributed to prose instead) -- the exact danger this test
+        # exists to close. With the guard, it must raise instead.
+        with self.assertRaises(WorkItemError):
+            self.run_migrate()
+
+        idmap_after = migrate.read_idmap(str(self.idmap_path))
+        self.assertNotIn(migrate.PHASE_RESULT_PROSE, idmap_after[third["id"]].phases)
+
 
 class TagMigrationTest(_MigrateFixtureMixin, unittest.TestCase):
     """Tags: applied at create() time only (create(tags=[...]), youtrack.py:248)
