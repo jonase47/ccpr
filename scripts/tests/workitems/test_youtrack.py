@@ -1049,6 +1049,28 @@ class YouTrackTagVisibilityGroupNotConfiguredTest(unittest.TestCase):
         self.assertIn("security", fetched["tags"])
         self.assertEqual(self.transport.explicit_tag_creation_calls, [])
 
+    def test_a_second_call_for_the_same_tag_name_does_not_warn_again(self):
+        """_known_tag_names's own docstring claims a tag this method warned
+        about "is never mistaken for missing a second time" -- nothing
+        proved that before this test: dropping the cache-add from this warn
+        branch would make a real 259-assignment/35-distinct-tag migration
+        print 259 warnings instead of 35, and every EXISTING test here
+        (which only ever calls add_tag once) would stay green regardless.
+        Counts the warning LINES, not a substring -- the warning message
+        itself mentions "workitems.youtrack.tagVisibilityGroup" twice, so an
+        assertIn/count on that substring would overcount a single warning
+        as two."""
+        first_item = self.backend.create(title="First feature")
+        second_item = self.backend.create(title="Second feature")
+
+        captured_stderr = io.StringIO()
+        with contextlib.redirect_stderr(captured_stderr):
+            self.backend.add_tag(first_item["id"], "security")
+            self.backend.add_tag(second_item["id"], "security")
+
+        warning_lines = [line for line in captured_stderr.getvalue().splitlines() if line]
+        self.assertEqual(len(warning_lines), 1)
+
 
 class YouTrackTagVisibilityGroupNotFoundTest(unittest.TestCase):
     """The configured group name doesn't match any group on this instance --
@@ -1074,6 +1096,21 @@ class YouTrackTagVisibilityGroupNotFoundTest(unittest.TestCase):
         self.assertIn("Team Atlantis", captured_stderr.getvalue())
         self.assertIn("security", fetched["tags"])
         self.assertEqual(self.transport.explicit_tag_creation_calls, [])
+
+    def test_a_second_call_for_the_same_tag_name_does_not_warn_again(self):
+        """Same discriminating-count proof as
+        YouTrackTagVisibilityGroupNotConfiguredTest's own version -- this
+        warn branch has its own, separate cache-add call."""
+        first_item = self.backend.create(title="First feature")
+        second_item = self.backend.create(title="Second feature")
+
+        captured_stderr = io.StringIO()
+        with contextlib.redirect_stderr(captured_stderr):
+            self.backend.add_tag(first_item["id"], "security")
+            self.backend.add_tag(second_item["id"], "security")
+
+        warning_lines = [line for line in captured_stderr.getvalue().splitlines() if line]
+        self.assertEqual(len(warning_lines), 1)
 
 
 class YouTrackTagVisibilityGroupAmbiguousTest(unittest.TestCase):
@@ -1108,6 +1145,22 @@ class YouTrackTagVisibilityGroupAmbiguousTest(unittest.TestCase):
         self.assertIn("Support", captured_stderr.getvalue())
         self.assertIn("security", fetched["tags"])
         self.assertEqual(self.transport.explicit_tag_creation_calls, [])
+
+    def test_a_second_call_for_the_same_tag_name_does_not_warn_again(self):
+        """Same discriminating-count proof as
+        YouTrackTagVisibilityGroupNotConfiguredTest's own version -- this
+        warn branch (group unresolved, shared by "not found" and
+        "ambiguous") has its own, separate cache-add call."""
+        first_item = self.backend.create(title="First feature")
+        second_item = self.backend.create(title="Second feature")
+
+        captured_stderr = io.StringIO()
+        with contextlib.redirect_stderr(captured_stderr):
+            self.backend.add_tag(first_item["id"], "security")
+            self.backend.add_tag(second_item["id"], "security")
+
+        warning_lines = [line for line in captured_stderr.getvalue().splitlines() if line]
+        self.assertEqual(len(warning_lines), 1)
 
 
 class YouTrackTagVisibilityFailureTest(unittest.TestCase):
