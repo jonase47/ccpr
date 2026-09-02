@@ -1023,6 +1023,33 @@ class YouTrackTagVisibilityTest(unittest.TestCase):
         self.assertIsNone(self.transport._tags["already-private"]["visibleFor"])
 
 
+class YouTrackTagVisibilityGroupNotConfiguredTest(unittest.TestCase):
+    """workitems.youtrack.tagVisibilityGroup absent must not silently create a
+    private tag -- that's the exact silent shape this feature exists to close
+    (PO decision, on the record). The tag still gets applied (refusing
+    visibility must not refuse the tag itself); the missing key is named in a
+    stderr warning instead."""
+
+    def setUp(self):
+        self.transport = FakeYouTrackTransport(project_short_name="TEST")
+        self.backend = youtrack.YouTrackBackend(
+            base_url="https://faketrack.example.org", project="TEST",
+            token="fake-token", transport=self.transport,
+            # tag_visibility_group intentionally omitted.
+        )
+
+    def test_missing_config_key_warns_and_still_applies_the_tag(self):
+        item = self.backend.create(title="New feature")
+
+        captured_stderr = io.StringIO()
+        with contextlib.redirect_stderr(captured_stderr):
+            fetched = self.backend.add_tag(item["id"], "security")
+
+        self.assertIn("workitems.youtrack.tagVisibilityGroup", captured_stderr.getvalue())
+        self.assertIn("security", fetched["tags"])
+        self.assertEqual(self.transport.explicit_tag_creation_calls, [])
+
+
 class YouTrackQueryTest(unittest.TestCase):
     """`--query` is a project-scoped passthrough to YouTrack's own query language
     (ADR-0002 2nd addendum, 09.07.2026): the `project: <PROJ> ` prefix is always
