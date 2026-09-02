@@ -31,10 +31,18 @@ class FakeYouTrackTransport:
     }
     _DEFAULT_SYMMETRIC_TYPE_NAMES = frozenset({"Relates"})
 
+    # /api/groups default, matching what a live probe measured (see youtrack.py's
+    # tagVisibilityGroup docstrings): a real instance always has an "All Users"
+    # group alongside project-team groups. Tests that need a missing or ambiguous
+    # group override `known_groups` explicitly; this default keeps every OTHER
+    # test (which never configures tagVisibilityGroup at all) unaffected.
+    _DEFAULT_GROUPS = [{"id": "102-0", "name": "All Users"}]
+
     def __init__(self, project_short_name="TEST", page_size_cap=None,
                  known_states=None, known_users=None, known_types=None, known_tags=None,
                  known_sprints=None, estimate_field_name=None, link_type_names=None,
-                 symmetric_type_names=None):
+                 symmetric_type_names=None, known_groups=None,
+                 corrupt_tag_visibility_readback=False):
         self.project_short_name = project_short_name
         self.project_internal_id = "0-0"
         self.commands_received = []  # for tests asserting on the exact command string
@@ -108,6 +116,32 @@ class FakeYouTrackTransport:
         # globally (not per-issue), same rationale as `_fail_comment_at_indices`.
         self._fail_link_at_indices = set()
         self._link_command_count = 0
+        # Tag registry (/api/tags), separate from the Command-API `tag <name>`
+        # branch's per-issue application above: on a real instance a tag is a
+        # standalone resource with its own id/owner/visibleFor, created either
+        # explicitly (POST /api/tags, this backend's new tagVisibilityGroup path)
+        # or implicitly the first time a `tag <name>` command names one that
+        # doesn't exist yet (mirrored by `_ensure_tag_registered`, called from
+        # both places) -- visibleFor is None (private) on either creation path,
+        # matching the measured live-instance shape.
+        self._tags = {}  # name -> {"id", "name", "visibleFor", "updateableBy"}
+        self._next_tag_number = 1
+        self._groups = (
+            list(known_groups) if known_groups is not None else list(self._DEFAULT_GROUPS)
+        )
+        # Test hook: makes the fake's GET /api/tags/{id} report visibleFor/
+        # updateableBy as if the tag were still private, regardless of what a
+        # prior POST /api/tags/{id} actually recorded -- simulates a real
+        # instance's set call reporting success while the value didn't actually
+        # take, which the backend's read-back-after-set step must catch.
+        self.corrupt_tag_visibility_readback = corrupt_tag_visibility_readback
+        # Same counting/rejection shape as _fail_comment_at_indices/
+        # _fail_link_at_indices: the (0-based) index-th POST /api/tags/{id}
+        # visibility-set call raises instead of applying, simulating a real
+        # instance rejecting the write outright (as opposed to silently not
+        # taking it, which corrupt_tag_visibility_readback simulates).
+        self._fail_tag_visibility_set_at_indices = set()
+        self._tag_visibility_set_count = 0
 
     def request(self, method, url, token, body=None):
         parsed = urllib.parse.urlparse(url)
@@ -169,6 +203,29 @@ class FakeYouTrackTransport:
             del self._issues[item_id]
             return None
 
+        if method == "GET" and path == "/api/groups":
+            return list(self._groups)
+
+        if method == "GET" and path == "/api/tags":
+            return [self._tag_public(tag) for tag in self._tags.values()]
+
+        if method == "POST" and path == "/api/tags":
+            return self._tag_public(self._ensure_tag_registered(body["name"]))
+
+        if method == "POST" and path.startswith("/api/tags/"):
+            tag_id = path.rsplit("/", 1)[-1]
+            return self._tag_public(self._set_tag_visibility(tag_id, body))
+
+        if method == "GET" and path.startswith("/api/tags/"):
+            tag_id = path.rsplit("/", 1)[-1]
+            tag = self._require_tag_by_id(tag_id)
+            if self.corrupt_tag_visibility_readback:
+                return {
+                    "id": tag["id"], "name": tag["name"],
+                    "visibleFor": None, "updateableBy": None,
+                }
+            return self._tag_public(tag)
+
         raise AssertionError(f"FakeYouTrackTransport: unhandled request {method} {path}")
 
     def _matches_query(self, issue, query):
@@ -198,6 +255,57 @@ class FakeYouTrackTransport:
         issue's id up front (ids are only assigned inside create(), which the test
         may not have called yet when it needs to arm this)."""
         self._fail_comment_at_indices.add(index)
+
+    def fail_tag_visibility_set_at(self, index):
+        """Test hook: makes the (0-based) `index`-th POST /api/tags/{id}
+        visibility-set call raise WorkItemError instead of applying, simulating a
+        real instance rejecting the write outright (same counting/rejection shape
+        as fail_comment_at/fail_link_at)."""
+        self._fail_tag_visibility_set_at_indices.add(index)
+
+    def _ensure_tag_registered(self, name):
+        """Returns the registry entry for `name`, creating a fresh PRIVATE one
+        (visibleFor/updateableBy both None) if it doesn't exist yet -- mirrors a
+        real instance's own behaviour, where a tag springs into existence private
+        to the executing identity the first time it's named, whether via an
+        explicit POST /api/tags or implicitly via a `tag <name>` command."""
+        if name not in self._tags:
+            tag_id = f"10-{self._next_tag_number}"
+            self._next_tag_number += 1
+            self._tags[name] = {
+                "id": tag_id, "name": name, "visibleFor": None, "updateableBy": None,
+            }
+        return self._tags[name]
+
+    def _require_tag_by_id(self, tag_id):
+        for tag in self._tags.values():
+            if tag["id"] == tag_id:
+                return tag
+        raise WorkItemError(f"YouTrack tag not found: {tag_id}")
+
+    def _set_tag_visibility(self, tag_id, body):
+        tag = self._require_tag_by_id(tag_id)
+        index = self._tag_visibility_set_count
+        self._tag_visibility_set_count += 1
+        if index in self._fail_tag_visibility_set_at_indices:
+            raise WorkItemError(
+                f"YouTrack tag visibility update rejected (simulated failure, "
+                f"call #{index}) for tag {tag['name']!r}"
+            )
+        for field in ("visibleFor", "updateableBy"):
+            if field not in body:
+                continue
+            group_ref = body[field]
+            group_id = group_ref.get("id") if isinstance(group_ref, dict) else group_ref
+            matched = next((g for g in self._groups if g["id"] == group_id), None)
+            tag[field] = matched or {"id": group_id}
+        return tag
+
+    def _tag_public(self, tag):
+        return {
+            "id": tag["id"], "name": tag["name"],
+            "visibleFor": tag["visibleFor"], "updateableBy": tag["updateableBy"],
+        }
 
     def fail_link_at(self, index):
         """Test hook: makes the (0-based) `index`-th add-link Command-API call
@@ -280,6 +388,7 @@ class FakeYouTrackTransport:
                 tag_name = query[len("tag "):]
                 if self.known_tags is not None and tag_name not in self.known_tags:
                     raise WorkItemError(f"YouTrack command rejected (HTTP 400): tag not permitted: {tag_name}")
+                self._ensure_tag_registered(tag_name)
                 if tag_name not in issue["tags"]:
                     issue["tags"].append(tag_name)
             elif query.startswith("Type "):

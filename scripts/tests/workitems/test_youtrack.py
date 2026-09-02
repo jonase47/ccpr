@@ -963,6 +963,36 @@ class YouTrackTagsTest(unittest.TestCase):
         self.assertNotIn("remove tag security", self.transport.commands_received)
 
 
+class YouTrackTagVisibilityTest(unittest.TestCase):
+    """A tag `add_tag`/`create(tags=...)` creates via the Command API is owned by
+    the executing identity and PRIVATE to it by default (measured against a live
+    instance) -- workitems.youtrack.tagVisibilityGroup names a group a fresh tag
+    should be made visible to instead (standing PO rule: every tag is visible to
+    all users). See youtrack.py's _ensure_tag_visibility for the full design."""
+
+    def setUp(self):
+        self.transport = FakeYouTrackTransport(project_short_name="TEST")
+        self.backend = youtrack.YouTrackBackend(
+            base_url="https://faketrack.example.org", project="TEST",
+            token="fake-token", transport=self.transport,
+            tag_visibility_group="All Users",
+        )
+
+    def test_add_tag_on_a_new_tag_makes_it_visible_to_the_configured_group(self):
+        item = self.backend.create(title="New feature")
+
+        self.backend.add_tag(item["id"], "security")
+
+        tag = self.transport._tags["security"]
+        # Read the state back through the fake's OWN GET path (not the in-memory
+        # dict directly) -- the assertion this AC actually needs is "the read-back
+        # shows the group", not "the set call returned something".
+        readback = self.transport.request(
+            "GET", f"https://faketrack.example.org/api/tags/{tag['id']}", "fake-token",
+        )
+        self.assertEqual(readback["visibleFor"], {"id": "102-0", "name": "All Users"})
+
+
 class YouTrackQueryTest(unittest.TestCase):
     """`--query` is a project-scoped passthrough to YouTrack's own query language
     (ADR-0002 2nd addendum, 09.07.2026): the `project: <PROJ> ` prefix is always

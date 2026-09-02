@@ -157,6 +157,7 @@ def create(config):
         link_type_name_map=config.get("linkTypeNameMap"),
         priority_map=config.get("priorityMap"),
         estimate_field=config.get("estimateField"),
+        tag_visibility_group=config.get("tagVisibilityGroup"),
     )
 
 
@@ -214,7 +215,8 @@ def _resolve_token(token_env, token_file):
 class YouTrackBackend:
     def __init__(self, base_url, project, token, state_map=None, transport=None,
                  clock=None, stale_after_seconds=None, link_type_map=None,
-                 link_type_name_map=None, priority_map=None, estimate_field=None):
+                 link_type_name_map=None, priority_map=None, estimate_field=None,
+                 tag_visibility_group=None):
         self.base_url = base_url.rstrip("/")
         self.project = project
         self.token = token
@@ -244,6 +246,18 @@ class YouTrackBackend:
             stale_after_seconds if stale_after_seconds is not None
             else DEFAULT_STALE_AFTER_SECONDS
         )
+        # Tag visibility (workitems.youtrack.tagVisibilityGroup, standing PO rule:
+        # every tag must be visible to all users -- see _ensure_tag_visibility).
+        # No default: unlike stateMap/priorityMap's identity fallback, "which
+        # group" is not guessable -- an unconfigured key means "leave a fresh
+        # tag's default (private) visibility alone, but say so" (see
+        # _ensure_tag_visibility), never a silent guess.
+        self.tag_visibility_group = _stripped_or_none(tag_visibility_group)
+        # Lazy, per-backend-instance caches (see _ensure_tag_visibility's own
+        # docstring for the cost rationale): None means "not fetched yet",
+        # distinct from an empty result once it has been.
+        self._known_tag_names_cache = None
+        self._all_groups_cache = None
 
     def create(self, title, item_type=None, owner=None, description=None, tags=None):
         if not title:
@@ -598,8 +612,124 @@ class YouTrackBackend:
         current = self.get(item_id)
         if tag in current["tags"]:
             return current
+        self._ensure_tag_visibility(tag)
         self._run_command(item_id, f"tag {tag}")
         return self.get(item_id)
+
+    def _known_tag_names(self):
+        """The full set of tag names that already exist on this instance,
+        fetched via GET /api/tags ONCE per backend instance and cached -- the
+        cost this guards against: a migration applying 259 tag assignments over
+        35 distinct tags would otherwise issue up to 259 GET /api/tags round
+        trips for 35 answers. Any tag this backend itself creates (via
+        _ensure_tag_visibility) is added to the SAME cache immediately, so a tag
+        created earlier in this run is never mistaken for missing a second time
+        -- the cache would otherwise go blind to writes it caused itself."""
+        if self._known_tag_names_cache is None:
+            existing = self._request("GET", "/api/tags", fields="id,name") or []
+            self._known_tag_names_cache = {
+                tag["name"] for tag in existing if tag.get("name")
+            }
+        return self._known_tag_names_cache
+
+    def _resolve_tag_visibility_group_id(self, group_name):
+        """Resolves `group_name` (workitems.youtrack.tagVisibilityGroup) to a
+        YouTrack group id via GET /api/groups, cached for the life of this
+        backend instance (one extra round trip total, regardless of how many
+        tags need it). Returns None -- after printing a warning naming the
+        group -- if the name doesn't resolve to exactly one group: not found, or
+        ambiguous (more than one group sharing the name). Ambiguity was not
+        observed on the live instance this was measured against (every group
+        name, including "All Users", was unique there), but nothing in the API
+        rules it out for a different instance (e.g. two same-named project
+        teams), so the guard costs nothing to keep either way."""
+        if self._all_groups_cache is None:
+            self._all_groups_cache = self._request("GET", "/api/groups", fields="id,name") or []
+        matches = [g for g in self._all_groups_cache if g.get("name") == group_name]
+        if not matches:
+            print(
+                f"Warning: workitems.youtrack.tagVisibilityGroup {group_name!r} does "
+                "not match any group on this YouTrack instance; new tags will keep "
+                "their default (private) visibility.",
+                file=sys.stderr,
+            )
+            return None
+        if len(matches) > 1:
+            print(
+                f"Warning: workitems.youtrack.tagVisibilityGroup {group_name!r} "
+                f"matches {len(matches)} groups on this YouTrack instance; refusing "
+                "to guess which one -- new tags will keep their default (private) "
+                "visibility.",
+                file=sys.stderr,
+            )
+            return None
+        return matches[0]["id"]
+
+    def _ensure_tag_visibility(self, tag_name):
+        """Ensures `tag_name` exists on this instance with the configured
+        visibility BEFORE it is applied to an issue via the Command API's
+        `tag <name>` phrase -- which creates a tag on first use, PRIVATE to the
+        executing identity by default (measured against a live instance: a
+        fresh POST /api/tags comes back with `visibleFor: null`). Standing PO
+        rule: every tag must be visible to all users, via
+        workitems.youtrack.tagVisibilityGroup naming the group (never
+        hardcoded -- a different deployment may use a team group instead of
+        "All Users").
+
+        A tag that ALREADY exists is left untouched, including one that already
+        exists but is private: 8 of 20 tags measured on the probed instance were
+        already correctly shared and 12 were private, so re-setting the shared
+        ones would be a write with no statement -- and fixing an existing
+        private tag's visibility is a DIFFERENT decision this method does not
+        make (it would mean silently changing a tag some other actor may have
+        deliberately kept private). Existence is read once per backend instance
+        (see _known_tag_names) and updated with every tag this method creates
+        so the check never repeats needless work within one run.
+
+        Three ways this can report instead of silently creating a private tag,
+        all warn on stderr and RETURN (the caller still applies the tag via the
+        Command API as before -- refusing visibility must not refuse the tag
+        itself): the config key is unset, the configured group name doesn't
+        resolve, or it's ambiguous. Anything past that point (POST /api/tags,
+        the visibility POST, or the read-back mismatch below) is an unexpected
+        instance-level failure and raises WorkItemError -- a set call that
+        returned is not evidence; only the read-back is.
+        """
+        if tag_name in self._known_tag_names():
+            return
+        group_name = self.tag_visibility_group
+        if not group_name:
+            print(
+                "Warning: workitems.youtrack.tagVisibilityGroup is not configured; "
+                f"tag {tag_name!r} will be created with its default (private) "
+                "visibility. Set workitems.youtrack.tagVisibilityGroup to a group "
+                "name (e.g. 'All Users') to make new tags visible to everyone.",
+                file=sys.stderr,
+            )
+            self._known_tag_names_cache.add(tag_name)
+            return
+        group_id = self._resolve_tag_visibility_group_id(group_name)
+        if group_id is None:
+            self._known_tag_names_cache.add(tag_name)
+            return
+
+        created = self._request("POST", "/api/tags", body={"name": tag_name}, fields="id,name")
+        tag_id = created["id"]
+        self._request(
+            "POST", f"/api/tags/{tag_id}",
+            body={"visibleFor": {"id": group_id}, "updateableBy": {"id": group_id}},
+            fields="id,visibleFor(id,name)",
+        )
+        readback = self._request(
+            "GET", f"/api/tags/{tag_id}", fields="id,visibleFor(id,name)",
+        ) or {}
+        if (readback.get("visibleFor") or {}).get("id") != group_id:
+            raise WorkItemError(
+                f"Tag {tag_name!r} (id {tag_id}) visibility read-back does not "
+                f"match the configured group {group_name!r} (id {group_id}): got "
+                f"{readback.get('visibleFor')!r}."
+            )
+        self._known_tag_names_cache.add(tag_name)
 
     def remove_tag(self, item_id, tag):
         validate_item_id(item_id)
