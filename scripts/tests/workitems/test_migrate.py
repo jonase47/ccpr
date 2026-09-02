@@ -265,6 +265,25 @@ class CommentMigrationTest(_MigrateFixtureMixin, unittest.TestCase):
         target_item = self.target_backend.get(idmap[third["id"]].target_id)
         self.assertEqual(target_item["comments"], [multiline_text])
 
+    def test_a_comment_with_edge_whitespace_arrives_byte_identical(self):
+        # Counter-proof for the result-refs edge-whitespace fix (see
+        # ResultRefEdgeWhitespaceMigrationTest below): comment() -- unlike
+        # append_result() -- was NOT given a normalize_result_ref() call (PO
+        # decision, 02.09.2026: a comment is prose, byte-faithful by design,
+        # see normalize_result_ref's own docstring). This proves the comments
+        # phase is unaffected by that fix -- edge whitespace survives exactly
+        # as written.
+        third = self.source_backend.create(title="Third item")
+        self.source_backend.comment(third["id"], "  leading and trailing whitespace  ")
+
+        self.run_migrate()
+
+        idmap = migrate.read_idmap(str(self.idmap_path))
+        target_item = self.target_backend.get(idmap[third["id"]].target_id)
+        self.assertEqual(
+            target_item["comments"], ["  leading and trailing whitespace  "],
+        )
+
     def test_resumes_a_comment_list_interrupted_mid_item_without_duplicating(self):
         third = self.source_backend.create(title="Third item")
         self.source_backend.comment(third["id"], "alpha")
@@ -925,6 +944,130 @@ class ResultRefMigrationTest(_MigrateFixtureMixin, unittest.TestCase):
 
         self.assertTrue(report["fully_migrated"])
         self.assertTrue(report["archived"])
+
+
+class ResultRefEdgeWhitespaceMigrationTest(_MigrateFixtureMixin, unittest.TestCase):
+    """Regression coverage for a gap left by the 02.09.2026 append_result()
+    normalization fix (see `workitems.normalize_result_ref`'s docstring):
+    normalizing the WRITE side alone does not repair a migration whose SOURCE
+    entry still carries edge whitespace that a pre-existing item picked up
+    before the fix existed -- append_result() now trims what migrate() posts,
+    but the postcondition previously compared the raw (unstripped) source text
+    against the target's now-normalized value, so it never matched.
+
+    A source entry with edge whitespace can no longer be produced through
+    append_result() (it normalizes on the way in) -- these fixtures are
+    written directly to the source `.md` file instead, reproducing the exact
+    shape 34 pre-existing entries in the live corpus have (measured
+    02.09.2026)."""
+
+    def _write_raw_source_item(self, item_id, result_section_text):
+        # Mirrors LocalBackendUnbulletedSectionShapeTest._write_raw in
+        # test_local.py -- same frontmatter shape, minimal enough to satisfy
+        # LocalBackend.list()/get().
+        (self.source_dir / f"{item_id}.md").write_text(
+            "---\n"
+            f"id: {item_id}\n"
+            "title: Hand-written fixture\n"
+            "status: Backlog\n"
+            "---\n"
+            "\n"
+            "Description.\n"
+            "\n"
+            "## Acceptance Criteria\n"
+            "\n"
+            "## Result\n"
+            f"{result_section_text}"
+            "## Comments\n",
+            encoding="utf-8",
+        )
+
+    def test_a_trailing_newline_on_a_result_ref_entry_migrates_and_passes_the_postcondition(self):
+        # The exact shape reported live: a `## Result` entry text ending in
+        # "\n" (a bullet line followed by one blank continuation line).
+        self.source_dir.mkdir(parents=True, exist_ok=True)
+        self._write_raw_source_item(
+            "WI-0100",
+            "- 8f28dbf410b6061b1f14\n\n",
+        )
+
+        report = self.run_migrate()
+
+        idmap = migrate.read_idmap(str(self.idmap_path))
+        target_item = self.target_backend.get(idmap["WI-0100"].target_id)
+        self.assertEqual(
+            target_item["result-link"], ["8f28dbf410b6061b1f14"],
+        )
+        self.assertTrue(report["fully_migrated"])
+
+    def test_leading_whitespace_on_a_result_ref_entry_migrates_and_passes_the_postcondition(self):
+        self.source_dir.mkdir(parents=True, exist_ok=True)
+        self._write_raw_source_item("WI-0100", "-   aaa1111\n")
+
+        report = self.run_migrate()
+
+        idmap = migrate.read_idmap(str(self.idmap_path))
+        target_item = self.target_backend.get(idmap["WI-0100"].target_id)
+        self.assertEqual(target_item["result-link"], ["aaa1111"])
+        self.assertTrue(report["fully_migrated"])
+
+    def test_whitespace_on_both_edges_of_a_result_ref_entry_migrates_and_passes_the_postcondition(self):
+        self.source_dir.mkdir(parents=True, exist_ok=True)
+        self._write_raw_source_item("WI-0100", "-   bbb2222  \n")
+
+        report = self.run_migrate()
+
+        idmap = migrate.read_idmap(str(self.idmap_path))
+        target_item = self.target_backend.get(idmap["WI-0100"].target_id)
+        self.assertEqual(target_item["result-link"], ["bbb2222"])
+        self.assertTrue(report["fully_migrated"])
+
+    def test_resumes_an_interrupted_ref_list_containing_an_edge_whitespace_entry_without_duplicating(self):
+        # Counter-proof half 1: the fix must not break the ordered-subsequence
+        # resume machinery -- a normalized source ref must still be findable
+        # against the target's (already-normalized) read-back values across
+        # an interruption, exactly like ResultRefMigrationTest's equivalent
+        # test for entries with no edge whitespace at all.
+        self.source_dir.mkdir(parents=True, exist_ok=True)
+        self._write_raw_source_item(
+            "WI-0100",
+            "- 8f28dbf410b6061b1f14\n\n-   bbb2222  \n",
+        )
+
+        # first_id/second_id have zero result-links (a zero-call phase); the
+        # trimmed sha is this run's call #0 -- fail #1 ("bbb2222").
+        self.transport.fail_comment_at(1)
+        with self.assertRaises(WorkItemError):
+            self.run_migrate()
+
+        idmap = migrate.read_idmap(str(self.idmap_path))
+        target_id = idmap["WI-0100"].target_id
+        self.assertEqual(
+            self.target_backend.get(target_id)["result-link"],
+            ["8f28dbf410b6061b1f14"],
+        )
+        self.assertNotIn(migrate.PHASE_RESULT_REFS, idmap["WI-0100"].phases)
+
+        self.run_migrate()
+
+        self.assertEqual(
+            self.target_backend.get(target_id)["result-link"],
+            ["8f28dbf410b6061b1f14", "bbb2222"],
+        )
+        idmap_after = migrate.read_idmap(str(self.idmap_path))
+        self.assertIn(migrate.PHASE_RESULT_REFS, idmap_after["WI-0100"].phases)
+
+    def test_a_ref_with_no_edge_whitespace_is_still_unaffected_by_the_fix(self):
+        # Counter-proof half 2: an entry that never had edge whitespace to
+        # begin with must migrate exactly as it always did.
+        third = self.source_backend.create(title="Third item")
+        self.source_backend.append_result(third["id"], "ccc3333")
+
+        self.run_migrate()
+
+        idmap = migrate.read_idmap(str(self.idmap_path))
+        target_item = self.target_backend.get(idmap[third["id"]].target_id)
+        self.assertEqual(target_item["result-link"], ["ccc3333"])
 
 
 class ResultProseMigrationTest(_MigrateFixtureMixin, unittest.TestCase):

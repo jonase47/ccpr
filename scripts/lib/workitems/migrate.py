@@ -46,7 +46,7 @@ import os
 import re
 import shutil
 
-from workitems import WorkItemError
+from workitems import WorkItemError, normalize_result_ref
 
 _PROVENANCE_PATTERN = re.compile(r"^Migrated from (.+)\.$", re.MULTILINE)
 
@@ -126,8 +126,35 @@ def _classify_result_entries(entries):
 
 
 def _ref_result_entries(item):
+    """The result-refs phase's source list, normalized through the SAME edge-
+    whitespace rule `append_result()` applies on write
+    (`workitems.normalize_result_ref`) -- review follow-up, 02.09.2026. Before
+    this normalization existed, `append_result()` wrote a ref's raw text
+    byte-faithfully, so comparing this list against a target's read-back
+    values (also raw, at the time) was comparing like with like. Once
+    `append_result()` started trimming edge whitespace on write (see
+    `normalize_result_ref`'s own docstring), a PRE-EXISTING source entry that
+    still carries edge whitespace (measured 02.09.2026: 34 of the live
+    corpus's result-link entries) would post through `append_result()`
+    correctly trimmed, but the postcondition compared THIS function's raw,
+    untrimmed text against the target's now-trimmed value -- an item that
+    migrated correctly would fail its own postcondition on every subsequent
+    run. Normalizing HERE, the single place both `_migrate_result_refs` and
+    `_verify_result_refs_migrated` read their source list from, means there is
+    exactly one rule for "the same ref" -- neither caller needs (or is
+    permitted) its own second definition. Never raises for an already-
+    classified ref: `_is_result_ref`/rule C only accepts an entry with at
+    least one non-whitespace token, and `normalize_result_ref` only strips
+    edges, so a ref's content survives the strip unconditionally.
+
+    The prose sibling, `_prose_result_entries`, deliberately does NOT do this
+    -- classified prose travels through `comment()`, which was never given a
+    `normalize_result_ref()` call (a comment is prose, byte-faithful by
+    design; see `normalize_result_ref`'s own docstring and
+    ResultRefEdgeWhitespaceMigrationTest's comments-phase counter-proof in
+    test_migrate.py)."""
     refs, _ = _classify_result_entries(item.get("result-link") or [])
-    return refs
+    return [normalize_result_ref(ref) for ref in refs]
 
 
 def _prose_result_entries(item):
