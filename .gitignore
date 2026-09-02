@@ -65,6 +65,22 @@ docs/decisions/
 docs/workitems/
 docs/memory/
 
+# The id-map `migrate` writes (docs/workitems-idmap.yml) is working state of the
+# same kind as docs/workitems/ above -- a snapshot of one machine's migration,
+# not a shipped artifact. It sits outside docs/workitems/ and outside the docs/.*
+# dotfile pattern further down, so neither of them covers it; without this line
+# it would be the one migration artifact that lands in a clone.
+docs/workitems-idmap.yml
+
+# The project's own Claude settings. `migrate` creates or rewrites this file to
+# flip `workitems.provider`, and a youtrack-backed project must put its
+# `baseUrl` and token path in it first -- a real infrastructure address and
+# machine-specific paths, in a repository meant to be cloned. The setup those
+# values belong to is documented separately; the values themselves are per
+# installation. `.claude/settings.local.json` was already ignored above; this
+# closes the other half.
+.claude/settings.json
+
 # Social-preview renders. The tracked logo assets under docs/logo/ (icon SVGs,
 # wordmark PNGs) are referenced from the README; these two are not referenced
 # from anywhere in the repo -- they exist for a platform's repo-preview slot,
