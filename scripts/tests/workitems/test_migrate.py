@@ -901,10 +901,15 @@ class ResultProseMigrationTest(_MigrateFixtureMixin, unittest.TestCase):
     everything a `## Result` entry can be that is not a ref -- see
     ResultRefClassificationTest): joins the comments channel via comment(), in a
     deterministic order -- source comments FIRST, then classified result-link
-    prose, each sublist keeping its own relative order (see
-    _comment_source_texts's docstring). Re-uses the SAME resume/postcondition
-    machinery as CommentMigrationTest -- PHASE_COMMENTS, not a new phase -- since
-    the source list is just wider now, not a new kind of write."""
+    prose, each sublist keeping its own relative order. Its OWN phase
+    (PHASE_RESULT_PROSE), resumed/verified with the same ordered-subsequence
+    machinery CommentMigrationTest already exercises for PHASE_COMMENTS
+    (_first_unmatched_source_index against the shared comments channel) --
+    but deliberately NOT PHASE_COMMENTS itself (see PHASE_RESULT_PROSE's own
+    docstring in migrate.py for why folding prose into PHASE_COMMENTS's
+    existing marker was the bug this class's own resume test now guards
+    against: an idmap written under the OLD, comments-only meaning of
+    PHASE_COMMENTS would otherwise satisfy a widened gate it never earned)."""
 
     def test_a_prose_result_entry_migrates_as_a_comment_not_a_result_link(self):
         third = self.source_backend.create(title="Third item")
@@ -944,13 +949,18 @@ class ResultProseMigrationTest(_MigrateFixtureMixin, unittest.TestCase):
         self.assertEqual(target_item["result-link"], ["aaa1111", "bbb2222"])
         self.assertEqual(target_item["comments"], ["A prose note."])
 
-    def test_resumes_a_combined_comments_and_prose_list_interrupted_at_the_boundary(self):
+    def test_resumes_the_prose_phase_independently_once_comments_have_already_completed(self):
+        # The two phases are separately resumable: the comments phase (call
+        # #0, "alpha") completes and is verified BEFORE the prose phase even
+        # starts, so an abort inside the prose phase (call #1) leaves
+        # PHASE_COMMENTS genuinely recorded -- it earned it, "alpha" really
+        # did land -- while PHASE_RESULT_PROSE stays unrecorded.
         third = self.source_backend.create(title="Third item")
         self.source_backend.comment(third["id"], "alpha")
         self.source_backend.append_result(third["id"], "A prose result note.")
 
-        # "alpha" (call #0) succeeds; the prose entry (call #1, posted through
-        # the same comment() endpoint once folded into the combined list) fails.
+        # "alpha" (call #0, the comments phase) succeeds; the prose entry
+        # (call #1, the result-prose phase's own first post) fails.
         self.transport.fail_comment_at(1)
         with self.assertRaises(WorkItemError):
             self.run_migrate()
@@ -958,7 +968,8 @@ class ResultProseMigrationTest(_MigrateFixtureMixin, unittest.TestCase):
         idmap = migrate.read_idmap(str(self.idmap_path))
         target_id = idmap[third["id"]].target_id
         self.assertEqual(self.target_backend.get(target_id)["comments"], ["alpha"])
-        self.assertNotIn(migrate.PHASE_COMMENTS, idmap[third["id"]].phases)
+        self.assertIn(migrate.PHASE_COMMENTS, idmap[third["id"]].phases)
+        self.assertNotIn(migrate.PHASE_RESULT_PROSE, idmap[third["id"]].phases)
 
         self.run_migrate()
 
@@ -967,7 +978,37 @@ class ResultProseMigrationTest(_MigrateFixtureMixin, unittest.TestCase):
             ["alpha", "A prose result note."],
         )
         idmap_after = migrate.read_idmap(str(self.idmap_path))
-        self.assertIn(migrate.PHASE_COMMENTS, idmap_after[third["id"]].phases)
+        self.assertIn(migrate.PHASE_RESULT_PROSE, idmap_after[third["id"]].phases)
+
+    def test_an_idmap_marking_comments_complete_under_the_old_meaning_still_migrates_the_prose_on_resume(self):
+        # Reproduces the bug this cycle fixes: PHASE_COMMENTS used to gate a
+        # source list that was widened in place (comments + prose) without
+        # renaming the phase -- so an idmap written back when `comments` meant
+        # only "item['comments'] copied" already satisfies the (now wider)
+        # gate, and a resumed run never even looks at the prose. Planted by
+        # hand, exactly the shape an older build would have left on disk: a
+        # target item that only has created+status+comments recorded, with
+        # the prose never posted.
+        third = self.source_backend.create(title="Third item")
+        self.source_backend.append_result(third["id"], "Some prose note about the result.")
+
+        pre_existing = self.target_backend.create(title="Third item")
+        migrate.write_idmap(str(self.idmap_path), {
+            third["id"]: migrate.IdmapEntry(
+                pre_existing["id"],
+                frozenset({
+                    migrate.PHASE_CREATED, migrate.PHASE_STATUS, migrate.PHASE_COMMENTS,
+                }),
+            ),
+        })
+
+        report = self.run_migrate()
+
+        self.assertEqual(
+            self.target_backend.get(pre_existing["id"])["comments"],
+            ["Some prose note about the result."],
+        )
+        self.assertTrue(report["fully_migrated"])
 
 
 class TagMigrationTest(_MigrateFixtureMixin, unittest.TestCase):
@@ -1274,7 +1315,10 @@ class FullyMigratedRequiresEveryPhaseTest(unittest.TestCase):
 
         self.assertFalse(migrate._all_phases_complete(idmap, source_items))
 
-    def test_every_item_with_every_required_phase_is_fully_migrated(self):
+    def test_an_item_missing_only_result_prose_is_not_fully_migrated(self):
+        # Direct regression guard for this task's fix: PHASE_RESULT_PROSE must
+        # itself gate the formula, not merely be accepted when present (see
+        # test_every_item_with_every_required_phase_is_fully_migrated below).
         source_items = [{"id": "WI-0001"}]
         idmap = {
             "WI-0001": migrate.IdmapEntry(
@@ -1282,6 +1326,20 @@ class FullyMigratedRequiresEveryPhaseTest(unittest.TestCase):
                     migrate.PHASE_CREATED, migrate.PHASE_STATUS,
                     migrate.PHASE_COMMENTS, migrate.PHASE_LINKS,
                     migrate.PHASE_RESULT_REFS,
+                }),
+            ),
+        }
+
+        self.assertFalse(migrate._all_phases_complete(idmap, source_items))
+
+    def test_every_item_with_every_required_phase_is_fully_migrated(self):
+        source_items = [{"id": "WI-0001"}]
+        idmap = {
+            "WI-0001": migrate.IdmapEntry(
+                "CT-1", frozenset({
+                    migrate.PHASE_CREATED, migrate.PHASE_STATUS,
+                    migrate.PHASE_COMMENTS, migrate.PHASE_RESULT_PROSE,
+                    migrate.PHASE_LINKS, migrate.PHASE_RESULT_REFS,
                 }),
             ),
         }

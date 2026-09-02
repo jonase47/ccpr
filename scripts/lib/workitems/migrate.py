@@ -54,6 +54,19 @@ _PROVENANCE_PATTERN = re.compile(r"^Migrated from (.+)\.$", re.MULTILINE)
 PHASE_CREATED = "created"
 PHASE_STATUS = "status"
 PHASE_COMMENTS = "comments"
+# Deliberately a SEPARATE, NEW phase from PHASE_COMMENTS -- not a widened
+# meaning of it. An earlier version of this code folded classified `## Result`
+# PROSE into PHASE_COMMENTS's own source list (see _comment_source_texts'
+# history) without renaming the phase; an idmap written by a build that
+# predates that change already carries `comments` (correctly, by ITS
+# meaning -- only item["comments"] had been copied), so a resumed run against
+# such an idmap silently skipped the now-wider phase and the prose was lost
+# for good, with the run still reporting success. Splitting it into its own
+# phase means an old idmap's `comments` marker stays true to what it always
+# meant, and the new phase's absence from that idmap is exactly what makes a
+# resume pick the prose up -- no marker rewriting needed. See
+# _migrate_result_prose / _verify_result_prose_migrated.
+PHASE_RESULT_PROSE = "result-prose"
 PHASE_LINKS = "links"
 PHASE_RESULT_REFS = "result-refs"
 
@@ -79,15 +92,16 @@ _RESULT_REF_TOKEN_PATTERN = re.compile(
 _PHASES_AFTER_CREATE_AND_STATUS = frozenset({PHASE_CREATED, PHASE_STATUS})
 
 # Every phase this run is responsible for completing, for `fully_migrated` (see
-# _all_phases_complete). Comments, links and result-refs -- tags and priority are
-# DELIBERATELY excluded (see migrate()'s own docstring for why): tags are
-# best-effort by backend design (create()'s own contract, see
+# _all_phases_complete). Comments, result-prose, links and result-refs -- tags
+# and priority are DELIBERATELY excluded (see migrate()'s own docstring for
+# why): tags are best-effort by backend design (create()'s own contract, see
 # _apply_optional_create_field) and reported instead of gated; priority is a
 # plain idempotent overwrite with nothing to resume. When another phase joins
 # this set, NOTHING else about the idmap format has to change (see the module
 # docstring).
 _REQUIRED_PHASES = frozenset({
-    PHASE_CREATED, PHASE_STATUS, PHASE_COMMENTS, PHASE_LINKS, PHASE_RESULT_REFS,
+    PHASE_CREATED, PHASE_STATUS, PHASE_COMMENTS, PHASE_RESULT_PROSE,
+    PHASE_LINKS, PHASE_RESULT_REFS,
 })
 
 
@@ -311,8 +325,8 @@ def migrate(source_backend, target_backend, idmap_path, source_workitems_dir=Non
 
         # Resume never re-attempts create()/set_status() above for an item already
         # in the idmap -- but its OWN remaining phase(s) still run every call, until
-        # they're recorded done. Comments and result-refs are the phases beyond
-        # created/status today; a future phase slots in the same way.
+        # they're recorded done. Comments, result-prose and result-refs are the
+        # phases beyond created/status today; a future phase slots in the same way.
         if PHASE_COMMENTS not in entry.phases:
             _migrate_comments(item, target_backend, entry.target_id)
             # Hard postcondition, not a trust of _migrate_comments' own return:
@@ -322,6 +336,24 @@ def migrate(source_backend, target_backend, idmap_path, source_workitems_dir=Non
             # only LOOKS complete because posting didn't raise.
             _verify_comments_migrated(item, target_backend, entry.target_id)
             entry = IdmapEntry(target_id=entry.target_id, phases=entry.phases | {PHASE_COMMENTS})
+            idmap[source_id] = entry
+            write_idmap(idmap_path, idmap)
+
+        # Deliberately AFTER the comments block above, not merged into it (see
+        # PHASE_RESULT_PROSE's own docstring for why the two are separate
+        # phases): running comments first keeps an uninterrupted run's posting
+        # order identical to what it was before this phase split (plain
+        # comments, then prose), and on a resume it means the prose phase
+        # always sees whatever plain comments already landed as part of the
+        # target's current comments list, exactly like a foreign comment.
+        if PHASE_RESULT_PROSE not in entry.phases:
+            _migrate_result_prose(item, target_backend, entry.target_id)
+            # Hard postcondition, same discipline as _verify_comments_migrated:
+            # re-read the target's comments channel and confirm every
+            # classified prose entry actually landed before PHASE_RESULT_PROSE
+            # is recorded.
+            _verify_result_prose_migrated(item, target_backend, entry.target_id)
+            entry = IdmapEntry(target_id=entry.target_id, phases=entry.phases | {PHASE_RESULT_PROSE})
             idmap[source_id] = entry
             write_idmap(idmap_path, idmap)
 
@@ -464,25 +496,23 @@ def _first_unmatched_source_index(source_comments, target_texts):
 
 
 def _comment_source_texts(item):
-    """The comments phase's full source list: `item["comments"]` FIRST, then
-    `item`'s `## Result` entries classified as prose (see
-    _prose_result_entries / rule C), each sublist keeping its own relative
-    order. A `## Result` entry classified as prose has no dedicated channel of
-    its own on the target (unlike a ref, which goes to result-link via
-    append_result -- see _migrate_result_refs) -- it travels as an ordinary
-    comment instead, appended AFTER the item's real comments so a resume that
-    already matched a prefix of the plain comments never has to re-derive
-    where the prose entries start. Shared by _migrate_comments and
-    _verify_comments_migrated so the two can never see a different source
-    list for the same item."""
-    return (item.get("comments") or []) + _prose_result_entries(item)
+    """The comments phase's source list: `item["comments"]` verbatim, nothing
+    else. An earlier version of this function also appended classified
+    `## Result` PROSE (see _prose_result_entries), riding PHASE_COMMENTS's own
+    resume marker -- see PHASE_RESULT_PROSE's docstring for why that was a
+    bug (a widened source list under an unrenamed phase name), and
+    _migrate_result_prose / _verify_result_prose_migrated for where the prose
+    now lives, as its own phase against the SAME comments channel. Shared by
+    _migrate_comments and _verify_comments_migrated so the two can never see
+    a different source list for the same item."""
+    return item.get("comments") or []
 
 
 def _migrate_comments(source_item, target_backend, target_id):
-    """Copies source_item's plain comments (and, since this task, its
-    classified `## Result` PROSE -- see _comment_source_texts) to target_id,
-    resuming from wherever a prior attempt left off. comment() has no dedup of
-    its own (unlike set_status,
+    """Copies source_item's plain comments (`item["comments"]` only -- see
+    _comment_source_texts; classified `## Result` prose is a separate phase,
+    _migrate_result_prose) to target_id, resuming from wherever a prior
+    attempt left off. comment() has no dedup of its own (unlike set_status,
     which plainly overwrites, or add_tag/add_link, which check membership before
     writing), so a mid-item abort must be survivable without risking a duplicate
     post.
@@ -557,8 +587,8 @@ def _verify_comments_migrated(source_item, target_backend, target_id):
     """Hard postcondition for the comments phase: re-reads the target (a FRESH
     read, not the one _migrate_comments already made -- the whole point is not
     to trust that call's own view of what it accomplished) and confirms every
-    text in source_item's combined comment source (see _comment_source_texts)
-    is present as an ordered subsequence, using the same walk _migrate_comments
+    text in source_item's comment source (see _comment_source_texts) is
+    present as an ordered subsequence, using the same walk _migrate_comments
     uses to decide what to post. If anything is still missing, raises --
     uncaught, exactly like a comment() failure already does (see migrate()'s
     own docstring) -- rather than letting the caller record PHASE_COMMENTS for
@@ -575,6 +605,63 @@ def _verify_comments_migrated(source_item, target_backend, target_id):
             f"{len(missing)} of {len(source_comments)} source comment(s) not "
             f"found on the target as an ordered subsequence after posting "
             f"(first missing: {missing[0]!r})"
+        )
+
+
+def _migrate_result_prose(source_item, target_backend, target_id):
+    """Copies source_item's classified `## Result` PROSE (see
+    _prose_result_entries / rule C) to target_id via comment() -- the SAME
+    channel _migrate_comments writes to, not a new one (a prose entry has no
+    dedicated channel of its own on the target, unlike a ref -- see
+    _migrate_result_refs). Own phase (PHASE_RESULT_PROSE), own resume
+    bookkeeping, but the same ordered-subsequence discipline as
+    _migrate_comments (_first_unmatched_source_index against the target's
+    CURRENT comments list): a text on the target that isn't the pointer's
+    current prose entry is simply skipped, whether it's a plain comment this
+    run already posted, a foreign (human) comment, or (on a resume) prose
+    this phase itself posted in an earlier, aborted attempt -- the exact same
+    argument _migrate_comments' own docstring already makes for a foreign
+    comment landing between two runs, applied here to a second phase sharing
+    the channel rather than a second writer sharing it.
+
+    Ordering: migrate()'s per-item loop runs the comments phase before this
+    one, so on an uninterrupted run source_item's plain comments always
+    precede its prose in the target's comments list -- matching the order the
+    two classes were combined in before this phase split existed. On a
+    resume where comments already completed under an OLDER idmap (see
+    PHASE_RESULT_PROSE's own docstring), the target's comments list already
+    holds those plain comments; this phase's walk treats every one of them as
+    foreign (never matching a prose entry) and appends the still-missing
+    prose after them, exactly as it would on a fresh run."""
+    source_prose = _prose_result_entries(source_item)
+    if not source_prose:
+        return
+    target_texts = target_backend.get(target_id).get("comments") or []
+    pointer = _first_unmatched_source_index(source_prose, target_texts)
+    for text in source_prose[pointer:]:
+        target_backend.comment(target_id, text)
+
+
+def _verify_result_prose_migrated(source_item, target_backend, target_id):
+    """Hard postcondition for the result-prose phase, mirroring
+    _verify_comments_migrated exactly, against the SAME comments channel:
+    re-reads the target (a FRESH read) and confirms every classified prose
+    entry is present as an ordered subsequence. Raises -- uncaught, same
+    discipline as every other phase's postcondition -- rather than letting
+    the caller record PHASE_RESULT_PROSE for an item that only APPEARED to
+    finish because comment() didn't raise."""
+    source_prose = _prose_result_entries(source_item)
+    if not source_prose:
+        return
+    target_texts = target_backend.get(target_id).get("comments") or []
+    pointer = _first_unmatched_source_index(source_prose, target_texts)
+    if pointer != len(source_prose):
+        missing = source_prose[pointer:]
+        raise WorkItemError(
+            f"result-prose migration postcondition failed for target {target_id!r}: "
+            f"{len(missing)} of {len(source_prose)} classified result-prose "
+            f"entry(ies) not found on the target as an ordered subsequence "
+            f"after posting (first missing: {missing[0]!r})"
         )
 
 
