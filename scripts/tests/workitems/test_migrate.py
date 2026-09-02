@@ -1327,6 +1327,85 @@ class TagMigrationTest(_MigrateFixtureMixin, unittest.TestCase):
         self.assertTrue(report["fully_migrated"])
 
 
+class TagVisibilityReportTest(_MigrateFixtureMixin, unittest.TestCase):
+    """A tag is counted `applied` the moment it's on the item, regardless of
+    whether its VISIBILITY was ever set -- if tagVisibilityGroup is unset,
+    the group can't be resolved, or it's ambiguous, the tag is created
+    private and (before this) the only trace was a stderr warning
+    migrate()'s report never collected (a run that made every tag private
+    would look identical to a correct one). PO decision, verbatim in
+    substance: the report carries them; nothing is gated. `_MigrateFixtureMixin`'s
+    own fixture backend has no tag_visibility_group configured, so every
+    test below that doesn't override it exercises the "not configured"
+    reason for free."""
+
+    def test_unconfigured_group_reports_every_tag_as_visibility_not_set(self):
+        third = self.source_backend.create(title="Third item", tags=["backend", "urgent"])
+
+        report = self.run_migrate()
+
+        [entry] = [e for e in report["tags"]["items"] if e["source_id"] == third["id"]]
+        self.assertEqual(
+            sorted(entry["visibility_not_set"], key=lambda o: o["tag"]),
+            [
+                {"tag": "backend", "reason": youtrack.TAG_VISIBILITY_NOT_CONFIGURED},
+                {"tag": "urgent", "reason": youtrack.TAG_VISIBILITY_NOT_CONFIGURED},
+            ],
+        )
+        # first_id/second_id carry no tags at all -- only third's 2 tags.
+        self.assertEqual(report["tags"]["total_visibility_not_set"], 2)
+
+    def test_an_item_with_no_tags_still_has_an_empty_visibility_not_set_list(self):
+        # Absence vs. zero, same rule as requested/applied/missing above.
+        report = self.run_migrate()
+
+        [entry] = [e for e in report["tags"]["items"] if e["source_id"] == self.first_id]
+        self.assertEqual(entry["visibility_not_set"], [])
+
+    def test_a_correctly_resolved_group_reports_nothing_as_not_set(self):
+        self.transport = FakeYouTrackTransport(project_short_name="TEST")
+        self.target_backend = youtrack.YouTrackBackend(
+            base_url="https://faketrack.example.org", project="TEST",
+            token="fake-token", transport=self.transport,
+            tag_visibility_group="All Users",
+        )
+        third = self.source_backend.create(title="Third item", tags=["backend"])
+
+        report = self.run_migrate()
+
+        [entry] = [e for e in report["tags"]["items"] if e["source_id"] == third["id"]]
+        self.assertEqual(entry["visibility_not_set"], [])
+        self.assertEqual(report["tags"]["total_visibility_not_set"], 0)
+
+    def test_group_not_found_is_reported_with_its_own_reason(self):
+        self.transport = FakeYouTrackTransport(project_short_name="TEST")
+        self.target_backend = youtrack.YouTrackBackend(
+            base_url="https://faketrack.example.org", project="TEST",
+            token="fake-token", transport=self.transport,
+            tag_visibility_group="Team Atlantis",
+        )
+        third = self.source_backend.create(title="Third item", tags=["backend"])
+
+        report = self.run_migrate()
+
+        [entry] = [e for e in report["tags"]["items"] if e["source_id"] == third["id"]]
+        self.assertEqual(
+            entry["visibility_not_set"],
+            [{"tag": "backend", "reason": youtrack.TAG_VISIBILITY_GROUP_NOT_FOUND}],
+        )
+
+    def test_visibility_not_set_does_not_block_fully_migrated(self):
+        # PO decision, on the record (migrate()'s own docstring): a missing
+        # visibility configuration is a state of the environment, not a
+        # failure of the migration -- it must not gate completion.
+        self.source_backend.create(title="Third item", tags=["backend"])
+
+        report = self.run_migrate()
+
+        self.assertGreater(report["tags"]["total_visibility_not_set"], 0)
+        self.assertTrue(report["fully_migrated"])
+
+
 class PriorityMigrationTest(_MigrateFixtureMixin, unittest.TestCase):
     """Priority: a plain overwrite via set_priority() -- idempotent, so it
     needs no ordered-subsequence resume bookkeeping (unlike comments/result-

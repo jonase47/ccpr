@@ -263,7 +263,24 @@ def migrate(source_backend, target_backend, idmap_path, source_workitems_dir=Non
         # place that vanishing becomes visible. Per item AND in total, always
         # present (even all-zero: an absent field is not the same statement as
         # a zero) -- see _record_tag_diff.
-        "tags": {"items": [], "total_requested": 0, "total_applied": 0, "total_missing": 0},
+        #
+        # total_visibility_not_set / each item's own "visibility_not_set" list
+        # (PO decision, verbatim in substance): a tag counts as `applied` the
+        # moment it's on the item, regardless of whether its VISIBILITY was
+        # ever set -- an unconfigured/unresolvable/ambiguous
+        # tagVisibilityGroup still creates and applies the tag, just with its
+        # default (private) visibility, and the only prior trace was a
+        # stderr warning this report never collected (see
+        # youtrack.py's TAG_VISIBILITY_NOT_CONFIGURED/_GROUP_NOT_FOUND/
+        # _GROUP_AMBIGUOUS). NEVER gated into fully_migrated (see
+        # _all_phases_complete / _REQUIRED_PHASES, which excludes tags
+        # entirely): a missing configuration is a state of the environment,
+        # not a failure of the migration, and visibility is repairable
+        # afterwards while a lost comment is not.
+        "tags": {
+            "items": [], "total_requested": 0, "total_applied": 0, "total_missing": 0,
+            "total_visibility_not_set": 0,
+        },
     }
 
     for item in source_items:
@@ -287,6 +304,7 @@ def migrate(source_backend, target_backend, idmap_path, source_workitems_dir=Non
                 target_id = created["id"]
                 _record_tag_diff(
                     report, source_id, target_id, requested_tags, created.get("tags") or [],
+                    _tag_visibility_outcomes(target_backend),
                 )
 
             # Re-applied unconditionally, even for an adopted item: a crash could
@@ -911,7 +929,21 @@ def _verify_links_migrated(source_item, target_backend, target_id, idmap):
         )
 
 
-def _record_tag_diff(report, source_id, target_id, requested, applied):
+def _tag_visibility_outcomes(target_backend):
+    """Reads the tag-visibility outcomes from the create() call just made
+    (see youtrack.py's last_create_tag_visibility_outcomes), if the target
+    backend tracks them at all. A backend with no tag-visibility concept
+    (e.g. `local`) has no such method -- treated as "nothing to report",
+    not an error, since migrate() itself is not YouTrack-specific (see
+    _verify_links_migrated's own docstring for the same "a YouTrack-shaped
+    target" carve-out elsewhere in this module)."""
+    accessor = getattr(target_backend, "last_create_tag_visibility_outcomes", None)
+    if accessor is None:
+        return []
+    return accessor()
+
+
+def _record_tag_diff(report, source_id, target_id, requested, applied, visibility_not_set):
     """Appends one entry to report["tags"]["items"] for an item that just went
     through target_backend.create(tags=requested) -- `applied` is what
     create()'s own return value (already a fresh get(), see create()'s
@@ -922,15 +954,23 @@ def _record_tag_diff(report, source_id, target_id, requested, applied):
     forgets to check for absence. Only called from the branch that actually
     calls create() -- an adopted (crash-recovered) or already-idmapped item
     gets no entry this run (see migrate()'s own docstring on why tags are not
-    re-diffed on resume)."""
+    re-diffed on resume).
+
+    `visibility_not_set` (see _tag_visibility_outcomes) is a DIFFERENT axis
+    from `missing`: a tag can be `applied` (present on the item) and still
+    have its visibility never set (created private, PO decision -- see
+    migrate()'s own docstring on report["tags"] for why this is reported,
+    never gated)."""
     missing = [tag for tag in requested if tag not in applied]
     report["tags"]["items"].append({
         "source_id": source_id, "target_id": target_id,
         "requested": requested, "applied": applied, "missing": missing,
+        "visibility_not_set": visibility_not_set,
     })
     report["tags"]["total_requested"] += len(requested)
     report["tags"]["total_applied"] += len(applied)
     report["tags"]["total_missing"] += len(missing)
+    report["tags"]["total_visibility_not_set"] += len(visibility_not_set)
 
 
 def _existing_migration_markers(target_backend):
