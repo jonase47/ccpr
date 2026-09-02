@@ -3,7 +3,7 @@ kind: adr
 adr_id: ADR-0003
 adr_status: proposed
 status: draft
-last_updated: 10.07.2026
+last_updated: 02.09.2026
 related:
   - ADR-0002-workitem-backend-contract.md
   - ../../Manual/WORKITEMS.md
@@ -146,3 +146,83 @@ Points the first implementation had to resolve, verified read-only against a rea
 The concrete API behaviours above are abstracted from a real self-hosted YouTrack integration; the
 instance-specific reference notes (host, keys, numeric field IDs) are kept in a private repo and are
 **not** ported here — this backend is written generically.
+
+## Addendum (02.09.2026): The setup preconditions are demonstrably incomplete
+
+### Context
+
+The "Prerequisites (setup, not runtime)" section above lists the project, its `State` bundle, and team
+membership. A real migration pilot against a live, self-hosted instance (01.09.2026,
+`docs/.handover-archive/2026-09-01-youtrack-pilot-report.md`,
+`docs/.handover-archive/2026-08-28-open-findings.md` findings #46–#48) measured that this list is
+incomplete in three ways — one that blocks every create outright, one that silently fabricates data,
+and one naming a configuration key this ADR predates.
+
+### Decision
+
+**1. `State` needs a default value, not just a populated bundle.** `create()`'s own `POST /api/issues`
+call (`youtrack.py:321`) sends no `customFields` at all — the initial state is set by a separate
+Command API call immediately afterward, `self.set_status(item_id, "Backlog")` (`youtrack.py:337-340`).
+On the pilot instance, with `State` required (`canBeEmpty=False`) and no default configured, the
+`POST /api/issues` call itself was rejected with `State is required`
+(`@jetbrains/required-custom-fields-feature` —
+`docs/.handover-archive/2026-09-01-youtrack-pilot-report.md:111` and
+`docs/.handover-archive/2026-08-28-open-findings.md:1395-1397`) — YouTrack's own
+project-level workflow rule refuses to create an issue at all when a required field has no resolvable
+value, before this backend's own follow-up `State` command ever runs. Measured consequence: **every**
+create fails, and no orphan issue is left behind — the pilot's `CT-1` id was consumed by exactly such a
+failure, with the instance reporting 0 issues afterward
+(`docs/.handover-archive/2026-09-01-youtrack-pilot-report.md:13-16`).
+
+This means `_rollback_failed_create` (`youtrack.py:447-466`) — which deletes an issue that WAS created
+but whose subsequent, explicit `State` command was then rejected — is **not** the code path this
+precondition exercises: there is no issue to roll back, because the `POST /api/issues` call itself
+raised, before `item_id = created["idReadable"]` is ever reached. `_rollback_failed_create` covers a
+narrower, different window: an issue that YouTrack accepted with no explicit state (a project where
+`State` is not strictly required at creation time), whose immediately-following `State <name>` command
+is then rejected for some other reason (e.g. an unmapped state name). Fixed on the pilot instance by
+giving `State` a default value (`Backlog`), matching the one working reference project measured
+alongside it.
+
+**2. `Type` and `Priority` need `canBeEmpty: true` AND their default cleared — not `canBeEmpty` alone.**
+Neither backend's `create()` sets a priority (ADR-0004's addendum); `type` is set best-effort only when
+the source item carries one. On a project where `Priority` is required with a default (e.g. `Normal`),
+every item that arrives with no source priority silently acquires the default instead of staying unset
+— measured on 130 of 137 real corpus items, all reading `Medium` after un-mapping through
+`priorityMap`, despite carrying no local priority (`docs/.handover-archive/2026-08-28-open-findings.md`
+finding #47). **Making the field optional alone (`canBeEmpty: true`) is not enough and was measured not
+enough**: with only `canBeEmpty` toggled and the default left in place, a fresh item still came out
+`Normal` — "the default applies regardless of whether the field may be empty"
+(`docs/.handover-archive/2026-08-28-open-findings.md:1325-1327`). Only clearing **both**
+(`canBeEmpty: true` **and** `defaultValues: []`) was measured to leave an item with no source value
+arriving as `Priority: None`, verified by an independent read-back rather than trusted from the write's
+own response (`docs/.handover-archive/2026-08-28-open-findings.md:1331-1367`). The same two-part change
+applies to `Type` — mechanically the same enum field shape as `Priority`
+(`docs/.handover-archive/2026-08-28-open-findings.md:1372-1378`) — for a project that wants `migrate`
+to carry a genuinely absent type rather than fabricate the bundle default.
+
+**3. A new configuration key, `workitems.youtrack.tagVisibilityGroup`, is not covered by this ADR's
+original "Access"/"Model mapping" sections.** It names a tag-visibility group **by name**
+(`workitems.youtrack.tagVisibilityGroup`, resolved via `GET /api/groups`,
+`_resolve_tag_visibility_group_id`, `youtrack.py:762-797`) — never a group id in config, the same
+"resolve by name, never a numeric id" principle this ADR already applies to fields, states, and the
+project reference. Consumed by `_ensure_tag_visibility` (`youtrack.py:799-888`), called before a fresh
+tag is first applied (both from `create(..., tags=[...])` and from `add_tag`): a tag that already
+exists on the instance is left untouched, including one that is already private
+(`youtrack.py:810-818`). For a genuinely new tag:
+- **Unset** — the tag is created and applied with YouTrack's own default (private) visibility, and a
+  stderr warning names the missing key (`TAG_VISIBILITY_NOT_CONFIGURED`, `youtrack.py:843-852`).
+- **Set, but the name resolves to no group** — same private-and-warn outcome
+  (`TAG_VISIBILITY_GROUP_NOT_FOUND`, `youtrack.py:780-787`).
+- **Set, but the name matches more than one group** — same private-and-warn outcome
+  (`TAG_VISIBILITY_GROUP_AMBIGUOUS`, `youtrack.py:788-797`) — this backend never guesses which group
+  was meant.
+
+In every one of these three cases the tag is still created and applied; only its visibility is left at
+the default. A fourth, heavier outcome — the instance itself rejecting the visibility write, or a
+read-back that does not match what was requested — raises `WorkItemError` rather than returning one of
+the three reasons above (`TAG_VISIBILITY_WRITE_REJECTED`, `youtrack.py:127`, added 02.09.2026); see
+ADR-0004's addendum for how `migrate()` reports all four.
+
+No other claim in the original "Prerequisites" section was found contradicted by the code — the
+project/State-bundle/team-membership list is incomplete, per the above, not wrong.
