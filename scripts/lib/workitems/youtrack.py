@@ -349,7 +349,14 @@ class YouTrackBackend:
         can return -- the fourth, genuinely-raising failure mode caught
         below is a distinct class the PO's decision did not name among
         these three (see TAG_VISIBILITY_NOT_CONFIGURED's own module-level
-        comment)."""
+        comment). Code-review note: that fourth case is therefore INVISIBLE
+        to migrate.py's structured report (no visibility_not_set entry,
+        total_visibility_not_set not incremented) -- stderr is its only
+        trace, same as before this feature existed. Do not read "no
+        visibility_not_set entries for this item" as "no visibility
+        problems for this item" -- it only means none of the three named,
+        reported reasons applied; a raised failure here is still possible
+        and still silent from the report's point of view."""
         try:
             outcome_reason = self._ensure_tag_visibility(tag)
         except WorkItemError as exc:
@@ -380,7 +387,18 @@ class YouTrackBackend:
         TAG_VISIBILITY_GROUP_AMBIGUOUS}` -- only for a tag create() itself
         applied to a FRESH (not already-existing) name; a tag already known
         to the instance is left untouched entirely (see
-        _ensure_tag_visibility's own docstring) and never appears here."""
+        _ensure_tag_visibility's own docstring) and never appears here.
+
+        Code-review note: the "read immediately after calling create(),
+        before the next create() call" ordering is not enforced by this
+        method itself -- there is exactly one caller today (migrate.py's
+        _tag_visibility_outcomes, called right after target_backend.create()
+        in the same loop iteration), verified by grep. Before adding a
+        SECOND caller of create() on the same backend instance (a dry-run
+        preview, a retry helper, a parallelised migration), grep for every
+        existing caller of this method first -- a second create() call
+        between an existing caller's create() and its read of this method
+        would silently return the WRONG call's outcomes, not raise."""
         return list(self._last_create_tag_visibility_outcomes)
 
     def _apply_optional_create_field(self, item_id, query, field_name, value):
