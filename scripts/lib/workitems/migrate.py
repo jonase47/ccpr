@@ -908,7 +908,7 @@ def _verify_result_refs_migrated(source_item, target_backend, target_id):
 def _resolve_link_target_id(link_target_source_id, idmap):
     """A source link's `target` field is a SOURCE id (e.g. `WI-0029`) -- never a
     target-backend id -- so it must be resolved through the idmap, the only
-    trustworthy mapping table (WI-NNNN -> CCP-N numeric alignment is dead: a
+    trustworthy mapping table (WI-NNNN -> PROJ-N numeric alignment is dead: a
     failed create() burns a target-side number, measured in an earlier pilot, so
     the two numberings can drift apart). Raises loud rather than skipping: by the
     time the links pass runs, every item THIS run's own first pass attempted has

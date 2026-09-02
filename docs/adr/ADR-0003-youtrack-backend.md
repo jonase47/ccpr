@@ -170,8 +170,8 @@ On the pilot instance, with `State` required (`canBeEmpty=False`) and no default
 `docs/.handover-archive/2026-08-28-open-findings.md:1395-1397`) — YouTrack's own
 project-level workflow rule refuses to create an issue at all when a required field has no resolvable
 value, before this backend's own follow-up `State` command ever runs. Measured consequence: **every**
-create fails, and no orphan issue is left behind — the pilot's `CT-1` id was consumed by exactly such a
-failure, with the instance reporting 0 issues afterward
+create fails, and no orphan issue is left behind — the pilot's first issue id was consumed by exactly
+such a failure, with the instance reporting 0 issues afterward
 (`docs/.handover-archive/2026-09-01-youtrack-pilot-report.md:13-16`).
 
 This means `_rollback_failed_create` (`youtrack.py:447-466`) — which deletes an issue that WAS created

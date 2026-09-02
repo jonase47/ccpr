@@ -571,7 +571,7 @@ class LinkMigrationTest(_MigrateFixtureMixin, unittest.TestCase):
         )
 
     def test_link_resolution_uses_the_idmap_not_positional_id_arithmetic(self):
-        # WI-NNNN -> CCP-N positional alignment is dead (a failed create() burns
+        # WI-NNNN -> PROJ-N positional alignment is dead (a failed create() burns
         # a target-side number, measured in an earlier pilot) -- pre-create an
         # unrelated item directly in the target so the fake transport's own
         # issue numbering is offset from this test's two source items (their
@@ -1939,12 +1939,12 @@ class FullyMigratedRequiresEveryPhaseTest(unittest.TestCase):
         source_items = [{"id": "WI-0001"}, {"id": "WI-0002"}]
         idmap = {
             "WI-0001": migrate.IdmapEntry(
-                "CT-1", frozenset({migrate.PHASE_CREATED, migrate.PHASE_STATUS, migrate.PHASE_COMMENTS}),
+                "TEST-1", frozenset({migrate.PHASE_CREATED, migrate.PHASE_STATUS, migrate.PHASE_COMMENTS}),
             ),
             # WI-0002 exists in the idmap (the OLD, id-presence-only definition
             # would call this "fully migrated") but its comments phase never ran.
             "WI-0002": migrate.IdmapEntry(
-                "CT-2", frozenset({migrate.PHASE_CREATED, migrate.PHASE_STATUS}),
+                "TEST-2", frozenset({migrate.PHASE_CREATED, migrate.PHASE_STATUS}),
             ),
         }
 
@@ -1957,7 +1957,7 @@ class FullyMigratedRequiresEveryPhaseTest(unittest.TestCase):
         source_items = [{"id": "WI-0001"}]
         idmap = {
             "WI-0001": migrate.IdmapEntry(
-                "CT-1", frozenset({
+                "TEST-1", frozenset({
                     migrate.PHASE_CREATED, migrate.PHASE_STATUS,
                     migrate.PHASE_COMMENTS, migrate.PHASE_LINKS,
                     migrate.PHASE_RESULT_REFS,
@@ -1971,7 +1971,7 @@ class FullyMigratedRequiresEveryPhaseTest(unittest.TestCase):
         source_items = [{"id": "WI-0001"}]
         idmap = {
             "WI-0001": migrate.IdmapEntry(
-                "CT-1", frozenset({
+                "TEST-1", frozenset({
                     migrate.PHASE_CREATED, migrate.PHASE_STATUS,
                     migrate.PHASE_COMMENTS, migrate.PHASE_RESULT_PROSE,
                     migrate.PHASE_LINKS, migrate.PHASE_RESULT_REFS,
@@ -2002,13 +2002,13 @@ class IdmapPhaseFormatTest(unittest.TestCase):
 
     def test_round_trips_target_id_and_completed_phases(self):
         entry = migrate.IdmapEntry(
-            target_id="CT-1", phases=frozenset({migrate.PHASE_CREATED, migrate.PHASE_STATUS}),
+            target_id="TEST-1", phases=frozenset({migrate.PHASE_CREATED, migrate.PHASE_STATUS}),
         )
         migrate.write_idmap(self.idmap_path, {"WI-0001": entry})
 
         idmap = migrate.read_idmap(self.idmap_path)
 
-        self.assertEqual(idmap["WI-0001"].target_id, "CT-1")
+        self.assertEqual(idmap["WI-0001"].target_id, "TEST-1")
         self.assertEqual(idmap["WI-0001"].phases, entry.phases)
 
     def test_round_trips_a_third_phase_not_yet_used_by_migrate_itself(self):
@@ -2016,7 +2016,7 @@ class IdmapPhaseFormatTest(unittest.TestCase):
         # without another format change" requirement) without migrate() itself
         # having to know about a "comments" phase yet.
         entry = migrate.IdmapEntry(
-            target_id="CT-7",
+            target_id="TEST-7",
             phases=frozenset({migrate.PHASE_CREATED, migrate.PHASE_STATUS, migrate.PHASE_COMMENTS}),
         )
         migrate.write_idmap(self.idmap_path, {"WI-0007": entry})
@@ -2032,11 +2032,11 @@ class IdmapPhaseFormatTest(unittest.TestCase):
         # and set_status() had already succeeded (the single write happened after
         # both), so a bare "source: target" line can only ever mean those two
         # phases are done.
-        Path(self.idmap_path).write_text("WI-0001: CT-1\n", encoding="utf-8")
+        Path(self.idmap_path).write_text("WI-0001: TEST-1\n", encoding="utf-8")
 
         idmap = migrate.read_idmap(self.idmap_path)
 
-        self.assertEqual(idmap["WI-0001"].target_id, "CT-1")
+        self.assertEqual(idmap["WI-0001"].target_id, "TEST-1")
         self.assertEqual(idmap["WI-0001"].phases, frozenset({migrate.PHASE_CREATED, migrate.PHASE_STATUS}))
 
     def test_a_line_with_extra_whitespace_around_the_phase_list_still_parses_cleanly(self):
@@ -2045,11 +2045,11 @@ class IdmapPhaseFormatTest(unittest.TestCase):
         # or around individual phase names, must not corrupt a phase name (e.g.
         # produce " created" with a leading space, which would never again match
         # PHASE_CREATED anywhere it's checked).
-        Path(self.idmap_path).write_text("WI-0001: CT-1   created, status \n", encoding="utf-8")
+        Path(self.idmap_path).write_text("WI-0001: TEST-1   created, status \n", encoding="utf-8")
 
         idmap = migrate.read_idmap(self.idmap_path)
 
-        self.assertEqual(idmap["WI-0001"].target_id, "CT-1")
+        self.assertEqual(idmap["WI-0001"].target_id, "TEST-1")
         self.assertEqual(idmap["WI-0001"].phases, frozenset({migrate.PHASE_CREATED, migrate.PHASE_STATUS}))
 
     def test_write_idmap_refuses_an_entry_with_no_completed_phases(self):
@@ -2057,7 +2057,7 @@ class IdmapPhaseFormatTest(unittest.TestCase):
         # phase-less line (read back as "created+status done" -- see the test
         # above) -- silently turning "nothing done yet" into a false completion
         # claim. write_idmap must reject it outright rather than write it.
-        entry = migrate.IdmapEntry(target_id="CT-1", phases=frozenset())
+        entry = migrate.IdmapEntry(target_id="TEST-1", phases=frozenset())
 
         with self.assertRaises(ValueError):
             migrate.write_idmap(self.idmap_path, {"WI-0001": entry})
