@@ -546,6 +546,36 @@ class LocalBackendUnbulletedSectionShapeTest(unittest.TestCase):
             [prose, "https://example.org/pr/9"],
         )
 
+    def test_appending_to_a_placeholder_only_section_drops_the_scaffolding_line(self):
+        """Deliberate design decision, not an oversight: a placeholder like
+        `<!-- append-result writes PR/commit links here -->` exists to say "nothing
+        here yet", and that statement stops being true the moment a real entry is
+        appended -- so the rewritten section must not carry the scaffolding line
+        forward. This follows directly from `_section_entries` reading a
+        placeholder-only preamble as no entry at all (see
+        `test_a_section_containing_only_the_shipped_placeholder_comment_returns_no_entries`
+        below): `_append_to_section` rebuilds the section from `_section_entries`'
+        own output, so a preamble that reads as `[]` cannot reappear on disk. It also
+        matches the behaviour before the five-commit finding-#44/#45 sequence, where
+        `_section_lines` filtered `<!--` lines out of `existing` as a side effect of
+        the same rewrite -- this pins it as the current function's own rule
+        instead."""
+        item_id = "WI-0001"
+        self._write_raw(item_id, "<!-- append-result writes PR/commit links here -->")
+
+        item = self.backend.append_result(item_id, "abc1234")
+
+        self.assertEqual(item["result-link"], ["abc1234"])
+        self.assertEqual(self.backend.get(item_id)["result-link"], ["abc1234"])
+        file_text = (Path(self.tmp_dir) / f"{item_id}.md").read_text(encoding="utf-8")
+        # Equality, not `assertIn`: this pins the whole section, not just that the
+        # new entry is present somewhere -- the scaffolding line must be gone, not
+        # merely joined by the new one.
+        self.assertEqual(
+            file_text.split("## Result\n", 1)[1],
+            "- abc1234\n## Comments\n",
+        )
+
     def test_a_section_containing_only_the_shipped_placeholder_comment_returns_no_entries(self):
         """Finding: the shipped item template (Manual/WORKITEMS.md, mirrored in
         ITEM_TEMPLATE above) puts an HTML-comment placeholder as the first line of a
