@@ -42,7 +42,8 @@ class FakeYouTrackTransport:
                  known_states=None, known_users=None, known_types=None, known_tags=None,
                  known_sprints=None, estimate_field_name=None, link_type_names=None,
                  symmetric_type_names=None, known_groups=None,
-                 corrupt_tag_visibility_readback=False):
+                 corrupt_tag_visibility_readback=False,
+                 corrupt_tag_creation_response=False):
         self.project_short_name = project_short_name
         self.project_internal_id = "0-0"
         self.commands_received = []  # for tests asserting on the exact command string
@@ -149,6 +150,12 @@ class FakeYouTrackTransport:
         # taking it, which corrupt_tag_visibility_readback simulates).
         self._fail_tag_visibility_set_at_indices = set()
         self._tag_visibility_set_count = 0
+        # Test hook: makes POST /api/tags return a response with NO "id" key
+        # (an empty dict), simulating a malformed/non-conformant 2xx response
+        # from a real instance -- distinct from an outright rejection
+        # (fail_tag_visibility_set_at raises WorkItemError; this one returns
+        # successfully but with unusable content).
+        self.corrupt_tag_creation_response = corrupt_tag_creation_response
 
     def request(self, method, url, token, body=None):
         parsed = urllib.parse.urlparse(url)
@@ -218,6 +225,8 @@ class FakeYouTrackTransport:
 
         if method == "POST" and path == "/api/tags":
             self.explicit_tag_creation_calls.append(body["name"])
+            if self.corrupt_tag_creation_response:
+                return {}
             return self._tag_public(self._ensure_tag_registered(body["name"]))
 
         if method == "POST" and path.startswith("/api/tags/"):

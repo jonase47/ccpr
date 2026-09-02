@@ -625,7 +625,15 @@ class YouTrackBackend:
         redundant call is skipped rather than relying on the Command API's own
         idempotence (ADR-0002 2nd addendum, 09.07.2026). `validate_tag` already
         refuses a reserved tag before any request is made, so it can never reach
-        the membership check below."""
+        the membership check below.
+
+        Calls _ensure_tag_visibility(tag) before applying it: like
+        set_type/set_sprint/set_priority (see their docstrings), add_tag is a
+        dedicated call with nothing else to protect via atomicity, so an
+        unexpected visibility failure (a rejected set call, or a read-back
+        mismatch) is allowed to propagate uncaught rather than being
+        downgraded to a warning -- unlike create()'s best-effort tag loop,
+        which already committed the issue by the time tags are applied."""
         validate_item_id(item_id)
         validate_tag(tag)
         current = self.get(item_id)
@@ -732,8 +740,22 @@ class YouTrackBackend:
             self._known_tag_names_cache.add(tag_name)
             return
 
-        created = self._request("POST", "/api/tags", body={"name": tag_name}, fields="id,name")
-        tag_id = created["id"]
+        created = self._request("POST", "/api/tags", body={"name": tag_name}, fields="id,name") or {}
+        tag_id = created.get("id")
+        if not tag_id:
+            raise WorkItemError(
+                f"YouTrack POST /api/tags for {tag_name!r} did not return a tag "
+                f"id (got {created!r}) -- cannot set its visibility."
+            )
+        # The tag now genuinely exists server-side -- cached immediately (code
+        # review follow-up), BEFORE the visibility set/read-back below is
+        # attempted: those can still fail independently, but re-issuing this
+        # POST for the same name on a later call within the same run would
+        # create a SECOND server-side tag under the same name, which the
+        # duplicate-avoidance cache exists to prevent. Whether visibility was
+        # actually confirmed is an orthogonal question the read-back check
+        # below still raises on -- this only stops the CREATE step repeating.
+        self._known_tag_names_cache.add(tag_name)
         self._request(
             "POST", f"/api/tags/{tag_id}",
             body={"visibleFor": {"id": group_id}, "updateableBy": {"id": group_id}},
@@ -748,7 +770,6 @@ class YouTrackBackend:
                 f"match the configured group {group_name!r} (id {group_id}): got "
                 f"{readback.get('visibleFor')!r}."
             )
-        self._known_tag_names_cache.add(tag_name)
 
     def remove_tag(self, item_id, tag):
         validate_item_id(item_id)

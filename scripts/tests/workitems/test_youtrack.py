@@ -1143,6 +1143,56 @@ class YouTrackTagVisibilityFailureTest(unittest.TestCase):
         with self.assertRaises(WorkItemError):
             backend.add_tag(item["id"], "security")
 
+    def test_readback_failure_after_successful_creation_does_not_retry_creation(self):
+        """Code-review follow-up: POST /api/tags can succeed (the tag genuinely
+        exists on the server now) while the visibility set/read-back that
+        follows still fails -- the tag must not be re-created on a later call
+        for the SAME name within the same backend-instance run (the exact
+        batch scenario -- 259 assignments over 35 distinct tags -- this
+        method's own cache exists to protect)."""
+        # self.transport (not a bare local): explicit_tag_creation_calls'
+        # expected value ["security"] follows entirely from this test's own
+        # fixture (the tag name it chose to pass to add_tag), not from
+        # anything measured in the repository -- ADR-0012 doesn't apply to it,
+        # same as every other self.transport assertion in this file.
+        self.transport = FakeYouTrackTransport(
+            project_short_name="TEST", corrupt_tag_visibility_readback=True,
+        )
+        backend = youtrack.YouTrackBackend(
+            base_url="https://faketrack.example.org", project="TEST",
+            token="fake-token", transport=self.transport,
+            tag_visibility_group="All Users",
+        )
+        item = backend.create(title="New feature")
+
+        with self.assertRaises(WorkItemError):
+            backend.add_tag(item["id"], "security")
+        # The tag now genuinely exists server-side (POST /api/tags succeeded
+        # before the read-back check failed) -- a second call must not
+        # re-issue POST /api/tags for the same name.
+        fetched = backend.add_tag(item["id"], "security")
+
+        self.assertEqual(self.transport.explicit_tag_creation_calls, ["security"])
+        self.assertIn("security", fetched["tags"])
+
+    def test_a_malformed_tag_creation_response_raises_workitemerror_not_keyerror(self):
+        """Code-review follow-up: `created["id"]` was unguarded dict indexing --
+        a 2xx response missing the expected "id" key (malformed/non-conformant
+        server response) must surface as WorkItemError, matching every other
+        boundary error in this backend, not a raw KeyError/TypeError."""
+        transport = FakeYouTrackTransport(
+            project_short_name="TEST", corrupt_tag_creation_response=True,
+        )
+        backend = youtrack.YouTrackBackend(
+            base_url="https://faketrack.example.org", project="TEST",
+            token="fake-token", transport=transport,
+            tag_visibility_group="All Users",
+        )
+        item = backend.create(title="New feature")
+
+        with self.assertRaises(WorkItemError):
+            backend.add_tag(item["id"], "security")
+
 
 class YouTrackCreateTagVisibilityTest(unittest.TestCase):
     """create(..., tags=[...])'s best-effort tag loop is the OTHER entry point
