@@ -362,7 +362,7 @@ FIXTURE_ASSERTION_SITE_COUNTS = {
     "test_handover_size_hook.py": 21,
     "test_agent_monitor.py": 16,
     "test_bash_exit_status_pipe_hook.py": 12,
-    "workitems/test_migrate.py": 9,
+    "workitems/test_migrate.py": 10,
     "test_quality_scan.py": 21,
 }
 

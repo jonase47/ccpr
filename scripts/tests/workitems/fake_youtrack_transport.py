@@ -100,6 +100,14 @@ class FakeYouTrackTransport:
         # not-yet-created issue will be assigned (see fail_comment_at's docstring).
         self._fail_comment_at_indices = set()
         self._comment_post_count = 0
+        # Same idea, for typed-link Command-API calls (migrate.py's links pass,
+        # WI-0141 follow-up): unlike the State/tag/Type/Sprint command branches
+        # above, an add-link command has no known-value set to reject against --
+        # a caller resuming after a crash relies on the target rejecting or
+        # dropping the write, which this hook simulates directly. Counted
+        # globally (not per-issue), same rationale as `_fail_comment_at_indices`.
+        self._fail_link_at_indices = set()
+        self._link_command_count = 0
 
     def request(self, method, url, token, body=None):
         parsed = urllib.parse.urlparse(url)
@@ -190,6 +198,16 @@ class FakeYouTrackTransport:
         issue's id up front (ids are only assigned inside create(), which the test
         may not have called yet when it needs to arm this)."""
         self._fail_comment_at_indices.add(index)
+
+    def fail_link_at(self, index):
+        """Test hook: makes the (0-based) `index`-th add-link Command-API call
+        (a `POST /api/commands` query that doesn't match any known field/tag/
+        remove-link branch in `_run_command`) raise WorkItemError instead of
+        applying it, simulating a real instance rejecting or dropping a link
+        write. Global (not per-issue), same rationale as `fail_comment_at`: a
+        test can target "the 2nd of this issue's own links" or "the 1st link
+        of the NEXT issue" purely by counting calls."""
+        self._fail_link_at_indices.add(index)
 
     def seed_foreign_issue(self, item_id, project_short_name, summary="Foreign issue"):
         """Test helper: injects an issue belonging to a DIFFERENT project directly,
@@ -284,6 +302,16 @@ class FakeYouTrackTransport:
             elif query.startswith("remove "):
                 self._apply_remove_link_command(item_id, query[len("remove "):])
             else:
+                index = self._link_command_count
+                self._link_command_count += 1
+                if index in self._fail_link_at_indices:
+                    # Rejected BEFORE mutating -- same atomic-reject discipline
+                    # as every other command branch above and the comments
+                    # endpoint: a rejected write leaves the issue unchanged.
+                    raise WorkItemError(
+                        f"YouTrack link command rejected (simulated failure, "
+                        f"call #{index}) for {item_id}: {query!r}"
+                    )
                 self._apply_add_link_command(item_id, query)
         return {}
 

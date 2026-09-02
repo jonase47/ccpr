@@ -679,6 +679,55 @@ class LinkMigrationTest(_MigrateFixtureMixin, unittest.TestCase):
         self.assertTrue(report["fully_migrated"])
         self.assertTrue(report["archived"])
 
+    def test_fake_transport_link_refusal_reaches_the_caller_as_a_work_item_error(self):
+        # Not a migrate() test -- a unit test of the test double's OWN new hook
+        # (mirrors CommentMigrationTest's equivalent test for fail_comment_at),
+        # since fail_link_at has no coverage anywhere else.
+        created_a = self.target_backend.create(title="A")
+        created_b = self.target_backend.create(title="B")
+        self.transport.fail_link_at(0)
+
+        with self.assertRaises(WorkItemError):
+            self.target_backend.add_link(created_a["id"], "relates-to", created_b["id"])
+
+        # The rejected link must not have been recorded (atomic reject).
+        self.assertEqual(self.target_backend.get(created_a["id"])["links"], [])
+
+    def test_resumes_an_interrupted_link_pass_without_duplicating_and_completes(self):
+        third = self.source_backend.create(title="Third item")
+        fourth = self.source_backend.create(title="Fourth item")
+        fifth = self.source_backend.create(title="Fifth item")
+        self.source_backend.add_link(third["id"], "relates-to", fourth["id"])
+        self.source_backend.add_link(third["id"], "depends-on", fifth["id"])
+
+        # first_id/second_id (fixture) and fourth/fifth carry no links of their
+        # own -- the only two add-link commands this run ever sends are
+        # third's own, in source order. "relates-to fourth" (call #0) succeeds;
+        # "depends-on fifth" (call #1) fails -- abort mid-item's own link list.
+        self.transport.fail_link_at(1)
+        with self.assertRaises(WorkItemError):
+            self.run_migrate()
+
+        idmap = migrate.read_idmap(str(self.idmap_path))
+        third_target = idmap[third["id"]].target_id
+        fourth_target = idmap[fourth["id"]].target_id
+        fifth_target = idmap[fifth["id"]].target_id
+        target_links = self.target_backend.get(third_target)["links"]
+        self.assertIn({"type": "relates-to", "target": fourth_target}, target_links)
+        self.assertNotIn({"type": "depends-on", "target": fifth_target}, target_links)
+        self.assertNotIn(migrate.PHASE_LINKS, idmap[third["id"]].phases)
+
+        # Resume: no more injected failures -- the already-migrated edge must
+        # not be duplicated (add_link()'s own idempotence check), and the
+        # still-missing one must land.
+        report = self.run_migrate()
+
+        target_links_after = self.target_backend.get(third_target)["links"]
+        self.assertIn({"type": "relates-to", "target": fourth_target}, target_links_after)
+        self.assertIn({"type": "depends-on", "target": fifth_target}, target_links_after)
+        self.assertEqual(len(target_links_after), 2)
+        self.assertTrue(report["fully_migrated"])
+
 
 class FullyMigratedRequiresEveryPhaseTest(unittest.TestCase):
     """`report["fully_migrated"]` gates archiving the source directory AND (in
