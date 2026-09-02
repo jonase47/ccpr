@@ -582,6 +582,40 @@ class LinkMigrationTest(_MigrateFixtureMixin, unittest.TestCase):
             self.target_backend.get(seventh_target)["links"],
         )
 
+    def test_a_link_whose_target_is_missing_from_the_idmap_fails_loud(self):
+        # add_link() itself refuses to create a dangling link (both ids must
+        # exist as real work items -- see local.py's add_link), so the only
+        # reachable way for the LINKS PASS to hit a missing idmap entry is the
+        # scenario this task's briefing names: a resume whose idmap lost the
+        # entry for an item that this run's own first pass would otherwise
+        # have (re-)created -- simulated here by planting a pre-existing,
+        # links-incomplete idmap entry for `third` and then removing `fourth`
+        # (the link's target) from THIS run's source directory entirely, so
+        # the first pass never sees it and never adds it back to the idmap.
+        third = self.source_backend.create(title="Third item")
+        fourth = self.source_backend.create(title="Fourth item")
+        self.source_backend.add_link(third["id"], "relates-to", fourth["id"])
+
+        third_target = self.target_backend.create(title="Third item")
+        migrate.write_idmap(str(self.idmap_path), {
+            third["id"]: migrate.IdmapEntry(
+                third_target["id"],
+                frozenset({
+                    migrate.PHASE_CREATED, migrate.PHASE_STATUS, migrate.PHASE_COMMENTS,
+                }),
+            ),
+        })
+        (self.source_dir / f"{fourth['id']}.md").unlink()
+
+        with self.assertRaises(WorkItemError) as ctx:
+            self.run_migrate()
+
+        self.assertIn(fourth["id"], str(ctx.exception))
+        # Failing loud means failing BEFORE the phase is recorded -- the idmap
+        # on disk must still show `third` without PHASE_LINKS.
+        idmap_after = migrate.read_idmap(str(self.idmap_path))
+        self.assertNotIn(migrate.PHASE_LINKS, idmap_after[third["id"]].phases)
+
 
 class FullyMigratedRequiresEveryPhaseTest(unittest.TestCase):
     """`report["fully_migrated"]` gates archiving the source directory AND (in
