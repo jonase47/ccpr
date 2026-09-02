@@ -264,6 +264,22 @@ def migrate(source_backend, target_backend, idmap_path, source_workitems_dir=Non
             if status and status != "Backlog":
                 target_backend.set_status(target_id, status)
 
+            # Same reasoning as status: reapplied unconditionally on every
+            # entry-is-None pass (fresh create OR crash-recovered adoption),
+            # never resumed/tracked as an idmap phase (see migrate()'s own
+            # docstring). Unlike status, there is no "skip because create()
+            # already set a default" case -- neither backend's create() takes
+            # a priority= param, so the target genuinely starts with NO
+            # priority regardless of the source. An item with no source
+            # priority is therefore simply never touched here, which is what
+            # keeps the target's priority absent too -- an earlier pilot
+            # measured a missing priority being INVENTED (None -> "Medium")
+            # before this design, which is worse than a lost field because it
+            # looks like real data.
+            priority = item.get("priority")
+            if priority:
+                target_backend.set_priority(target_id, priority)
+
             entry = IdmapEntry(target_id=target_id, phases=_PHASES_AFTER_CREATE_AND_STATUS)
             idmap[source_id] = entry
             write_idmap(idmap_path, idmap)  # incremental: survives a mid-run crash
@@ -339,6 +355,18 @@ def migrate(source_backend, target_backend, idmap_path, source_workitems_dir=Non
             # then set workitems.provider back to the source (the CLI adds that
             # second half, which needs the provider NAME, not just instances).
             report["restore_command"] = f"mv {archive_path} {source_workitems_dir}"
+
+    # Sprint is deliberately never migrated (ADR-0004 follow-up, PO decision):
+    # the real corpus's one sprint-carrying item's value does not exist in the
+    # target's shared Sprints bundle, and a dedicated bundle for a single item
+    # costs more than the loss. Computed over ALL source_items regardless of
+    # skip/migrate status this run (a static fact about the corpus, not a
+    # per-run event) so a silent omission and this deliberate one never look
+    # alike -- named here, not just left absent from the report.
+    report["sprint_dropped"] = [
+        {"source_id": item["id"], "value": item["sprint"]}
+        for item in source_items if item.get("sprint")
+    ]
 
     return report
 

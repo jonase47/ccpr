@@ -1090,6 +1090,104 @@ class TagMigrationTest(_MigrateFixtureMixin, unittest.TestCase):
         self.assertTrue(report["fully_migrated"])
 
 
+class PriorityMigrationTest(_MigrateFixtureMixin, unittest.TestCase):
+    """Priority: a plain overwrite via set_priority() -- idempotent, so it
+    needs no ordered-subsequence resume bookkeeping (unlike comments/result-
+    refs/links) and no idmap phase (same reasoning as tags, see migrate()'s
+    own docstring). Re-applied unconditionally alongside status whenever the
+    `entry is None` branch runs (fresh create OR crash-recovered adoption),
+    mirroring status's own re-apply-unconditionally discipline. Re-uses
+    MigrateLocalToYouTrackTest's fixture (first_id/second_id, both with NO
+    source priority -- proving the no-priority case is a no-op, not a crash)."""
+
+    def test_priority_carries_over_to_the_target(self):
+        third = self.source_backend.create(title="Third item")
+        self.source_backend.set_priority(third["id"], "High")
+
+        self.run_migrate()
+
+        idmap = migrate.read_idmap(str(self.idmap_path))
+        target_item = self.target_backend.get(idmap[third["id"]].target_id)
+        self.assertEqual(target_item["priority"], "High")
+
+    def test_an_item_with_no_source_priority_arrives_with_no_target_priority(self):
+        # The regression an earlier pilot hit: a missing source priority must
+        # never be INVENTED (None -> "Medium") -- it must stay genuinely
+        # absent on the target, not fall back to a guessed default.
+        self.run_migrate()
+
+        idmap = migrate.read_idmap(str(self.idmap_path))
+        target_item = self.target_backend.get(idmap[self.first_id].target_id)
+        self.assertIsNone(target_item["priority"])
+
+    def test_priority_is_reapplied_when_adopting_a_crash_recovered_item(self):
+        # Mirrors test_recovers_from_a_crash_between_create_and_idmap_write_
+        # without_duplicating in MigrateLocalToYouTrackTest: create()/
+        # set_status() already succeeded in a prior (simulated) run, but the
+        # process died before priority was set AND before the idmap write --
+        # both status and priority must be re-applied on adoption.
+        self.source_backend.set_priority(self.first_id, "Low")
+        pre_existing = self.target_backend.create(
+            title="First item", owner="alice",
+            description=f"Desc one.\n\nMigrated from {self.first_id}.",
+        )
+        self.target_backend.set_status(pre_existing["id"], "In Progress")
+
+        self.run_migrate()
+
+        target_item = self.target_backend.get(pre_existing["id"])
+        self.assertEqual(target_item["priority"], "Low")
+
+    def test_priority_is_not_reapplied_for_an_item_already_recorded_in_the_idmap(self):
+        # A plain overwrite needs no resume bookkeeping in principle, but it
+        # must still not be RECALLED for an item whose created+status phase
+        # is already recorded from a genuinely prior, separate run (as
+        # opposed to same-run adoption) -- migrate() only ever reaches the
+        # priority-setting code inside the `entry is None` branch.
+        self.source_backend.set_priority(self.first_id, "High")
+        pre_existing = self.target_backend.create(title="First item", owner="alice")
+        self.target_backend.set_status(pre_existing["id"], "In Progress")
+        self.target_backend.set_priority(pre_existing["id"], "Low")
+        migrate.write_idmap(str(self.idmap_path), {
+            self.first_id: migrate.IdmapEntry(
+                pre_existing["id"],
+                frozenset({migrate.PHASE_CREATED, migrate.PHASE_STATUS}),
+            ),
+        })
+
+        self.run_migrate()
+
+        # Untouched: still "Low", not overwritten back to the source's "High".
+        self.assertEqual(self.target_backend.get(pre_existing["id"])["priority"], "Low")
+
+
+class SprintReportingTest(_MigrateFixtureMixin, unittest.TestCase):
+    """Sprint is deliberately never migrated (no target Sprint bundle value
+    exists for the real corpus's one sprint-carrying item, and a dedicated
+    bundle for a single item costs more than the loss) -- but the report
+    must name every dropped sprint value, so a silent omission and a
+    deliberate one never look alike."""
+
+    def test_an_item_with_a_sprint_is_named_in_the_report_and_never_migrated(self):
+        third = self.source_backend.create(title="Third item")
+        self.source_backend.set_sprint(third["id"], "0")
+
+        report = self.run_migrate()
+
+        self.assertEqual(report["sprint_dropped"], [{"source_id": third["id"], "value": "0"}])
+        idmap = migrate.read_idmap(str(self.idmap_path))
+        target_item = self.target_backend.get(idmap[third["id"]].target_id)
+        self.assertIsNone(target_item["sprint"])
+
+    def test_an_item_with_no_sprint_is_not_named_in_the_report(self):
+        report = self.run_migrate()
+
+        self.assertEqual(report["sprint_dropped"], [])
+        # Liveness: the run actually completed, not merely that it stayed
+        # silent about sprints for everything.
+        self.assertTrue(report["fully_migrated"])
+
+
 class FullyMigratedRequiresEveryPhaseTest(unittest.TestCase):
     """`report["fully_migrated"]` gates archiving the source directory AND (in
     scripts/workitems.py's _run_migrate) flipping .claude/settings.json's active
