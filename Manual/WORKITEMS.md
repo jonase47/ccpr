@@ -1,7 +1,7 @@
 # Work Items — the backend-neutral work-state contract
 
 **Status:** Proposed (draft) — see [`docs/adr/ADR-0002-workitem-backend-contract.md`](../docs/adr/ADR-0002-workitem-backend-contract.md)
-**Date:** 10.07.2026
+**Date:** 10.07.2026 (updated 02.09.2026)
 
 > CCPR works **with or without a ticket system.** The default is local Markdown files in the repo —
 > no server, no token, no setup. A team can point the same commands at a remote tracker by changing
@@ -98,7 +98,8 @@ plus **`Parked`**, **`Blocked`**, and **`Cancelled`** crosscutting (the two gate
     "priorityMap": { "Critical": "Show-stopper" },
     "linkTypeMap": { "depends-on": "depends on", "relates-to": "relates to", "subtask-of": "subtask of" },
     "linkTypeNameMap": { "Depend": "depends-on", "Relates": "relates-to", "Subtask": "subtask-of" },
-    "estimateField": "Story Points"
+    "estimateField": "Story Points",
+    "tagVisibilityGroup": "All Users"
   },
   "claiming": {
     "staleAfter": "2h",
@@ -136,8 +137,17 @@ plus **`Parked`**, **`Blocked`**, and **`Cancelled`** crosscutting (the two gate
 - `estimateField` (**required** if `set-estimate` is used, `youtrack` only, no default): the name of a
   numeric custom field for story-point estimates. Unlike `State`/`Priority`/`Type`/`Assignee`, no
   YouTrack instance ships this by default, so it must be configured explicitly (ADR-0002 2nd addendum).
+- `tagVisibilityGroup` (optional, `youtrack` only, no default): the **name** of a group (e.g.
+  `"All Users"`) — resolved via `GET /api/groups`, never a group id — that a freshly created tag's visibility
+  is set to, the first time `create`/`add-tag` applies a tag not yet known to the instance. Left unset,
+  or set to a name that resolves to no group or to more than one, a new tag is still created and
+  applied, just with YouTrack's own default (private) visibility, and a warning is printed to stderr
+  naming which of the three happened (ADR-0003 addendum).
 - A project adopting `sprint` needs a `Sprint` Enum custom field (fixed name, no config key) —
   a one-time, UI-side setup step, same class of precondition as ADR-0003's team-membership setup.
+  Likewise, `State` needs a **default value** (not just a populated bundle), and — only if `migrate`
+  should carry a genuinely absent value rather than fabricate the bundle default — `Type`/`Priority`
+  need both `canBeEmpty: true` **and** an emptied `defaultValues: []` (ADR-0003 addendum).
 
 ## 4. The `local` backend
 
@@ -183,6 +193,13 @@ The login / refresh / API-key endpoints have no rate limiting. Add a limiter …
   before the first `## ` heading (empty string clears it); `set-type` rewrites the `type` frontmatter
   field (always succeeds — `local` has no `Type` bundle to validate against); `comment` appends to the
   `## Comments` section, structurally separate from `## Result` from the start (no marker needed).
+- **A multi-line `comment`/`append-result` call is written and read back as one entry, not one per
+  physical line.** An entry starts at a line beginning with `- ` in column 0; every following line up to
+  the next column-0 `- ` line (or the end of the section) belongs to that same entry, byte-preserved
+  (indentation and blank lines included). Known, accepted limitation: this rule has no notion of
+  embedded Markdown structure — a column-0 `- ` line inside the entry's own authored text (plain prose,
+  or inside a fenced code block) is still read back as the start of a new entry, splitting what was
+  written as one call into more than one entry on the next read.
 - `add-tag`/`remove-tag` rewrite the `tags` list (idempotent, reserved-namespace rejected — ADR-0002
   2nd addendum); `set-sprint`/`set-estimate` rewrite their frontmatter field freely; `set-priority`
   **validates** against `{Critical, High, Medium, Low}` (unlike `type`, which is freeform on `local` —
@@ -205,7 +222,11 @@ The login / refresh / API-key endpoints have no rate limiting. Add a limiter …
 A remote backend maps the contract onto a tracker's API (the first, a self-hosted issue tracker, is
 specified in ADR-0003). The item `id` is the tracker's own (e.g. `PROJ-42`); a project keeps a local
 **id-map** (`docs/workitems-idmap.yml`, written by `migrate`) so references in HANDOVER and learnings
-stay resolvable across the switch.
+stay resolvable across the switch. Each line records not just the target id but which migration phases
+have completed for that item — `source-id: target-id phase1,phase2,...` (phases sorted alphabetically,
+comma-separated) — so an interrupted `migrate` run resumes exactly where it left off, per item, per
+phase, rather than re-attempting work already verified done. See ADR-0004's addendum for the full
+phase-name list and format.
 
 On the `youtrack` backend, `set-title`/`set-description` are direct field writes
 (`POST /api/issues/<id>` with `{"summary": ...}` / `{"description": ...}`); `set-type` goes through the
