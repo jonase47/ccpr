@@ -14,14 +14,21 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "lib"))
 
-from workitems import local, migrate, youtrack  # noqa: E402
+from workitems import WorkItemError, local, migrate, youtrack  # noqa: E402
 
 from .fake_youtrack_transport import FakeYouTrackTransport
 
 FIXED_CLOCK = lambda: datetime.datetime(2026, 7, 8, 15, 30, 0)  # noqa: E731
 
 
-class MigrateLocalToYouTrackTest(unittest.TestCase):
+class _MigrateFixtureMixin:
+    """Shared fixture only -- carries no `test_*` methods of its own (mirrors
+    `GateTestBase` in test_artifact_gate.py). `CommentMigrationTest` needs the same
+    source/target backends and `run_migrate()` helper as `MigrateLocalToYouTrackTest`
+    but must NOT subclass it directly: unittest discovers inherited `test_*` methods
+    too, so a `TestCase` subclassing another concrete `TestCase` silently re-runs
+    every one of the parent's own tests a second time under the child's identity."""
+
     def setUp(self):
         self.tmp_dir = tempfile.mkdtemp(prefix="ccpr-migrate-")
         self.addCleanup(shutil.rmtree, self.tmp_dir, ignore_errors=True)
@@ -47,6 +54,9 @@ class MigrateLocalToYouTrackTest(unittest.TestCase):
             self.source_backend, self.target_backend, str(self.idmap_path),
             source_workitems_dir=str(self.source_dir), clock=FIXED_CLOCK,
         )
+
+
+class MigrateLocalToYouTrackTest(_MigrateFixtureMixin, unittest.TestCase):
 
     def test_migrates_every_item_and_carries_over_status_and_owner(self):
         report = self.run_migrate()
@@ -205,6 +215,217 @@ class MigrateLocalToYouTrackTest(unittest.TestCase):
 
         self.assertTrue(report["fully_migrated"])
         self.assertFalse(report["archived"])
+
+
+class CommentMigrationTest(_MigrateFixtureMixin, unittest.TestCase):
+    """Comments (WI-0141 commit 2): the first non-idempotent field class migrate()
+    carries over. Unlike create()/set_status()/add_tag()/add_link(), `comment()` has
+    no dedup of its own -- POST /api/issues/<id>/comments has no pre-check -- so an
+    abort mid-item's own comment list must be resumable without duplicating.
+    Re-uses MigrateLocalToYouTrackTest's fixture (first_id/second_id, both with ZERO
+    comments -- proving the comments phase is a no-op for them, not a crash)."""
+
+    def test_fake_transport_comment_refusal_reaches_the_caller_as_a_work_item_error(self):
+        # Not a migrate() test -- a unit test of the test double's OWN new hook,
+        # since fail_comment_at has no coverage anywhere else (test_youtrack.py is
+        # out of scope for this task).
+        created = self.target_backend.create(title="Some item")
+        self.transport.fail_comment_at(0)
+
+        with self.assertRaises(WorkItemError):
+            self.target_backend.comment(created["id"], "hello")
+
+        # The rejected comment must not have been recorded (atomic reject).
+        self.assertEqual(self.target_backend.get(created["id"])["comments"], [])
+
+    def test_full_run_creates_each_comment_once_in_source_order(self):
+        third = self.source_backend.create(title="Third item")
+        self.source_backend.comment(third["id"], "alpha")
+        self.source_backend.comment(third["id"], "beta")
+        self.source_backend.comment(third["id"], "gamma")
+
+        self.run_migrate()
+
+        idmap = migrate.read_idmap(str(self.idmap_path))
+        target_item = self.target_backend.get(idmap[third["id"]].target_id)
+        self.assertEqual(target_item["comments"], ["alpha", "beta", "gamma"])
+
+    def test_multiline_comment_arrives_byte_identical(self):
+        third = self.source_backend.create(title="Third item")
+        multiline_text = (
+            "First line of a longer note.\n"
+            "Second line, no bullet marker.\n"
+            "    Indented continuation, byte-preserved."
+        )
+        self.source_backend.comment(third["id"], multiline_text)
+
+        self.run_migrate()
+
+        idmap = migrate.read_idmap(str(self.idmap_path))
+        target_item = self.target_backend.get(idmap[third["id"]].target_id)
+        self.assertEqual(target_item["comments"], [multiline_text])
+
+    def test_resumes_a_comment_list_interrupted_mid_item_without_duplicating(self):
+        third = self.source_backend.create(title="Third item")
+        self.source_backend.comment(third["id"], "alpha")
+        self.source_backend.comment(third["id"], "beta")
+        self.source_backend.comment(third["id"], "gamma")
+
+        # first_id/second_id have zero comments (trivial, zero-call phase); "alpha"
+        # and "beta" are this run's calls #0 and #1 -- fail #2 ("gamma").
+        self.transport.fail_comment_at(2)
+        with self.assertRaises(WorkItemError):
+            self.run_migrate()
+
+        idmap = migrate.read_idmap(str(self.idmap_path))
+        target_id = idmap[third["id"]].target_id
+        self.assertEqual(self.target_backend.get(target_id)["comments"], ["alpha", "beta"])
+        # The idmap must not yet claim the comments phase complete for this item.
+        self.assertNotIn(migrate.PHASE_COMMENTS, idmap[third["id"]].phases)
+
+        # Resume: no more injected failures -- the remaining comment ("gamma")
+        # should be the only one posted, appended after the two already there.
+        self.run_migrate()
+
+        self.assertEqual(
+            self.target_backend.get(target_id)["comments"], ["alpha", "beta", "gamma"],
+        )
+        idmap_after = migrate.read_idmap(str(self.idmap_path))
+        self.assertIn(migrate.PHASE_COMMENTS, idmap_after[third["id"]].phases)
+
+    def test_idmap_is_written_after_created_and_status_before_comments_begin(self):
+        # Proves the idmap write happens at the created+status boundary, BEFORE any
+        # comment is attempted -- not only once the whole item (including comments)
+        # is done. Abort on the item's very first comment (call #0) and inspect the
+        # on-disk idmap.
+        third = self.source_backend.create(title="Third item")
+        self.source_backend.comment(third["id"], "alpha")
+
+        self.transport.fail_comment_at(0)
+        with self.assertRaises(WorkItemError):
+            self.run_migrate()
+
+        idmap = migrate.read_idmap(str(self.idmap_path))
+        self.assertIn(third["id"], idmap)
+        self.assertEqual(
+            idmap[third["id"]].phases, frozenset({migrate.PHASE_CREATED, migrate.PHASE_STATUS}),
+        )
+
+    def test_aborts_between_items_leaves_the_earlier_items_comments_intact(self):
+        third = self.source_backend.create(title="Third item")
+        self.source_backend.comment(third["id"], "alpha")
+        fourth = self.source_backend.create(title="Fourth item")
+        self.source_backend.comment(fourth["id"], "delta")
+
+        # "alpha" (call #0) succeeds; "delta" (call #1, a DIFFERENT item) fails.
+        self.transport.fail_comment_at(1)
+        with self.assertRaises(WorkItemError):
+            self.run_migrate()
+
+        idmap = migrate.read_idmap(str(self.idmap_path))
+        third_target = idmap[third["id"]].target_id
+        self.assertEqual(self.target_backend.get(third_target)["comments"], ["alpha"])
+        self.assertIn(migrate.PHASE_COMMENTS, idmap[third["id"]].phases)
+        # fourth was already created+status'd (that always precedes its own comment
+        # attempt) but its comments phase is NOT complete.
+        self.assertIn(fourth["id"], idmap)
+        self.assertNotIn(migrate.PHASE_COMMENTS, idmap[fourth["id"]].phases)
+        fourth_target = idmap[fourth["id"]].target_id
+        self.assertEqual(self.target_backend.get(fourth_target)["comments"], [])
+
+        report = self.run_migrate()
+
+        self.assertEqual(self.target_backend.get(fourth_target)["comments"], ["delta"])
+        # Resume never re-creates: nothing new in "migrated" this run.
+        self.assertEqual(report["migrated"], [])
+        # Every item is now genuinely done -- the resumed run's own report says so.
+        self.assertTrue(report["fully_migrated"])
+
+    def test_resume_never_recreates_an_item_whose_comments_are_still_pending(self):
+        third = self.source_backend.create(title="Third item")
+        self.source_backend.comment(third["id"], "alpha")
+
+        # Simulate an idmap that already has third's created+status phase recorded
+        # (as if a prior run got that far) but not comments -- built directly via
+        # write_idmap rather than via the abort mechanism above, so this test is
+        # independent of it.
+        pre_existing = self.target_backend.create(title="Third item")
+        migrate.write_idmap(str(self.idmap_path), {
+            third["id"]: migrate.IdmapEntry(
+                pre_existing["id"], frozenset({migrate.PHASE_CREATED, migrate.PHASE_STATUS}),
+            ),
+        })
+
+        report = self.run_migrate()
+
+        # first_id/second_id are NOT in this deliberately minimal idmap (only
+        # third's entry was planted above), so THEY legitimately get created this
+        # run -- the assertion here is scoped to third specifically: create() must
+        # never be called again for an item already present in the idmap, no matter
+        # which of its OWN phases remain incomplete.
+        migrated_source_ids = [source_id for source_id, _ in report["migrated"]]
+        self.assertNotIn(third["id"], migrated_source_ids)
+        self.assertIn(third["id"], report["skipped_already_migrated"])
+        # Exactly ONE target item titled "Third item" -- not recreated.
+        matching = [i for i in self.target_backend.list() if i["title"] == "Third item"]
+        self.assertEqual(len(matching), 1)
+        self.assertEqual(self.target_backend.get(pre_existing["id"])["comments"], ["alpha"])
+
+
+class FullyMigratedRequiresEveryPhaseTest(unittest.TestCase):
+    """`report["fully_migrated"]` gates archiving the source directory AND (in
+    scripts/workitems.py's _run_migrate) flipping .claude/settings.json's active
+    provider. Before per-item phases existed, "every source id appears in the
+    idmap" WAS the complete definition. Now an item can be IN the idmap with its
+    comments phase still pending, so bare id-presence is no longer an accurate
+    description of "done".
+
+    A direct unit test of the extracted formula, not a full migrate() run --
+    deliberately, because a full-run test cannot exercise the disagreement between
+    the old and new formulas: under this task's explicit instruction that a comment
+    failure propagate the same way create()/set_status() failures always have (no
+    internal try/except), an in-progress migrate() call can only ever end in one of
+    two ways -- it raises (no report produced at all), or it completes with EVERY
+    attempted item's EVERY phase done (see CommentMigrationTest above). So at
+    today's one call site, this formula and plain id-presence agree on every
+    reachable input -- the actual guard against the archive/flip hazard is the
+    uncaught exception, not this formula. What this pins is the formula's OWN
+    correctness in isolation (including old-format idmap state left on disk between
+    invocations, e.g. from a differently-shaped prior run or hand-editing) so it
+    keeps meaning what it says the day a phase might become best-effort rather than
+    fail-hard, and id-presence-alone would then silently accept an item that never
+    finished."""
+
+    def test_an_item_present_but_missing_a_required_phase_is_not_fully_migrated(self):
+        source_items = [{"id": "WI-0001"}, {"id": "WI-0002"}]
+        idmap = {
+            "WI-0001": migrate.IdmapEntry(
+                "CT-1", frozenset({migrate.PHASE_CREATED, migrate.PHASE_STATUS, migrate.PHASE_COMMENTS}),
+            ),
+            # WI-0002 exists in the idmap (the OLD, id-presence-only definition
+            # would call this "fully migrated") but its comments phase never ran.
+            "WI-0002": migrate.IdmapEntry(
+                "CT-2", frozenset({migrate.PHASE_CREATED, migrate.PHASE_STATUS}),
+            ),
+        }
+
+        self.assertFalse(migrate._all_phases_complete(idmap, source_items))
+
+    def test_every_item_with_every_required_phase_is_fully_migrated(self):
+        source_items = [{"id": "WI-0001"}]
+        idmap = {
+            "WI-0001": migrate.IdmapEntry(
+                "CT-1", frozenset({migrate.PHASE_CREATED, migrate.PHASE_STATUS, migrate.PHASE_COMMENTS}),
+            ),
+        }
+
+        self.assertTrue(migrate._all_phases_complete(idmap, source_items))
+
+    def test_an_id_missing_from_the_idmap_entirely_is_not_fully_migrated(self):
+        # Baseline: an item never even created yet -- both the old and new
+        # definitions agree here, kept as a guard against a future edit that
+        # accidentally drops this case.
+        self.assertFalse(migrate._all_phases_complete({}, [{"id": "WI-0001"}]))
 
 
 class IdmapPhaseFormatTest(unittest.TestCase):

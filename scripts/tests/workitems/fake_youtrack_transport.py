@@ -89,6 +89,17 @@ class FakeYouTrackTransport:
             symmetric_type_names if symmetric_type_names is not None
             else self._DEFAULT_SYMMETRIC_TYPE_NAMES
         )
+        # comments are NOT idempotent (unlike the Command-API paths above, which all
+        # reject via known_states/known_users/known_types/known_tags/known_sprints):
+        # `POST /api/issues/<id>/comments` has no pre-check of its own, so a caller
+        # (migrate.py's comment-copy phase) that resumes after a crash must be able
+        # to observe a rejected write. `_fail_comment_at_indices` counts calls
+        # GLOBALLY across every issue (not per-issue): a test can simulate a crash
+        # mid-way through one issue's own comment list, OR between two different
+        # issues, purely by counting -- without needing to predict the target id a
+        # not-yet-created issue will be assigned (see fail_comment_at's docstring).
+        self._fail_comment_at_indices = set()
+        self._comment_post_count = 0
 
     def request(self, method, url, token, body=None):
         parsed = urllib.parse.urlparse(url)
@@ -122,6 +133,16 @@ class FakeYouTrackTransport:
         if method == "POST" and path.endswith("/comments"):
             item_id = path.split("/")[-2]
             issue = self._require_issue(item_id)
+            index = self._comment_post_count
+            self._comment_post_count += 1
+            if index in self._fail_comment_at_indices:
+                # Rejected BEFORE mutating -- same atomic-reject discipline as the
+                # Command-API paths above: a rejected write leaves the issue
+                # unchanged, no partial apply.
+                raise WorkItemError(
+                    f"YouTrack comment rejected (simulated failure, call #{index}) "
+                    f"for {item_id}"
+                )
             issue["comments"].append({"text": body["text"]})
             return {"text": body["text"]}
 
@@ -157,6 +178,18 @@ class FakeYouTrackTransport:
         if not mentioned_projects:
             return True
         return issue["project"] in mentioned_projects
+
+    def fail_comment_at(self, index):
+        """Test hook: makes the (0-based) `index`-th `POST /api/issues/.../comments`
+        call across the WHOLE session -- every issue, every caller, comment() and
+        append_result() alike, since both hit this same endpoint -- raise
+        WorkItemError instead of recording the comment, simulating a real instance
+        rejecting or dropping a write. Global (not per-issue) so a test can target
+        "the 2nd of this issue's own 3 comments" or "the 1st comment of the NEXT
+        issue" purely by counting calls, without having to predict a not-yet-created
+        issue's id up front (ids are only assigned inside create(), which the test
+        may not have called yet when it needs to arm this)."""
+        self._fail_comment_at_indices.add(index)
 
     def seed_foreign_issue(self, item_id, project_short_name, summary="Foreign issue"):
         """Test helper: injects an issue belonging to a DIFFERENT project directly,

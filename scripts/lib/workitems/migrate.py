@@ -60,6 +60,12 @@ PHASE_COMMENTS = "comments"
 # value, so it is named once rather than duplicated at each use site.
 _PHASES_AFTER_CREATE_AND_STATUS = frozenset({PHASE_CREATED, PHASE_STATUS})
 
+# Every phase this run is responsible for completing, for `fully_migrated` (see
+# _all_phases_complete). Comments only, for now (WI-0141) -- results/tags/links are
+# deliberately out of scope; when they're added, they join this set, and NOTHING
+# else about the idmap format has to change (see the module docstring).
+_REQUIRED_PHASES = frozenset({PHASE_CREATED, PHASE_STATUS, PHASE_COMMENTS})
+
 IdmapEntry = collections.namedtuple("IdmapEntry", ["target_id", "phases"])
 
 
@@ -136,6 +142,11 @@ def migrate(source_backend, target_backend, idmap_path, source_workitems_dir=Non
         clock: zero-arg callable returning a datetime (defaults to datetime.now) —
             injected so tests get a deterministic archive directory name.
 
+    Comment failures propagate uncaught, exactly like create()/set_status() always
+    have (matching a real process crash) -- comment() has no dedup of its own, so a
+    caller resuming after such a crash relies on the idmap's per-item phase record
+    (see the module docstring), not on the target rejecting a duplicate.
+
     Returns a report dict: migrated ([(source_id, target_id), ...]),
     skipped_already_migrated ([source_id, ...]), archived (bool), and archive_path
     (only present if archived).
@@ -154,38 +165,49 @@ def migrate(source_backend, target_backend, idmap_path, source_workitems_dir=Non
 
     for item in source_items:
         source_id = item["id"]
-        if source_id in idmap:
-            report["skipped_already_migrated"].append(source_id)
-            continue
+        entry = idmap.get(source_id)
 
-        if source_id in existing_markers:
-            target_id = existing_markers[source_id]
+        if entry is None:
+            if source_id in existing_markers:
+                target_id = existing_markers[source_id]
+            else:
+                description = item.get("description") or ""
+                provenance = f"Migrated from {source_id}."
+                description = f"{description}\n\n{provenance}" if description else provenance
+
+                created = target_backend.create(
+                    title=item["title"], item_type=item.get("type"),
+                    owner=item.get("owner"), description=description,
+                )
+                target_id = created["id"]
+
+            # Re-applied unconditionally, even for an adopted item: a crash could
+            # have happened before set_status() ran in the prior attempt, so the
+            # adopted item might still be sitting at its create-time default
+            # (Backlog).
+            status = item.get("status")
+            if status and status != "Backlog":
+                target_backend.set_status(target_id, status)
+
+            entry = IdmapEntry(target_id=target_id, phases=_PHASES_AFTER_CREATE_AND_STATUS)
+            idmap[source_id] = entry
+            write_idmap(idmap_path, idmap)  # incremental: survives a mid-run crash
+            report["migrated"].append((source_id, target_id))
         else:
-            description = item.get("description") or ""
-            provenance = f"Migrated from {source_id}."
-            description = f"{description}\n\n{provenance}" if description else provenance
+            report["skipped_already_migrated"].append(source_id)
 
-            created = target_backend.create(
-                title=item["title"], item_type=item.get("type"),
-                owner=item.get("owner"), description=description,
-            )
-            target_id = created["id"]
-
-        # Re-applied unconditionally, even for an adopted item: a crash could have
-        # happened before set_status() ran in the prior attempt, so the adopted item
-        # might still be sitting at its create-time default (Backlog).
-        status = item.get("status")
-        if status and status != "Backlog":
-            target_backend.set_status(target_id, status)
-
-        idmap[source_id] = IdmapEntry(
-            target_id=target_id, phases=_PHASES_AFTER_CREATE_AND_STATUS,
-        )
-        write_idmap(idmap_path, idmap)  # incremental: survives a mid-run crash
-        report["migrated"].append((source_id, target_id))
+        # Resume never re-attempts create()/set_status() above for an item already
+        # in the idmap -- but its OWN remaining phase(s) still run every call, until
+        # they're recorded done. Comments is the only phase beyond created/status
+        # today (WI-0141); a future phase slots in the same way.
+        if PHASE_COMMENTS not in entry.phases:
+            _migrate_comments(item, target_backend, entry.target_id)
+            entry = IdmapEntry(target_id=entry.target_id, phases=entry.phases | {PHASE_COMMENTS})
+            idmap[source_id] = entry
+            write_idmap(idmap_path, idmap)
 
     report["archived"] = False
-    fully_migrated = all(item["id"] in idmap for item in source_items)
+    fully_migrated = _all_phases_complete(idmap, source_items)
     report["fully_migrated"] = fully_migrated
     if fully_migrated and source_workitems_dir is not None and os.path.isdir(source_workitems_dir):
         # Re-check immediately before archiving: an item created in the source
@@ -208,6 +230,48 @@ def migrate(source_backend, target_backend, idmap_path, source_workitems_dir=Non
             report["restore_command"] = f"mv {archive_path} {source_workitems_dir}"
 
     return report
+
+
+def _all_phases_complete(idmap, source_items):
+    """The definition `fully_migrated` needs once idmap entries track PER-PHASE
+    completion (WI-0141): bare id-presence ("item id in idmap") stopped being an
+    accurate description the moment an item could sit in the idmap with its
+    comments phase still pending. Gates archiving the source directory and (in
+    scripts/workitems.py) flipping the active provider.
+
+    Defense in depth, not the sole guard: migrate()'s loop never returns a report
+    at all while an item it attempted this run is left incomplete (an uncaught
+    comment failure raises instead, exactly like create()/set_status() always
+    have -- see migrate()'s own docstring) -- so at today's one call site, this
+    formula and the old id-presence check agree on every reachable input. It earns
+    its keep the day a phase ever becomes best-effort (warn-and-continue instead of
+    raise): id-presence alone would then silently accept an item that never
+    finished, and this formula would not."""
+    return all(
+        item["id"] in idmap and _REQUIRED_PHASES <= idmap[item["id"]].phases
+        for item in source_items
+    )
+
+
+def _migrate_comments(source_item, target_backend, target_id):
+    """Copies source_item's plain comments to target_id, resuming from wherever a
+    prior attempt left off. comment() has no dedup of its own (unlike set_status,
+    which plainly overwrites, or add_tag/add_link, which check membership before
+    writing), so a mid-item abort must be survivable without risking a duplicate
+    post.
+
+    Re-derives progress LIVE from the target's own comment count (rather than a
+    persisted per-comment checkpoint in the idmap): comments are appended in order
+    and never edited or removed by this code, so "how many are already there" is
+    exactly "how many of the source's list still need posting" -- no separate
+    counter to keep in sync. Posts only the not-yet-posted TAIL, in source order, so
+    a caller's assertion on ordering (not just count) holds after a resume."""
+    source_comments = source_item.get("comments") or []
+    if not source_comments:
+        return
+    already_posted = len(target_backend.get(target_id).get("comments") or [])
+    for text in source_comments[already_posted:]:
+        target_backend.comment(target_id, text)
 
 
 def _existing_migration_markers(target_backend):
