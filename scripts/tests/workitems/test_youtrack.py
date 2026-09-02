@@ -1076,6 +1076,40 @@ class YouTrackTagVisibilityGroupNotFoundTest(unittest.TestCase):
         self.assertEqual(self.transport.explicit_tag_creation_calls, [])
 
 
+class YouTrackTagVisibilityGroupAmbiguousTest(unittest.TestCase):
+    """Two groups sharing the configured name -- not observed on the probed live
+    instance (every group name there, including "All Users", was unique), but
+    nothing in the API rules it out for a different instance, so the guard is
+    built and tested regardless (see _resolve_tag_visibility_group_id's own
+    docstring). Refuses to guess which one, same reported-not-waved-through
+    shape as a group that doesn't resolve at all."""
+
+    def setUp(self):
+        self.transport = FakeYouTrackTransport(
+            project_short_name="TEST",
+            known_groups=[
+                {"id": "100-1", "name": "Support"},
+                {"id": "100-2", "name": "Support"},
+            ],
+        )
+        self.backend = youtrack.YouTrackBackend(
+            base_url="https://faketrack.example.org", project="TEST",
+            token="fake-token", transport=self.transport,
+            tag_visibility_group="Support",
+        )
+
+    def test_ambiguous_group_warns_by_name_and_still_applies_the_tag(self):
+        item = self.backend.create(title="New feature")
+
+        captured_stderr = io.StringIO()
+        with contextlib.redirect_stderr(captured_stderr):
+            fetched = self.backend.add_tag(item["id"], "security")
+
+        self.assertIn("Support", captured_stderr.getvalue())
+        self.assertIn("security", fetched["tags"])
+        self.assertEqual(self.transport.explicit_tag_creation_calls, [])
+
+
 class YouTrackQueryTest(unittest.TestCase):
     """`--query` is a project-scoped passthrough to YouTrack's own query language
     (ADR-0002 2nd addendum, 09.07.2026): the `project: <PROJ> ` prefix is always
