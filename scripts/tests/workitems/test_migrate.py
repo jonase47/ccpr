@@ -551,6 +551,37 @@ class LinkMigrationTest(_MigrateFixtureMixin, unittest.TestCase):
             self.target_backend.get(sixth_target)["links"],
         )
 
+    def test_link_resolution_uses_the_idmap_not_positional_id_arithmetic(self):
+        # WI-NNNN -> CCP-N positional alignment is dead (a failed create() burns
+        # a target-side number, measured in an earlier pilot) -- pre-create an
+        # unrelated item directly in the target so the fake transport's own
+        # issue numbering is offset from this test's two source items (their
+        # WI-numeric suffix no longer lines up with their eventual target-side
+        # number). If link resolution ever assumed that alignment instead of
+        # reading the idmap, it would call add_link() with the WRONG (or a
+        # nonexistent) target id, and the assertion below would fail -- either
+        # the expected edge would be missing, or add_link() would itself raise
+        # on an unknown target id.
+        self.target_backend.create(title="Unrelated pre-existing item")
+
+        seventh = self.source_backend.create(title="Seventh item")
+        eighth = self.source_backend.create(title="Eighth item")
+        self.source_backend.add_link(seventh["id"], "relates-to", eighth["id"])
+
+        self.run_migrate()
+
+        idmap = migrate.read_idmap(str(self.idmap_path))
+        seventh_target = idmap[seventh["id"]].target_id
+        eighth_target = idmap[eighth["id"]].target_id
+        # The offset is real, not merely assumed: the naive WI-suffix ==
+        # target-suffix guess for `eighth` (WI-0004 -> "TEST-4") is not what
+        # this run actually assigned, because of the unrelated item above.
+        self.assertNotEqual(eighth_target, "TEST-4")
+        self.assertIn(
+            {"type": "relates-to", "target": eighth_target},
+            self.target_backend.get(seventh_target)["links"],
+        )
+
 
 class FullyMigratedRequiresEveryPhaseTest(unittest.TestCase):
     """`report["fully_migrated"]` gates archiving the source directory AND (in
