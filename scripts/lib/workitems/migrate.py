@@ -42,6 +42,7 @@ ever mean `created` and `status` are done; nothing else is known.
 
 import collections
 import datetime
+import inspect
 import os
 import re
 import shutil
@@ -219,7 +220,16 @@ def migrate(source_backend, target_backend, idmap_path, source_workitems_dir=Non
     existing_markers = _existing_migration_markers(target_backend)
 
     source_items = source_backend.list()
-    report = {"migrated": [], "skipped_already_migrated": []}
+    report = {
+        "migrated": [], "skipped_already_migrated": [],
+        # Tags are best-effort at create() time (see _apply_optional_create_field
+        # in youtrack.py) -- a rejected tag simply vanishes from the created
+        # item, by design, with no exception to catch. This report is the ONLY
+        # place that vanishing becomes visible. Per item AND in total, always
+        # present (even all-zero: an absent field is not the same statement as
+        # a zero) -- see _record_tag_diff.
+        "tags": {"items": [], "total_requested": 0, "total_applied": 0, "total_missing": 0},
+    }
 
     for item in source_items:
         source_id = item["id"]
@@ -233,11 +243,18 @@ def migrate(source_backend, target_backend, idmap_path, source_workitems_dir=Non
                 provenance = f"Migrated from {source_id}."
                 description = f"{description}\n\n{provenance}" if description else provenance
 
-                created = target_backend.create(
+                requested_tags = item.get("tags") or []
+                create_kwargs = dict(
                     title=item["title"], item_type=item.get("type"),
                     owner=item.get("owner"), description=description,
                 )
+                if _target_create_accepts_tags(target_backend):
+                    create_kwargs["tags"] = requested_tags
+                created = target_backend.create(**create_kwargs)
                 target_id = created["id"]
+                _record_tag_diff(
+                    report, source_id, target_id, requested_tags, created.get("tags") or [],
+                )
 
             # Re-applied unconditionally, even for an adopted item: a crash could
             # have happened before set_status() ran in the prior attempt, so the
@@ -628,6 +645,51 @@ def _verify_links_migrated(source_item, target_backend, target_id, idmap):
             f"{len(missing)} of {len(source_links)} source link(s) not found on "
             f"the target after migrating (first missing: {missing[0]!r})"
         )
+
+
+def _target_create_accepts_tags(target_backend):
+    """Tags are a 2nd-addendum EXTENSION to the six-op contract (ADR-0002), not
+    guaranteed by every conforming target -- unlike `item_type`/`owner`, which
+    every create() implementation in this codebase has declared (even as an
+    always-optional keyword) since the very first increment. Introspecting the
+    target's own create() signature (the only way to know without calling it
+    and risking a TypeError mid-migration) keeps migrate() usable against an
+    older or minimal target that only implements the original contract -- a
+    real, reachable case: scripts/tests/test_workitems_cli.py's own
+    hand-written migrate-target fakes predate the tags addendum and were never
+    widened (out of this task's write scope; see docs/memory/senior-developer
+    for the precedent -- widening create()'s signature already broke every
+    hardcoded fake once, when the addendum itself landed). A target that
+    doesn't accept `tags` simply never receives them; _record_tag_diff still
+    runs (requested vs. an empty `applied`) so that gap is as visible as any
+    other -- see migrate()'s own call site."""
+    try:
+        params = inspect.signature(target_backend.create).parameters
+    except (TypeError, ValueError):
+        return False
+    return "tags" in params
+
+
+def _record_tag_diff(report, source_id, target_id, requested, applied):
+    """Appends one entry to report["tags"]["items"] for an item that just went
+    through target_backend.create(tags=requested) -- `applied` is what
+    create()'s own return value (already a fresh get(), see create()'s
+    docstring in youtrack.py) actually shows, NEVER an assumption that
+    `requested` landed unchanged. `missing` is requested-not-in-applied,
+    computed here rather than left for a report consumer to derive, so "zero
+    missing" and "no entry at all" can never be confused by a caller that
+    forgets to check for absence. Only called from the branch that actually
+    calls create() -- an adopted (crash-recovered) or already-idmapped item
+    gets no entry this run (see migrate()'s own docstring on why tags are not
+    re-diffed on resume)."""
+    missing = [tag for tag in requested if tag not in applied]
+    report["tags"]["items"].append({
+        "source_id": source_id, "target_id": target_id,
+        "requested": requested, "applied": applied, "missing": missing,
+    })
+    report["tags"]["total_requested"] += len(requested)
+    report["tags"]["total_applied"] += len(applied)
+    report["tags"]["total_missing"] += len(missing)
 
 
 def _existing_migration_markers(target_backend):

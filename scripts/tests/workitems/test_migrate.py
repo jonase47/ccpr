@@ -970,6 +970,126 @@ class ResultProseMigrationTest(_MigrateFixtureMixin, unittest.TestCase):
         self.assertIn(migrate.PHASE_COMMENTS, idmap_after[third["id"]].phases)
 
 
+class TagMigrationTest(_MigrateFixtureMixin, unittest.TestCase):
+    """Tags: applied at create() time only (create(tags=[...]), youtrack.py:248)
+    -- no second pass, no extra calls, no idmap phase (see migrate()'s own
+    docstring for why tags never gate `fully_migrated`). But create()'s tag
+    handling is BEST-EFFORT (_apply_optional_create_field warns and continues
+    on a rejected tag, see youtrack.py's create() docstring) -- a silently
+    swallowed tag must be visible in the report, even when nothing was
+    swallowed (an absent field is not the same statement as a zero)."""
+
+    def test_tags_applied_at_create_are_reported_with_zero_missing(self):
+        third = self.source_backend.create(title="Third item", tags=["backend", "urgent"])
+
+        report = self.run_migrate()
+
+        idmap = migrate.read_idmap(str(self.idmap_path))
+        target_id = idmap[third["id"]].target_id
+        self.assertEqual(sorted(self.target_backend.get(target_id)["tags"]), ["backend", "urgent"])
+        [entry] = [e for e in report["tags"]["items"] if e["source_id"] == third["id"]]
+        self.assertEqual(entry["target_id"], target_id)
+        self.assertEqual(sorted(entry["requested"]), ["backend", "urgent"])
+        self.assertEqual(sorted(entry["applied"]), ["backend", "urgent"])
+        self.assertEqual(entry["missing"], [])
+
+    def test_an_item_with_no_tags_still_gets_a_report_entry_with_empty_lists(self):
+        # Absence vs. zero: first_id/second_id (the fixture) carry no tags at
+        # all -- the report must still name them, with empty (not missing)
+        # lists, not omit them.
+        report = self.run_migrate()
+
+        [entry] = [e for e in report["tags"]["items"] if e["source_id"] == self.first_id]
+        self.assertEqual(entry["requested"], [])
+        self.assertEqual(entry["applied"], [])
+        self.assertEqual(entry["missing"], [])
+
+    def test_a_rejected_tag_is_swallowed_and_surfaces_in_the_report_as_a_difference(self):
+        # A project workflow that only permits a subset of tags -- exactly the
+        # scenario test_create_with_an_unmappable_tag_succeeds_and_leaves_no_orphan
+        # in test_youtrack.py already proves at the backend level: the rejected
+        # tag simply vanishes from the created item. migrate()'s job is to make
+        # that vanishing VISIBLE, not to prevent it (it can't -- create()'s
+        # contract is best-effort by design).
+        self.transport = FakeYouTrackTransport(project_short_name="TEST", known_tags={"backend"})
+        self.target_backend = youtrack.YouTrackBackend(
+            base_url="https://faketrack.example.org", project="TEST",
+            token="fake-token", transport=self.transport,
+        )
+        third = self.source_backend.create(title="Third item", tags=["backend", "not-permitted"])
+
+        report = self.run_migrate()
+
+        idmap = migrate.read_idmap(str(self.idmap_path))
+        target_id = idmap[third["id"]].target_id
+        self.assertEqual(self.target_backend.get(target_id)["tags"], ["backend"])
+        [entry] = [e for e in report["tags"]["items"] if e["source_id"] == third["id"]]
+        self.assertEqual(sorted(entry["requested"]), ["backend", "not-permitted"])
+        self.assertEqual(entry["applied"], ["backend"])
+        self.assertEqual(entry["missing"], ["not-permitted"])
+        self.assertEqual(report["tags"]["total_missing"], 1)
+
+    def test_a_dropped_tag_does_not_block_fully_migrated(self):
+        # Best-effort by deliberate design (the 35 real tags are pre-created by
+        # hand in the target project, per the PO's decision) -- a tag diff is
+        # reported, never gated.
+        self.transport = FakeYouTrackTransport(project_short_name="TEST", known_tags={"backend"})
+        self.target_backend = youtrack.YouTrackBackend(
+            base_url="https://faketrack.example.org", project="TEST",
+            token="fake-token", transport=self.transport,
+        )
+        self.source_backend.create(title="Third item", tags=["not-permitted"])
+
+        report = self.run_migrate()
+
+        self.assertTrue(report["fully_migrated"])
+
+    def test_tag_report_totals_sum_across_every_item_created_this_run(self):
+        self.source_backend.create(title="Third item", tags=["a", "b"])
+        self.source_backend.create(title="Fourth item", tags=["c"])
+
+        report = self.run_migrate()
+
+        # first_id/second_id (0 tags each) + third (2) + fourth (1) = 3, all
+        # accepted (permissive fake, no known_tags restriction in this test).
+        self.assertEqual(report["tags"]["total_requested"], 3)
+        self.assertEqual(report["tags"]["total_applied"], 3)
+        self.assertEqual(report["tags"]["total_missing"], 0)
+
+    def test_tags_are_never_reapplied_on_a_resumed_or_adopted_item(self):
+        # Tags are create()-only -- an item already in the idmap gets NO tags
+        # report entry this run (nothing was created, so there is nothing new
+        # to diff); re-diffing would need a second create()-shaped call this
+        # backend's contract doesn't offer.
+        pre_existing = self.target_backend.create(title="First item", owner="alice")
+        self.target_backend.set_status(pre_existing["id"], "In Progress")
+        migrate.write_idmap(str(self.idmap_path), {
+            self.first_id: migrate.IdmapEntry(
+                pre_existing["id"],
+                frozenset({migrate.PHASE_CREATED, migrate.PHASE_STATUS}),
+            ),
+        })
+
+        report = self.run_migrate()
+
+        self.assertNotIn(
+            self.first_id, [e["source_id"] for e in report["tags"]["items"]],
+        )
+        # Positive counterpart: second_id is NOT pre-planted in the idmap, so
+        # this run genuinely creates it -- it DOES get a tags report entry
+        # (empty, since it has no tags of its own), proving the report
+        # mechanism fires for a real create(), not merely that it stays
+        # silent for everything.
+        self.assertIn(
+            self.second_id, [e["source_id"] for e in report["tags"]["items"]],
+        )
+        # Liveness: the run actually completed every phase for both items
+        # (first_id's comments/result-refs/links are all trivially empty, so
+        # they complete on this very pass) -- not merely that it returned
+        # without touching tags for the resumed item.
+        self.assertTrue(report["fully_migrated"])
+
+
 class FullyMigratedRequiresEveryPhaseTest(unittest.TestCase):
     """`report["fully_migrated"]` gates archiving the source directory AND (in
     scripts/workitems.py's _run_migrate) flipping .claude/settings.json's active
