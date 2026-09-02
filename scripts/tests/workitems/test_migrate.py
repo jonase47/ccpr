@@ -616,6 +616,69 @@ class LinkMigrationTest(_MigrateFixtureMixin, unittest.TestCase):
         idmap_after = migrate.read_idmap(str(self.idmap_path))
         self.assertNotIn(migrate.PHASE_LINKS, idmap_after[third["id"]].phases)
 
+    def test_a_links_postcondition_failure_leaves_the_phase_unrecorded_and_does_not_archive(self):
+        # Mirrors CommentMigrationTest's equivalent postcondition test: PHASE_LINKS
+        # must not be recorded on the strength of add_link() merely returning
+        # without raising -- it must re-read the target and confirm the edge
+        # actually landed. Simulated with a target wrapper whose add_link()
+        # ACKNOWLEDGES a write without persisting it -- a scenario _migrate_links
+        # itself cannot detect from its own return value, but the postcondition
+        # re-read does.
+        class _TargetThatSilentlyDropsOneLink:
+            """Wraps the real target backend: the `drop_at`-th (0-based, counted
+            across calls made through THIS wrapper only) `add_link()` call
+            returns successfully but never actually writes the edge through to
+            the backend -- acknowledges a write it silently lost."""
+
+            def __init__(self, backend, drop_at):
+                self._backend = backend
+                self._drop_at = drop_at
+                self._call_count = 0
+
+            def add_link(self, item_id, link_type, target_id):
+                index = self._call_count
+                self._call_count += 1
+                if index == self._drop_at:
+                    return self._backend.get(item_id)
+                return self._backend.add_link(item_id, link_type, target_id)
+
+            def __getattr__(self, name):
+                return getattr(self._backend, name)
+
+        third = self.source_backend.create(title="Third item")
+        fourth = self.source_backend.create(title="Fourth item")
+        self.source_backend.add_link(third["id"], "relates-to", fourth["id"])
+
+        wrapped_target = _TargetThatSilentlyDropsOneLink(self.target_backend, drop_at=0)
+
+        with self.assertRaises(WorkItemError):
+            migrate.migrate(
+                self.source_backend, wrapped_target, str(self.idmap_path),
+                source_workitems_dir=str(self.source_dir), clock=FIXED_CLOCK,
+            )
+
+        idmap = migrate.read_idmap(str(self.idmap_path))
+        self.assertNotIn(migrate.PHASE_LINKS, idmap[third["id"]].phases)
+        self.assertFalse(migrate._all_phases_complete(idmap, self.source_backend.list()))
+        # No filesystem side effect from a partial phase -- the source must not
+        # have been archived.
+        self.assertTrue(self.source_dir.is_dir())
+
+    def test_full_run_with_links_present_completes_and_archives(self):
+        # The positive counterpart to the postcondition-failure test above: the
+        # PHASE_LINKS requirement must not spuriously block an otherwise-normal
+        # successful run. Asserts on the REPORT (fully_migrated, archived) --
+        # the surface scripts/workitems.py reads to decide whether to flip the
+        # active provider (ADR-0002) -- not just on the underlying formula.
+        third = self.source_backend.create(title="Third item")
+        fourth = self.source_backend.create(title="Fourth item")
+        self.source_backend.add_link(third["id"], "relates-to", fourth["id"])
+
+        report = self.run_migrate()
+
+        self.assertTrue(report["fully_migrated"])
+        self.assertTrue(report["archived"])
+
 
 class FullyMigratedRequiresEveryPhaseTest(unittest.TestCase):
     """`report["fully_migrated"]` gates archiving the source directory AND (in
