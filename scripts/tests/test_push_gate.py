@@ -945,6 +945,92 @@ class TagPayloadIsScannedTest(PushGateTestBase):
 
 
 # ---------------------------------------------------------------------------
+# 16. Coverage gap -- two refs pushed SIMULTANEOUSLY in one `git push`
+#     invocation. A leak on either one must block the whole push, including
+#     the otherwise-clean ref pushed alongside it (pre-receive is
+#     all-or-nothing).
+# ---------------------------------------------------------------------------
+class MultipleRefsInOnePushTest(PushGateTestBase):
+    def test_a_leak_on_one_of_two_simultaneously_pushed_refs_blocks_both(self):
+        self.write_config(denyNames=["Blorptech"])
+        self.install_hook()
+        work = self.clone_work()
+
+        self._git("checkout", "-q", "-b", "feature-clean", cwd=work)
+        self.write(work, "docs/clean.md", CLEAN_TEXT)
+        clean_sha = self.commit_all(work, "clean")
+
+        self._git("checkout", "-q", "-b", "feature-dirty", "main", cwd=work)
+        self.write(work, "fixtures/data.py", "SETTINGS = {\n    %s\n}\n" % CREDENTIAL)
+        dirty_sha = self.commit_all(work, "dirty")
+
+        before = self.remote_state()
+        r = self._git("push", self.remote, "feature-clean", "feature-dirty", cwd=work)
+        self.assertNotEqual(r.returncode, 0, "expected a refusal:\n" + self.output(r))
+        self.assert_nothing_published(before, planted_sha=dirty_sha, result=r)
+        self.assertFalse(
+            self.object_exists(clean_sha),
+            "the clean ref's own commit landed even though the push as a "
+            "whole should have been refused",
+        )
+
+    def test_two_simultaneously_pushed_clean_refs_are_both_accepted(self):
+        self.write_config(denyNames=["Blorptech"])
+        self.install_hook()
+        work = self.clone_work()
+
+        self._git("checkout", "-q", "-b", "feature-one", cwd=work)
+        self.write(work, "docs/one.md", CLEAN_TEXT)
+        self.commit_all(work, "one")
+
+        self._git("checkout", "-q", "-b", "feature-two", "main", cwd=work)
+        self.write(work, "docs/two.md", CLEAN_TEXT)
+        self.commit_all(work, "two")
+
+        r = self._git("push", self.remote, "feature-one", "feature-two", cwd=work)
+        self.assertEqual(r.returncode, 0, self.output(r))
+        refs = self._git("for-each-ref", "--format=%(refname)", cwd=self.remote)
+        self.assertIn("refs/heads/feature-one", refs.stdout)
+        self.assertIn("refs/heads/feature-two", refs.stdout)
+
+
+# ---------------------------------------------------------------------------
+# 17. Coverage gap -- the FIRST push into a genuinely empty bare repository
+#     (zero refs at hook-install time; _seed_bare_repo() normally lands a
+#     commit before the hook exists, so this shape is otherwise unreachable
+#     through the standard fixture).
+# ---------------------------------------------------------------------------
+class FirstPushIntoAGenuinelyEmptyRepoTest(PushGateTestBase):
+    SEED_BARE_REPO = False
+
+    def test_a_leak_on_the_first_push_into_an_empty_repo_is_still_rejected(self):
+        self.write_config(denyNames=[DENY_NAME])
+        self.install_hook()
+        work = self.tmp / "first-push-work"
+        r = self._git("init", "--quiet", "--initial-branch=main", work)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.write(work, "notes.py", "# customer note: %s uses this system\n" % DENY_NAME)
+        sha = self.commit_all(work)
+        before = self.remote_state()
+        r = self.push(work)
+        self.assertNotEqual(r.returncode, 0, "expected a refusal:\n" + self.output(r))
+        self.assert_nothing_published(before, planted_sha=sha, result=r)
+
+    def test_a_clean_first_push_into_an_empty_repo_is_accepted(self):
+        self.write_config(denyNames=["Blorptech"])
+        self.install_hook()
+        work = self.tmp / "first-push-work"
+        r = self._git("init", "--quiet", "--initial-branch=main", work)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.write(work, "docs/notes.md", CLEAN_TEXT)
+        self.commit_all(work)
+        r = self.push(work)
+        self.assertEqual(r.returncode, 0, self.output(r))
+        tree = self._git("ls-tree", "-r", "--name-only", "main", cwd=self.remote)
+        self.assertIn("docs/notes.md", tree.stdout.splitlines())
+
+
+# ---------------------------------------------------------------------------
 # 18. PO decision -- above PUSH_GATE_MAX_COMMITS, the push is now refused
 #     OUTRIGHT rather than degraded to a tip-only diff. Pins the boundary
 #     (`-gt`, not `-ge`) and the exact attack the degrade-instead-of-refuse
@@ -997,6 +1083,113 @@ class CommitCapExceededRejectsPushTest(PushGateTestBase):
         self.commit_all(work, "b")
         r = self.push(work)
         self.assertEqual(r.returncode, 0, self.output(r))
+
+
+# ---------------------------------------------------------------------------
+# 19. Code-review coverage gap -- the three arms of is_unsafe_repo_path's
+#     case pattern the existing traversal tests never reach, because both
+#     of them always wrap the '..' component in an outer "subdir" tree
+#     (only the middle `*/../*` arm, already covered by
+#     PathTraversalInTheTreeIsRejectedTest).
+# ---------------------------------------------------------------------------
+class AllFourTraversalArmsAreRejectedTest(PushGateTestBase):
+    def test_a_standalone_dotdot_leaf_is_rejected(self):
+        self.write_config(denyNames=["Blorptech"])
+        self.install_hook()
+        work = self.clone_work()
+        sha = self.craft_traversal_commit_with_parts(work, [".."])
+        self._git("branch", "-f", "evil-branch", sha, cwd=work)
+        before = self.remote_state()
+        r = self.push(work, refspec="evil-branch")
+        self.assertNotEqual(r.returncode, 0, "expected a refusal:\n" + self.output(r))
+        self.assert_nothing_published(before, planted_sha=sha, result=r)
+        # Not just "rejected" -- this exact dest (SCANDIR/i/..) collides
+        # with an already-existing DIRECTORY at the filesystem level, so an
+        # unguarded materialize step would ALSO fail here (EISDIR on the
+        # `git cat-file blob ... > "$dest"` redirection), incidentally
+        # refusing the push for an unrelated reason. Naming the guard's own
+        # message is what actually proves is_unsafe_repo_path fired, not a
+        # filesystem coincidence -- measured directly: narrowing the case
+        # pattern to only the `*/../*` arm left this exact test PASSING
+        # (with a different message) before this assertion was added.
+        self.assertIn("escapes its own tree", self.output(r))
+
+    def test_a_leading_dotdot_segment_is_rejected(self):
+        self.write_config(denyNames=["Blorptech"])
+        self.install_hook()
+        work = self.clone_work()
+        sha = self.craft_traversal_commit_with_parts(work, ["..", "secret.txt"])
+        self._git("branch", "-f", "evil-branch", sha, cwd=work)
+        before = self.remote_state()
+        r = self.push(work, refspec="evil-branch")
+        self.assertNotEqual(r.returncode, 0, "expected a refusal:\n" + self.output(r))
+        self.assert_nothing_published(before, planted_sha=sha, result=r)
+        self.assertIn("escapes its own tree", self.output(r))
+
+    def test_a_trailing_dotdot_segment_is_rejected(self):
+        self.write_config(denyNames=["Blorptech"])
+        self.install_hook()
+        work = self.clone_work()
+        sha = self.craft_traversal_commit_with_parts(work, ["subdir", ".."])
+        self._git("branch", "-f", "evil-branch", sha, cwd=work)
+        before = self.remote_state()
+        r = self.push(work, refspec="evil-branch")
+        self.assertNotEqual(r.returncode, 0, "expected a refusal:\n" + self.output(r))
+        self.assert_nothing_published(before, planted_sha=sha, result=r)
+        # Same EISDIR-coincidence risk as the standalone-leaf case above
+        # (dest = SCANDIR/i/subdir/.. also collides with an existing
+        # directory) -- same reason the explicit message is asserted here.
+        self.assertIn("escapes its own tree", self.output(r))
+
+
+# ---------------------------------------------------------------------------
+# 20. Code-review coverage gap -- a MERGE commit. `git diff-tree` without
+#     `-m` shows NO diff at all for a merge, so this pins that the `-m` flag
+#     stays on both diff-tree invocations: a regression here would let every
+#     merged branch through unscanned, silently.
+# ---------------------------------------------------------------------------
+class MergeCommitIsScannedTest(PushGateTestBase):
+    def test_a_leak_introduced_only_by_conflict_resolution_is_rejected(self):
+        self.write_config(denyNames=["Blorptech"])
+        self.install_hook()
+        work = self.clone_work()
+        merge_sha = self.craft_merge_commit(
+            work, leak_in_resolution="SETTINGS = {\n    %s\n}\n" % CREDENTIAL,
+        )
+        before = self.remote_state()
+        r = self.push(work)
+        self.assertNotEqual(r.returncode, 0, "expected a refusal:\n" + self.output(r))
+        self.assert_nothing_published(before, planted_sha=merge_sha, result=r)
+
+    def test_a_clean_merge_commit_is_accepted(self):
+        self.write_config(denyNames=["Blorptech"])
+        self.install_hook()
+        work = self.clone_work()
+        self.craft_merge_commit(work)
+        r = self.push(work)
+        self.assertEqual(r.returncode, 0, self.output(r))
+        tree = self._git("show", "main:shared.md", cwd=self.remote)
+        self.assertEqual(tree.returncode, 0, tree.stderr)
+        self.assertEqual(tree.stdout, "resolved content\n")
+
+
+# ---------------------------------------------------------------------------
+# 21. Code-review coverage gap -- a gitlink (submodule reference) is skipped
+#     BEFORE any attempt to materialize/read a blob for it. Its "sha" names
+#     a commit in another repository, never a blob in this one, so reaching
+#     the materialize step for it would fail.
+# ---------------------------------------------------------------------------
+class GitlinkIsSkippedBeforeMaterializationTest(PushGateTestBase):
+    def test_a_push_adding_only_a_gitlink_is_accepted_and_reported_skipped(self):
+        self.write_config(denyNames=["Blorptech"])
+        self.install_hook()
+        work = self.clone_work()
+        sha = self.craft_gitlink_commit(work)
+        self._git("branch", "-f", "gitlink-branch", sha, cwd=work)
+        r = self.push(work, refspec="gitlink-branch")
+        self.assertEqual(r.returncode, 0, self.output(r))
+        self.assertIn("gitlink skipped", self.output(r))
+        self.assertIn("submod", self.output(r))
 
 
 if __name__ == "__main__":
