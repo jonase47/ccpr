@@ -206,6 +206,50 @@ class ExistingHookIsBackedUpTest(InstallPushGateHookTestBase):
 
 
 # ---------------------------------------------------------------------------
+# 2b. An existing pre-push hook that is a SYMLINK is refused outright, never
+#     followed -- the same "a shape that has no legitimate reason to exist
+#     here is its own finding, not routed around" rule
+#     push-gate.sh's own is_unsafe_repo_path() already applies to a tree
+#     entry escaping its scan sandbox. Hook managers (husky, pre-commit,
+#     lefthook) routinely leave `.git/hooks/pre-push` as a symlink onto a
+#     file THEY manage -- reproduced directly: the `cp` backup step read
+#     the symlink's TARGET content into a file inside the repo (an
+#     information leak), and the `cat >` write step overwrote the external
+#     target itself (an integrity loss) -- neither step ever checked
+#     `[ -L ]` before its own `[ -f ]` test, and a symlink onto an existing
+#     file satisfies both.
+# ---------------------------------------------------------------------------
+class ExistingHookIsASymlinkRefusesInstallTest(InstallPushGateHookTestBase):
+    def test_a_symlinked_hook_is_refused_and_the_external_target_is_untouched(self):
+        remote = self.init_bare_remote()
+        work = self.clone_work(remote)
+        hooks_dir = work / ".git" / "hooks"
+        hooks_dir.mkdir(parents=True, exist_ok=True)
+
+        external_target = self.tmp / "externally-managed-hook.sh"
+        original = "#!/bin/sh\necho 'managed by another hook tool'\n"
+        external_target.write_text(original, encoding="utf-8")
+        (hooks_dir / "pre-push").symlink_to(external_target)
+
+        r = self.run_installer(work)
+        self.assertNotEqual(r.returncode, 0, "expected a refusal:\n" + self.output(r))
+        self.assertIn(str(external_target), self.output(r))
+
+        self.assertEqual(
+            external_target.read_text(encoding="utf-8"), original,
+            "the externally-managed symlink target was overwritten",
+        )
+        self.assertTrue(
+            (hooks_dir / "pre-push").is_symlink(),
+            "the pre-existing symlink itself was replaced",
+        )
+        self.assertEqual(
+            list(hooks_dir.glob("pre-push.bak.*")), [],
+            "a backup must not be written from a symlink's target content",
+        )
+
+
+# ---------------------------------------------------------------------------
 # 3. The written hook is executable and syntactically valid bash.
 # ---------------------------------------------------------------------------
 class WrittenHookIsExecutableAndSyntacticallyValidTest(InstallPushGateHookTestBase):

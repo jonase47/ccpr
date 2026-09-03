@@ -50,6 +50,22 @@ fi
 
 HOOK_PATH="${GIT_DIR}/hooks/pre-push"
 
+# `[ -L ]` before any `[ -f ]` test on ${HOOK_PATH} -- a symlink onto an
+# existing file satisfies BOTH, and `[ -f ]` alone would silently follow
+# it. Hook managers (husky, pre-commit, lefthook) routinely leave
+# `.git/hooks/pre-push` as a symlink onto a file they themselves manage;
+# following it here would let `cp` read the EXTERNAL target's content into
+# a backup file inside this repo (an information leak) and let `cat >`
+# overwrite that same external target (an integrity loss) -- the same
+# "a shape that has no legitimate reason to exist here is its own finding,
+# never routed around" rule push-gate.sh's own is_unsafe_repo_path()
+# already applies to a tree entry escaping its scan sandbox. Refused
+# outright, before touching a backup or the hook path at all.
+if [[ -L "${HOOK_PATH}" ]]; then
+  echo "install-push-gate-hook: ${HOOK_PATH} is a symlink to $(readlink "${HOOK_PATH}") -- refusing to follow it (remove or replace it manually, then re-run this installer)" >&2
+  exit 2
+fi
+
 if [[ -f "${HOOK_PATH}" ]]; then
   BACKUP="${HOOK_PATH}.bak.$(date +%Y%m%d_%H%M%S)"
   cp "${HOOK_PATH}" "${BACKUP}"
