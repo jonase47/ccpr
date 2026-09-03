@@ -8,6 +8,52 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Added
 
+- **`scripts/push-gate.sh` — the discipline gate now has a server-side entry point, so a
+  plain `git push` is no longer an unchecked path.** Until now the gate ran in exactly two
+  places, `memory-sync.sh promote` and `artifact-gate.sh`; a commit followed by a push
+  reached neither. That is not a bypass anyone has to construct — it is the ordinary way
+  code moves, and it is the busier of the two paths. The new script reads pre-receive's
+  `<oldrev> <newrev> <refname>` lines, materializes the blobs the push introduces and hands
+  them to `artifact-gate.sh`, which stays the scan and report layer: the patterns still
+  live exactly once, in `lib/discipline_gate.sh`. Five carriers are checked, not two — file
+  content, file path, **ref name**, **commit message** and **annotated tag payload**. The
+  last three came out of a threat-model pass that reproduced each one rather than reasoning
+  about it: a name in a branch name sits in every `ls-remote` output permanently without
+  ever being scanned as content, and `git diff-tree` reports tree and blob diffs only, so a
+  commit message never crosses it. Scope is every commit the push introduces, never the net
+  diff, because a leak planted in commit N and removed in N+1 is invisible in a tip-to-tip
+  diff and stays in history forever. Above a commit-count cap the push is **refused**, not
+  scanned partially. The reachability scope is selectable and its default is the
+  conservative one (`--not --remotes`); `--server` selects `--not --all` and must be
+  requested explicitly, because the two options fail in opposite directions — a forgotten
+  flag on a bare repository scans the whole history, while an `--not --all` default on a
+  client scans **nothing** and reports success. Decision, measurements and the full list of
+  what the gate does not reach are in `docs/adr/ADR-0013-server-side-push-gate.md`.
+
+- **`scripts/install-push-gate-hook.sh` — an opt-in installer for a local `pre-push` hook,
+  following the shape `scripts/local-llm/install-git-hook.sh` already established.** It
+  takes a project directory, refuses anything that is not a git repository, backs up an
+  existing hook with a timestamp, and writes a hook that runs the gate over the refs being
+  pushed. The hook is deliberately **fast feedback, never the enforcement boundary** — it
+  lives in the pusher's own `.git/hooks/` and `--no-verify` walks past it, which the
+  installer says out loud rather than leaving to be discovered. Two things it refuses
+  outright instead of routing around: a `pre-push` path that is a **symlink** (hook
+  managers such as husky or lefthook put one there, and following it would copy the link's
+  target into the repository and then overwrite it), and a **backup name that already
+  exists** (two installs in the same second would otherwise write the already-replaced hook
+  over the only copy of the original). Known limit, recorded in the installer's header and
+  as Follow-up 4 of ADR-0013: there is no timeout around the two commands the hook invokes,
+  so a hang blocks `git push` until `--no-verify`; `timeout` is GNU coreutils with no
+  guaranteed presence on macOS and no precedent in this repository, and trading a rare hang
+  for a portability regression on the platform ADR-0011 pins to was the worse deal.
+
+- **`docs/CONSTITUTION.md` v1.2 — a Default rule for branch convention**, plus a `Git
+  Workflow` section in `CLAUDE.md` covering it and item-claiming. New work begins on its own
+  branch and `main` receives merges, with **no technical enforcement**: direct pushes stay
+  permitted, which is why the rule is Default rather than Inviolable. Item-claiming points
+  at `Manual/WORKITEMS.md` §6 and ADR-0005 instead of restating a mechanism that already
+  refuses to take over an item held by a live runner.
+
 - **`scripts/doc-volume-check.sh` gains a second corpus: the documents Claude Code
   autoloads into every session.** Its existing scan of `docs/` answers "what shipped
   documentation is oversized"; nothing measured the separate, smaller question of what
