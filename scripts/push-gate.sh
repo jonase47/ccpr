@@ -27,10 +27,11 @@
 # diff between the push's old and new tip, but it ships in history forever —
 # rewriting history to remove it is out of scope by design (no
 # `--force`/rewrite path exists here). So the scan set is the union of every
-# path touched by every commit `git rev-list "$newrev" --not --all` finds
+# path touched by every commit `git rev-list "$newrev" --not <SCOPE>` finds
 # (i.e. every commit this push introduces that no existing ref already
-# reaches), diffed one at a time with `--root -m` so a root commit or a
-# merge's every parent is covered without special-casing. Above
+# reaches — see "--server vs the client-safe default" below for what
+# <SCOPE> resolves to and why), diffed one at a time with `--root -m` so a
+# root commit or a merge's every parent is covered without special-casing. Above
 # PUSH_GATE_MAX_COMMITS commits the push is REFUSED outright, not degraded
 # to a partial scan: an earlier version of this script fell back to a
 # single diff against the ref's own old tip once the cap was exceeded —
@@ -78,6 +79,90 @@
 # rejected for that reason alone: the oversized blob is skipped, loudly
 # (never silently), and the rest of the push is still scanned normally.
 #
+# --- --server vs the client-safe default: an asymmetric choice, not a
+# preference (CCP-1137R3) -----------------------------------------------
+# This script runs in two structurally different places, and
+# `git rev-list "$newrev" --not <X>`'s correctness depends on which one:
+#
+#   * SERVER (Forgejo pre-receive, the only caller today): git invokes
+#     this hook BEFORE any ref moves (see "why the gate is not sourced
+#     from the pushed tip" above) — the ref this push is updating still
+#     points at its OLD value here, so `--not --all` correctly excludes
+#     exactly the commits every existing ref (this one included) already
+#     reaches, leaving only what the push introduces. A bare repository
+#     has no configured remotes at all, so `--remotes` there resolves to
+#     nothing to exclude — scanning the ENTIRE history reachable from
+#     `$newrev` on every single push: correct, but needlessly slow.
+#   * CLIENT (a future pre-push hook, CCP-1137 Auflage 2): a local branch
+#     ref has ALREADY moved to the new commit by the time any hook runs —
+#     that is how `git commit` works — so `--not --all` finds the new
+#     commit trivially reachable from itself via the very ref being
+#     pushed and reports ZERO new commits, unconditionally, on every
+#     single push (measured directly: a clone with a remote-tracking ref
+#     plus one new local commit — `git rev-list HEAD --not --all` -> 0,
+#     `git rev-list HEAD --not --remotes` -> 1, the correct count). A
+#     silent, universal false negative — exactly the shape this whole
+#     script exists to refuse elsewhere (see the empty-scope handling
+#     further down; ClientScopeIsTheDefaultTest in
+#     scripts/tests/test_push_gate.py reproduces both sides of this).
+#
+# These two failure directions are NOT symmetric. `--remotes` used where
+# `--all` belongs (server) scans MORE than strictly necessary — slow, but
+# every leak that was ever findable still gets found. `--all` used where
+# `--remotes` belongs (client) scans NOTHING and reports success — fast,
+# and silently wrong, on every push, forever. Given a forced choice
+# between "too slow" and "silently blind", the DEFAULT is the client-safe
+# one — `--remotes` — and the faster-but-narrower `--all` mode is never
+# reached by omission: it is requested by the single literal argument
+# `--server`, spelled out in full, only by the deployed pre-receive shim
+# (below) — the same "a forgotten switch fails toward MORE scanning, never
+# toward less" rule PUSH_GATE_MAX_COMMITS's own refuse-outright-above-the-
+# cap decision already follows.
+#
+# --- invocation from the server-side pre-receive shim ---------------------
+# The Forgejo pre-receive shim — a POSIX `sh` one-liner living in the
+# separate infra repo, not this one — MUST invoke this script with the
+# literal argument below. The exact line the shim has to run:
+#
+#   exec bash "$GATE_ROOT/scripts/push-gate.sh" --server
+#
+# ($GATE_ROOT resolved by the shim to the deployed gate's own root — the
+# same layout PushGateTestBase mirrors in scripts/tests/test_push_gate.py:
+# this script next to its two siblings and lib/discipline_gate.sh.)
+# Omitting `--server` does not fail loudly here — it silently falls back
+# to the client-safe default, which on THIS repo's bare, remote-less
+# layout means "scan every commit reachable from $newrev, every push":
+# correct, per the asymmetry above, but not the behavior pre-receive is
+# designed around, so a deploy that forgets the flag is a performance
+# regression that review must catch — not a scanning gap, because the
+# server-shaped fallback direction is the safe one.
+#
+# What a `verify-gate.sh` (infra repo, does not exist yet) must check to
+# keep the DEPLOYED shim honest: (1) the deployed `hooks/pre-receive` file
+# invokes this script's own path with the literal `--server` argument
+# present — a grep for both together, not either alone, so a shim that
+# calls some OTHER script with `--server` or this script with no argument
+# both still fail the check; (2) the deployed copies of push-gate.sh /
+# artifact-gate.sh / memory-sync.sh / lib/discipline_gate.sh match this
+# repository's own copies byte-for-byte (a stale deploy silently running
+# an older gate is the same class of bypass as the pushed-tip risk
+# discussed above, just introduced by a missed deploy instead of a
+# malicious commit); (3) MEMORY_SYNC_CONFIG in the shim resolves to a path
+# OUTSIDE any operator's own $HOME (see PushGateTestBase.gate_config's own
+# comment for why). None of this is implemented here — it lives in the
+# infra repo that owns the shim.
+#
+# --- arguments -------------------------------------------------------------
+#   (none)      the client-safe default — commit reachability is measured
+#               against `--not --remotes` (see the asymmetry rationale
+#               above). Correct for a future client-side pre-push caller;
+#               scans more than strictly necessary on today's server-side
+#               caller (a bare repo has no remotes to exclude against).
+#   --server    requests `--not --all` instead — correct ONLY where a ref
+#               has not yet moved when this script runs (pre-receive).
+#               Never pass this from a client-side caller.
+#   anything else is refused outright (exit 2) before any scan runs.
+#
 # --- environment ---------------------------------------------------------
 #   MEMORY_SYNC_CONFIG        config path forwarded to artifact-gate.sh /
 #                              memory-sync.sh unchanged (see their own
@@ -122,6 +207,21 @@ gate_load_config
 
 [ -f "$ARTIFACT_GATE" ] || die "artifact-gate.sh not found next to this script: $ARTIFACT_GATE"
 [ -f "$MEMORY_SYNC" ]   || die "memory-sync.sh not found next to this script: $MEMORY_SYNC"
+
+# --not <PUSH_GATE_NOT_SCOPE> feeds the `git rev-list` call below (see "---
+# --server vs the client-safe default" above). `--remotes` is the DEFAULT
+# on purpose — reached by simply passing no argument — and `--all` is
+# reached only through the single literal `--server` argument, never
+# implicitly. Anything else on the command line is a caller mistake this
+# script refuses BEFORE any scan runs, rather than silently ignoring an
+# argument it does not understand.
+PUSH_GATE_NOT_SCOPE="--remotes"
+[ "$#" -le 1 ] || die "unrecognized arguments: $* -- this script accepts at most one argument, --server, requested only by the deployed pre-receive shim"
+case "${1:-}" in
+  '') ;;
+  --server) PUSH_GATE_NOT_SCOPE="--all" ;;
+  *) die "unrecognized argument: $1 -- this script accepts at most one argument, --server, requested only by the deployed pre-receive shim" ;;
+esac
 
 PUSH_GATE_MAX_BLOB_BYTES="${PUSH_GATE_MAX_BLOB_BYTES:-1048576}"
 PUSH_GATE_MAX_COMMITS="${PUSH_GATE_MAX_COMMITS:-200}"
@@ -281,7 +381,7 @@ while read -r oldrev newrev refname; do
     die "refusing this push: ref name matches a denied name: $refname"
   fi
 
-  if ! git rev-list "$newrev" --not --all > "$TMP/commits" 2>"$TMP/err"; then
+  if ! git rev-list "$newrev" --not "$PUSH_GATE_NOT_SCOPE" > "$TMP/commits" 2>"$TMP/err"; then
     die "could not enumerate commits for $refname: $(cat "$TMP/err")"
   fi
 

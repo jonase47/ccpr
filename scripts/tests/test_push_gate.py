@@ -360,7 +360,7 @@ class PushGateTestBase(unittest.TestCase):
         self.gate_config.write_text(json.dumps(cfg), encoding="utf-8")
 
     def install_hook(self, bash_path=None, memory_paths=None,
-                      max_blob_bytes=None, max_commits=None):
+                      max_blob_bytes=None, max_commits=None, server_mode=True):
         """Write <remote>/hooks/pre-receive as a POSIX-sh shim.
 
         Every value the real deployment would bake in at deploy time is
@@ -368,6 +368,14 @@ class PushGateTestBase(unittest.TestCase):
         environment -- the real hook runs under a service account whose
         $HOME the operator does not control, so MEMORY_SYNC_CONFIG must
         never depend on it (see the comment on self.gate_config above).
+
+        `server_mode` defaults to True and appends `--server` -- the
+        literal argument the real Forgejo pre-receive shim must pass (see
+        push-gate.sh's own header, "invocation from the server-side
+        pre-receive shim"). Every test in this file except the one that
+        deliberately reproduces a forgotten flag
+        (OmittingServerFlagOnABareRepoScansMoreNotLessTest) relies on this
+        default so it exercises the shim's real, documented invocation.
         """
         lines = ["#!/bin/sh"]
         lines.append("export MEMORY_SYNC_CONFIG=%s" % shlex.quote(str(self.gate_config)))
@@ -377,10 +385,12 @@ class PushGateTestBase(unittest.TestCase):
             lines.append("export PUSH_GATE_MAX_BLOB_BYTES=%s" % shlex.quote(str(max_blob_bytes)))
         if max_commits is not None:
             lines.append("export PUSH_GATE_MAX_COMMITS=%s" % shlex.quote(str(max_commits)))
-        lines.append(
-            "exec %s %s"
-            % (shlex.quote(bash_path or "bash"), shlex.quote(str(self.push_gate_copy)))
+        exec_line = "exec %s %s" % (
+            shlex.quote(bash_path or "bash"), shlex.quote(str(self.push_gate_copy)),
         )
+        if server_mode:
+            exec_line += " --server"
+        lines.append(exec_line)
         hook = self.remote / "hooks" / "pre-receive"
         hook.write_text("\n".join(lines) + "\n", encoding="utf-8")
         hook.chmod(0o755)
@@ -1190,6 +1200,126 @@ class GitlinkIsSkippedBeforeMaterializationTest(PushGateTestBase):
         self.assertEqual(r.returncode, 0, self.output(r))
         self.assertIn("gitlink skipped", self.output(r))
         self.assertIn("submod", self.output(r))
+
+
+# ---------------------------------------------------------------------------
+# CCP-1137R3 -- commit-reachability SCOPE mode. `git rev-list "$newrev" --not
+# --all` is correct on the SERVER (pre-receive runs before any ref moves,
+# see install_hook()'s own `--server` above) but structurally wrong on a
+# CLIENT: a local branch ref has already moved to the new commit by the
+# time any hook runs there, so `--not --all` finds it trivially reachable
+# from the very ref being pushed and reports zero new commits, always.
+# `--not --remotes` is the fix, and per push-gate.sh's own header the
+# asymmetry between the two failure directions (too-slow vs silently-blind)
+# is why `--remotes` is the DEFAULT and `--all` is reached only through the
+# explicit `--server` argument.
+#
+# These tests invoke push-gate.sh DIRECTLY against a real client clone --
+# not through a bare-repo pre-receive hook -- because "a branch ref that
+# has already moved to the new commit before any hook runs" cannot be
+# reproduced through git's own pre-receive contract at all; pre-receive by
+# definition runs BEFORE the ref moves.
+# ---------------------------------------------------------------------------
+class ClientScopeIsTheDefaultTest(PushGateTestBase):
+    def _client_repo_with_one_unpushed_commit(self, content):
+        """A clone with a remote-tracking ref (origin/main) plus one new
+        local commit origin does not know about yet -- the exact
+        constellation that measured `git rev-list HEAD --not --all` -> 0
+        and `git rev-list HEAD --not --remotes` -> 1."""
+        work = self.clone_work()
+        old_sha = self._git("rev-parse", "origin/main", cwd=work).stdout.strip()
+        self.write(work, "notes.py", content)
+        new_sha = self.commit_all(work)
+        return work, old_sha, new_sha
+
+    def _invoke(self, work, old_sha, new_sha, extra_args=()):
+        """A direct subprocess call, deliberately bypassing both `git push`
+        and any hook installation -- this is the shape a future client-side
+        pre-push hook (CCP-1137, Auflage 2) will call push-gate.sh with,
+        translated from git's own 4-field pre-push stdin contract into the
+        3-field <oldrev> <newrev> <refname> form push-gate.sh reads."""
+        return subprocess.run(
+            ["bash", str(self.push_gate_copy), *extra_args],
+            cwd=str(work),
+            input="%s %s refs/heads/main\n" % (old_sha, new_sha),
+            capture_output=True, text=True,
+            env=self.env(MEMORY_SYNC_CONFIG=str(self.gate_config)),
+        )
+
+    def test_the_default_scope_catches_a_secret_in_the_unpushed_commit(self):
+        self.write_config(denyNames=["Blorptech"])
+        work, old_sha, new_sha = self._client_repo_with_one_unpushed_commit(
+            "SETTINGS = {\n    %s\n}\n" % CREDENTIAL
+        )
+        r = self._invoke(work, old_sha, new_sha)
+        self.assertNotEqual(r.returncode, 0, "expected a refusal:\n" + self.output(r))
+        # Two candidates, not one: the blob (notes.py) AND the commit's own
+        # message (see push-gate.sh's "why every new COMMIT is scanned" and
+        # CCP-1137R2) -- an exact "1 file(s)" expectation would be wrong by
+        # construction, not merely brittle.
+        self.assertIn("scanned 2 file(s)", self.output(r), self.output(r))
+        self.assertIn("[secret]", self.output(r), self.output(r))
+
+    def test_forcing_server_scope_in_a_client_repo_is_blind_to_the_same_secret(self):
+        """Documents WHY `--server` must never be the default: in the exact
+        same constellation as the test above, `--server` (--not --all)
+        measures zero new commits and ACCEPTS a push that carries a real
+        secret -- the failure this whole item exists to close."""
+        self.write_config(denyNames=["Blorptech"])
+        work, old_sha, new_sha = self._client_repo_with_one_unpushed_commit(
+            "SETTINGS = {\n    %s\n}\n" % CREDENTIAL
+        )
+        r = self._invoke(work, old_sha, new_sha, extra_args=["--server"])
+        self.assertEqual(r.returncode, 0, self.output(r))
+        self.assertIn("no content-bearing paths in this push", self.output(r))
+
+    def test_an_unrecognized_argument_is_refused_loudly(self):
+        self.write_config(denyNames=["Blorptech"])
+        work, old_sha, new_sha = self._client_repo_with_one_unpushed_commit(CLEAN_TEXT)
+        r = self._invoke(work, old_sha, new_sha, extra_args=["--bogus"])
+        self.assertNotEqual(r.returncode, 0, self.output(r))
+        self.assertIn("--bogus", self.output(r))
+
+    def test_a_second_argument_is_also_refused_loudly(self):
+        # The die message in push-gate.sh promises "at most one argument" --
+        # a second, otherwise-valid-looking argument must actually be
+        # refused, not silently dropped by a case pattern that only ever
+        # inspects $1.
+        self.write_config(denyNames=["Blorptech"])
+        work, old_sha, new_sha = self._client_repo_with_one_unpushed_commit(CLEAN_TEXT)
+        r = self._invoke(work, old_sha, new_sha, extra_args=["--server", "extra"])
+        self.assertNotEqual(r.returncode, 0, self.output(r))
+
+
+# ---------------------------------------------------------------------------
+# CCP-1137R3 review follow-up -- push-gate.sh's own header claims that
+# forgetting `--server` on THIS repo's bare, remote-less server layout fails
+# toward "scans more", never toward "scans less/blind" (see the asymmetry
+# rationale). That claim was prose-only until now: every other test in this
+# file installs the hook via `install_hook()`'s `server_mode=True` default,
+# so none of them ever ran the omitted-flag path against a real bare repo.
+# ---------------------------------------------------------------------------
+class OmittingServerFlagOnABareRepoScansMoreNotLessTest(PushGateTestBase):
+    def test_omitting_server_widens_the_scan_instead_of_narrowing_it(self):
+        self.write_config(denyNames=["Blorptech"])
+        # server_mode=False: the shim "forgets" --server, the exact
+        # deploy mistake the header describes.
+        self.install_hook(server_mode=False)
+        work = self.clone_work()
+        self.write(work, "docs/notes.md", CLEAN_TEXT)
+        self.commit_all(work)
+        r = self.push(work)
+        self.assertEqual(r.returncode, 0, self.output(r))
+        # A bare repo configures no remotes of its own, so `--not --remotes`
+        # (reached here because --server was omitted) excludes nothing --
+        # BOTH the seed commit `_seed_bare_repo` already landed on `main`
+        # AND this push's own new commit are "new" from that scope's own
+        # point of view, unlike `--server`'s `--not --all`, which would have
+        # excluded the seed commit as already reachable via the pre-move
+        # ref. Two commits, one blob + one commit-message candidate each --
+        # asserting the exact count (not just "still accepted") is what
+        # proves the scan widened rather than merely "still worked by luck".
+        self.assertIn("scanned 4 file(s)", self.hook_output(r), self.output(r))
 
 
 if __name__ == "__main__":
