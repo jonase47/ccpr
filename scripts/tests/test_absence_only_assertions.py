@@ -891,7 +891,7 @@ class NoStaleKnownFindingsTest(unittest.TestCase):
 
 class ClassificationCountsTest(unittest.TestCase):
     def test_classification_counts(self):
-        """Regression pin on the measured baseline: 1290 `test_*` methods
+        """Regression pin on the measured baseline: 1292 `test_*` methods
         across the corpus call something shaped like a subprocess invocation
         and are therefore in scope for this check; 0 of those are currently
         absence-only-needs-exemption -- `KNOWN_FINDINGS` above is empty for
@@ -905,6 +905,20 @@ class ClassificationCountsTest(unittest.TestCase):
         growing paragraph:
 
           in-scope / flagged   when
+          1292 / 0             03.09.2026 (CCP-1137, third-round review
+                               fixes): +2 from the same
+                               scripts/tests/test_install_push_gate_hook.py
+                               -- ExistingHookIsASymlinkRefusesInstallTest
+                               and BackupNameCollisionRefusesRatherThan
+                               OverwritesTest each call `self.run_installer
+                               (...)` directly in their own method body
+                               (matches `RUN_HELPER_RE`), confirmed via
+                               scan_tree() directly rather than assumed from
+                               the two new class names alone. Neither is
+                               flagged: each carries assertEqual/assertNotEqual
+                               on the subprocess returncode plus a positive
+                               state assertion (file content, symlink-ness,
+                               backup-glob emptiness).
           1290 / 0             03.09.2026 (CCP-1137R3, Auflage 2): +4 from
                                the new scripts/tests/test_install_push_gate_
                                hook.py -- NotAGitRepoRefusesInstallTest,
@@ -1663,7 +1677,7 @@ class ClassificationCountsTest(unittest.TestCase):
         count."""
         recs = scan_tree()
         flagged = [r for r in recs if r.disposition in NEEDS_EXEMPTION]
-        self.assertEqual(1290, len(recs))
+        self.assertEqual(1292, len(recs))
         self.assertEqual(0, len(flagged))
 
 
