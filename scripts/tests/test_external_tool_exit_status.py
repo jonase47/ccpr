@@ -1201,7 +1201,7 @@ class ExternalToolExitStatusTest(unittest.TestCase):
         by_disposition = {}
         for inv in invocations:
             by_disposition[inv.disposition] = by_disposition.get(inv.disposition, 0) + 1
-        self.assertEqual(167, len(invocations))
+        self.assertEqual(169, len(invocations))
         self.assertEqual(
             {
                 # 28.08.2026, open-findings wave 1a: one invocation moved
@@ -1232,7 +1232,30 @@ class ExternalToolExitStatusTest(unittest.TestCase):
                 # above for the per-invocation breakdown.
                 # 03.09.2026 (CCP-1137): +6 total for scripts/push-gate.sh --
                 # see this test's own docstring entry immediately above.
-                "checked-condition": 32,
+                # 03.09.2026 (CCP-1137, round 2): +2 total, net, for
+                # scripts/push-gate.sh -- ref-name/commit-message/tag-
+                # payload scanning added four new `git`/`awk` invocations
+                # (`git cat-file -t`, `git cat-file tag`, `git log -1
+                # --format=%B`, and an `awk` header-strip on the tag
+                # payload), each tested directly by its own `if !
+                # ...; then` guard (`checked-condition` +4 gross); removing
+                # the commit-cap tip-diff fallback (the cap now refuses the
+                # push outright instead) deleted TWO invocations, a `git
+                # diff-tree` tested by its own `if !` guard
+                # (`checked-condition` -1, net +3 for this bucket) and the
+                # empty-tree `git hash-object -t tree --stdin` bare
+                # assignment marked `set-e-sufficient` (`bare-needs-
+                # exemption` -1); one MORE `git cat-file -t` was reshaped
+                # from a checked `if ! VAR="$(...)"; then` guard (a shape
+                # this scanner's backward walk does not recognise as
+                # governed by the `if`, measured directly: it classified it
+                # `bare-needs-exemption` all the same) into the SAME bare
+                # `set-e-sufficient` shape `size="$(git cat-file -s
+                # "$sha")"` already uses (`checked-condition` -1,
+                # `bare-needs-exemption` +1). Net for scripts/push-gate.sh:
+                # `checked-condition` +2 (169 total), `bare-needs-exemption`
+                # unchanged.
+                "checked-condition": 34,
                 "checked-captured": 5,
                 "checked-chain": 14,
                 "discard-needs-exemption": 41,

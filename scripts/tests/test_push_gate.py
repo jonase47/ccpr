@@ -112,6 +112,13 @@ class PushGateTestBase(unittest.TestCase):
     """A push fixture: a real local bare repo with push-gate.sh installed as
     its pre-receive hook, driven by a real `git push` from a real clone."""
 
+    # Overridden to False by the one test class that needs a bare repo with
+    # literally zero refs at push time -- _seed_bare_repo() always lands one
+    # commit on `main` BEFORE the hook is installed (a plausible pre-existing
+    # shared repo), so the genuinely-empty-repo shape is unreachable through
+    # the ordinary fixture and must be opted out of explicitly.
+    SEED_BARE_REPO = True
+
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(prefix="ccpr-push-gate-"))
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
@@ -140,7 +147,10 @@ class PushGateTestBase(unittest.TestCase):
         self.gate_config = self.tmp / "gate-config.json"
 
         self.remote = self.tmp / "remote.git"
-        self._seed_bare_repo()
+        r = self._git("init", "--quiet", "--bare", "--initial-branch=main", self.remote)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        if self.SEED_BARE_REPO:
+            self._seed_bare_repo()
 
         self._work_counter = 0
 
@@ -160,9 +170,15 @@ class PushGateTestBase(unittest.TestCase):
 
         git's own object model has no opinion on path-component semantics
         -- only `git mktree`'s input format -- and a tree entry literally
-        named '..' is accepted without complaint (confirmed directly: a
-        commit built on top of one survives a normal `git push`, even with
-        `receive.fsckObjects=true` set on the receiving bare repo).
+        named '..' is accepted without complaint by `git mktree`. Git's OWN
+        fsck DOES reject it (confirmed directly: with
+        `receive.fsckObjects=true` set on the receiving bare repo, the push
+        fails with "hasDotdot: contains '..'"). `receive.fsckObjects`
+        defaults to false and is unset on the deployment this hook actually
+        runs on, so a commit built on top of one survives a normal
+        `git push` there -- `push-gate.sh`'s own `is_unsafe_repo_path()` is
+        the only active guard, matching the corrected comment at the top of
+        that function.
         `git diff-tree` then reports the PATH field as an innocuous-
         looking string, e.g. `subdir/../secret.txt` for `dotdot_levels=1`
         -- exactly the shape a naive `mkdir -p "$(dirname "$dest")"` +
@@ -192,12 +208,123 @@ class PushGateTestBase(unittest.TestCase):
         self.assertEqual(commit.returncode, 0, commit.stderr)
         return commit.stdout.strip()
 
+    def craft_traversal_commit_with_parts(self, repo, path_parts, parent="HEAD"):
+        """Raw-plumbing commit whose tree encodes EXACTLY `path_parts`, the
+        innermost (last) component always the leaf.
+
+        `craft_path_traversal_commit` above always wraps its '..' component
+        in an outer "subdir" tree, so it can only ever exercise the middle
+        `*/../*` arm of `is_unsafe_repo_path`'s case pattern. This builds
+        the tree bottom-up from an arbitrary component list instead, so a
+        caller can hit the standalone `..`, leading `../*`, or trailing
+        `*/..` arms too -- a case pattern narrowed to only the middle
+        alternative would stay green against the existing tests and red
+        only here.
+        """
+        blob = self._git("hash-object", "-w", "--stdin", cwd=repo, input="evil content\n")
+        self.assertEqual(blob.returncode, 0, blob.stderr)
+        leaf = self._git(
+            "mktree", cwd=repo,
+            input="100644 blob %s\t%s\n" % (blob.stdout.strip(), path_parts[-1]),
+        )
+        self.assertEqual(leaf.returncode, 0, leaf.stderr)
+        current = leaf.stdout.strip()
+        for comp in reversed(path_parts[:-1]):
+            wrapped = self._git("mktree", cwd=repo, input="040000 tree %s\t%s\n" % (current, comp))
+            self.assertEqual(wrapped.returncode, 0, wrapped.stderr)
+            current = wrapped.stdout.strip()
+
+        parent_sha = self._git("rev-parse", parent, cwd=repo)
+        self.assertEqual(parent_sha.returncode, 0, parent_sha.stderr)
+
+        commit = self._git(
+            "commit-tree", current, "-p", parent_sha.stdout.strip(), "-m", "evil", cwd=repo,
+        )
+        self.assertEqual(commit.returncode, 0, commit.stderr)
+        return commit.stdout.strip()
+
+    def craft_gitlink_commit(self, repo, name="submod", parent="HEAD"):
+        """Raw-plumbing commit adding one gitlink (mode 160000) tree entry,
+        the shape a submodule reference takes -- pointing at a commit sha
+        that does NOT exist in this repository's own object store (exactly
+        like a real submodule reference, whose commit lives in a different
+        repository). Used to prove the mode-160000 skip in
+        process_diff_tree_records happens BEFORE anything tries to read a
+        blob for it -- doing so would fail, since no such blob exists here.
+        """
+        fake_commit_sha = "a" * 40
+        tree = self._git(
+            "mktree", cwd=repo, input="160000 commit %s\t%s\n" % (fake_commit_sha, name)
+        )
+        self.assertEqual(tree.returncode, 0, tree.stderr)
+
+        parent_sha = self._git("rev-parse", parent, cwd=repo)
+        self.assertEqual(parent_sha.returncode, 0, parent_sha.stderr)
+
+        commit = self._git(
+            "commit-tree", tree.stdout.strip(), "-p", parent_sha.stdout.strip(),
+            "-m", "add submodule reference", cwd=repo,
+        )
+        self.assertEqual(commit.returncode, 0, commit.stderr)
+        return commit.stdout.strip()
+
+    def craft_merge_commit(self, repo, leak_in_resolution=None):
+        """Two branches that CONFLICT on the same file, merged with the
+        conflict resolved by writing entirely new content that appears in
+        NEITHER parent's own tree.
+
+        A merge whose two sides touch DIFFERENT files does not isolate
+        `--root -m`'s own effect: every commit `git rev-list` finds --
+        including each SIDE commit, independent of merge topology -- is
+        diffed on its own via the main per-commit loop regardless of
+        whether the merge commit's own diff-tree call carries `-m` at
+        all, so a leak planted in a side commit is caught by THAT
+        commit's own diff either way (measured: an earlier version of
+        this fixture, with the leak in a side commit's own new file,
+        stayed GREEN even with `-m` removed from the merge's diff-tree
+        call -- it proved nothing about the flag). Only content
+        introduced during CONFLICT RESOLUTION -- committed as part of the
+        merge commit ITSELF, never appearing in any single parent's own
+        tree -- is exclusively visible through the merge commit's own
+        `-m` diff.
+        """
+        self._git("checkout", "-q", "-b", "merge-side-a", cwd=repo)
+        self.write(repo, "shared.md", "side A content\n")
+        self.commit_all(repo, "side a")
+
+        self._git("checkout", "-q", "-b", "merge-side-b", "main", cwd=repo)
+        self.write(repo, "shared.md", "side B content\n")
+        self.commit_all(repo, "side b")
+
+        self._git("checkout", "-q", "merge-side-a", cwd=repo)
+        merge = self._git("merge", "--no-ff", "--no-edit", "merge-side-b", cwd=repo)
+        self.assertNotEqual(
+            merge.returncode, 0,
+            "expected a conflict to resolve by hand:\n" + merge.stdout + merge.stderr,
+        )
+
+        resolution = "resolved content\n" if leak_in_resolution is None else leak_in_resolution
+        self.write(repo, "shared.md", resolution)
+        add = self._git("add", "shared.md", cwd=repo)
+        self.assertEqual(add.returncode, 0, add.stderr)
+        commit = self._git("commit", "--no-edit", cwd=repo)
+        self.assertEqual(commit.returncode, 0, commit.stderr)
+        merge_sha = self._git("rev-parse", "HEAD", cwd=repo)
+        self.assertEqual(merge_sha.returncode, 0, merge_sha.stderr)
+
+        # Still on merge-side-a here, so moving "main" (not the checked-out
+        # branch) is a plain fast-moving ref update, not a "force update the
+        # current branch" refusal.
+        self._git("branch", "-f", "main", "merge-side-a", cwd=repo)
+        self._git("checkout", "-q", "main", cwd=repo)
+        return merge_sha.stdout.strip()
+
     def _seed_bare_repo(self):
-        """A bare repo with one commit on `main`, pushed BEFORE the hook is
-        installed -- a plausible pre-existing shared repo, not itself
-        subject to this suite's gate."""
-        r = self._git("init", "--quiet", "--bare", "--initial-branch=main", self.remote)
-        self.assertEqual(r.returncode, 0, r.stderr)
+        """One commit landed on `main`, pushed BEFORE the hook is installed
+        -- a plausible pre-existing shared repo, not itself subject to this
+        suite's gate. The bare repo itself is already created by setUp;
+        skipped entirely when SEED_BARE_REPO is False, leaving self.remote
+        with genuinely zero refs at hook-install time."""
         seed = self.tmp / "seed"
         self.assertEqual(
             self._git("init", "--quiet", "--initial-branch=main", seed).returncode, 0
@@ -326,6 +453,24 @@ class PushGateTestBase(unittest.TestCase):
     @staticmethod
     def output(result):
         return result.stdout + result.stderr
+
+    @staticmethod
+    def hook_output(result):
+        """Only the lines the SERVER side (this hook) actually emitted --
+        `git push` relays them client-side prefixed "remote: ". This is
+        deliberately narrower than `output()`: git's own LOCAL porcelain
+        (e.g. "! [remote rejected] <local-refspec> -> ... (pre-receive hook
+        declined)") echoes back the refspec the caller typed on their own
+        command line -- unavoidably, since the pusher already knows the ref
+        name they asked to push -- and is not something this hook emits or
+        controls. A redaction promise only ever covers text this hook
+        itself produces, the text that would actually reach a downstream
+        server-side log.
+        """
+        out = PushGateTestBase.output(result)
+        return "\n".join(
+            line for line in out.splitlines() if line.startswith("remote:")
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -579,17 +724,40 @@ class BranchDeletionIsAllowedTest(PushGateTestBase):
 
 
 # ---------------------------------------------------------------------------
-# 10. K6.1 -- a push containing only a binary file ends in `scanned == 0`
-#     inside artifact-gate.sh, which is a DELIBERATELY accepted false
+# 10. K6.1 -- a push containing only a binary file used to end in
+#     `scanned == 0` inside artifact-gate.sh, a DELIBERATELY accepted false
 #     reject (PO decision E3), not a bug to work around.
+#
+#     CCP-1137R2 note, flagged rather than resolved (see push-gate.sh's own
+#     header, "two FORMER accepted false-rejects"): a commit's own message
+#     is now an UNCONDITIONAL scan candidate, so `scanned` is no longer 0
+#     for this shape once the commit carries any message at all -- the
+#     push below is now ACCEPTED where it used to be refused. The binary
+#     file's own CONTENT is still never verified; only the message is.
+#     Whether that still satisfies "nothing scanned is not a pass" is a
+#     decision for the PO, not settled here -- the second test below is
+#     the control that keeps proving the message itself is still checked.
 # ---------------------------------------------------------------------------
 class BinaryOnlyPushTest(PushGateTestBase):
-    def test_a_push_containing_only_a_binary_file_is_rejected(self):
+    def test_a_binary_only_push_with_a_clean_commit_message_is_now_accepted(self):
         self.write_config(denyNames=["Blorptech"])
         self.install_hook()
         work = self.clone_work()
         self.write_bytes(work, "assets/blob.bin", bytes(range(256)))
-        sha = self.commit_all(work)
+        self.commit_all(work)  # default "x" message: clean under both profiles
+        r = self.push(work)
+        self.assertEqual(r.returncode, 0, self.output(r))
+        self.assertIn("binary file(s) skipped", self.output(r))
+
+    def test_a_binary_only_push_with_a_dirty_commit_message_is_still_rejected(self):
+        # Control: the binary file's content is not what caught this --
+        # the message is, same property CommitMessageIsScannedTest already
+        # pins, checked again at this specific binary-only shape.
+        self.write_config(denyNames=["Blorptech"])
+        self.install_hook()
+        work = self.clone_work()
+        self.write_bytes(work, "assets/blob.bin", bytes(range(256)))
+        sha = self.commit_all(work, "SETTINGS = {\n    %s\n}\n" % CREDENTIAL)
         before = self.remote_state()
         r = self.push(work)
         self.assertNotEqual(r.returncode, 0, "expected a refusal:\n" + self.output(r))
@@ -641,6 +809,194 @@ class Bash32Test(PushGateTestBase):
         r = self.push(work)
         self.assertEqual(r.returncode, 0, self.output(r))
         self.assertNotIn("unbound variable", self.output(r).lower(), self.output(r))
+
+
+# ---------------------------------------------------------------------------
+# 13. CCP-1137R2 -- a deny name planted ONLY in the ref/branch NAME (clean
+#     file content otherwise) never crossed `git diff-tree` and was accepted
+#     silently. The refusal itself must not print the name either, the same
+#     discipline the content- and path-deny refusals already carry.
+# ---------------------------------------------------------------------------
+class RefNameDenyIsRejectedTest(PushGateTestBase):
+    def test_a_deny_name_in_the_branch_name_is_rejected_with_clean_content(self):
+        self.write_config(denyNames=[DENY_NAME])
+        self.install_hook()
+        work = self.clone_work()
+        self.write(work, "docs/notes.md", CLEAN_TEXT)
+        sha = self.commit_all(work)
+        self._git("branch", "-f", "%s-migration-plan" % DENY_NAME, "HEAD", cwd=work)
+        before = self.remote_state()
+        r = self.push(work, refspec="%s-migration-plan" % DENY_NAME)
+        self.assertNotEqual(r.returncode, 0, "expected a refusal:\n" + self.output(r))
+        self.assert_nothing_published(before, planted_sha=sha, result=r)
+
+    def test_the_refusal_does_not_print_the_configured_name(self):
+        # Scoped to hook_output(), not output(): git's OWN local porcelain
+        # ("! [remote rejected] <local-refspec> -> ...") echoes back the
+        # refspec the test itself typed on the push command line -- outside
+        # this hook's control, and not the shape of leak a server-side log
+        # (what hook_output() isolates) would ever carry.
+        self.write_config(denyNames=[DENY_NAME])
+        self.install_hook()
+        work = self.clone_work()
+        self.write(work, "docs/notes.md", CLEAN_TEXT)
+        sha = self.commit_all(work)
+        self._git("branch", "-f", "%s-migration-plan" % DENY_NAME, "HEAD", cwd=work)
+        before = self.remote_state()
+        r = self.push(work, refspec="%s-migration-plan" % DENY_NAME)
+        self.assertNotEqual(r.returncode, 0, "expected a refusal:\n" + self.output(r))
+        self.assert_nothing_published(before, planted_sha=sha, result=r)
+        self.assertNotIn(DENY_NAME.lower(), self.hook_output(r).lower(), self.hook_output(r))
+
+    def test_a_clean_branch_name_with_clean_content_is_still_accepted(self):
+        # Control: the ref-name check must not fire on an ordinary name.
+        self.write_config(denyNames=[DENY_NAME])
+        self.install_hook()
+        work = self.clone_work()
+        self.write(work, "docs/notes.md", CLEAN_TEXT)
+        self.commit_all(work)
+        self._git("branch", "-f", "feature-ordinary", "HEAD", cwd=work)
+        r = self.push(work, refspec="feature-ordinary")
+        self.assertEqual(r.returncode, 0, self.output(r))
+
+
+# ---------------------------------------------------------------------------
+# 14. CCP-1137R2 -- a leak planted ONLY in a commit's own MESSAGE (clean
+#     file content otherwise) never crossed `git diff-tree` and was accepted
+#     silently.
+# ---------------------------------------------------------------------------
+class CommitMessageIsScannedTest(PushGateTestBase):
+    def test_a_secret_shape_in_the_commit_message_is_rejected(self):
+        self.write_config(denyNames=["Blorptech"])
+        self.install_hook()
+        work = self.clone_work()
+        self.write(work, "docs/notes.md", CLEAN_TEXT)
+        sha = self.commit_all(work, "internal memo for %s\n\n%s" % (DENY_NAME, CREDENTIAL))
+        before = self.remote_state()
+        r = self.push(work)
+        self.assertNotEqual(r.returncode, 0, "expected a refusal:\n" + self.output(r))
+        self.assert_nothing_published(before, planted_sha=sha, result=r)
+
+    def test_a_deny_name_in_the_commit_message_is_rejected_with_clean_content(self):
+        self.write_config(denyNames=[DENY_NAME])
+        self.install_hook()
+        work = self.clone_work()
+        self.write(work, "docs/notes.md", CLEAN_TEXT)
+        sha = self.commit_all(work, "internal memo for %s migration project" % DENY_NAME)
+        before = self.remote_state()
+        r = self.push(work)
+        self.assertNotEqual(r.returncode, 0, "expected a refusal:\n" + self.output(r))
+        self.assert_nothing_published(before, planted_sha=sha, result=r)
+
+
+# ---------------------------------------------------------------------------
+# 15. CCP-1137R2 -- an annotated tag's own PAYLOAD (message) never crossed
+#     `git diff-tree` and was accepted silently, in both shapes: a tag on a
+#     commit this push does NOT introduce (rev-list finds zero new commits,
+#     so no sub-gate ran at all) and a tag on a commit this push DOES
+#     introduce (the commit's own content was scanned, the tag's own
+#     message never was).
+# ---------------------------------------------------------------------------
+class TagPayloadIsScannedTest(PushGateTestBase):
+    def test_a_deny_name_in_a_tag_on_an_already_published_commit_is_rejected(self):
+        self.write_config(denyNames=[DENY_NAME])
+        self.install_hook()
+        work = self.clone_work()
+        # No new commit: the tag names a commit main already carries on the
+        # remote (the seeded "init" commit) -- rev-list finds nothing new.
+        tag = self._git(
+            "tag", "-a", "release-note", "-m",
+            "notes for the %s migration" % DENY_NAME, "main", cwd=work,
+        )
+        self.assertEqual(tag.returncode, 0, tag.stderr)
+        before = self.remote_state()
+        r = self.push(work, refspec="release-note")
+        self.assertNotEqual(r.returncode, 0, "expected a refusal:\n" + self.output(r))
+        self.assertEqual(self.remote_state(), before, "the shared repo moved")
+
+    def test_a_deny_name_in_a_tag_on_a_new_commit_in_this_push_is_rejected(self):
+        self.write_config(denyNames=[DENY_NAME])
+        self.install_hook()
+        work = self.clone_work()
+        self.write(work, "docs/notes.md", CLEAN_TEXT)
+        sha = self.commit_all(work, "add notes")
+        tag = self._git(
+            "tag", "-a", "release-note", "-m",
+            "notes for the %s migration" % DENY_NAME, "HEAD", cwd=work,
+        )
+        self.assertEqual(tag.returncode, 0, tag.stderr)
+        before = self.remote_state()
+        r = self._git("push", self.remote, "main", "release-note", cwd=work)
+        self.assertNotEqual(r.returncode, 0, "expected a refusal:\n" + self.output(r))
+        self.assert_nothing_published(before, planted_sha=sha, result=r)
+
+    def test_a_clean_annotated_tag_on_an_already_published_commit_is_accepted(self):
+        # Control, and closes the "tag push" shape of the coverage gap: a
+        # genuinely clean annotated tag must still go through.
+        self.write_config(denyNames=["Blorptech"])
+        self.install_hook()
+        work = self.clone_work()
+        tag = self._git("tag", "-a", "v1", "-m", "first release", "main", cwd=work)
+        self.assertEqual(tag.returncode, 0, tag.stderr)
+        r = self.push(work, refspec="v1")
+        self.assertEqual(r.returncode, 0, self.output(r))
+        tags = self._git("tag", cwd=self.remote)
+        self.assertIn("v1", tags.stdout.splitlines())
+
+
+# ---------------------------------------------------------------------------
+# 18. PO decision -- above PUSH_GATE_MAX_COMMITS, the push is now refused
+#     OUTRIGHT rather than degraded to a tip-only diff. Pins the boundary
+#     (`-gt`, not `-ge`) and the exact attack the degrade-instead-of-refuse
+#     shape used to miss: a secret planted in commit N and removed in N+1,
+#     spanning a range ABOVE the cap.
+# ---------------------------------------------------------------------------
+class CommitCapExceededRejectsPushTest(PushGateTestBase):
+    def test_a_push_exceeding_the_commit_cap_is_rejected_outright(self):
+        self.write_config(denyNames=["Blorptech"])
+        self.install_hook(max_commits=1)
+        work = self.clone_work()
+        self.write(work, "docs/a.md", CLEAN_TEXT)
+        sha1 = self.commit_all(work, "a")
+        self.write(work, "docs/b.md", CLEAN_TEXT)
+        sha2 = self.commit_all(work, "b")
+        before = self.remote_state()
+        r = self.push(work)
+        self.assertNotEqual(r.returncode, 0, "expected a refusal:\n" + self.output(r))
+        self.assert_nothing_published(before, planted_sha=sha2, result=r)
+        self.assertFalse(self.object_exists(sha1))
+
+    def test_a_plant_then_remove_shape_above_the_cap_is_rejected_by_the_cap_itself(self):
+        self.write_config(denyNames=["Blorptech"])
+        self.install_hook(max_commits=1)
+        work = self.clone_work()
+        self.write(work, "fixtures/data.py", "SETTINGS = {\n    %s\n}\n" % CREDENTIAL)
+        planted_sha = self.commit_all(work, "plant")
+        (work / "fixtures" / "data.py").unlink()
+        self.commit_all(work, "remove")
+
+        net_diff = self._git("diff", "--name-only", "origin/main", "HEAD", cwd=work)
+        self.assertEqual(net_diff.returncode, 0, net_diff.stderr)
+        self.assertNotIn("fixtures/data.py", net_diff.stdout)
+
+        before = self.remote_state()
+        r = self.push(work)
+        self.assertNotEqual(r.returncode, 0, "expected a refusal:\n" + self.output(r))
+        self.assert_nothing_published(before, planted_sha=planted_sha, result=r)
+
+    def test_a_push_at_exactly_the_cap_is_still_scanned_normally(self):
+        # Boundary control: the cap is exclusive ("-gt"), so a push carrying
+        # EXACTLY the configured number of commits is not refused for that
+        # reason.
+        self.write_config(denyNames=["Blorptech"])
+        self.install_hook(max_commits=2)
+        work = self.clone_work()
+        self.write(work, "docs/a.md", CLEAN_TEXT)
+        self.commit_all(work, "a")
+        self.write(work, "docs/b.md", CLEAN_TEXT)
+        self.commit_all(work, "b")
+        r = self.push(work)
+        self.assertEqual(r.returncode, 0, self.output(r))
 
 
 if __name__ == "__main__":
