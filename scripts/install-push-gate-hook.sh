@@ -166,12 +166,18 @@ fi
 #     own header states for its two sub-gates).
 #   * A FIRST push into an empty remote has <remote sha1> = 40 zeros. That
 #     becomes push-gate.sh's `oldrev` -- which push-gate.sh never actually
-#     reads for anything beyond its own blank-line skip (confirmed: `grep
-#     -n oldrev push-gate.sh` has exactly two hits, the header comment and
-#     the `read` + empty-check line). The commit-reachability scope is
-#     computed from `newrev` alone (`git rev-list "$newrev" --not
-#     <scope>`), so an all-zero oldrev needs no translation here either --
-#     it is inert by construction, not by an added guard.
+#     reads for anything beyond its own blank-line skip. Confirmed at the
+#     CODE level, not by a raw text search: `oldrev` is a live shell
+#     variable on exactly two lines in push-gate.sh (the `read` statement
+#     and the blank-check right after it) -- its own header comments
+#     mention the same word in prose besides those two lines, so a plain
+#     `grep -n oldrev push-gate.sh` line count also picks those up and
+#     will drift every time either file's header prose changes. Re-verify
+#     against the two USAGE lines directly, not a text-search count. The
+#     commit-reachability scope is computed from `newrev` alone
+#     (`git rev-list "$newrev" --not <scope>`), so an all-zero oldrev
+#     needs no translation here either -- it is inert by construction,
+#     not by an added guard.
 TMP_REFS="$(mktemp -t push-gate-refs.XXXXXX)"
 trap 'rm -f "${TMP_REFS}"' EXIT
 
