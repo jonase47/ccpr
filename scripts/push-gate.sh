@@ -121,6 +121,33 @@ TAB="$(printf '\t')"
 CANDIDATES="$TMP/candidates"
 : > "$CANDIDATES"
 
+# is_unsafe_repo_path <path> — true when <path>, later joined onto
+# "$SCANDIR/<n>/" and handed to `mkdir -p`/`git cat-file blob >`, could
+# write outside its own scan sandbox.
+#
+# git's tree object format has no opinion on path-COMPONENT semantics: a
+# single tree entry literally named ".." is accepted without complaint by
+# `git mktree`, and a commit built on one survives a normal `git push` —
+# confirmed directly, including with `receive.fsckObjects=true` set on the
+# receiving repository. `git diff-tree`'s own path field then reads back
+# as an ordinary-looking string, e.g. `subdir/../secret.txt`, which this
+# script would otherwise hand straight to `mkdir -p "$(dirname "$dest")"`
+# and `git cat-file blob "$sha" > "$dest"` — a real, exploitable escape
+# from the scan sandbox, bounded only by the filesystem permissions of
+# whichever account runs the hook, and reachable BEFORE either sub-gate
+# ever sees the content. Refused outright (the whole push, not just this
+# one candidate) rather than skipped-and-continued: a tree entry shaped
+# like this has no legitimate reason to exist in a push, so it is treated
+# as its own finding, not a benign feature to route around the way a
+# gitlink is.
+is_unsafe_repo_path() {
+  case "$1" in
+    /*) return 0 ;;
+    ..|../*|*/..|*/../*) return 0 ;;
+  esac
+  return 1
+}
+
 # process_diff_tree_records <file> — read NUL-terminated raw `git diff-tree
 # -z` records (meta, path pairs; see the two invocations below) from <file>
 # and append "<sha><TAB><path>\0" to $CANDIDATES for every entry whose mode
@@ -143,11 +170,27 @@ process_diff_tree_records() {
           "$PROG" "$path"
       continue
     fi
+    if is_unsafe_repo_path "$path"; then
+      die "refusing this push: a tree entry's path escapes its own tree ($path) — never a legitimate shape, always refused rather than routed around"
+    fi
     printf '%s%s%s\0' "$newsha" "$TAB" "$path" >> "$CANDIDATES"
   done < "$f"
 }
 
-# --- read the pre-receive protocol from stdin ---------------------------------
+# Both `git diff-tree` invocations below pass `--no-renames` deliberately,
+# even though `process_diff_tree_records` was ALREADY correct without it —
+# git's own docs on `diff.renames` are explicit that the config default
+# "affects only git diff Porcelain like git-diff(1) and git-log(1), and
+# not lower level commands such as git-diff-files(1)" (git-diff-tree is
+# the same class of lower-level command; confirmed directly, not just
+# read: setting `diff.renames = true` in this repository's own config and
+# diffing a renamed file through `git diff-tree` — with neither `-M` nor
+# `--find-renames` on the command line — still produced a plain
+# delete+add pair, never an R-status two-path record). Kept anyway as an
+# explicit, self-evident guarantee rather than a fact a future reader
+# would need this same git-manual paragraph to rediscover: the parser
+# below reads exactly one path per record, and `--no-renames` is what
+# makes that shape true by construction instead of by observed default.
 while read -r oldrev newrev refname; do
   [ -n "${oldrev:-}${newrev:-}${refname:-}" ] || continue
 
@@ -186,7 +229,7 @@ while read -r oldrev newrev refname; do
       # shape the blob-size read below already uses.
       base="$(git hash-object -t tree --stdin < /dev/null)"  # exit-status: exempt set-e-sufficient
     fi
-    if ! git diff-tree -r -z --no-commit-id --diff-filter=ACMRT "$base" "$newrev" \
+    if ! git diff-tree -r -z --no-commit-id --no-renames --diff-filter=ACMRT "$base" "$newrev" \
          > "$TMP/difftree" 2>"$TMP/err"; then
       die "could not compute tip diff for $refname: $(cat "$TMP/err")"
     fi
@@ -194,7 +237,7 @@ while read -r oldrev newrev refname; do
   else
     while IFS= read -r c; do
       [ -n "$c" ] || continue
-      if ! git diff-tree -r -z --no-commit-id --root -m --diff-filter=ACMRT "$c" \
+      if ! git diff-tree -r -z --no-commit-id --root -m --no-renames --diff-filter=ACMRT "$c" \
            > "$TMP/difftree" 2>"$TMP/err"; then
         die "could not compute diff for commit $c ($refname): $(cat "$TMP/err")"
       fi

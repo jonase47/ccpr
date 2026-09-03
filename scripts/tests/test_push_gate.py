@@ -145,12 +145,52 @@ class PushGateTestBase(unittest.TestCase):
         self._work_counter = 0
 
     # --- fixture -----------------------------------------------------
-    def _git(self, *args, cwd=None, env=None):
+    def _git(self, *args, cwd=None, env=None, input=None):
         return subprocess.run(
             ["git", *[str(a) for a in args]],
             cwd=str(cwd) if cwd else None,
             capture_output=True, text=True, env=env or self.env(),
+            input=input,
         )
+
+    def craft_path_traversal_commit(self, repo, dotdot_levels=1, parent="HEAD"):
+        """Raw-plumbing commit whose tree stores one or more literal '..'
+        path components, nested `dotdot_levels` deep, wrapping a blob named
+        `secret.txt`.
+
+        git's own object model has no opinion on path-component semantics
+        -- only `git mktree`'s input format -- and a tree entry literally
+        named '..' is accepted without complaint (confirmed directly: a
+        commit built on top of one survives a normal `git push`, even with
+        `receive.fsckObjects=true` set on the receiving bare repo).
+        `git diff-tree` then reports the PATH field as an innocuous-
+        looking string, e.g. `subdir/../secret.txt` for `dotdot_levels=1`
+        -- exactly the shape a naive `mkdir -p "$(dirname "$dest")"` +
+        `git cat-file blob ... > "$dest"` would happily write through.
+        """
+        blob = self._git("hash-object", "-w", "--stdin", cwd=repo, input="evil content\n")
+        self.assertEqual(blob.returncode, 0, blob.stderr)
+        tree_sha = self._git(
+            "mktree", cwd=repo, input="100644 blob %s\tsecret.txt\n" % blob.stdout.strip()
+        )
+        self.assertEqual(tree_sha.returncode, 0, tree_sha.stderr)
+        current = tree_sha.stdout.strip()
+        for _ in range(dotdot_levels):
+            wrapped = self._git("mktree", cwd=repo, input="040000 tree %s\t..\n" % current)
+            self.assertEqual(wrapped.returncode, 0, wrapped.stderr)
+            current = wrapped.stdout.strip()
+        root = self._git("mktree", cwd=repo, input="040000 tree %s\tsubdir\n" % current)
+        self.assertEqual(root.returncode, 0, root.stderr)
+
+        parent_sha = self._git("rev-parse", parent, cwd=repo)
+        self.assertEqual(parent_sha.returncode, 0, parent_sha.stderr)
+
+        commit = self._git(
+            "commit-tree", root.stdout.strip(), "-p", parent_sha.stdout.strip(),
+            "-m", "evil", cwd=repo,
+        )
+        self.assertEqual(commit.returncode, 0, commit.stderr)
+        return commit.stdout.strip()
 
     def _seed_bare_repo(self):
         """A bare repo with one commit on `main`, pushed BEFORE the hook is
@@ -309,8 +349,15 @@ class PlantedDenyNameInContentIsRejectedTest(PushGateTestBase):
         self.install_hook()
         work = self.clone_work()
         self.write(work, "notes.py", "# customer note: %s uses this system\n" % DENY_NAME)
-        self.commit_all(work)
+        sha = self.commit_all(work)
+        before = self.remote_state()
         r = self.push(work)
+        # A refusal is the premise this test's own name is about, not
+        # something to take on faith from the sibling test above -- without
+        # this, a regression that made the redaction path run on an
+        # ACCEPTED push would still read as a name-absence pass here.
+        self.assertNotEqual(r.returncode, 0, "expected a refusal:\n" + self.output(r))
+        self.assert_nothing_published(before, planted_sha=sha, result=r)
         self.assertNotIn(DENY_NAME.lower(), self.output(r).lower(), self.output(r))
 
 
@@ -402,6 +449,42 @@ class MidPushCommitIsScannedTest(PushGateTestBase):
         r = self.push(work)
         self.assertNotEqual(r.returncode, 0, "expected a refusal:\n" + self.output(r))
         self.assert_nothing_published(before, planted_sha=planted_sha, result=r)
+
+
+# ---------------------------------------------------------------------------
+# 5b. A git tree entry can be literally named '..' -- git's own object
+#     model has no opinion on path-component semantics, only `git mktree`'s
+#     input format (see PushGateTestBase.craft_path_traversal_commit for
+#     how this was confirmed reachable through a real `git push`, even with
+#     `receive.fsckObjects=true`). `git diff-tree` then reports the PATH
+#     field as an innocuous-looking string, e.g. `subdir/../secret.txt` --
+#     exactly the shape a materialization step that trusts the path string
+#     could write outside its own scan sandbox with.
+# ---------------------------------------------------------------------------
+class PathTraversalInTheTreeIsRejectedTest(PushGateTestBase):
+    def test_a_tree_entry_named_dotdot_is_rejected(self):
+        self.write_config(denyNames=["Blorptech"])
+        self.install_hook()
+        work = self.clone_work()
+        sha = self.craft_path_traversal_commit(work, dotdot_levels=1)
+        self._git("branch", "-f", "evil-branch", sha, cwd=work)
+        before = self.remote_state()
+        r = self.push(work, refspec="evil-branch")
+        self.assertNotEqual(r.returncode, 0, "expected a refusal:\n" + self.output(r))
+        self.assert_nothing_published(before, planted_sha=sha, result=r)
+
+    def test_a_deeply_nested_traversal_is_rejected_too(self):
+        # Not just the single-level shape above: a guard that merely
+        # special-cased "exactly one '..' segment" would miss this.
+        self.write_config(denyNames=["Blorptech"])
+        self.install_hook()
+        work = self.clone_work()
+        sha = self.craft_path_traversal_commit(work, dotdot_levels=6)
+        self._git("branch", "-f", "evil-branch", sha, cwd=work)
+        before = self.remote_state()
+        r = self.push(work, refspec="evil-branch")
+        self.assertNotEqual(r.returncode, 0, "expected a refusal:\n" + self.output(r))
+        self.assert_nothing_published(before, planted_sha=sha, result=r)
 
 
 # ---------------------------------------------------------------------------
