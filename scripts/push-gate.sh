@@ -119,6 +119,24 @@
 # toward less" rule PUSH_GATE_MAX_COMMITS's own refuse-outright-above-the-
 # cap decision already follows.
 #
+# What the client-safe default does NOT reach: `--not --remotes` unions
+# EVERY `refs/remotes/*` this clone knows about, not only the remote-
+# tracking ref of the actual push TARGET. A commit already pushed to one
+# remote but never to a second one falls out of scope on the very first
+# push to that second remote (0 new commits scanned), because the FIRST
+# remote's own remote-tracking ref already reaches it — reproduced
+# directly, and it needs no adversarial setup: any ordinary fork+upstream
+# or mirror layout with more than one configured remote hits this on a
+# normal push. `--not "$oldrev"` (the pre-push stdin line's own
+# <remote-sha> field — exactly the pushed-to remote's prior state for THIS
+# ref) would close it precisely, but is deliberately not built here: this
+# scope computation has already been touched three times in this item,
+# each change needing its own mutation probe, and the path it narrows is
+# explicitly FAST FEEDBACK ONLY (see install-push-gate-hook.sh's own
+# header) — never the enforcement boundary. The SERVER side is unaffected:
+# `--server` computes scope from `--not --all`, not `--not --remotes`, and
+# a bare pre-receive repository has no `refs/remotes/*` to begin with.
+#
 # --- invocation from the server-side pre-receive shim ---------------------
 # The Forgejo pre-receive shim — a POSIX `sh` one-liner living in the
 # separate infra repo, not this one — MUST invoke this script with the
