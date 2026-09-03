@@ -99,11 +99,46 @@ ADR that is intended. The residual gap is a memory-shaped page filed under a pat
 A leak that commit N introduces and commit N+1 removes is invisible in a diff between the push's old
 and new tip, and would otherwise ship in history forever — rewriting history to remove it is out of
 scope by design (this instance's own operating decision: no forced rewrite of shared history). The
-scan set is therefore the union of every path touched by every commit the push introduces
-(`git rev-list "$newrev" --not --all`), diffed one at a time. Above a configured commit-count cap the
-push is **refused outright**, never silently degraded to a partial scan — an earlier draft of this
-script fell back to a single diff against the ref's own old tip once the cap was exceeded, which a
-review caught going blind to exactly the plant-then-remove shape this rule exists to close.
+scan set is therefore the union of every path touched by every commit the push introduces, diffed one
+at a time. Above a configured commit-count cap the push is **refused outright**, never silently
+degraded to a partial scan — an earlier draft of this script fell back to a single diff against the
+ref's own old tip once the cap was exceeded, which a review caught going blind to exactly the
+plant-then-remove shape this rule exists to close.
+
+**Which commits count as "introduced" depends on where the gate runs, and the two answers are not
+equally safe.** Server-side, before any ref has moved, no existing ref reaches the new tip, so
+`--not --all` is exact and skips commits an unrelated ref already carries. Client-side — in a
+`pre-push` hook — the pusher's own branch ref *already* points at the new tip, because one commits
+first and pushes after; `--not --all` therefore resolves to **zero commits**, and the gate would
+report an empty scope and accept. Measured on a throwaway repository with one unpushed commit:
+`--not --all` → 0, `--not --remotes` → 1.
+
+The scope is therefore **selectable, with the conservative option as the default**:
+`--not --remotes` is used unless the caller passes `--server`, which selects `--not --all`. The
+server-side hook shim requests it explicitly, verbatim:
+
+```sh
+exec bash "$GATE_ROOT/scripts/push-gate.sh" --server
+```
+
+### 4a. The direction a mistake points — the principle behind three separate rules
+
+Three decisions in this ADR look unrelated and follow one rule: **when a check can fail in two
+directions, the default must fail toward "checked too much", never toward "checked nothing while
+reporting success".**
+
+| Decision | Cheap-and-blind option | Chosen default |
+|---|---|---|
+| Commit-count cap (§4) | degrade to a partial scan | refuse the push |
+| Scope selection (§4) | `--not --all` everywhere | `--not --remotes`, `--server` opts in |
+| Emergency override | a warn-only fail-open switch | no such switch exists |
+
+The asymmetry is what makes the choice obvious rather than a matter of taste. A forgotten `--server`
+on the server means a Bare repository with no remote refs scans its whole history: slow, never
+wrong. A `--not --all` default on a client means every ordinary push scans nothing and says it
+passed. The first is a performance complaint; the second is the failure this entire ADR exists to
+prevent, reintroduced through a flag. Where the two directions differ in kind like that, the
+default belongs on the side whose worst case is merely expensive.
 
 ### 5. Five carriers, not one
 
@@ -236,3 +271,10 @@ than as an oversight.
    sweeping are a sighting review, not a decision made by this ADR** — the PO reviews them before the
    hook is activated, and any tree cleanup that results is its own commit, tracked separately from
    this decision.
+4. **The installed `pre-push` hook has no timeout around the two commands it invokes.** If either the
+   optional config-verification helper or the gate itself hangs, `git push` blocks indefinitely and
+   the only way out is `--no-verify`. Not fixed deliberately: `timeout` is a GNU coreutils command
+   with no guaranteed presence on macOS and no precedent anywhere in this repository, so adding it
+   would trade a rare hang for a portability regression on the platform this project pins itself to
+   (ADR-0011). Recorded in the installer's own header so whoever hits it knows it is a known limit
+   rather than a mystery.
