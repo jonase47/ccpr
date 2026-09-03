@@ -1008,6 +1008,19 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Fixed
 
+- **`settings.json` shipped a deprecated attribution key that no longer does anything.**
+  `includeCoAuthoredBy` has been superseded by the `attribution` object; Claude Code does not
+  read the old key any more. It sat in the shipped template looking like a setting while having
+  no effect — the exact shape of a control that is trusted without being verified. Replaced by
+  `attribution.commit`, `attribution.pr` and `attribution.sessionUrl`, all `false`.
+  `sessionUrl` is the one that matters beyond preference: this project's own discipline gate
+  classifies a `claude.ai` session link as personal data, so a commit message carrying one would
+  be refused by the gate this same repository ships — a default that makes the shipped tooling
+  reject the shipped workflow. Measured before the change: no trailer and no session URL had
+  reached any commit in three repositories, so the dead key had caused no leak; it simply was not
+  what had been keeping them out. **Note for adopters:** a settings change takes effect at the
+  next session start, not in the running one.
+
 - **`install.sh --verify` reported generated artefacts as divergence.** Found on its first real
   run, seconds after the first `--update` that wrote a provenance marker: 161 of 161 files
   compared and every one correct, but `hooks/__pycache__/agent-monitor.cpython-314.pyc` and
