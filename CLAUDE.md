@@ -32,6 +32,10 @@
 - Clean Code, SOLID where sensible, YAGNI
 - Simplest solution that works
 
+## Git Workflow
+- **Branch convention:** new work begins on its own branch; `main` receives merges. No technical enforcement — direct pushes to `main` remain permitted (PO decision). See `docs/CONSTITUTION.md` (Default).
+- **Item-claiming:** a claimed item (owner set, status In Progress) is not touched by another session. See `Manual/WORKITEMS.md` §6 and `docs/adr/ADR-0005-claiming-runner-protocol.md`.
+
 ## Date Format
 - German format: DD.MM.YYYY
 

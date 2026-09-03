@@ -1,8 +1,8 @@
 ---
 kind: constitution
 status: active
-version: 1.1
-last_updated: 05.06.2026
+version: 1.2
+last_updated: 03.09.2026
 related:
   - README.md
   - CLAUDE.md
@@ -37,6 +37,7 @@ related:
 - **Self-hosted before managed:** prefer Hetzner Cloud + Coolify + Traefik + Gitea over managed cloud services. *Deviation:* when operational overhead of self-hosting clearly outweighs the benefits for the specific component. *Decided by:* DevOps lead / project owner.
 - **Markdown-first documentation:** all docs, ADRs, memory pages, and skill outputs are written in Markdown. *Deviation:* downstream exports (PDF, slides, dashboards) generated from Markdown sources. *Decided by:* tech-writer / PO.
 - **Conventional Commits:** all commit subjects follow `type(scope): subject` (`feat`, `fix`, `refactor`, `docs`, `chore`, `test`, `perf`, `style`, `ci`, `build`, `revert`). *Deviation:* emergency hotfixes that get rebased into conforming commits later. *Decided by:* committer + reviewer.
+- **Branch convention:** new work begins on its own branch; `main` receives merges. *Deviation:* direct pushes to `main` remain permitted — this is a Product-Owner decision, not a technical restriction. *Decided by:* PO / committer.
 - **Accessibility WCAG 2.2 AA + Dark Mode:** every project with a user interface ships a dark mode and meets WCAG 2.2 AA. Status colours always pair with icon and text — never colour alone. *Deviation:* CLI-only tools without graphical UI. *Decided by:* ux-designer during P3.
 
 ## Aspirational
@@ -48,5 +49,6 @@ related:
 
 ## Changelog
 
+- **v1.2** (03.09.2026): added a Default rule for branch convention — new work begins on its own branch, `main` receives merges — with no technical enforcement (direct pushes to `main` remain permitted, a PO decision). No Inviolable changed.
 - **v1.1** (05.06.2026): re-scoped the "v1.0 release" Aspirational goal — its review cadence now gates on declaring CCPR **stable** (stable interfaces + upgrade path) rather than "before any public release", to allow an earlier `0.x` public beta. No Inviolable or Default changed.
 - **v1.0** (15.05.2026): initial ratification. Six Inviolables (distribution self-containment, no PII/tenant data, GDPR default, English in code, no breaking skill changes, no vendor lock-in), five Defaults (TDD, self-hosted, Markdown-first, Conventional Commits, WCAG 2.2 AA + Dark Mode), four Aspirational goals (multi-tenant, skill consolidation, v1.0 release, Lean sunset).
