@@ -891,7 +891,7 @@ class NoStaleKnownFindingsTest(unittest.TestCase):
 
 class ClassificationCountsTest(unittest.TestCase):
     def test_classification_counts(self):
-        """Regression pin on the measured baseline: 1227 `test_*` methods
+        """Regression pin on the measured baseline: 1290 `test_*` methods
         across the corpus call something shaped like a subprocess invocation
         and are therefore in scope for this check; 0 of those are currently
         absence-only-needs-exemption -- `KNOWN_FINDINGS` above is empty for
@@ -905,6 +905,30 @@ class ClassificationCountsTest(unittest.TestCase):
         growing paragraph:
 
           in-scope / flagged   when
+          1290 / 0             03.09.2026 (CCP-1137R3, Auflage 2): +4 from
+                               the new scripts/tests/test_install_push_gate_
+                               hook.py -- NotAGitRepoRefusesInstallTest,
+                               ExistingHookIsBackedUpTest,
+                               WrittenHookIsExecutableAndSyntacticallyValidTest
+                               and MissingGateAbortsLoudlyTest each call
+                               `self.run_installer(...)` directly in their own
+                               method body (the helper's name matches
+                               `RUN_HELPER_RE`). The other two new methods in
+                               that file (InstalledHookDrivesARealPushTest)
+                               call `self.push()`/`self._prepared_work()`
+                               instead, which only call a subprocess helper
+                               INDIRECTLY -- this scanner does no call-graph
+                               resolution across methods, so those two stay
+                               out of scope, correctly, not by omission.
+                               Proven a pure addition rather than a swap by
+                               differencing scan_tree()'s (file, class,
+                               method) sets against a worktree of acd0cca:
+                               4 additions, 0 removals, all in the new file.
+                               None flagged -- each of the four asserts a
+                               positive outcome (a returncode, a backup
+                               file's exact content, `os.access`/`bash -n`,
+                               or the specific loud-abort message), never
+                               only an absence.
           1227 / 0             01.09.2026 (WI-0133 T1): UNCHANGED, and that
                                is the finding rather than the absence of one.
                                Two files joined scripts/tests/ --
@@ -1639,7 +1663,7 @@ class ClassificationCountsTest(unittest.TestCase):
         count."""
         recs = scan_tree()
         flagged = [r for r in recs if r.disposition in NEEDS_EXEMPTION]
-        self.assertEqual(1286, len(recs))
+        self.assertEqual(1290, len(recs))
         self.assertEqual(0, len(flagged))
 
 
@@ -1840,6 +1864,14 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
         scripts/tests/test_push_gate.py, the end-to-end test for the new
         scripts/push-gate.sh. Proven an addition rather than a swap by
         `git status --porcelain scripts/tests` -- one `??` line plus this
+        module's own ` M`, nothing deleted, nothing renamed.
+
+        Bumped 66 -> 67, 03.09.2026 (CCP-1137R3, Auflage 2): added
+        scripts/tests/test_install_push_gate_hook.py, the end-to-end test
+        for the new scripts/install-push-gate-hook.sh (the client-side
+        `pre-push` hook installer). Proven an addition rather than a swap
+        the same way as the row above: `git status --porcelain
+        scripts/tests` shows one `??` line for the new file plus this
         module's own ` M`, nothing deleted, nothing renamed."""
         files = sorted(TESTS_DIR.glob("*.py")) + sorted((TESTS_DIR / "workitems").glob("*.py"))
         names = sorted(f.relative_to(TESTS_DIR).as_posix() for f in files if f.name != "__init__.py")
@@ -1852,8 +1884,8 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
         # floor; it is why the set pin below stands beside it. Keeping both is
         # the decision (WI-0133 T1), not redundancy left in by accident.
         self.assertGreaterEqual(  # pin: floor tests-corpus-files
-            len(names), 66,
-            "the scripts/tests corpus glob reached {} file(s); it reached 66 "
+            len(names), 67,
+            "the scripts/tests corpus glob reached {} file(s); it reached 67 "
             "when this floor was measured (03.09.2026). A SHRINKING scope is "
             "a blind scanner, not a clean tree.".format(len(names)),
         )
@@ -1905,6 +1937,7 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
             "test_install_docs_boundary.py",
             "test_install_protected_path_rm_guard.py",
             "test_install_provenance.py",
+            "test_install_push_gate_hook.py",
             "test_instinct_registers_agree.py",
             "test_live_status_claims.py",
             "test_log_cleanup_behavior.py",
@@ -1942,11 +1975,11 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
             "workitems/test_youtrack.py",
             ],
             names,
-            "the scripts/tests corpus (65 -> 66, 03.09.2026, CCP-1137: "
-            "test_push_gate.py added; proven an addition rather than a "
-            "swap by `git status --porcelain scripts/tests` -- one `??` "
-            "line plus this module's own ` M`; nothing deleted, nothing "
-            "renamed)",
+            "the scripts/tests corpus (66 -> 67, 03.09.2026, CCP-1137R3 "
+            "Auflage 2: test_install_push_gate_hook.py added; proven an "
+            "addition rather than a swap by `git status --porcelain "
+            "scripts/tests` -- one `??` line plus this module's own ` M`; "
+            "nothing deleted, nothing renamed)",
         )
 
 

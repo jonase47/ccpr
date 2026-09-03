@@ -1196,12 +1196,26 @@ class ExternalToolExitStatusTest(unittest.TestCase):
         never crosses `(` to find the enclosing `if`), so both are marked
         `set-e-sufficient` instead, the same shape memory-sync.sh's own
         `branch="$(git rev-parse --abbrev-ref HEAD)"` already uses --
-        `bare-needs-exemption` +2."""
+        `bare-needs-exemption` +2.
+        03.09.2026 (CCP-1137R3, Auflage 2): +1 total for the new
+        scripts/install-push-gate-hook.sh. Its one `git rev-parse
+        --git-dir` invocation was first written as the same `if !
+        VAR="$(...)"; then` guard the round above already names as
+        invisible to this scanner's backward walk (confirmed the same
+        way: classified `bare-needs-exemption` regardless of the `if`).
+        Reshaped into `VAR="$(cmd)" || VAR=""` followed by a plain `[[ -z
+        ]]` bash test (no external tool involved in the follow-up check,
+        so it never re-enters this scanner) -- the real chain operator
+        `||` in the SAME statement as the invocation lands it in
+        `checked-chain` instead, with no exemption marker needed, and
+        without losing the custom exit-2/message contract the `if !`
+        form would have if left as `bare-needs-exemption`-and-marked
+        instead. `checked-chain` +1."""
         invocations = scan_tree()
         by_disposition = {}
         for inv in invocations:
             by_disposition[inv.disposition] = by_disposition.get(inv.disposition, 0) + 1
-        self.assertEqual(169, len(invocations))
+        self.assertEqual(170, len(invocations))
         self.assertEqual(
             {
                 # 28.08.2026, open-findings wave 1a: one invocation moved
@@ -1257,7 +1271,7 @@ class ExternalToolExitStatusTest(unittest.TestCase):
                 # unchanged.
                 "checked-condition": 34,
                 "checked-captured": 5,
-                "checked-chain": 14,
+                "checked-chain": 15,
                 "discard-needs-exemption": 41,
                 "bare-needs-exemption": 75,
             },
@@ -1274,7 +1288,8 @@ class ExternalToolExitStatusTest(unittest.TestCase):
         updated again 27.08.2026 when WI-0124 wave 1 added
         scripts/conformance-run.sh; updated again 30.08.2026 when WI-0129 D2
         added scripts/shellcheck-run.sh; updated again 03.09.2026 when
-        CCP-1137 added scripts/push-gate.sh)."""
+        CCP-1137 added scripts/push-gate.sh; updated again 03.09.2026 when
+        CCP-1137R3 Auflage 2 added scripts/install-push-gate-hook.sh)."""
         files = sorted(SCRIPTS_DIR.glob("*.sh")) + sorted((SCRIPTS_DIR / "lib").glob("*.sh"))
         names = sorted(f.relative_to(SCRIPTS_DIR).as_posix() for f in files)
         self.assertEqual(  # pin: set external-tool-scanned-scripts
@@ -1287,6 +1302,7 @@ class ExternalToolExitStatusTest(unittest.TestCase):
                 "conformance-run.sh",
                 "doc-volume-check.sh",
                 "freeze-phase-docs.sh",
+                "install-push-gate-hook.sh",
                 "instinct-check.sh",
                 "lib/discipline_gate.sh",
                 "lib/frontmatter.sh",

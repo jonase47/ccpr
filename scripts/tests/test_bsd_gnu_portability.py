@@ -1871,6 +1871,7 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
                 "scripts/conformance-run.sh",
                 "scripts/doc-volume-check.sh",
                 "scripts/freeze-phase-docs.sh",
+                "scripts/install-push-gate-hook.sh",
                 "scripts/instinct-check.sh",
                 "scripts/lib/discipline_gate.sh",
                 "scripts/lib/frontmatter.sh",
@@ -1907,7 +1908,7 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
             "the portability scan enumerated ZERO files -- that is a broken "
             "scope, not a clean tree",
         )
-        self.assertEqual(30, len(files))
+        self.assertEqual(31, len(files))
 
 
 class KnownFindingsMatchTheCurrentScanTest(unittest.TestCase):
@@ -1928,7 +1929,7 @@ class KnownFindingsMatchTheCurrentScanTest(unittest.TestCase):
 
 class ClassificationCountsTest(unittest.TestCase):
     def test_classification_counts(self):
-        """Regression pin on the measured baseline: 29 scanned files, 11
+        """Regression pin on the measured baseline: 31 scanned files, 11
         rules, and -- since R3 -- 0 unexempted findings with all 9 of
         WI-0130's sites moved into the marker-exempted set, still in the same
         2 files. A change in any of these means a script changed shape or
@@ -1943,10 +1944,15 @@ class ClassificationCountsTest(unittest.TestCase):
         Bumped 29 -> 30, 03.09.2026 (CCP-1137): added scripts/push-gate.sh.
         Findings/exempted counts unchanged -- confirmed by
         KnownFindingsMatchTheCurrentScanTest passing unmodified, the same
-        set-equality check that would have caught a new finding."""
+        set-equality check that would have caught a new finding.
+
+        Bumped 30 -> 31, 03.09.2026 (CCP-1137R3, Auflage 2): added
+        scripts/install-push-gate-hook.sh. Findings/exempted counts
+        unchanged -- confirmed the same way, by
+        KnownFindingsMatchTheCurrentScanTest passing unmodified."""
         findings = scan_tree()
         exempted = exemptions_tree()
-        self.assertEqual(30, len(scanned_files()))
+        self.assertEqual(31, len(scanned_files()))
         self.assertEqual(11, len(FLAG_RULES) + 1)
         self.assertEqual(0, len(findings))
         self.assertEqual(9, len(exempted))

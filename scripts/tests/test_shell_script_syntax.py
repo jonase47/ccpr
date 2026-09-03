@@ -166,6 +166,7 @@ class ShellScriptSyntaxTest(unittest.TestCase):
                 "conformance-run.sh",
                 "doc-volume-check.sh",
                 "freeze-phase-docs.sh",
+                "install-push-gate-hook.sh",
                 "instinct-check.sh",
                 "lib/discipline_gate.sh",
                 "lib/frontmatter.sh",
