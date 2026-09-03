@@ -1,6 +1,5 @@
 {
   "skillListingBudgetFraction": 0.02,
-  "includeCoAuthoredBy": false,
   "permissions": {
     "allow": [
       "Bash(~/.claude/scripts/*.sh:*)",
@@ -125,5 +124,10 @@
         ]
       }
     ]
+  },
+  "attribution": {
+    "commit": false,
+    "pr": false,
+    "sessionUrl": false
   }
 }
