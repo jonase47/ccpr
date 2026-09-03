@@ -68,6 +68,23 @@ fi
 
 if [[ -f "${HOOK_PATH}" ]]; then
   BACKUP="${HOOK_PATH}.bak.$(date +%Y%m%d_%H%M%S)"
+  # Second-resolution name, no uniqueness suffix -- two installer runs
+  # within the same second compute the SAME ${BACKUP} name. Appending
+  # "$$" (the installer's own PID) would dodge the collision but not
+  # DETECT it, and this repo's own convention (is_unsafe_repo_path above,
+  # PUSH_GATE_MAX_COMMITS in push-gate.sh) is to refuse outright rather
+  # than silently route around a shape that should not happen -- a
+  # same-second re-run is rare enough that a loud abort (re-run a second
+  # later) costs nothing, while a silent PID-based dodge would still let a
+  # *third*, unrelated coincidence (a restored/copied backup file landing
+  # on the exact same name) overwrite the true original without saying so.
+  # Checked HERE, before the copy -- not after -- so the ORIGINAL, still
+  # only at ${HOOK_PATH} at this point, is never even read into a
+  # colliding backup in the first place.
+  if [[ -e "${BACKUP}" ]]; then
+    echo "install-push-gate-hook: backup target already exists: ${BACKUP} -- refusing to overwrite it (re-run a moment later, or remove/rename it manually first)" >&2
+    exit 2
+  fi
   cp "${HOOK_PATH}" "${BACKUP}"
   echo "install-push-gate-hook: existing hook backed up to ${BACKUP}"
 fi

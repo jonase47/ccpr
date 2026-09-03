@@ -250,6 +250,53 @@ class ExistingHookIsASymlinkRefusesInstallTest(InstallPushGateHookTestBase):
 
 
 # ---------------------------------------------------------------------------
+# 2c. Two installer runs whose backup name computation collides (second-
+#     resolution `date +%Y%m%d_%H%M%S`, no uniqueness guard) must not let
+#     the second run silently overwrite the first run's backup -- the
+#     original, foreign hook a first run preserved would otherwise be gone
+#     from BOTH the hook path (already overwritten by the first run's own
+#     install) and the backup (overwritten by the second run's own
+#     just-installed copy) even though the header promises nothing is ever
+#     silently lost. A fake `date` on PATH pins the computed name to a
+#     fixed value across both runs -- deterministic, not a same-second
+#     timing race.
+# ---------------------------------------------------------------------------
+class BackupNameCollisionRefusesRatherThanOverwritesTest(InstallPushGateHookTestBase):
+    def _env_with_frozen_date(self):
+        fake_bin = self.tmp / "fake-bin"
+        fake_bin.mkdir()
+        (fake_bin / "date").write_text(
+            "#!/bin/sh\necho 20260101_000000\n", encoding="utf-8"
+        )
+        (fake_bin / "date").chmod(0o755)
+        return self.env(PATH="%s:/usr/bin:/bin:/usr/sbin:/sbin" % fake_bin)
+
+    def test_a_same_named_backup_is_refused_not_overwritten(self):
+        remote = self.init_bare_remote()
+        work = self.clone_work(remote)
+        hooks_dir = work / ".git" / "hooks"
+        hooks_dir.mkdir(parents=True, exist_ok=True)
+        original = "#!/bin/sh\necho 'original foreign hook'\n"
+        (hooks_dir / "pre-push").write_text(original, encoding="utf-8")
+
+        env = self._env_with_frozen_date()
+
+        r1 = self.run_installer(work, env=env)
+        self.assertEqual(r1.returncode, 0, self.output(r1))
+        backups = list(hooks_dir.glob("pre-push.bak.*"))
+        self.assertEqual(len(backups), 1, "expected exactly one backup: %s" % backups)
+        self.assertEqual(backups[0].read_text(encoding="utf-8"), original)
+
+        r2 = self.run_installer(work, env=env)
+        self.assertNotEqual(r2.returncode, 0, "expected a refusal:\n" + self.output(r2))
+
+        self.assertEqual(
+            backups[0].read_text(encoding="utf-8"), original,
+            "the original foreign hook's backup was overwritten by the second run",
+        )
+
+
+# ---------------------------------------------------------------------------
 # 3. The written hook is executable and syntactically valid bash.
 # ---------------------------------------------------------------------------
 class WrittenHookIsExecutableAndSyntacticallyValidTest(InstallPushGateHookTestBase):
