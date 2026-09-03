@@ -176,6 +176,7 @@ class ShellScriptSyntaxTest(unittest.TestCase):
                 "migrate-review-headers.sh",
                 "phase-docs-lint.sh",
                 "project-init.sh",
+                "push-gate.sh",
                 "quality-scan.sh",
                 "run-tests.sh",
                 "shellcheck-run.sh",

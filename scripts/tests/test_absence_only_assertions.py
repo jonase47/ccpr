@@ -1834,7 +1834,13 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
         beside it is not a leftover: a floor sees a scope going blind and
         nothing else, a set sees a swap and a shrink; neither covers the
         other's case. In-scope count above did NOT move -- see its own
-        trajectory row for the set proof against a996ec3."""
+        trajectory row for the set proof against a996ec3.
+
+        Bumped 65 -> 66, 03.09.2026 (CCP-1137): added
+        scripts/tests/test_push_gate.py, the end-to-end test for the new
+        scripts/push-gate.sh. Proven an addition rather than a swap by
+        `git status --porcelain scripts/tests` -- one `??` line plus this
+        module's own ` M`, nothing deleted, nothing renamed."""
         files = sorted(TESTS_DIR.glob("*.py")) + sorted((TESTS_DIR / "workitems").glob("*.py"))
         names = sorted(f.relative_to(TESTS_DIR).as_posix() for f in files if f.name != "__init__.py")
         # The floor first, and it does exactly one job: it catches this glob
@@ -1846,9 +1852,9 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
         # floor; it is why the set pin below stands beside it. Keeping both is
         # the decision (WI-0133 T1), not redundancy left in by accident.
         self.assertGreaterEqual(  # pin: floor tests-corpus-files
-            len(names), 65,
-            "the scripts/tests corpus glob reached {} file(s); it reached 65 "
-            "when this floor was measured (01.09.2026). A SHRINKING scope is "
+            len(names), 66,
+            "the scripts/tests corpus glob reached {} file(s); it reached 66 "
+            "when this floor was measured (03.09.2026). A SHRINKING scope is "
             "a blind scanner, not a clean tree.".format(len(names)),
         )
         # The set pin, replacing a bare count (WI-0133 T1). A count cannot
@@ -1914,6 +1920,7 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
             "test_phase_docs_lint.py",
             "test_pin_inventory.py",
             "test_platform_conditional_skip_budget.py",
+            "test_push_gate.py",
             "test_quality_scan.py",
             "test_quality_scan_sast_patterns.py",
             "test_run_tests_argument_quoting.py",
@@ -1935,11 +1942,11 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
             "workitems/test_youtrack.py",
             ],
             names,
-            "the scripts/tests corpus (63 -> 65, 01.09.2026, WI-0133 T1: "
-            "pin_registry.py and test_pin_inventory.py added; proven an "
-            "addition rather than a swap by `git status --porcelain "
-            "scripts/tests` -- two `??` lines plus one ` M`, this module "
-            "itself carrying the pin; nothing deleted, nothing renamed)",
+            "the scripts/tests corpus (65 -> 66, 03.09.2026, CCP-1137: "
+            "test_push_gate.py added; proven an addition rather than a "
+            "swap by `git status --porcelain scripts/tests` -- one `??` "
+            "line plus this module's own ` M`; nothing deleted, nothing "
+            "renamed)",
         )
 
 

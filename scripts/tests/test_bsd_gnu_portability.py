@@ -1886,6 +1886,7 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
                 "scripts/migrate-review-headers.sh",
                 "scripts/phase-docs-lint.sh",
                 "scripts/project-init.sh",
+                "scripts/push-gate.sh",
                 "scripts/quality-scan.sh",
                 "scripts/run-tests.sh",
                 "scripts/shellcheck-run.sh",
@@ -1906,7 +1907,7 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
             "the portability scan enumerated ZERO files -- that is a broken "
             "scope, not a clean tree",
         )
-        self.assertEqual(29, len(files))
+        self.assertEqual(30, len(files))
 
 
 class KnownFindingsMatchTheCurrentScanTest(unittest.TestCase):
@@ -1937,10 +1938,15 @@ class ClassificationCountsTest(unittest.TestCase):
         The exempted count is pinned HERE as well as in EXEMPTED_SITES on
         purpose: `0 findings` on its own is also what a scanner that stopped
         matching anything would report, and the two numbers cannot both be
-        right if that happened."""
+        right if that happened.
+
+        Bumped 29 -> 30, 03.09.2026 (CCP-1137): added scripts/push-gate.sh.
+        Findings/exempted counts unchanged -- confirmed by
+        KnownFindingsMatchTheCurrentScanTest passing unmodified, the same
+        set-equality check that would have caught a new finding."""
         findings = scan_tree()
         exempted = exemptions_tree()
-        self.assertEqual(29, len(scanned_files()))
+        self.assertEqual(30, len(scanned_files()))
         self.assertEqual(11, len(FLAG_RULES) + 1)
         self.assertEqual(0, len(findings))
         self.assertEqual(9, len(exempted))

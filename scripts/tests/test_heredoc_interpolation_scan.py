@@ -411,7 +411,12 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
         Bumped 26 -> 27, 30.08.2026 (WI-0129 D2, ShellCheck adoption): added
         scripts/shellcheck-run.sh under scripts/*.sh. It carries no heredoc
         of its own (zero `<<` occurrences), so ClassificationCountsTest's 41
-        openers / 2 findings are unchanged by this file-count bump alone."""
+        openers / 2 findings are unchanged by this file-count bump alone.
+
+        Bumped 27 -> 28, 03.09.2026 (CCP-1137): added scripts/push-gate.sh
+        under scripts/*.sh. Same shape as the previous bump -- zero `<<`
+        occurrences of its own, so ClassificationCountsTest's 41/2 stays
+        unchanged by this bump alone too."""
         files = (
             sorted(SCRIPTS_DIR.glob("*.sh"))
             + sorted((SCRIPTS_DIR / "lib").glob("*.sh"))
@@ -419,7 +424,7 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
             + [REPO_ROOT / "install.sh"]
         )
         files = [f for f in files if f.is_file()]
-        self.assertEqual(27, len(files))
+        self.assertEqual(28, len(files))
         names = {f.relative_to(REPO_ROOT).as_posix() for f in files}
         self.assertIn("scripts/run-tests.sh", names)
         self.assertIn("scripts/baseline.sh", names)

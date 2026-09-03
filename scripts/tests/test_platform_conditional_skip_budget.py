@@ -22,6 +22,10 @@ running it rather than on anything the test itself controls:
     (true on every POSIX platform this repo's two CI runners use; kept so a
     future non-POSIX runner is accounted for rather than assumed
     impossible).
+  * test_push_gate.py (CCP-1137) -- Bash32Test's one canary method, the
+    identical shape and identical `SYSTEM_BASH`/`_bash_major_minor` check
+    UsageHintOnBash32Test already uses, gated on the resolved `/bin/bash`
+    being 3.x.
 
 NOT a flat "N skips per platform" pin. A first version of this module tried
 that (Darwin: 8, Linux: 3) and it is WRONG for any contributor whose local
@@ -57,6 +61,7 @@ from pathlib import Path
 
 from . import test_handover_size_hook
 from . import test_memory_sync_promote
+from . import test_push_gate
 from . import test_quality_scan
 from . import test_shellcheck_run
 
@@ -71,6 +76,7 @@ TESTS_DIR = Path(__file__).resolve().parent
 _REGISTERED_SKIP_DECORATOR_FILES = {
     "test_handover_size_hook.py",
     "test_memory_sync_promote.py",
+    "test_push_gate.py",
     "test_quality_scan.py",
     "test_shellcheck_run.py",
 }
@@ -104,6 +110,7 @@ def files_with_skip_decorators():
 _SKIP_SOURCE_MODULES = (
     test_handover_size_hook,
     test_memory_sync_promote,
+    test_push_gate,
     test_quality_scan,
     test_shellcheck_run,
 )
@@ -169,6 +176,10 @@ def skipped_test_ids():
 #                     mutation tests.
 #   memory_sync / 1  Pre-existing (WI-0012): UsageHintOnBash32Test's one
 #                     canary method.
+#   push_gate / 1    CCP-1137 (03.09.2026): Bash32Test's one canary
+#                     method -- the identical shape as memory_sync's, a
+#                     separate source because it reads its OWN module's
+#                     SYSTEM_BASH global, not a shared one.
 #   fifo / 1         Pre-existing: test_handover_size_hook.py's one
 #                     FIFO-gated method.
 def expected_skip_count():
@@ -181,6 +192,11 @@ def expected_skip_count():
         test_memory_sync_promote.SYSTEM_BASH
     )
     if (system_bash_version or (99, 0))[0] >= 4:
+        count += 1
+    push_gate_bash_version = test_push_gate._bash_major_minor(
+        test_push_gate.SYSTEM_BASH
+    )
+    if (push_gate_bash_version or (99, 0))[0] >= 4:
         count += 1
     if not hasattr(os, "mkfifo"):
         count += 1
