@@ -394,10 +394,16 @@ class ClassificationCountsTest(unittest.TestCase):
         fix already closed all 5 of run-tests.sh's own sites). A change in
         either number means a script's heredoc shape changed or this
         scanner's own logic changed -- worth a deliberate look either way,
-        not a silent drift."""
+        not a silent drift.
+
+        Bumped 41 -> 42, 03.09.2026 (CCP-1137R3, Auflage 2): +1 opener from
+        scripts/install-push-gate-hook.sh's own `<<'HOOK'` block -- see
+        ScannedFilesCoverTheShippedScopeTest's own trajectory entry for why
+        it is quoted. Findings unchanged at 2 (the quoted delimiter is not
+        a finding)."""
         sites = scan_tree()
         findings = [s for s in sites if s.is_finding]
-        self.assertEqual(41, len(sites))
+        self.assertEqual(42, len(sites))
         self.assertEqual(2, len(findings))
 
 
@@ -411,7 +417,27 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
         Bumped 26 -> 27, 30.08.2026 (WI-0129 D2, ShellCheck adoption): added
         scripts/shellcheck-run.sh under scripts/*.sh. It carries no heredoc
         of its own (zero `<<` occurrences), so ClassificationCountsTest's 41
-        openers / 2 findings are unchanged by this file-count bump alone."""
+        openers / 2 findings are unchanged by this file-count bump alone.
+
+        Bumped 27 -> 28, 03.09.2026 (CCP-1137): added scripts/push-gate.sh
+        under scripts/*.sh. Same shape as the previous bump -- zero `<<`
+        occurrences of its own, so ClassificationCountsTest's 41/2 stays
+        unchanged by this bump alone too.
+
+        Bumped 28 -> 29, 03.09.2026 (CCP-1137R3, Auflage 2): added
+        scripts/install-push-gate-hook.sh under scripts/*.sh. UNLIKE the two
+        bumps above, this file DOES carry a heredoc of its own -- the
+        `cat > "${HOOK_PATH}" <<'HOOK'` block writing the installed
+        pre-push hook's own body -- so ClassificationCountsTest's opener
+        count moves too (41 -> 42). Its delimiter is QUOTED ('HOOK'), which
+        is exactly what is needed here: the written hook body's own
+        `${HOME}` references must reach the INSTALLED file as literal text,
+        expanded later when the hook itself runs (a different shell
+        invocation entirely, with its own $HOME), not interpolated at
+        install time against the installer's own environment. Zero new
+        findings -- confirmed by ScopeMatchesKnownFindingsTest passing
+        unmodified, the same set-equality check that would have caught an
+        unquoted-delimiter finding."""
         files = (
             sorted(SCRIPTS_DIR.glob("*.sh"))
             + sorted((SCRIPTS_DIR / "lib").glob("*.sh"))
@@ -419,7 +445,7 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
             + [REPO_ROOT / "install.sh"]
         )
         files = [f for f in files if f.is_file()]
-        self.assertEqual(27, len(files))
+        self.assertEqual(29, len(files))
         names = {f.relative_to(REPO_ROOT).as_posix() for f in files}
         self.assertIn("scripts/run-tests.sh", names)
         self.assertIn("scripts/baseline.sh", names)

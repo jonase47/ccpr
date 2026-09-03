@@ -1178,12 +1178,44 @@ class ExternalToolExitStatusTest(unittest.TestCase):
         removals for the same change; the line-independent one shows 3 and 0.
         The total pinned here was correct, but the full set of pin registers
         in this repository was NOT known at the time of this bump -- this pin
-        was discovered by a red CI run, not from a list (WI-0133)."""
+        was discovered by a red CI run, not from a list (WI-0133).
+        03.09.2026 (CCP-1137): +6 total for the new scripts/push-gate.sh.
+        Four `git` invocations are the tested command of their own `if`
+        (`git rev-list`, two `git diff-tree` shapes, `git cat-file blob`)
+        -- `checked-condition` +4. Two more are bare, standalone
+        `var="$(git ...)"` assignments: `size="$(git cat-file -s "$sha")"`
+        and `base="$(git hash-object -t tree --stdin < /dev/null)"`
+        (computing the well-known empty-tree object rather than shipping
+        it as a 40-hex-character literal, which artifact-gate.sh's own
+        secret-blob pattern reads as a plausible leaked token -- measured
+        directly against this file). The scanner's own backward walk
+        stops at the `$(` boundary regardless of what governs the
+        substitution as a whole (confirmed directly -- wrapping the first
+        of the two in `if size="$(...)"; then ... else die ...; fi` left
+        it classified `bare-needs-exemption` all the same, since the walk
+        never crosses `(` to find the enclosing `if`), so both are marked
+        `set-e-sufficient` instead, the same shape memory-sync.sh's own
+        `branch="$(git rev-parse --abbrev-ref HEAD)"` already uses --
+        `bare-needs-exemption` +2.
+        03.09.2026 (CCP-1137R3, Auflage 2): +1 total for the new
+        scripts/install-push-gate-hook.sh. Its one `git rev-parse
+        --git-dir` invocation was first written as the same `if !
+        VAR="$(...)"; then` guard the round above already names as
+        invisible to this scanner's backward walk (confirmed the same
+        way: classified `bare-needs-exemption` regardless of the `if`).
+        Reshaped into `VAR="$(cmd)" || VAR=""` followed by a plain `[[ -z
+        ]]` bash test (no external tool involved in the follow-up check,
+        so it never re-enters this scanner) -- the real chain operator
+        `||` in the SAME statement as the invocation lands it in
+        `checked-chain` instead, with no exemption marker needed, and
+        without losing the custom exit-2/message contract the `if !`
+        form would have if left as `bare-needs-exemption`-and-marked
+        instead. `checked-chain` +1."""
         invocations = scan_tree()
         by_disposition = {}
         for inv in invocations:
             by_disposition[inv.disposition] = by_disposition.get(inv.disposition, 0) + 1
-        self.assertEqual(161, len(invocations))
+        self.assertEqual(170, len(invocations))
         self.assertEqual(
             {
                 # 28.08.2026, open-findings wave 1a: one invocation moved
@@ -1212,11 +1244,36 @@ class ExternalToolExitStatusTest(unittest.TestCase):
                 # 30.08.2026: +3 total for scripts/shellcheck-run.sh (WI-0129
                 # D2) -- see this test's own docstring entry immediately
                 # above for the per-invocation breakdown.
-                "checked-condition": 28,
+                # 03.09.2026 (CCP-1137): +6 total for scripts/push-gate.sh --
+                # see this test's own docstring entry immediately above.
+                # 03.09.2026 (CCP-1137, round 2): +2 total, net, for
+                # scripts/push-gate.sh -- ref-name/commit-message/tag-
+                # payload scanning added four new `git`/`awk` invocations
+                # (`git cat-file -t`, `git cat-file tag`, `git log -1
+                # --format=%B`, and an `awk` header-strip on the tag
+                # payload), each tested directly by its own `if !
+                # ...; then` guard (`checked-condition` +4 gross); removing
+                # the commit-cap tip-diff fallback (the cap now refuses the
+                # push outright instead) deleted TWO invocations, a `git
+                # diff-tree` tested by its own `if !` guard
+                # (`checked-condition` -1, net +3 for this bucket) and the
+                # empty-tree `git hash-object -t tree --stdin` bare
+                # assignment marked `set-e-sufficient` (`bare-needs-
+                # exemption` -1); one MORE `git cat-file -t` was reshaped
+                # from a checked `if ! VAR="$(...)"; then` guard (a shape
+                # this scanner's backward walk does not recognise as
+                # governed by the `if`, measured directly: it classified it
+                # `bare-needs-exemption` all the same) into the SAME bare
+                # `set-e-sufficient` shape `size="$(git cat-file -s
+                # "$sha")"` already uses (`checked-condition` -1,
+                # `bare-needs-exemption` +1). Net for scripts/push-gate.sh:
+                # `checked-condition` +2 (169 total), `bare-needs-exemption`
+                # unchanged.
+                "checked-condition": 34,
                 "checked-captured": 5,
-                "checked-chain": 14,
+                "checked-chain": 15,
                 "discard-needs-exemption": 41,
-                "bare-needs-exemption": 73,
+                "bare-needs-exemption": 75,
             },
             by_disposition,
         )
@@ -1230,7 +1287,9 @@ class ExternalToolExitStatusTest(unittest.TestCase):
         again 22.08.2026 when WI-0072 added scripts/migrate-review-headers.sh;
         updated again 27.08.2026 when WI-0124 wave 1 added
         scripts/conformance-run.sh; updated again 30.08.2026 when WI-0129 D2
-        added scripts/shellcheck-run.sh)."""
+        added scripts/shellcheck-run.sh; updated again 03.09.2026 when
+        CCP-1137 added scripts/push-gate.sh; updated again 03.09.2026 when
+        CCP-1137R3 Auflage 2 added scripts/install-push-gate-hook.sh)."""
         files = sorted(SCRIPTS_DIR.glob("*.sh")) + sorted((SCRIPTS_DIR / "lib").glob("*.sh"))
         names = sorted(f.relative_to(SCRIPTS_DIR).as_posix() for f in files)
         self.assertEqual(  # pin: set external-tool-scanned-scripts
@@ -1243,6 +1302,7 @@ class ExternalToolExitStatusTest(unittest.TestCase):
                 "conformance-run.sh",
                 "doc-volume-check.sh",
                 "freeze-phase-docs.sh",
+                "install-push-gate-hook.sh",
                 "instinct-check.sh",
                 "lib/discipline_gate.sh",
                 "lib/frontmatter.sh",
@@ -1253,6 +1313,7 @@ class ExternalToolExitStatusTest(unittest.TestCase):
                 "migrate-review-headers.sh",
                 "phase-docs-lint.sh",
                 "project-init.sh",
+                "push-gate.sh",
                 "quality-scan.sh",
                 "run-tests.sh",
                 "shellcheck-run.sh",
