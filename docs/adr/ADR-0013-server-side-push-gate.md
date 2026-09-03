@@ -140,6 +140,17 @@ passed. The first is a performance complaint; the second is the failure this ent
 prevent, reintroduced through a flag. Where the two directions differ in kind like that, the
 default belongs on the side whose worst case is merely expensive.
 
+**Observed in the field, 03.09.2026 — the same rule, one row further down.** A fourth case belongs
+in that table, and it is recorded here because it was watched happening rather than reasoned about.
+During the pre-activation dry run the gate was invoked directly instead of through the hook shim,
+so neither the deny-list environment nor the config path was set. It could have reported a clean
+scan: the files were read, no configured name was in them, zero findings. Instead it refused the
+push and said why — `deny-list NOT CONFIGURED … --require-denylist was given but no deny-list is
+configured`. An unconfigured list is "could not check", and the gate treats that as a failure
+rather than an absence of findings, which is the same asymmetry the three rows above encode. Worth
+recording because a fail-open here would have been invisible: a push with nothing to find and a
+push whose check never ran produce identical output, right up to the exit code.
+
 ### 5. Five carriers, not one
 
 The first draft of this mechanism checked file content and file path. A threat-model pass before
