@@ -1012,7 +1012,11 @@ All notable changes to this project are documented in this file. The format is b
   `includeCoAuthoredBy` has been superseded by the `attribution` object; Claude Code does not
   read the old key any more. It sat in the shipped template looking like a setting while having
   no effect — the exact shape of a control that is trusted without being verified. Replaced by
-  `attribution.commit`, `attribution.pr` and `attribution.sessionUrl`, all `false`.
+  the `attribution` object, and the types differ per key: `commit` and `pr` take a **string**
+  (empty disables the line, a non-empty one replaces it), `sessionUrl` takes a **boolean**.
+  Setting all three to `false`, as this entry first described, is rejected by the settings
+  validator for the two string keys — corrected the day after, and worth recording rather than
+  quietly amending: an entry that documents a fix is itself a claim about the code.
   `sessionUrl` is the one that matters beyond preference: this project's own discipline gate
   classifies a `claude.ai` session link as personal data, so a commit message carrying one would
   be refused by the gate this same repository ships — a default that makes the shipped tooling
