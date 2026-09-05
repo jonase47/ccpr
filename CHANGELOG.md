@@ -8,6 +8,55 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Added
 
+- **CCP-1150, first cut: `docs/adr/ADR-0014-documentation-namespace.md` ratifies the folder cut,
+  and `templates/ADR_TEMPLATE.md` extracts the convention it had to reconstruct to write it.**
+  The framework keeps `docs/` as its project namespace; human documentation is called
+  `handbook/` across all repositories, so the convention has no exceptions. **The rename is not
+  performed here** — this cut decides, a separate cut executes.
+
+  **Option (b), the framework vacating `docs/` into `.ccpr/`, is assessed and rejected in the
+  ADR — on who pays, not on diff size.** `Manual/` → `handbook/` touches only files in this
+  repository, because `install.sh:43` never shipped `Manual/`: no installed CCPR and no consumer
+  project has anything to migrate. `docs/` → `.ccpr/` renames the *consumer's* tree, and
+  `docs/CONSTITUTION.md:31` requires a documented migration path before the merge — one that
+  would have to run in repositories whose schedule this project does not set. The closing pre-1.0
+  window is named, and so is the argument's own weakness: it assumes adopters read `handbook/`
+  as natural, and if they do not, the confusion has only moved.
+
+  **Three of the standard's own assumptions did not survive measurement, and the ADR carries the
+  corrections.** *`docs/` is not "the runtime docs" — and the answer depends on which set you
+  count.* Tracked (`git ls-files docs`): **20** files, **all** of them inside the five allowlist
+  entries, **zero** outside. On disk (`find docs -type f`): **274**, of which ~252 are ignored
+  working state. Both readings are load-bearing, and the ADR assigns each to its audience: the
+  filesystem reading governs the install boundary, because `install.sh` and the allowlist read
+  the filesystem rather than the index — which is also why an ignored file inside an allowlisted
+  directory still ships. *"Nothing breaks mechanically" is false*: five sites in three files
+  break (`scripts/check-all.sh:453`, `scripts/tests/test_doc_counts_agree.py:93,96,97`,
+  `scripts/tests/test_memory_lint_checklist_binding.py:53`), every one of them building the path
+  segment-wise or without a trailing slash, which is exactly why a `Manual/` pattern found none
+  of them. *A missing root exits 0*: `manual-lint.sh handbook` reports `Files scanned: 0` and
+  exit 0 today, so the acceptance criterion written for the rename **cannot fail** — it is as
+  green before the work as after it; and `check-all.sh:453` invokes the linter on a hard-coded
+  `"$PROJECT_DIR/Manual"`, so after the rename the check would exit 0, the baseline would expect
+  0, and the gate would report "match" while the linter checked nothing. That line therefore
+  moves in the same commit as the `git mv`, not in a later sweep.
+
+  **The Inviolable at `docs/CONSTITUTION.md:31` is satisfied by a migration path whose switch is
+  mechanical.** Check (d) evaluates the completeness condition itself — a warning while it is
+  unmet, an error once it is met. A state, not a rebuild action, with no human switching step in
+  between that could be left undone. The mandatory tree is named concretely as `handbook/`, not
+  `docs/` and not the allowlist entries, which carry their own schema. ADR-0014 is the first
+  document to carry the reliability fields, and says in one sentence that it does so
+  *voluntarily*, since `docs/adr/` sits outside the scope it just defined — otherwise a later
+  reader reads `docs/` back into it.
+
+  `templates/ADR_TEMPLATE.md` records the convention as **measured** rather than idealised:
+  `## Context` / `## Decision` / `## Consequences` universal (13/13), `## Alternatives
+  considered` near-universal (12/13), `## Follow-ups` optional (6/13). It also separates two
+  frontmatter dialects, since `adr` is not among `scripts/phase-docs-lint.sh:61`'s
+  `PHASE_FOLDERS` and a scopeless run never walks `docs/adr/` — a distinction no single existing
+  ADR states.
+
 - **CCP-1152, second cut: `scripts/manual-lint.sh` gains check (f) — a number in prose can
   now be pinned to the value derived from a glob, by an inline marker on its own line.** The
   first cut of this item (`scripts/tests/test_doc_counts_agree.py`) derived four specific
