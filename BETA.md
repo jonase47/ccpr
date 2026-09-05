@@ -14,7 +14,7 @@ where it's useful.
 Feedback is the whole reason CCPR is public this early. The bar is deliberately
 low — half-formed thoughts count. A few questions that are most useful:
 
-- **Did onboarding land?** After the README + `Manual/GETTING_STARTED.md`, did you
+- **Did onboarding land?** After the README + `handbook/GETTING_STARTED.md`, did you
   understand *what CCPR is* and *how you drive it*? Where did it click, where did
   you stall?
 - **Did the install go cleanly?** `install.sh` — backup, preview, confirmation:

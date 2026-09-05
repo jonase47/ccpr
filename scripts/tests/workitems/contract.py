@@ -148,7 +148,7 @@ class WorkItemsContractTestCase:
     def test_list_with_a_status_value_outside_the_vocabulary_warns_and_returns_empty(self):
         """A filter value outside STATUS_VALUES is almost always a caller's typo, not
         a legitimate query -- but it must not silently produce the SAME `[]` a real
-        "no items have this status" query would (Manual/WORKITEMS.md's "empty result
+        "no items have this status" query would (handbook/WORKITEMS.md's "empty result
         is real" contract, §"The adoption guard"). The filter still runs (an item CAN
         carry such a value -- see the backend-specific out-of-vocabulary fixtures in
         test_local.py/test_youtrack.py), but a stderr warning makes a typo visible

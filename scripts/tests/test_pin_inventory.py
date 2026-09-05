@@ -81,7 +81,7 @@ asserting the gap in prose only.
    time" while the list literal below it holds 21 names;
    `test_heredoc_interpolation_scan.py:390` says "the 25 scanned files" while
    the pin at :421 requires 27.
-2. **Prose registers** in `Manual/`, `README.md`, `CLAUDE.md`,
+2. **Prose registers** in `handbook/`, `README.md`, `CLAUDE.md`,
    `CONTRIBUTING.md`. CONTRIBUTING.md:85-102 alone carries four discovery
    numbers, known stale.
 3. **Numbers in YAML comments**, e.g. `.github/workflows/ci.yml:57` ("1923
@@ -1477,7 +1477,7 @@ class PatternLimitsTest(unittest.TestCase):
 
     def test_a_number_in_a_comment_is_not_reached(self):
         """Gap 1 again, in its other form, and the form gaps 2 and 3 reduce
-        to. A prose register (Manual/, README.md, CLAUDE.md,
+        to. A prose register (handbook/, README.md, CLAUDE.md,
         CONTRIBUTING.md:85-102's four known-stale discovery numbers) and a
         YAML comment (.github/workflows/ci.yml:57's "1923 tests") are the same
         case seen from a Python AST: text no parser in this repository reads

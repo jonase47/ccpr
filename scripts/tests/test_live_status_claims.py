@@ -1129,7 +1129,7 @@ if __name__ == "__main__":
 # ## Attribution: which catalogue is this sentence about
 #
 # This repository has more than one thing called a catalogue. `/cross-check`
-# has a rule catalogue (`Manual/system/anchored-state.md`, ADR-0009);
+# has a rule catalogue (`handbook/system/anchored-state.md`, ADR-0009);
 # conformance-run.sh ships a CHECK_NAMES array of its own. Attribution is
 # therefore the literal `check-all` or the phrase `catalogued check`, never
 # the bare word `catalogue`. Inside check-all.sh and its baseline it is
@@ -1593,7 +1593,7 @@ class AttributionNamesThisCatalogueTest(unittest.TestCase):
     resolution problem, not an equivalence (G-121), and the answer is a
     synthetic fixture that supplies the witness the corpus lacks."""
 
-    # Modelled on Manual/system/anchored-state.md's real sentence about
+    # Modelled on handbook/system/anchored-state.md's real sentence about
     # /cross-check's RULE catalogue, with a count of checks substituted in so
     # it reaches this rule's alphabet at all.
     OTHER_CATALOGUE = (

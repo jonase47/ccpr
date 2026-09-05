@@ -497,7 +497,7 @@ def _section_entries(lines, heading, heading_idx=None, end_idx=None):
     section-with-no-entries-yet case -- when it is empty, carries only blank lines,
     or carries only HTML-comment lines (every non-blank line starts with `<!--`):
     the common case there is a freshly created item's still-empty section, which the
-    shipped template (Manual/WORKITEMS.md) seeds with a scaffolding placeholder like
+    shipped template (handbook/WORKITEMS.md) seeds with a scaffolding placeholder like
     `<!-- append-result writes PR/commit links here -->` as the section's first line.
     A preamble that carries at least one non-blank, non-`<!--` line is real authored
     content and becomes an entry in full, HTML-comment lines included -- the

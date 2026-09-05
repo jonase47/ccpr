@@ -1,6 +1,6 @@
 """test_memory_lint_checklist_binding.py -- WI-0110: pin that every check
 `scripts/memory-lint.sh` defines has a matching bullet in the "Per file"
-checklist chapter of `Manual/system/memory-instincts.md`, and that no bullet
+checklist chapter of `handbook/system/memory-instincts.md`, and that no bullet
 in that chapter names a check the script no longer defines.
 
 ## Measured before writing anything (26.08.2026)
@@ -114,11 +114,11 @@ class ChecklistBindingTest(unittest.TestCase):
         self.assertEqual(
             set(), undocumented,
             f"scripts/memory-lint.sh defines check(s) {sorted(undocumented)} "
-            "with no matching bullet in Manual/system/memory-instincts.md",
+            "with no matching bullet in handbook/system/memory-instincts.md",
         )
         self.assertEqual(
             set(), stale,
-            f"Manual/system/memory-instincts.md documents check(s) {sorted(stale)} "
+            f"handbook/system/memory-instincts.md documents check(s) {sorted(stale)} "
             "that scripts/memory-lint.sh no longer defines",
         )
 

@@ -9,8 +9,8 @@ consumers.md:24` and `docs/memory/project_test-runner.md:49` are examples,
 and this module deliberately never reads either. A LIVING DOCUMENT claims a
 present-tense fact about the repository ("the shipped suite has N tests",
 "CCPR ships N agents") and must be derived, or it ages exactly the way
-`README.md`'s "1458-test Python suite", `Manual/README.md`'s "1691-test
-suite" and `Manual/SYSTEM_OVERVIEW.md`'s "14 agents" (contradicting its own
+`README.md`'s "1458-test Python suite", `handbook/README.md`'s "1691-test
+suite" and `handbook/SYSTEM_OVERVIEW.md`'s "14 agents" (contradicting its own
 line 103's "15 agents" two paragraphs later) had already aged before this
 module existed. A date next to a number does not make it a protocol --
 CONTRIBUTING.md's own `-t .` paragraph carries a date AND is a living claim,
@@ -189,7 +189,7 @@ def measured_utility_command_names():
 
 def parse_test_count_claims(readme_text, contributing_text):
     """CCP-1152 follow-up (PO decision, 05.09.2026): only TWO of the three
-    former "N-test suite" claims remain typed numbers. Manual/README.md's own
+    former "N-test suite" claims remain typed numbers. handbook/README.md's own
     "the 2623-test suite" phrase is gone -- see `TestCountAgreementTest`'s
     docstring for why a third copy of the same number bought no reader
     benefit its cross-reference to CONTRIBUTING.md didn't already provide.
@@ -349,7 +349,7 @@ class TestCountAgreementTest(unittest.TestCase):
     together, not adjusted one at a time). README.md states a FLOOR instead
     -- an order of magnitude that keeps the adopter signal but only breaks
     if the suite SHRINKS, which is exactly when someone should be woken up.
-    Manual/README.md carries no number at all any more: it already
+    handbook/README.md carries no number at all any more: it already
     cross-references CONTRIBUTING.md for the invocation, and a third typed
     copy of the same fact bought nothing a reader couldn't get from that
     link. All three checks below still require a clean `-t .` discovery --
@@ -415,7 +415,7 @@ class AgentCountAgreementTest(unittest.TestCase):
         }
         self.assertEqual(
             expected, claims,
-            f"README.md and/or Manual/SYSTEM_OVERVIEW.md quote an agent "
+            f"README.md and/or handbook/SYSTEM_OVERVIEW.md quote an agent "
             f"count that disagrees with the measured agents/*.md file "
             f"count ({count})",
         )
@@ -447,7 +447,7 @@ class CommandCountAgreementTest(unittest.TestCase):
 
 class CommandBreakdownAgreementTest(unittest.TestCase):
     """The per-category breakdown (phase/gates/learning/utility/track) that
-    Manual/SYSTEM_OVERVIEW.md and Manual/SECTIONS_COMMANDS.md both state in
+    handbook/SYSTEM_OVERVIEW.md and handbook/SECTIONS_COMMANDS.md both state in
     full -- two independent doc locations for the same derived facts, both
     checked against the same measured values so neither can drift alone."""
 
@@ -482,7 +482,7 @@ class CommandBreakdownAgreementTest(unittest.TestCase):
         }
         self.assertEqual(
             expected, claims,
-            "Manual/SYSTEM_OVERVIEW.md and/or Manual/SECTIONS_COMMANDS.md "
+            "handbook/SYSTEM_OVERVIEW.md and/or handbook/SECTIONS_COMMANDS.md "
             "quotes a phase/gate/learning/utility/track command breakdown "
             "that disagrees with the measured commands/*.md classification",
         )

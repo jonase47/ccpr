@@ -126,7 +126,7 @@ Run the ones relevant to what you touched — each is read-only:
 |---|---|
 | `scripts/memory-lint.sh` | memory frontmatter, naming, cross-refs, index consistency |
 | `scripts/phase-docs-lint.sh` | phase-doc frontmatter (scoped to the phase folders) |
-| `scripts/manual-lint.sh` | `Manual/` index↔detail contract: `parent_index`, back-links, `kind`, and marked numbers against the value derived from their glob |
+| `scripts/manual-lint.sh` | `handbook/` index↔detail contract: `parent_index`, back-links, `kind`, and marked numbers against the value derived from their glob |
 | `scripts/doc-volume-check.sh` | file size against the 25/40/50 KB splitting thresholds |
 | `scripts/shellcheck-run.sh` | ShellCheck over the shipped shell scripts at `--severity=warning` |
 | `scripts/conformance-run.sh` | the shipped checks above, run against real consumer projects (see below) |
@@ -188,7 +188,7 @@ finding beyond the line it was written for.
 ### Follow the doc schemas
 
 Phase docs follow the two-level **phase index + detail file** split and the
-frontmatter schema in `templates/PHASE_DOC_SCHEMA.md`. Documents under `Manual/`
+frontmatter schema in `templates/PHASE_DOC_SCHEMA.md`. Documents under `handbook/`
 additionally follow the index↔detail contract that `manual-lint.sh` checks.
 
 ### Record an ADR's resolutions in place

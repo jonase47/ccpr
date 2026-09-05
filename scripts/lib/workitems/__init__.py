@@ -19,7 +19,7 @@ import sys
 # physical lines on the next parse (review follow-up, 09.07.2026).
 ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]+\Z")
 
-# Status vocabulary (Manual/WORKITEMS.md §2 / ADR-0002): backends map their own states
+# Status vocabulary (handbook/WORKITEMS.md §2 / ADR-0002): backends map their own states
 # onto this set. `set-status` rejects anything outside it.
 STATUS_VALUES = (
     "Backlog",
@@ -196,7 +196,7 @@ def warn_if_filter_value_unknown(kind, value, vocabulary):
     bundle (see youtrack.py's `_item_from_issue`) -- and must stay findable via
     `list --status`/`--priority`. But silently running the filter would produce the
     exact same `[]` a genuine "no item has this value" query returns -- indistinguishable
-    from a caller's plain typo, and Manual/WORKITEMS.md's "empty result is real"
+    from a caller's plain typo, and handbook/WORKITEMS.md's "empty result is real"
     contract (§"The adoption guard") depends on being able to trust that `[]` at face
     value. This warns on stderr instead, then lets the filter run unchanged. Called
     once per unknown filter value, by both backends' `list()`, before filtering.
