@@ -260,7 +260,7 @@ Detailed gate checklists are in [PROJECT_PHASES.md](../docs/PROJECT_PHASES.md).
 - **2 learning commands** (/postmortem, /instinct)
 - **14 utility commands** (/konzept, /konzept-update, /decision, /epic, /user-stories, /roadmap, /roadmap-update, /project-init, /logs-summary, /guide, /release-baseline, /cleanup, /specialize, /anchor)
 - **6 track + cross-cutting commands** (/track-decision, /constitution, /lean-frame, /lean-learn, /lean-promote, /cross-check)
-- **Total: 116 commands**
+- **Total: 116 commands** <!-- pin: count ../commands/*.md -->
 
 ### Naming Convention
 
@@ -591,7 +591,9 @@ Five read-only validators, all non-zero on findings: `memory-lint.sh` (memory sc
 cross-refs, index consistency, age, size caps), `phase-docs-lint.sh` (phase-doc
 frontmatter — **scoped by folder name**, so `Files scanned: 0` means it looked at
 nothing, not that it passed), `manual-lint.sh` (a documentation index↔detail contract:
-`parent_index`, the back-link, `kind` — run by `/cleanup`), `doc-volume-check.sh` (size:
+`parent_index`, the back-link, `kind`, plus check (f): a number in prose carrying an
+inline marker is compared against the value derived from its glob — run by
+`/cleanup`), `doc-volume-check.sh` (size:
 info 25–40 KB, warning 40–50, error ≥50) and `instinct-check.sh` (decay, no LLM).
 
 ### State, Baselines & Migration

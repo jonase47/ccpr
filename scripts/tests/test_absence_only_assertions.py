@@ -891,7 +891,7 @@ class NoStaleKnownFindingsTest(unittest.TestCase):
 
 class ClassificationCountsTest(unittest.TestCase):
     def test_classification_counts(self):
-        """Regression pin on the measured baseline: 1292 `test_*` methods
+        """Regression pin on the measured baseline: 1325 `test_*` methods
         across the corpus call something shaped like a subprocess invocation
         and are therefore in scope for this check; 0 of those are currently
         absence-only-needs-exemption -- `KNOWN_FINDINGS` above is empty for
@@ -905,6 +905,41 @@ class ClassificationCountsTest(unittest.TestCase):
         growing paragraph:
 
           in-scope / flagged   when
+          1325 / 0             05.09.2026 (CCP-1152, check (f) in
+                               manual-lint.sh): +33 from
+                               scripts/tests/test_manual_lint.py -- 32 new
+                               methods across twelve CheckF* classes plus one
+                               existing method split in two. Every one drives
+                               the shipped script through `self.run_lint()`
+                               (matches `RUN_HELPER_RE`), so all 33 are in
+                               scope; confirmed via scan_tree() rather than
+                               inferred from the class names. None flagged:
+                               each asserts on a named finding string or on
+                               the returncode, and every silent-direction test
+                               carries a deliberately-wrong companion document
+                               whose finding must appear. The pin moved THREE
+                               times inside this one round -- +24, then +2 from
+                               an adversarial probe run after the module was
+                               already green, then +7 from a code review and a
+                               re-run of the mutation probes against the
+                               restructured script. Re-measured each time via
+                               scan_tree(), never adjusted by arithmetic.
+                               The previous CCP-1152 cut added methods too and
+                               did NOT move this pin -- those live in
+                               test_doc_counts_agree.py and run in-process,
+                               which is the boundary described below. Every one drives
+                               the shipped script through `self.run_lint()`
+                               (matches `RUN_HELPER_RE`), so all 24 are in
+                               scope; confirmed via scan_tree() rather than
+                               inferred from the class names. None flagged:
+                               each asserts on a named finding string or on
+                               the returncode, and every silent-direction
+                               test carries a deliberately-wrong companion
+                               document whose finding must appear. The
+                               previous CCP-1152 cut added 24 methods too
+                               and did NOT move this pin -- those live in
+                               test_doc_counts_agree.py and run in-process,
+                               which is the boundary described below.
           1292 / 0             03.09.2026 (CCP-1137, third-round review
                                fixes): +2 from the same
                                scripts/tests/test_install_push_gate_hook.py
@@ -1677,7 +1712,7 @@ class ClassificationCountsTest(unittest.TestCase):
         count."""
         recs = scan_tree()
         flagged = [r for r in recs if r.disposition in NEEDS_EXEMPTION]
-        self.assertEqual(1292, len(recs))
+        self.assertEqual(1325, len(recs))
         self.assertEqual(0, len(flagged))
 
 

@@ -8,6 +8,78 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Added
 
+- **CCP-1152, second cut: `scripts/manual-lint.sh` gains check (f) — a number in prose can
+  now be pinned to the value derived from a glob, by an inline marker on its own line.** The
+  first cut of this item (`scripts/tests/test_doc_counts_agree.py`) derived four specific
+  counted facts with four purpose-built extractors; that is the right shape for a
+  multi-number anchor sentence, and the wrong shape for the ~25 other simple claims scattered
+  through the manual, each of which would need its own extractor and its own test. Check (f)
+  is the generic shell guard for the simple case:
+
+  ```markdown
+  CCPR ships 116 commands. <!-- pin: count ../commands/*.md -->
+  ```
+
+  Two verbs — `count` (the derived value must
+  EQUAL the number on the line) and `floor` (it must be `>=` it, the semantics the already
+  settled "2,600+ tests" claim needs, and the reason the contract has to be able to express a
+  lower bound at all). Everything it reports is an `error`; check (f) raises no warnings.
+
+  **Three rules, each chosen against a milder alternative that was considered and rejected.**
+  *Exactly one number on the marked line*, marker comment excluded — the obvious alternative,
+  set-membership ("the derived value must appear among the numbers on the line"), has a hole:
+  `115 commands plus 1 = 116 total` passes on the presence of 116 while 115 is wrong. The
+  one-number rule costs the ability to pin a compound sentence and buys the guarantee that a
+  passing line means what it says. *A glob matching zero files is an error, not a warning* —
+  a guard with no scope checks nothing and also looks like coverage (KA-G-017). The milder
+  reading, that a downstream project inheriting this tree may legitimately lack the path, was
+  rejected by the same argument in reverse: if the path is absent there, the claim in front of
+  the marker is unsupported for that project too, and the error points at the line that should
+  have been adapted or deleted at project init. *A marker inside a fenced code block is
+  documentation OF the marker*, and is skipped — this repository has been bitten by that class
+  twice before (check (n) reporting bracketed text inside a code block as a dead link;
+  `freeze-phase-docs.sh` hoisting a fenced example header as a real `reviewed_head`), so the
+  fence rules mirror `memory-lint.sh`'s own state machine rather than being re-derived.
+
+  **What it is not, stated in the script's own header so it cannot be mistaken later.** Check
+  (f) is opt-in by marker and therefore a **fallback guard, not a detector** — it can never
+  find an *unmarked* wrong number. And the letters jump from (c) to (f) on purpose: **(d) and
+  (e) are reserved** by documentation standard v0.7 for the frontmatter reliability fields,
+  which are not built yet. A test pins the absence of (d)/(e) from the report's `**Checks:**`
+  line so that nobody "repairs" the sequence in a year and breaks every reference to (f).
+
+  **Two defects found after the module was already green, both in the same place: the seam between
+  "where is the marker" and "which numbers are prose".** Marker detection ran over the RAW line
+  while the number scan ran over the STRIPPED one — two readings of the same text, and they
+  disagree wherever an outer comment encloses the marker. `<!-- TODO … <!-- pin: … -->` is ONE html
+  comment (a comment ends at the first `-->`), so that marker is commented out and must be inert;
+  the raw-line search saw it anyway and then reported the enclosing comment's now-empty prose as
+  "0 numbers". Both are now derived from the same single walk, which makes the class
+  unrepresentable rather than merely fixed — and the walk now also hands back each comment's own
+  span, so a marker is recognised as a whole span rather than found by a substring search.
+
+  **The first of the two, found by an adversarial probe rather than by the tests.** The markup stripper that removes the marker comment before counting numbers took
+  the text before the first `<!--` as the prose head, but then advanced past the first `-->`
+  *anywhere on the line*. Those two ends are not a pair when a literal arrow appears in ordinary
+  prose earlier than the opener (`Flow A --> B, so there are 3 assets. <!-- … -->`): the span
+  between arrow and opener is emitted twice, so a legitimate single-number line is rejected as
+  carrying two. Fixed by searching for the closer in the text *after* the opener. The opposite,
+  worse direction was hypothesised and then traced by hand through the broken code — a numberless
+  line adopting a digit out of its own glob — and found **not reachable**; the test written for it
+  would have been green against both the broken and the fixed script, so it was deleted rather
+  than kept as decoration.
+
+  Implemented in pure bash — `[[ =~ ]]` and glob expansion, no `grep`/`awk`/`sed` — so the
+  invocation inventory `scripts/tests/test_external_tool_exit_status.py` pins needed no change,
+  and bash 3.2 (ADR-0011) stays the floor. The markdown `pin:` vocabulary and the Python
+  `pin:` marker vocabulary in `scripts/tests/` are disjoint **by corpus**, verified rather than
+  assumed: `pin_registry.corpus_files()` enumerates `scripts/tests/**/*.py` only and its
+  `MARKER_RE` requires a leading `#`, which an HTML comment has not. The Python `floor` group's
+  "a floor needs a companion `set`" rule therefore does not transfer to the markdown verb. Two
+  real markers land with this cut, on `Manual/README.md` and `Manual/SYSTEM_OVERVIEW.md`, both
+  guarding the 116-command claim against `commands/*.md`; a broader rollout over the remaining
+  correct-but-unguarded sites is deliberately a separate cut.
+
 - **`scripts/push-gate.sh` — the discipline gate now has a server-side entry point, so a
   plain `git push` is no longer an unchecked path.** Until now the gate ran in exactly two
   places, `memory-sync.sh promote` and `artifact-gate.sh`; a commit followed by a push

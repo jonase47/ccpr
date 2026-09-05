@@ -144,6 +144,34 @@ it). Exit codes: 0 clean, 1 warnings, 2 errors.
 - **(c) `kind:` vocabulary** — checked against the known list above; opt-in, only fires when the
   field is actually set. A recognised value stays silent; an unrecognised one is a `warning`,
   not an `error` — see the "KNOWN set, not the ALLOWED set" paragraph above.
+- **(f) derived-count markers** — a number in prose, guarded by an inline HTML comment on the
+  SAME line, compared against a value derived from the tree. Grammar:
+
+  ```markdown
+  CCPR ships 116 commands. <!-- pin: count ../commands/*.md -->
+  ```
+
+  Two verbs: `count <glob>` (the derived value must EQUAL the number on the line) and
+  `floor <glob>` (it must be `>=` the number — a floor stays silent while its subject grows and
+  fires only on a shortfall, the semantics a claim like "2,600+ tests" needs). Every finding is
+  an `error`; check (f) raises no warnings. Three rules: exactly ONE number on the marked line
+  with the marker comment excluded (set-membership semantics would let `115 commands plus 1 =
+  116 total` pass while 115 is wrong); a glob matching ZERO files is an error, not a warning (a
+  guard with no scope checks nothing, and it also looks like coverage); and the value comparison
+  itself. The glob resolves document-relative first and against `ROOT` as a fallback — the same
+  cascade as (a), and a fallback hit is likewise reported as `info`. A marker inside a fenced
+  code block is documentation OF the marker and is skipped — **fenced blocks only**: a marker
+  written inside an inline code span (single backticks) is still read as live. That limitation
+  is deliberate and fails loud (an error), never silent.
+
+  **What it is not.** Check (f) is OPT-IN BY MARKER and therefore a **fallback guard, not a
+  detector**: it can never find an unmarked wrong number. It is also limited to simple
+  single-number claims — multi-number anchor sentences (a per-phase command breakdown, say) are
+  not its terrain and belong to a purpose-built extractor.
+
+  The letter gap between (c) and (f) is deliberate: **(d) and (e) are reserved** by documentation
+  standard v0.7 for the frontmatter reliability fields, which are not built yet. Do not renumber
+  (f) to close it.
 
 ## Status semantics (vs. Memory schema)
 
