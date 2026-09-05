@@ -1,4 +1,4 @@
-# CCPR Manual
+# CCPR Handbook
 
 The **how** of CCPR. This folder lives in the repository only — it is **not**
 copied into `~/.claude/` by `install.sh`. Read it here in the cloned repo or on

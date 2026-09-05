@@ -450,7 +450,7 @@ while [ "$ci" -lt "$CHECK_COUNT" ]; do
         invoke_args=()
         case "$name" in
           phase-docs-lint|memory-lint) invoke_args=("$PROJECT_DIR") ;;
-          manual-lint)                 invoke_args=("$PROJECT_DIR/Manual") ;;
+          manual-lint)                 invoke_args=("$PROJECT_DIR/handbook") ;;
           doc-volume-check)            invoke_args=("$PROJECT_DIR/docs") ;;
           artifact-gate)
             if [ "$GATE_DENY_STATE" = "configured" ]; then

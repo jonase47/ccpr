@@ -76,7 +76,7 @@ Indexes are listings — no frontmatter required.
 `~/.claude/scripts/memory-lint.sh [projectdir]` validates `docs/memory/**` in the project plus the
 global tiers under `~/.claude/`.
 
-**This is the only check-by-check list in the Manual** — `SYSTEM_OVERVIEW.md` links here instead of
+**This is the only check-by-check list in the handbook** — `SYSTEM_OVERVIEW.md` links here instead of
 restating it, because a list that grows when the script grows cannot be maintained in two places.
 Ground truth is the script itself: every entry below names the check letter it documents, so a
 bullet can be traced to the code block that implements it.

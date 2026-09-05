@@ -30,7 +30,7 @@ Every new project starts with `/track-decision`, which chooses between two paral
                                                          (P0-P8 full pipeline)
 ```
 
-**Decision criteria** (see `/track-decision`): Knockouts K1-K5 (DSGVO PII, special categories, launch-imminent, BFSG/regulatory, external stakeholders) + Indicator Score I1-I5. Mid-flight re-assessment allowed; **no downgrade Full -> Lean** (Lean is a transient fast-test shortcut, see `Manual/LEAN_TRACK.md`).
+**Decision criteria** (see `/track-decision`): Knockouts K1-K5 (DSGVO PII, special categories, launch-imminent, BFSG/regulatory, external stakeholders) + Indicator Score I1-I5. Mid-flight re-assessment allowed; **no downgrade Full -> Lean** (Lean is a transient fast-test shortcut, see `handbook/LEAN_TRACK.md`).
 
 ## Lean-Track Skills (4)
 

@@ -840,7 +840,7 @@ command-by-command effects live there.
 |   +-- adr/                     # Architecture Decision Records
 |   +-- memory/                  # Project memory (MEMORY.md index + project_*.md)
 |
-|   # Human-facing manual (this document) lives in the repo's Manual/ — not installed
+|   # Human-facing manual (this document) lives in the repo's handbook/ — not installed
 |
 +-- hooks/
 |   +-- agent-monitor.py         # Central monitoring script

@@ -50,7 +50,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_PATH = REPO_ROOT / "scripts" / "memory-lint.sh"
-CHAPTER_PATH = REPO_ROOT / "Manual" / "system" / "memory-instincts.md"
+CHAPTER_PATH = REPO_ROOT / "handbook" / "system" / "memory-instincts.md"
 
 _SCRIPT_CHECK_RE = re.compile(r"^[ \t]*# \(([a-z][a-z0-9]?)\)")
 _CHAPTER_CHECK_RE = re.compile(r"^- \*\*\(([a-z][a-z0-9]?)\)", re.MULTILINE)
