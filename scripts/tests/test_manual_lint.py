@@ -32,8 +32,28 @@ point as a subprocess against the shipped script, never sourced internals.
 Every mutation-proof test below constructs its own RED state on a synthetic
 fixture (G-107/G-109: structural swap, not deletion) since `Manual/` is
 read-only for this work item and the real corpus cannot be edited to
-manufacture a failure -- see `ReverseLinkMutationProofTest` and
-`KindVocabularyMutationProofTest`.
+manufacture a failure -- see `ReverseLinkMutationProofTest`,
+`KindVocabularyMutationProofTest` and `CheckFMutationProofTest`.
+
+## The check letters, and the gap in them (CCP-1152)
+
+The shipped script implements (a), (b), (c) and (f). **(d) and (e) are
+RESERVED** by documentation standard v0.7 for the frontmatter reliability
+fields, which are not built yet, so the sequence deliberately jumps.
+`ReportScopeLineTest.test_the_letters_d_and_e_are_not_claimed` pins that
+absence: without it, a future reader "repairing" the numbering by renaming
+(f) to (d) would break every reference to the letter at once (the report's
+own `**Checks:**` line, templates/PHASE_DOC_SCHEMA.md, this module, and
+CHANGELOG.md) while every test stayed green.
+
+Check (f) compares a number in prose against a value derived from a glob,
+opt-in via an inline marker on the number's own line. It is therefore a
+FALLBACK GUARD, NOT A DETECTOR: it can never find an *unmarked* wrong number,
+and `CheckFOneNumberRuleTest.test_an_unmarked_line_carrying_numbers_is_
+untouched` pins exactly that. Its silent-direction tests all carry a
+deliberately-wrong COMPANION document over the same glob, because "check (f)
+ran and correctly stayed silent" and "check (f) never ran" are
+indistinguishable from the outside (WI-0128 finding #1).
 """
 
 import shutil
@@ -526,11 +546,11 @@ class KindVocabularyMutationProofTest(ManualLintTestBase):
 
 
 class ReportScopeLineTest(ManualLintTestBase):
-    """(d) the report names its scope of CHECKS -- WI-0090/WI-0121
-    convention, landed twice already (artifact-gate.sh's header,
+    """The report names its scope of CHECKS -- WI-0090/WI-0121 convention,
+    landed twice already (artifact-gate.sh's header,
     scripts/phase-docs-lint.sh:165-190)."""
 
-    def test_report_names_all_three_checks(self):
+    def test_report_names_every_shipped_check(self):
         self.write_doc("x.md", doc_text())
 
         result = self.run_lint()
@@ -543,6 +563,25 @@ class ReportScopeLineTest(ManualLintTestBase):
         self.assertIn("(a)", checks_line)
         self.assertIn("(b)", checks_line)
         self.assertIn("(c)", checks_line)
+        self.assertIn("(f)", checks_line)
+
+    def test_the_letters_d_and_e_are_not_claimed(self):
+        """The gap between (c) and (f) is deliberate: (d) and (e) are
+        RESERVED by documentation standard v0.7 for the frontmatter
+        reliability fields, which are not built yet. Pinning the absence
+        here so that nobody "repairs" the sequence in a year by renaming
+        (f) to (d) and breaking every reference to it."""
+        self.write_doc("x.md", doc_text())
+
+        result = self.run_lint()
+
+        checks_line = next(
+            (line for line in result.stdout.splitlines() if line.startswith("**Checks:**")),
+            None,
+        )
+        self.assertIsNotNone(checks_line, result.stdout)
+        self.assertNotIn("(d)", checks_line)
+        self.assertNotIn("(e)", checks_line)
 
 
 class EmptyScopeTest(ManualLintTestBase):
@@ -583,6 +622,706 @@ class EmptyScopeTest(ManualLintTestBase):
         )
 
         self.assertEqual(self.files_scanned(result.stdout), 1)
+
+
+# ---------------------------------------------------------------------------
+# Check (f) -- derived-count markers
+# ---------------------------------------------------------------------------
+
+def marker(verb, glob):
+    """The markdown marker check (f) reads, exactly as it appears in prose."""
+    return "<!-- " + "pin: %s %s -->" % (verb, glob)
+
+
+def pinned(text, verb, glob):
+    """One prose line carrying a claim and the marker that guards it."""
+    return "%s %s\n" % (text, marker(verb, glob))
+
+
+class CheckFMarkerBase(ManualLintTestBase):
+    """Shared fixture vocabulary for check (f): a corpus of NON-markdown
+    assets to count, so the counted set is independent of how many .md
+    documents the lint itself happens to be scanning."""
+
+    def write_assets(self, folder, n, ext="txt"):
+        for i in range(n):
+            path = self.root / folder / ("asset-%d.%s" % (i, ext))
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("x\n", encoding="utf-8")
+
+    def pinned_doc(self, rel_path, text, verb, glob, prefix="Intro paragraph.\n\n"):
+        return self.write_doc(
+            rel_path,
+            doc_text(body="\n# Doc\n\n" + prefix + pinned(text, verb, glob)),
+        )
+
+
+class CheckFCountVerbTest(CheckFMarkerBase):
+    """(f) `count` -- the derived value must EQUAL the single number on the
+    marked line."""
+
+    def test_a_count_that_agrees_with_the_glob_is_silent(self):
+        # Companion liveness proof: a second, deliberately wrong claim over
+        # the SAME glob. Silence on the correct document is otherwise
+        # indistinguishable from check (f) never running at all.
+        self.write_assets("assets", 3)
+        self.pinned_doc("ok.md", "There are 3 assets.", "count", "assets/*.txt")
+        self.pinned_doc("wrong.md", "There are 9 assets.", "count", "assets/*.txt")
+
+        result = self.run_lint()
+
+        errors = self.findings(result.stdout, "Errors")
+        self.assertFalse(any("ok.md" in e for e in errors), errors)
+        self.assertTrue(any("wrong.md" in e for e in errors), errors)
+
+    def test_a_count_that_disagrees_is_an_error_and_exits_2(self):
+        self.write_assets("assets", 3)
+        self.pinned_doc("claim.md", "There are 5 assets.", "count", "assets/*.txt")
+
+        result = self.run_lint()
+
+        self.assertEqual(result.returncode, 2, result.stdout)
+        self.assertEqual(self.findings(result.stdout, "Warnings"), [], result.stdout)
+        errors = self.findings(result.stdout, "Errors")
+        self.assertTrue(
+            any("claim.md" in e and "derives 3" in e and "states 5" in e for e in errors),
+            errors,
+        )
+
+
+class CheckFFloorVerbTest(CheckFMarkerBase):
+    """(f) `floor` -- the derived value must be >= the number on the line.
+    A floor stays silent while its subject GROWS; it fires only when the
+    derived value falls below the claim. This verb exists because README.md's
+    already-settled test-count decision ("2,600+ tests") needs >= semantics."""
+
+    def test_a_floor_exactly_at_the_derived_value_is_silent(self):
+        self.write_assets("assets", 3)
+        self.pinned_doc("ok.md", "At least 3 assets.", "floor", "assets/*.txt")
+        self.pinned_doc("wrong.md", "At least 9 assets.", "floor", "assets/*.txt")
+
+        result = self.run_lint()
+
+        errors = self.findings(result.stdout, "Errors")
+        self.assertFalse(any("ok.md" in e for e in errors), errors)
+        self.assertTrue(any("wrong.md" in e for e in errors), errors)
+
+    def test_a_floor_below_the_derived_value_is_silent(self):
+        self.write_assets("assets", 5)
+        self.pinned_doc("ok.md", "More than 2 assets.", "floor", "assets/*.txt")
+        self.pinned_doc("wrong.md", "More than 8 assets.", "floor", "assets/*.txt")
+
+        result = self.run_lint()
+
+        errors = self.findings(result.stdout, "Errors")
+        self.assertFalse(any("ok.md" in e for e in errors), errors)
+        self.assertTrue(any("wrong.md" in e for e in errors), errors)
+
+    def test_a_floor_above_the_derived_value_is_an_error(self):
+        self.write_assets("assets", 3)
+        self.pinned_doc("claim.md", "At least 4 assets.", "floor", "assets/*.txt")
+
+        result = self.run_lint()
+
+        self.assertEqual(result.returncode, 2, result.stdout)
+        errors = self.findings(result.stdout, "Errors")
+        self.assertTrue(
+            any("claim.md" in e and "derives 3" in e and "4" in e for e in errors),
+            errors,
+        )
+
+    def test_the_same_number_that_passes_as_a_floor_fails_as_a_count(self):
+        """The two verbs are not interchangeable -- the discriminating
+        case is derived > declared, which `floor` accepts and `count`
+        rejects. Without this pair, a `count` implemented as `>=` would
+        pass every other test in this module."""
+        self.write_assets("assets", 5)
+        self.pinned_doc("floored.md", "At least 2 assets.", "floor", "assets/*.txt")
+        self.pinned_doc("counted.md", "There are 2 assets.", "count", "assets/*.txt")
+
+        result = self.run_lint()
+
+        errors = self.findings(result.stdout, "Errors")
+        self.assertFalse(any("floored.md" in e for e in errors), errors)
+        self.assertTrue(any("counted.md" in e for e in errors), errors)
+
+
+class CheckFGlobScopeTest(CheckFMarkerBase):
+    """(f) glob resolution -- document-relative first, ROOT-fallback second
+    (check (a)'s cascade, reused not reinvented), and a glob that matches
+    NOTHING is an error: a guard that silently checks nothing is worse than
+    no guard at all (KA-G-017, "a check run that reports no scope is not a
+    pass"). The milder reading -- warn, because a downstream project may not
+    have the path -- was considered and rejected: if the path does not exist
+    there, the claim in front of the marker is unsupported for that project
+    too, and the error points at the line that should have been adapted or
+    deleted at project init."""
+
+    def test_a_glob_matching_zero_files_is_an_error(self):
+        self.pinned_doc("claim.md", "There are 3 assets.", "count", "ghost/*.txt")
+
+        result = self.run_lint()
+
+        self.assertEqual(result.returncode, 2, result.stdout)
+        errors = self.findings(result.stdout, "Errors")
+        self.assertTrue(
+            any("claim.md" in e and "ghost/*.txt" in e and "matches no files" in e
+                for e in errors),
+            errors,
+        )
+
+    def test_a_document_relative_glob_resolves_without_an_info_line(self):
+        self.write_assets("chapters/assets", 2)
+        self.pinned_doc("chapters/doc.md", "There are 2 assets.", "count", "assets/*.txt")
+        # Liveness companion: same directory, deliberately wrong number.
+        self.pinned_doc("chapters/wrong.md", "There are 7 assets.", "count", "assets/*.txt")
+
+        result = self.run_lint()
+
+        errors = self.findings(result.stdout, "Errors")
+        self.assertFalse(any("chapters/doc.md" in e for e in errors), errors)
+        self.assertTrue(any("chapters/wrong.md" in e for e in errors), errors)
+        self.assertEqual(self.findings(result.stdout, "Info"), [], result.stdout)
+
+    def test_a_root_fallback_glob_resolves_and_is_reported_as_info(self):
+        # `assets/` sits at the ROOT, not next to the document -- the same
+        # fallback check (a) reports as `info` for parent_index.
+        self.write_assets("assets", 2)
+        self.pinned_doc("chapters/doc.md", "There are 2 assets.", "count", "assets/*.txt")
+
+        result = self.run_lint()
+
+        self.assertEqual(self.findings(result.stdout, "Errors"), [], result.stdout)
+        infos = self.findings(result.stdout, "Info")
+        self.assertTrue(
+            any("chapters/doc.md" in i and "assets/*.txt" in i and "root fallback" in i
+                for i in infos),
+            infos,
+        )
+
+    def test_a_root_fallback_glob_still_compares_the_number(self):
+        """The fallback resolves the SCOPE; it does not excuse the claim."""
+        self.write_assets("assets", 2)
+        self.pinned_doc("chapters/doc.md", "There are 6 assets.", "count", "assets/*.txt")
+
+        result = self.run_lint()
+
+        errors = self.findings(result.stdout, "Errors")
+        self.assertTrue(
+            any("chapters/doc.md" in e and "derives 2" in e for e in errors), errors,
+        )
+
+
+class CheckFOneNumberRuleTest(CheckFMarkerBase):
+    """(f) exactly ONE number on the marked line, the marker comment itself
+    excluded. Set-membership semantics ("the derived value must appear among
+    the numbers on the line") has a hole: `115 commands plus 1 = 116 total`
+    would pass on the presence of 116 while 115 is wrong. The one-number rule
+    closes it and forces simple, pinnable sentences."""
+
+    def test_two_numbers_on_the_marked_line_is_an_error(self):
+        self.write_assets("assets", 3)
+        self.pinned_doc(
+            "claim.md", "There are 3 assets in 1 folder.", "count", "assets/*.txt",
+        )
+
+        result = self.run_lint()
+
+        self.assertEqual(result.returncode, 2, result.stdout)
+        errors = self.findings(result.stdout, "Errors")
+        self.assertTrue(
+            any("claim.md" in e and "2 numbers" in e for e in errors), errors,
+        )
+
+    def test_no_number_on_the_marked_line_is_an_error(self):
+        self.write_assets("assets", 3)
+        self.pinned_doc("claim.md", "There are several assets.", "count", "assets/*.txt")
+
+        result = self.run_lint()
+
+        self.assertEqual(result.returncode, 2, result.stdout)
+        errors = self.findings(result.stdout, "Errors")
+        self.assertTrue(
+            any("claim.md" in e and "0 numbers" in e for e in errors), errors,
+        )
+
+    def test_digits_inside_the_marker_comment_are_not_counted(self):
+        # `assets2/*.txt` carries a digit. If the marker were not excluded
+        # from the number scan, this line would read as two numbers (3, 2)
+        # and fail the one-number rule instead of comparing 3 against 3.
+        self.write_assets("assets2", 3)
+        self.pinned_doc("claim.md", "There are 3 assets.", "count", "assets2/*.txt")
+
+        result = self.run_lint()
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(self.findings(result.stdout, "Errors"), [], result.stdout)
+
+    def test_an_unmarked_line_carrying_numbers_is_untouched(self):
+        """Check (f) is opt-in by marker, and therefore a FALLBACK GUARD,
+        not a detector: it can never find an unmarked wrong number."""
+        self.write_doc(
+            "prose.md",
+            doc_text(body="\n# Doc\n\nCCPR ships 999 commands and 3 agents.\n"),
+        )
+
+        result = self.run_lint()
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(self.findings(result.stdout, "Errors"), [], result.stdout)
+        self.assertEqual(self.findings(result.stdout, "Warnings"), [], result.stdout)
+
+
+class CheckFNumberFormTest(CheckFMarkerBase):
+    """(f) number parsing -- a number is its VALUE, not its literal. A
+    thousands separator (`2,600`) is part of one number; a trailing `+`
+    (`2,600+ tests`, README.md's floor form) is prose ornament and neither
+    creates nor alters a number."""
+
+    def test_a_thousands_separator_and_a_trailing_plus_read_as_one_number(self):
+        # 1000 real files, deliberately: this is the only POSITIVE proof that
+        # a separated number parses to its value -- the sibling test below
+        # proves the same point from the error text with 3 files, but an
+        # error message is the failing direction. A `1,000` claim can only be
+        # SATISFIED by a corpus of 1000. Measured cost ~50 ms.
+        self.write_assets("assets", 1000)
+        self.pinned_doc("ok.md", "Over 1,000+ assets.", "floor", "assets/*.txt")
+
+        result = self.run_lint()
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(self.findings(result.stdout, "Errors"), [], result.stdout)
+
+    def test_a_separated_number_is_compared_by_value_not_by_its_first_group(self):
+        # 3 assets against a claimed floor of 1,000: the error must name
+        # 1000, not 1 (which would pass) and not "2 numbers" (which would
+        # mean the separator split the token).
+        self.write_assets("assets", 3)
+        self.pinned_doc("claim.md", "Over 1,000 assets.", "floor", "assets/*.txt")
+
+        result = self.run_lint()
+
+        errors = self.findings(result.stdout, "Errors")
+        self.assertTrue(any("claim.md" in e and "1000" in e for e in errors), errors)
+        self.assertFalse(any("numbers" in e for e in errors), errors)
+
+
+class CheckFVerbVocabularyTest(CheckFMarkerBase):
+    """(f) the marker's own grammar. `count` and `floor` are the whole
+    vocabulary; anything else is an ERROR, not a silent skip -- a typo'd verb
+    would otherwise disable the guard it was written to install."""
+
+    def test_an_unknown_verb_is_an_error(self):
+        self.write_assets("assets", 3)
+        self.pinned_doc("claim.md", "There are 3 assets.", "eq", "assets/*.txt")
+
+        result = self.run_lint()
+
+        self.assertEqual(result.returncode, 2, result.stdout)
+        errors = self.findings(result.stdout, "Errors")
+        self.assertTrue(
+            any("claim.md" in e and "'eq'" in e for e in errors), errors,
+        )
+
+    def test_a_marker_without_a_glob_is_an_error(self):
+        self.write_doc(
+            "claim.md",
+            doc_text(body="\n# Doc\n\nThere are 3 assets. <!-- " + "pin: count -->\n"),
+        )
+
+        result = self.run_lint()
+
+        self.assertEqual(result.returncode, 2, result.stdout)
+        errors = self.findings(result.stdout, "Errors")
+        self.assertTrue(
+            any("claim.md" in e and "malformed" in e for e in errors), errors,
+        )
+
+
+class CheckFFencedBlockTest(CheckFMarkerBase):
+    """(f) a marker inside a fenced code block is DOCUMENTATION OF the
+    marker, not a live one. This repository has been bitten by exactly this
+    class before -- see the check (n) history in CHANGELOG.md, where an
+    extractor reported bracketed text inside a code block as a dead link,
+    and freeze-phase-docs.sh hoisted a fenced example header as a real
+    `reviewed_head` value."""
+
+    def test_a_marker_inside_a_fence_does_not_fire(self):
+        self.write_assets("assets", 3)
+        self.write_doc(
+            "guide.md",
+            doc_text(
+                body="\n# Guide\n\nWrite it like this:\n\n```markdown\n"
+                + pinned("There are 999 assets.", "count", "ghost/*.txt")
+                + "```\n\n"
+                # Liveness companion OUTSIDE the fence, same document: its
+                # error is what proves the fence skipped a line rather than
+                # check (f) never running on this file at all.
+                + pinned("There are 8 assets.", "count", "assets/*.txt")
+            ),
+        )
+
+        result = self.run_lint()
+
+        errors = self.findings(result.stdout, "Errors")
+        self.assertFalse(any("999" in e or "ghost" in e for e in errors), errors)
+        self.assertTrue(any("derives 3" in e and "states 8" in e for e in errors), errors)
+
+    def test_a_marker_after_a_closed_fence_still_fires(self):
+        self.write_assets("assets", 3)
+        self.write_doc(
+            "guide.md",
+            doc_text(
+                body="\n# Guide\n\n```\nsome code\n```\n\n"
+                + pinned("There are 8 assets.", "count", "assets/*.txt")
+            ),
+        )
+
+        result = self.run_lint()
+
+        errors = self.findings(result.stdout, "Errors")
+        self.assertTrue(any("derives 3" in e and "states 8" in e for e in errors), errors)
+
+    def test_a_tilde_fence_containing_a_backtick_fence_stays_one_block(self):
+        """A fence only closes with its OWN delimiter character, at least as
+        long as the opener -- the rule memory-lint.sh's own fence state
+        machine already implements."""
+        self.write_assets("assets", 3)
+        self.write_doc(
+            "guide.md",
+            doc_text(
+                body="\n# Guide\n\n~~~markdown\n```\n"
+                + pinned("There are 999 assets.", "count", "ghost/*.txt")
+                + "```\n~~~\n\n"
+                + pinned("There are 8 assets.", "count", "assets/*.txt")
+            ),
+        )
+
+        result = self.run_lint()
+
+        errors = self.findings(result.stdout, "Errors")
+        self.assertFalse(any("999" in e or "ghost" in e for e in errors), errors)
+        self.assertTrue(any("derives 3" in e and "states 8" in e for e in errors), errors)
+
+
+class CheckFMutationProofTest(CheckFMarkerBase):
+    """Mutation proof for check (f), structural not presence-based
+    (G-107/G-109): the claimed number is moved to a value ADJACENT to the
+    true one, so the marker, the glob and the sentence shape all survive
+    intact and only the comparison can be what fires. Reverting must
+    silence it again."""
+
+    def setUp(self):
+        super().setUp()
+        self.write_assets("assets", 4)
+        self.doc_path = self.pinned_doc(
+            "claim.md", "There are 4 assets.", "count", "assets/*.txt",
+        )
+
+    def test_the_true_number_is_silent(self):
+        # Companion liveness proof: a valid claim is indistinguishable from
+        # the OUTSIDE between "check (f) ran and stayed silent" and "check
+        # (f) never ran". A wrong companion that DOES fire settles it.
+        self.pinned_doc("companion.md", "There are 40 assets.", "count", "assets/*.txt")
+
+        result = self.run_lint()
+
+        errors = self.findings(result.stdout, "Errors")
+        self.assertFalse(any("claim.md" in e for e in errors), errors)
+        self.assertTrue(any("companion.md" in e for e in errors), errors)
+
+    def test_an_adjacent_number_fires_and_reverting_silences_it_again(self):
+        self.doc_path.write_text(
+            doc_text(
+                body="\n# Doc\n\nIntro paragraph.\n\n"
+                + pinned("There are 5 assets.", "count", "assets/*.txt")
+            ),
+            encoding="utf-8",
+        )
+
+        mutated = self.run_lint()
+        self.assertEqual(mutated.returncode, 2, mutated.stdout)
+        self.assertTrue(
+            any("claim.md" in e and "derives 4" in e and "states 5" in e
+                for e in self.findings(mutated.stdout, "Errors")),
+            mutated.stdout,
+        )
+
+        self.doc_path.write_text(
+            doc_text(
+                body="\n# Doc\n\nIntro paragraph.\n\n"
+                + pinned("There are 4 assets.", "count", "assets/*.txt")
+            ),
+            encoding="utf-8",
+        )
+        reverted = self.run_lint()
+        self.assertEqual(reverted.returncode, 0, reverted.stdout)
+        self.assertEqual(self.findings(reverted.stdout, "Errors"), [], reverted.stdout)
+
+
+class CheckFStrayArrowTest(CheckFMarkerBase):
+    """A literal `-->` appearing on the marked line BEFORE the marker's own
+    `<!--` must not confuse the markup stripper.
+
+    Found by an adversarial probe, not by the tests above. The first
+    implementation took the text before the first `<!--` as the prose head but
+    then advanced past the first `-->` ANYWHERE on the line; with a stray arrow
+    earlier than the opener those two ends are not a pair, so the span between
+    the arrow and the opener is emitted TWICE.
+
+    The reachable failure direction is a false ERROR, and only that -- measured,
+    not assumed. The stripper's loop runs again on the remainder and does strip
+    the marker comment eventually, so the marker's own glob digits never survive
+    into the scan; and the duplication can only ADD occurrences, never remove
+    one. So a legitimate single-number line is rejected as carrying two, which
+    is what this test pins. An earlier draft of this class also asserted a
+    false-PASS direction (a numberless line adopting a digit out of its own
+    glob); that case was traced through the buggy stripper by hand, found NOT
+    reachable, and the test deleted rather than kept as a passing decoration --
+    it would have been green against both the broken and the fixed code."""
+
+    def test_a_stray_arrow_before_the_marker_does_not_duplicate_the_prose(self):
+        self.write_assets("assets", 3)
+        # The discriminating shape: the number sits BETWEEN the stray arrow
+        # and the marker, i.e. inside exactly the span the mispaired ends
+        # duplicate. A number before the arrow would be in the prose head
+        # only and would survive the defect unharmed.
+        self.pinned_doc(
+            "arrow.md",
+            "Flow A --> B, so there are 3 assets.",
+            "count", "assets/*.txt",
+        )
+        # Liveness companion over the same glob and the same sentence shape.
+        self.pinned_doc(
+            "arrow-wrong.md",
+            "Flow A --> B, so there are 9 assets.",
+            "count", "assets/*.txt",
+        )
+
+        result = self.run_lint()
+
+        errors = self.findings(result.stdout, "Errors")
+        self.assertFalse(any("arrow.md:" in e for e in errors), errors)
+        self.assertTrue(
+            any("arrow-wrong.md" in e and "derives 3" in e and "states 9" in e
+                for e in errors),
+            errors,
+        )
+
+    def test_an_unterminated_comment_after_the_marker_is_left_as_prose(self):
+        """The stripper must not consume the rest of the line when a second,
+        unterminated `<!--` follows a complete marker -- the loop has to stop
+        at an opener it cannot pair, not treat the tail as stripped."""
+        self.write_assets("assets", 3)
+        self.pinned_doc(
+            "dangling.md", "There are 3 assets.", "count", "assets/*.txt", prefix="",
+        )
+        path = self.root / "dangling.md"
+        path.write_text(
+            path.read_text(encoding="utf-8").rstrip("\n") + " <!-- dangling\n",
+            encoding="utf-8",
+        )
+
+        result = self.run_lint()
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(self.findings(result.stdout, "Errors"), [], result.stdout)
+
+
+class CheckFCommentSpanTest(CheckFMarkerBase):
+    """A marker is recognised as a COMMENT SPAN, from the same walk that
+    strips comments before the number scan -- not by a separate search over
+    the raw line.
+
+    The distinction is the whole finding of the review round: detecting the
+    marker on the RAW line while counting numbers on the STRIPPED line means
+    two different readings of the same text, and they disagree exactly where
+    an outer comment encloses the marker. `<!-- TODO ... <!-- pin: ... -->`
+    is ONE html comment (a comment ends at the first `-->`), so the marker is
+    commented out and must be inert -- the raw-line search saw a marker
+    anyway and then reported the enclosing comment's now-empty prose as
+    "0 numbers"."""
+
+    def test_a_marker_nested_inside_an_outer_comment_is_inert(self):
+        self.write_assets("assets", 3)
+        self.write_doc(
+            "nested.md",
+            doc_text(
+                body="\n# Doc\n\n"
+                "<!-- TODO revisit: there are 3 assets " + marker("count", "assets/*.txt")
+                + "\n\n"
+                # Liveness companion on its own line, OUTSIDE any comment.
+                + pinned("There are 8 assets.", "count", "assets/*.txt")
+            ),
+        )
+
+        result = self.run_lint()
+
+        errors = self.findings(result.stdout, "Errors")
+        self.assertFalse(any("numbers" in e for e in errors), errors)
+        self.assertTrue(any("derives 3" in e and "states 8" in e for e in errors), errors)
+
+    def test_both_markers_on_one_line_are_checked_not_just_the_first(self):
+        """Two markers on one line is a strange thing to write, but the
+        second must not be silently dropped -- a marker that is parsed and
+        ignored is exactly the silent failure this check exists to remove.
+        Both compare against the line's single number."""
+        self.write_assets("assets", 3)
+        self.write_doc(
+            "two.md",
+            doc_text(
+                body="\n# Doc\n\nThere are 3 assets. "
+                + marker("count", "assets/*.txt") + " " + marker("count", "ghost/*.txt")
+                + "\n"
+            ),
+        )
+
+        result = self.run_lint()
+
+        errors = self.findings(result.stdout, "Errors")
+        self.assertTrue(
+            any("ghost/*.txt" in e and "matches no files" in e for e in errors), errors,
+        )
+
+
+class CheckFInlineCodeSpanLimitationTest(CheckFMarkerBase):
+    """KNOWN LIMITATION, pinned deliberately rather than left to be
+    discovered: the fence machine protects FENCED code blocks only. A marker
+    written inside an INLINE code span (single backticks) is still read as a
+    live marker, because nothing here parses inline spans.
+
+    Raised in review. Not closed in this cut for two reasons, both stated in
+    the script header and in templates/PHASE_DOC_SCHEMA.md so the claim is
+    narrow rather than optimistic: parsing inline code spans correctly
+    (backtick runs of arbitrary length, escapes) is a markdown parser, not a
+    guard clause; and the failure is fail-LOUD (an error nobody can miss),
+    never a silent pass. Measured at the time of writing: no line inside
+    `Manual/` -- the only tree check-all.sh points this linter at -- writes
+    the marker syntax inline.
+
+    This test pins the CURRENT behaviour. If the limitation is closed later,
+    this test is the one to invert, and its docstring is the reason it
+    existed."""
+
+    def test_a_marker_in_an_inline_code_span_is_still_read_as_live(self):
+        self.write_doc(
+            "guide.md",
+            doc_text(
+                body="\n# Guide\n\nWrite it as `" + marker("count", "ghost/*.txt")
+                + "` in your own document.\n"
+            ),
+        )
+
+        result = self.run_lint()
+
+        self.assertEqual(result.returncode, 2, result.stdout)
+        errors = self.findings(result.stdout, "Errors")
+        self.assertTrue(any("guide.md" in e for e in errors), errors)
+
+
+class CheckFLongFenceTest(CheckFMarkerBase):
+    """Raised in review: the fence machine requires a closing run at least as
+    long as the opener, but only the different-DELIMITER nesting case was
+    tested. This pins the same-delimiter, different-LENGTH case."""
+
+    def test_a_four_backtick_fence_is_not_closed_by_a_three_backtick_line(self):
+        self.write_assets("assets", 3)
+        self.write_doc(
+            "guide.md",
+            doc_text(
+                body="\n# Guide\n\n````markdown\n```\n"
+                + pinned("There are 999 assets.", "count", "ghost/*.txt")
+                + "```\n````\n\n"
+                + pinned("There are 8 assets.", "count", "assets/*.txt")
+            ),
+        )
+
+        result = self.run_lint()
+
+        errors = self.findings(result.stdout, "Errors")
+        self.assertFalse(any("999" in e or "ghost" in e for e in errors), errors)
+        self.assertTrue(any("derives 3" in e and "states 8" in e for e in errors), errors)
+
+
+class CheckFSpanBoundaryTest(CheckFMarkerBase):
+    """Three properties of the marker/span grammar that no other test in this
+    module discriminated. All three were found the same way: after the
+    comment-span restructure, the probe suite was re-run against the NEW
+    script and three mutations SURVIVED -- the old probes had been written
+    against regexes that no longer exist. A surviving mutation is a coverage
+    report, so each one is closed here rather than explained away."""
+
+    def test_a_marker_with_extra_tokens_is_malformed(self):
+        """The marker grammar anchors at the END of its span. Without that
+        anchor `pin: count a b` parses as verb=count, glob=a and silently
+        DROPS ` b` -- a marker that means something other than what it says,
+        which is worse than one that is rejected."""
+        self.write_assets("assets", 3)
+        self.write_doc(
+            "extra.md",
+            doc_text(
+                body="\n# Doc\n\nThere are 3 assets. <!-- "
+                + "pin: count assets/*.txt extra-token -->\n"
+            ),
+        )
+
+        result = self.run_lint()
+
+        self.assertEqual(result.returncode, 2, result.stdout)
+        errors = self.findings(result.stdout, "Errors")
+        self.assertTrue(
+            any("extra.md" in e and "malformed" in e for e in errors), errors,
+        )
+
+    def test_an_ordinary_comment_mentioning_the_marker_word_is_not_a_marker(self):
+        """The marker word has to start its span. A prose comment that merely
+        MENTIONS the vocabulary is not a marker, and must not be reported as a
+        malformed one -- a linter that complains about documentation of itself
+        gets switched off."""
+        self.write_assets("assets", 3)
+        self.write_doc(
+            "mention.md",
+            doc_text(
+                body="\n# Doc\n\n"
+                "Some prose. <!-- note: the " + "pin: vocabulary is documented elsewhere -->\n"
+                "\n"
+                # Liveness companion: a real marker on its own line in the
+                # SAME document, so silence on the mention line cannot be
+                # confused with check (f) skipping the file.
+                + pinned("There are 8 assets.", "count", "assets/*.txt")
+            ),
+        )
+
+        result = self.run_lint()
+
+        errors = self.findings(result.stdout, "Errors")
+        self.assertFalse(any("malformed" in e for e in errors), errors)
+        self.assertTrue(any("derives 3" in e and "states 8" in e for e in errors), errors)
+
+    def test_a_marked_line_followed_by_an_unrelated_comment_stays_silent(self):
+        """A span ends at ITS OWN `-->`, not at the last one on the line.
+        The script header claims a line may carry both an unrelated comment
+        and a marker; this is what pins that claim. If a span ran to the final
+        `-->`, the marker's own span would swallow the second comment and be
+        reported as malformed."""
+        self.write_assets("assets", 3)
+        self.write_doc(
+            "trailing.md",
+            doc_text(
+                body="\n# Doc\n\nThere are 3 assets. "
+                + marker("count", "assets/*.txt") + " <!-- editorial note -->\n\n"
+                # Liveness companion, same two-comment shape, wrong number.
+                + "There are 8 assets. " + marker("count", "assets/*.txt")
+                + " <!-- editorial note -->\n"
+            ),
+        )
+
+        result = self.run_lint()
+
+        errors = self.findings(result.stdout, "Errors")
+        self.assertFalse(any("malformed" in e for e in errors), errors)
+        self.assertFalse(any("states 3" in e for e in errors), errors)
+        self.assertTrue(any("derives 3" in e and "states 8" in e for e in errors), errors)
 
 
 if __name__ == "__main__":

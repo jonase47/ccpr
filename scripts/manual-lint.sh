@@ -26,6 +26,19 @@
 #       unrecognised value is a WARNING (surface it for deliberate curation),
 #       not an error (same open-enum precedent as memory-lint.sh check (c)'s
 #       Tier-2 `type:` field — see that script's comment).
+#   (f) derived-count markers — a number in prose, guarded by an inline HTML
+#       comment on the SAME line, is compared against a value derived from the
+#       repository. See the "Check (f)" block below for the full grammar and
+#       the reasoning behind each of its rules. Every finding is an ERROR;
+#       check (f) raises no warnings.
+#
+# WHY THE LETTERS JUMP FROM (c) TO (f) — this gap is deliberate, not a
+# numbering accident. (d) and (e) are RESERVED by documentation standard v0.7
+# for the frontmatter reliability fields, which are not built yet. Do not
+# "repair" the sequence by renaming (f) to (d): the letter is referenced from
+# the report's `**Checks:**` line, from templates/PHASE_DOC_SCHEMA.md, from
+# scripts/tests/test_manual_lint.py and from CHANGELOG.md, and renaming it
+# breaks all of them at once for no gain.
 #
 # Usage:
 #   bash scripts/manual-lint.sh [<root-dir>]
@@ -108,6 +121,185 @@ rel_path() {
     printf '%s' "$result"
 }
 
+# ---------------------------------------------------------------------------
+# Check (f) — derived-count markers
+# ---------------------------------------------------------------------------
+#
+# GRAMMAR. An inline HTML comment on the SAME LINE as the number it guards:
+#
+#     CCPR ships 116 commands. <!-- ${MARKER_WORD} count ../commands/*.md -->
+#
+# Two verbs, and no others:
+#   count <glob>  the derived value must EQUAL the number on the line.
+#   floor <glob>  the derived value must be >= the number on the line. A floor
+#                 stays silent while its subject GROWS and fires only when the
+#                 derived value falls BELOW the claim. The verb exists because
+#                 the already-settled README.md test-count decision
+#                 ("2,600+ tests") needs >= semantics, and a contract that
+#                 cannot express it would push that claim back to a hand-typed
+#                 number — the thing this check is here to remove.
+#
+# RULES. All three are ERRORS (exit 2). Check (f) raises no warnings.
+#
+#   1. EXACTLY ONE number on the marked line, the marker comment itself
+#      excluded. More than one, or none, is an error. The alternative —
+#      set-membership semantics, "the derived value must appear among the
+#      numbers on the line" — has a hole: `115 commands plus 1 = 116 total`
+#      would pass on the presence of 116 while 115 is wrong. The one-number
+#      rule closes it, at the price of forcing simple, pinnable sentences.
+#      That price is the point: a sentence too tangled to pin is a sentence
+#      whose numbers nobody can check either.
+#   2. A glob that matches ZERO files is an ERROR, not a warning. A guard that
+#      silently checks nothing is worse than no guard, because it also looks
+#      like coverage (KA-G-017: "a check run that reports no scope is not a
+#      pass"). The milder reading — warn, since a downstream project that
+#      inherits this tree may not have the path — was considered and rejected:
+#      if the path does not exist there, the claim in front of the marker is
+#      unsupported for that project too, and the error points squarely at the
+#      line that should have been adapted or deleted at project init.
+#   3. Derived value vs. the number on the line: mismatch (`count`) or
+#      shortfall (`floor`) is an error.
+#
+# NUMBER PARSING. A number is its VALUE, not its literal. A thousands
+# separator binds into one number (`2,600` → 2600) but only in full
+# three-digit groups, so `1,2` reads as two numbers and fails rule 1 rather
+# than silently becoming 12. A trailing `+` (`2,600+ tests`, README.md's floor
+# form) is prose ornament: it neither creates a number nor alters one. Leading
+# zeros are read base-10, never octal.
+#
+# WHAT CHECK (f) IS NOT. It is OPT-IN BY MARKER and therefore a FALLBACK
+# GUARD, NOT A DETECTOR: it can never find an UNMARKED wrong number. It is
+# also deliberately limited to SIMPLE SINGLE-NUMBER claims. Multi-number
+# anchor sentences — e.g. the command breakdown `3/5/4/23/4/12/22/5/4 = 82` —
+# are explicitly NOT check (f) terrain and stay with
+# scripts/tests/test_doc_counts_agree.py and its dedicated extractors, which
+# can parse a shape this generic shell guard has no business modelling.
+#
+# VOCABULARY SEPARATION. This markdown marker vocabulary and the Python
+# `<hash> pin: <group> <id>` vocabulary in scripts/tests/ are disjoint BY
+# CORPUS, verified 05.09.2026 by reading the code rather than by assumption:
+# pin_registry.corpus_files() (scripts/tests/pin_registry.py:906-913)
+# enumerates scripts/tests/*.py + scripts/tests/workitems/*.py only and never
+# sees a markdown file, and its MARKER_RE (pin_registry.py:87) requires a
+# leading `#`, which an HTML comment does not have. In particular the Python
+# `floor` group's admissibility rule ("a floor is admissible only where the
+# same subject also carries a `set` pin", scripts/tests/test_pin_inventory.py)
+# does NOT transfer to the markdown `floor` verb here — there is no
+# cross-vocabulary rule, and none should be invented.
+#
+# A marker inside a FENCED CODE BLOCK is documentation OF the marker, not a
+# live one, and is skipped. This repository has been bitten by that class
+# before: memory-lint.sh's check (n) once reported bracketed text inside a
+# code block as a dead link, and freeze-phase-docs.sh hoisted a fenced example
+# header as a real `reviewed_head` value (see CHANGELOG.md). The fence rules
+# mirror memory-lint.sh's own state machine: an opener is ``` or ~~~ (three or
+# more, indented at most 3 spaces) and closes only on its OWN delimiter
+# character, at a length at least the opener's.
+#
+# KNOWN LIMITATION, stated narrowly on purpose: that protection covers FENCED
+# blocks only. A marker written inside an INLINE code span (single backticks)
+# is still read as live. Closing it would mean parsing inline spans — backtick
+# runs of arbitrary length, escapes — which is a markdown parser, not a guard
+# clause; and the failure is fail-LOUD (an error nobody can miss), never a
+# silent pass. Measured 05.09.2026: no line inside Manual/ — the only tree
+# check-all.sh points this linter at — writes the marker syntax inline. Pinned
+# by CheckFInlineCodeSpanLimitationTest so the limitation is a decision on
+# record rather than something a later reader rediscovers.
+
+# The literal word a marker comment opens with. Held in a variable, never
+# written out next to `<!--` anywhere in this file, so that this script's own
+# header examples above cannot be mistaken for live markers by any future
+# scanner reading this file as documentation.
+MARKER_WORD="pin:"
+
+# Both marker regexes match against ONE COMMENT SPAN's content (the text
+# between a `<!--` and its own `-->`), never against the raw line. Searching
+# the raw line for a marker while counting numbers on the STRIPPED line is two
+# different readings of the same text, and they disagree exactly where an
+# outer comment encloses the marker: `<!-- TODO … <!-- pin: … -->` is ONE html
+# comment (a comment ends at the FIRST `-->`), so the marker is commented out
+# and must be inert — the raw-line search saw a live marker anyway and then
+# reported the enclosing comment's now-empty prose as "0 numbers". Deriving
+# both from the same walk makes that class unrepresentable rather than fixed.
+F_MARKER_PRESENT_RE="^[[:space:]]*${MARKER_WORD}"
+F_MARKER_RE="^[[:space:]]*${MARKER_WORD}[[:space:]]*([^[:space:]]+)[[:space:]]+([^[:space:]]+)[[:space:]]*$"
+F_FENCE_OPEN_RE='^ {0,3}(`{3,}|~{3,})'
+F_NUMBER_RE='[0-9]+(,[0-9][0-9][0-9])*'
+
+# f_strip_markup <line> — the line with every complete `<!-- ... -->` span
+# replaced by a single space, so rule 1 counts the numbers of the PROSE and
+# never the digits of a glob (`assets2/*.txt`, `p3-*.md`). Every HTML comment
+# is stripped, not just the marker: a line carrying both an unrelated comment
+# and a marker would otherwise count the unrelated one's digits too. Result in
+# F_STRIPPED (a global, not a command substitution: a subshell per marked line
+# would buy nothing and bash 3.2 does not honour `set -e` inside one anyway).
+#
+# The two ends MUST be paired through `rest`, never taken independently off
+# `$s`. Searching for the closer with `${s#*-->}` looks equivalent and is not:
+# on a line carrying a literal `-->` EARLIER than the opener (`Flow A --> B, so
+# there are 3 assets. <!-- ... -->`, an arrow in ordinary prose) it advances to
+# the STRAY arrow, so the span between arrow and opener is emitted twice and a
+# single-number line is rejected as carrying two. Found by an adversarial probe
+# after the first implementation shipped green; see CheckFStrayArrowTest.
+# An opener with no closer after it ends the loop with the remainder intact —
+# an unterminated comment is prose here, not a licence to swallow the rest.
+# It also collects each stripped span's CONTENT into F_SPANS, because that is
+# where markers are looked for: one walk produces both the prose to count and
+# the comments to interpret, so the two can never disagree about where a
+# comment begins and ends.
+F_STRIPPED=""
+F_SPANS=()
+f_strip_markup() {
+    local s="$1" out="" head="" rest=""
+    F_SPANS=()
+    while [[ "$s" == *"<!--"* ]]; do
+        head="${s%%<!--*}"
+        rest="${s#*<!--}"
+        [[ "$rest" == *"-->"* ]] || break
+        out="$out$head "
+        F_SPANS+=("${rest%%-->*}")
+        s="${rest#*-->}"
+    done
+    F_STRIPPED="$out$s"
+}
+
+# f_extract_numbers <text> — every number in <text>, normalised to its base-10
+# VALUE, into F_NUMBERS. Pure bash: `[[ =~ ]]` is a builtin, so this adds no
+# external-tool invocation to the inventory scripts/tests/
+# test_external_tool_exit_status.py pins.
+F_NUMBERS=()
+f_extract_numbers() {
+    local text="$1" tok=""
+    F_NUMBERS=()
+    while [[ "$text" =~ $F_NUMBER_RE ]]; do
+        tok="${BASH_REMATCH[0]}"
+        F_NUMBERS+=("$((10#${tok//,/}))")
+        text="${text#*"$tok"}"
+    done
+}
+
+# f_count_glob <dir> <pattern> — how many paths <pattern> matches when
+# expanded relative to <dir>, into F_GLOB_COUNT. The `cd` happens in a
+# subshell so the caller's working directory is untouched and <dir>'s own
+# characters never enter the glob word. With `nullglob` off (the default) an
+# unmatched pattern expands to itself, which the `-e` test then rejects — so a
+# pattern with no wildcard at all is simply a count of one named path.
+F_GLOB_COUNT=0
+f_count_glob() {
+    local dir="$1" pattern="$2" out=""
+    F_GLOB_COUNT=0
+    [[ -d "$dir" ]] || return 0
+    out="$(cd "$dir" && {
+        c=0
+        for m in $pattern; do
+            if [ -e "$m" ]; then c=$((c + 1)); fi
+        done
+        printf '%s' "$c"
+    })" || out=0
+    [[ -n "$out" ]] || out=0
+    F_GLOB_COUNT="$out"
+}
+
 errors=()
 warnings=()
 infos=()
@@ -186,6 +378,103 @@ for file in ${FILES[@]+"${FILES[@]}"}; do
         file_abs="$(cd "$base_dir" && pwd)/$(basename "$file")"
         PARENT_LINKS+=("$idx_abs|$file_abs")
     fi
+
+    # (f) derived-count markers — grammar, rules and rationale in the
+    # "Check (f)" block above. File-local, so it lives here in the per-file
+    # loop rather than in the second pass check (b) needs.
+    #
+    # `|| [[ -n "$line" ]]` keeps the last line of a file that ends without a
+    # newline: `read` returns non-zero there but has still filled $line.
+    fence_char=""
+    fence_close_re=""
+    line_no=0
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        line_no=$((line_no + 1))
+
+        if [[ -n "$fence_char" ]]; then
+            if [[ "$line" =~ $fence_close_re ]]; then
+                fence_char=""
+                fence_close_re=""
+            fi
+            continue
+        fi
+        if [[ "$line" =~ $F_FENCE_OPEN_RE ]]; then
+            fence_opener="${BASH_REMATCH[1]}"
+            fence_char="${fence_opener:0:1}"
+            # A fence closes only on its OWN character, at least as long as
+            # the opener — so a ``` inside an open ~~~ fence stays content.
+            fence_close_re="^ {0,3}[${fence_char}]{${#fence_opener},}[[:space:]]*$"
+            continue
+        fi
+
+        # One walk, two products: the prose to count numbers in, and the
+        # comment spans to look for markers in (see f_strip_markup).
+        f_strip_markup "$line"
+        [[ ${#F_SPANS[@]} -gt 0 ]] || continue
+
+        # Pass 1 — marker SHAPE. Every marker span on the line is parsed,
+        # not just the first: a marker that is recognised and then silently
+        # dropped is exactly the failure this check exists to remove.
+        line_markers=()
+        for span in ${F_SPANS[@]+"${F_SPANS[@]}"}; do
+            [[ "$span" =~ $F_MARKER_PRESENT_RE ]] || continue
+            if [[ ! "$span" =~ $F_MARKER_RE ]]; then
+                err "$rel:$line_no — malformed derived-count marker (expected '<!-- $MARKER_WORD <count|floor> <glob> -->')"
+                continue
+            fi
+            marker_verb="${BASH_REMATCH[1]}"
+            marker_glob="${BASH_REMATCH[2]}"
+            case "$marker_verb" in
+                count|floor) line_markers+=("$marker_verb $marker_glob") ;;
+                *) err "$rel:$line_no — unknown marker verb '$marker_verb' (the vocabulary is: count, floor)" ;;
+            esac
+        done
+        [[ ${#line_markers[@]} -gt 0 ]] || continue
+
+        # Pass 2 — the one-number rule, once per LINE rather than once per
+        # marker: the numbers belong to the line, so two markers on it must
+        # not produce the same complaint twice.
+        f_extract_numbers "$F_STRIPPED"
+        if [[ ${#F_NUMBERS[@]} -ne 1 ]]; then
+            err "$rel:$line_no — a derived-count marker guards a line carrying ${#F_NUMBERS[@]} numbers; exactly one is required (rewrite the sentence so it states a single number, marker comment excluded)"
+            continue
+        fi
+        declared_value="${F_NUMBERS[0]}"
+
+        # Pass 3 — resolve and compare, per marker.
+        for entry in "${line_markers[@]}"; do
+            marker_verb="${entry%% *}"
+            marker_glob="${entry#* }"
+
+            # Glob resolution — document-relative first, ROOT-fallback
+            # second: the same cascade check (a) above already implements for
+            # parent_index, reused rather than reinvented, with a fallback hit
+            # reported as `info` for the same reason (keep the fallback usage
+            # visible instead of letting it become unnoticed drift).
+            f_count_glob "$base_dir" "$marker_glob"
+            derived_value="$F_GLOB_COUNT"
+            if [[ "$derived_value" -eq 0 ]]; then
+                f_count_glob "$ROOT" "$marker_glob"
+                derived_value="$F_GLOB_COUNT"
+                if [[ "$derived_value" -gt 0 ]]; then
+                    info "$rel:$line_no — $marker_verb marker '$marker_glob' resolved via root fallback ($ROOT), not relative to $base_dir"
+                else
+                    err "$rel:$line_no — $marker_verb marker '$marker_glob' matches no files (neither relative to $base_dir nor to $ROOT) — a guard with no scope checks nothing"
+                    continue
+                fi
+            fi
+
+            if [[ "$marker_verb" == "count" ]]; then
+                if [[ "$derived_value" -ne "$declared_value" ]]; then
+                    err "$rel:$line_no — count marker '$marker_glob' derives $derived_value, but the line states $declared_value"
+                fi
+            else
+                if [[ "$derived_value" -lt "$declared_value" ]]; then
+                    err "$rel:$line_no — floor marker '$marker_glob' derives $derived_value, below the $declared_value the line states"
+                fi
+            fi
+        done
+    done < "$file"
 done
 
 # (b) Reverse direction — the index an existing parent_index resolved to
@@ -232,7 +521,7 @@ NOW="$(date '+%d.%m.%Y %H:%M')"
 echo "# Manual Lint Report"
 echo
 echo "**Root:** $ROOT"
-echo "**Checks:** (a) parent_index resolves (document-relative first, root-fallback second) · (b) the resolved index links the claiming file back · (c) kind: is in the known vocabulary (warning if not)"
+echo "**Checks:** (a) parent_index resolves (document-relative first, root-fallback second) · (b) the resolved index links the claiming file back · (c) kind: is in the known vocabulary (warning if not) · (f) a marked number agrees with the value derived from its glob"
 echo "**Run:** $NOW"
 echo "**Files scanned:** $FILES_TOTAL"
 echo
