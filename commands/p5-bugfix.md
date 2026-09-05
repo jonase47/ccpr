@@ -34,7 +34,7 @@ Run `python3 ~/.claude/scripts/workitems.py list`.
 - **`[]` but `docs/workitems/` exists** → adopted store, just empty right now. Treat as adopted: use
   the CLI, not the prose fallback.
 
-See Manual/WORKITEMS.md §8 for the full guard rationale and the status-verb mapping.
+See handbook/WORKITEMS.md §8 for the full guard rationale and the status-verb mapping.
 
 ## Execution
 
@@ -92,7 +92,7 @@ Using the same guard result from step 0:
 - Prose fallback: update SPRINT.md — mark bug as "Fixed".
 If the bug has a broader impact, add a note to **RISKS.md**.
 Once wired, item status is never hand-edited in SPRINT.md/BACKLOG.md — those are planning views
-(Manual/WORKITEMS.md §8).
+(handbook/WORKITEMS.md §8).
 
 ## Result
 

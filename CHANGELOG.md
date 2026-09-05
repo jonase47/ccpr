@@ -1127,6 +1127,53 @@ All notable changes to this project are documented in this file. The format is b
   plain VERIFIED; a code review caught this collapsing into the wrong wording during this
   same round. `--help`'s `--verify` section now names all three origin states.
 
+### Changed
+
+- **CCP-1150, second and final cut: the human handbook is renamed `Manual/` → `handbook/`,
+  and the sites that break travel in the same commit as the `git mv`.** ADR-0014 decided the
+  namespace; this cut performs it. 23 tracked files move; `install.sh:43` never shipped
+  `Manual/`, so no installed CCPR and no consumer project has anything to migrate.
+
+  **The load-bearing site is `scripts/check-all.sh:453`, and it fails green.** It invoked
+  `manual-lint` on a hard-coded `"$PROJECT_DIR/Manual"`. A missing root exits 0 — measured
+  again here: stderr says `root 'handbook' does not exist`, the exit code does not — and
+  `check-all.baseline.tsv:55` expects `manual-lint 0`, so the gate would have reported
+  **"match" while the linter scanned nothing**. Four further sites break silently because they
+  build the path segment-wise (`scripts/tests/test_doc_counts_agree.py:93,96,97`,
+  `scripts/tests/test_memory_lint_checklist_binding.py:53`). The path-form pattern `Manual/`
+  reaches **none** of the five.
+
+  **The acceptance asserts a count, because the obvious criterion cannot fail.**
+  `manual-lint.sh handbook` exits 0 before the rename and after it; only `**Files scanned:**`
+  separates the two. Verified: **23** before the move, **23** after. And verified to be capable
+  of failing — with the tree moved aside for one run the same command still exits 0 and reports
+  `**Files scanned:** 0`; the tree was restored and confirmed byte-identical (24 files, sha256).
+
+  **Classification came before the first write, because both directions of error were live.**
+  237 occurrences of `Manual` across tracked files partition, and the classes sum to the total:
+  **78 protocol** (46 in `CHANGELOG.md`, 29 in ADR bodies, 3 in `handbook/SYSTEM_OVERVIEW.md`'s
+  `## Change History` rows), **2 deferred** (`docs/CONSTITUTION.md`, held for the v1.3 bump),
+  **134 renamed**, and **23 that must not be renamed** — the English adjective ("Manual
+  install", "Manual Exploitation", "Manual status marker") and every identifier derived from
+  `manual-lint.sh`, whose own name does not change (`# Manual Lint Report`, the `ManualLint*`
+  test classes, `MANUAL_LINT`). The rule applied: **a path or a name denoting the directory
+  changes; an English word, a filename and an identifier do not.** Getting the width wrong in
+  either direction was the live risk: the path form `Manual/` reaches 122 of the 157
+  non-protocol occurrences and leaves dead paths behind, the bare word reaches all of them and
+  corrupts prose.
+
+  **The protocol line runs through a file, not around it.** `CHANGELOG.md` and all fourteen ADR
+  *bodies* keep saying `Manual/` — they record what was true on a date — and so do the two
+  `## Change History` rows in `handbook/SYSTEM_OVERVIEW.md` (`:935`, `:939`; three
+  occurrences between them). ADR *frontmatter* is living
+  navigation metadata, so the five `related:` entries pointing into the tree were repointed
+  (ADR-0001, -0003, -0004, -0008, -0013) and each target confirmed to resolve under `handbook/`.
+  That check had to be done by hand: **nothing in this repository validates an ADR's `related:`
+  paths** — `phase-docs-lint.sh` has the check but never walks `docs/adr/` (`adr` is absent from
+  `PHASE_FOLDERS` at `:61`), `memory-lint.sh` walks `docs/memory/**` only, and
+  `test_adr_status_mapping.py` asserts `adr_status` and `status` and nothing else. No validator
+  is added here; widening that scope is a separate cut.
+
 ### Fixed
 
 - **Several human-facing docs quoted a counted fact (test-suite size, agent count, command

@@ -362,6 +362,6 @@ file whose whole documented purpose is to make agents *stop* reading it.
   both addenda (18.08.2026 / 21.08.2026), which correct nine statements the ADR's own body
   made before implementation.
 - `commands/anchor.md` — the command surface: arguments, Stage 1/Stage 2 execution steps,
-  the escalation path into `Manual/WORKITEMS.md`, and the Handover epilogue rule.
+  the escalation path into `handbook/WORKITEMS.md`, and the Handover epilogue rule.
 - [Cross-Cutting Mechanisms → Cross-Check](../SYSTEM_OVERVIEW.md#5-cross-cutting-mechanisms) —
   the Markdown-vs-Markdown neighbour this mechanism does not replace.

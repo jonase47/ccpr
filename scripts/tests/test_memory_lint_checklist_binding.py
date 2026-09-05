@@ -1,6 +1,6 @@
 """test_memory_lint_checklist_binding.py -- WI-0110: pin that every check
 `scripts/memory-lint.sh` defines has a matching bullet in the "Per file"
-checklist chapter of `Manual/system/memory-instincts.md`, and that no bullet
+checklist chapter of `handbook/system/memory-instincts.md`, and that no bullet
 in that chapter names a check the script no longer defines.
 
 ## Measured before writing anything (26.08.2026)
@@ -50,7 +50,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_PATH = REPO_ROOT / "scripts" / "memory-lint.sh"
-CHAPTER_PATH = REPO_ROOT / "Manual" / "system" / "memory-instincts.md"
+CHAPTER_PATH = REPO_ROOT / "handbook" / "system" / "memory-instincts.md"
 
 _SCRIPT_CHECK_RE = re.compile(r"^[ \t]*# \(([a-z][a-z0-9]?)\)")
 _CHAPTER_CHECK_RE = re.compile(r"^- \*\*\(([a-z][a-z0-9]?)\)", re.MULTILINE)
@@ -114,11 +114,11 @@ class ChecklistBindingTest(unittest.TestCase):
         self.assertEqual(
             set(), undocumented,
             f"scripts/memory-lint.sh defines check(s) {sorted(undocumented)} "
-            "with no matching bullet in Manual/system/memory-instincts.md",
+            "with no matching bullet in handbook/system/memory-instincts.md",
         )
         self.assertEqual(
             set(), stale,
-            f"Manual/system/memory-instincts.md documents check(s) {sorted(stale)} "
+            f"handbook/system/memory-instincts.md documents check(s) {sorted(stale)} "
             "that scripts/memory-lint.sh no longer defines",
         )
 

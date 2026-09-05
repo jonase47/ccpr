@@ -30,7 +30,7 @@ project with zero committed work.
   reading BACKLOG.md/SPRINT.md prose for criterion 6, as before, and evaluate readiness from the
   prose story status. Emit one line: *"Tip: run `lift` to adopt the structured work-item store."*
 
-See Manual/WORKITEMS.md §8 for the full guard rationale, the directory-check requirement, and the
+See handbook/WORKITEMS.md §8 for the full guard rationale, the directory-check requirement, and the
 status-verb mapping.
 
 ## Execution

@@ -70,7 +70,7 @@ Before creating anything, check which store already exists:
 - A prose `docs/planning/BACKLOG.md` with actual story content exists **AND** `docs/workitems/`
   does **NOT** exist → the project has an established prose backlog that hasn't been adopted into
   the structured store yet. Do **not** blindly `create` (that would fork a second, competing
-  register — the §7 drift Manual/WORKITEMS.md warns against). Instead, recommend running
+  register — the §7 drift handbook/WORKITEMS.md warns against). Instead, recommend running
   `python3 ~/.claude/scripts/workitems.py lift docs/planning/BACKLOG.md` first, then re-run
   `/p4-backlog` once the store is adopted.
 - `docs/workitems/` already exists (structured store adopted, whether via a prior `/p4-backlog` run
@@ -109,7 +109,7 @@ python3 ~/.claude/scripts/workitems.py create --title "<story title>" --type fea
 
 The backend assigns the `id` (`WI-NNNN` on the `local` provider) — never invent one. This is the
 adoption point: it establishes the structured store, so no prose-fallback branch applies here (see
-Manual/WORKITEMS.md §8 for the full adoption guard used by commands that transition an *existing*
+handbook/WORKITEMS.md §8 for the full adoption guard used by commands that transition an *existing*
 store). `BACKLOG.md` becomes a generated **view** over the created items, not their source of truth.
 Record every story's assigned `id` — the view written in step 5 references it (see §5b/§5c) so
 downstream commands resolve `<id>` by a real reference instead of a fuzzy title match.
@@ -212,7 +212,7 @@ All IDs follow this consistent schema. Phase is metadata in BACKLOG.md, not part
 - Work items created via `workitems create` — one per story, backend-assigned ids (source of truth)
 - **`docs/planning/BACKLOG.md`** (generated **view** over the created items — living, prioritized,
   estimated; frontmatter `status: living`; item status is never hand-edited here, see
-  Manual/WORKITEMS.md §8)
+  handbook/WORKITEMS.md §8)
 - **`docs/planning/PROJECT_PLAN.md`** (phase index with `## Milestones & Release Planning` body section)
 - Foundation for `/p4-sprint` (populate first sprint) and all P5 commands
 

@@ -43,12 +43,12 @@
 # Usage:
 #   bash scripts/manual-lint.sh [<root-dir>]
 #
-# Generic over ANY documentation root — NOT hardwired to Manual/.
-# install.sh does not copy Manual/ into ~/.claude (see Manual/README.md:2-5),
+# Generic over ANY documentation root — NOT hardwired to handbook/.
+# install.sh does not copy handbook/ into ~/.claude (see handbook/README.md:2-5),
 # so a script that defaulted to it would find nothing on every installed
 # CCPR — the exact defect 0e76919 fixed for phase-docs-lint.sh's
 # PHASE_FOLDERS default. Point it at whichever tree carries the
-# kind/parent_index contract, e.g. `bash scripts/manual-lint.sh Manual`.
+# kind/parent_index contract, e.g. `bash scripts/manual-lint.sh handbook`.
 #
 # Exit-Codes: 0 clean, 1 warnings, 2 errors.
 
@@ -91,7 +91,7 @@ is_valid_kind() {
 # the system `realpath` binary is not guaranteed present either. Splits
 # both paths on "/", walks the shared prefix, then emits one "../" per
 # remaining `from` segment followed by the remaining `to` segments —
-# the canonical document-relative form this repository's own Manual/
+# the canonical document-relative form this repository's own handbook/
 # links already use (`[…](system/agents.md)`, no leading "./", no
 # fragment): check (b) below does a literal substring match against
 # that exact shape, not a general link-destination parser.
@@ -201,7 +201,7 @@ rel_path() {
 # is still read as live. Closing it would mean parsing inline spans — backtick
 # runs of arbitrary length, escapes — which is a markdown parser, not a guard
 # clause; and the failure is fail-LOUD (an error nobody can miss), never a
-# silent pass. Measured 05.09.2026: no line inside Manual/ — the only tree
+# silent pass. Measured 05.09.2026: no line inside handbook/ — the only tree
 # check-all.sh points this linter at — writes the marker syntax inline. Pinned
 # by CheckFInlineCodeSpanLimitationTest so the limitation is a decision on
 # record rather than something a later reader rediscovers.
@@ -507,7 +507,7 @@ if [[ ${#PARENT_LINKS[@]} -gt 0 ]]; then
             # bash 3.2 (this repo's minimum target) a here-string larger
             # than the pipe buffer is written through a temp file rather
             # than an in-memory fd, which is a performance cost, not a
-            # correctness one — real Manual/-sized index files are nowhere
+            # correctness one — real handbook/-sized index files are nowhere
             # near where that would matter.
             if ! grep -qF "]($target)" <<< "$idx_content"; then
                 warn "$idx_rel — does not link back to $child_rel, which names it as parent_index (expected a link to '$target')"

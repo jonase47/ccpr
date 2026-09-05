@@ -9,7 +9,7 @@ last_updated: 15.05.2026
 
 > **Repo vs installed.** `install.sh` copies the framework (`agents/`, `commands/`,
 > `docs/`, `hooks/`, `scripts/`, `templates/`) into `~/.claude/`. The human-facing
-> **`Manual/`** folder (this document included) lives only in the repo and is **not**
+> **`handbook/`** folder (this document included) lives only in the repo and is **not**
 > installed — read it in the cloned repo or on the repository host. `~/.claude/docs/`
 > therefore holds only the runtime reference docs Claude reads during project work.
 

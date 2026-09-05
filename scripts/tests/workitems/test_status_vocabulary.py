@@ -1,8 +1,8 @@
 """test_status_vocabulary.py – Tests for the shared STATUS_VALUES vocabulary
-(Manual/WORKITEMS.md §2 / ADR-0002).
+(handbook/WORKITEMS.md §2 / ADR-0002).
 
 `In Review` was added as a distinct gate between `In Progress` and `Waiting for
-Approval` (two-gate P5: code review, then acceptance) -- see Manual/WORKITEMS.md §8's
+Approval` (two-gate P5: code review, then acceptance) -- see handbook/WORKITEMS.md §8's
 status-verb mapping. Pinning both membership and position here (not just relying on
 the contract suite's set-status round-trip) makes an accidental reordering or removal
 fail loudly at the single source of truth, rather than only downstream in whichever

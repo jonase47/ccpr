@@ -10,7 +10,7 @@
 
 *Software-engineering discipline for Claude Code — from first idea to production.*
 
-**Quick links:** [Getting Started](Manual/GETTING_STARTED.md) · [Workflow Cheatsheet](Manual/WORKFLOW_CHEATSHEET.md) · [System Overview](Manual/SYSTEM_OVERVIEW.md)
+**Quick links:** [Getting Started](handbook/GETTING_STARTED.md) · [Workflow Cheatsheet](handbook/WORKFLOW_CHEATSHEET.md) · [System Overview](handbook/SYSTEM_OVERVIEW.md)
 
 Vibe-coding with Claude Code doesn't scale across sessions: context gets lost between runs, the thread through a project frays, and nothing stops a phase from being skipped or a decision from being silently overwritten. CCPR lays a traceable process on top — phases, quality gates, and a project-specific Constitution — and gets smarter with every project, because it learns from its own sessions.
 
@@ -85,7 +85,7 @@ Projects start with `/track-decision` which chooses based on Knockouts (DSGVO, B
 - **Lean-Track** (4 skills, no gates, *transient — sunset at CCPR v1.0*) — fast-test shortcut for CCPR itself and a bridge into Full. `/track-decision → /lean-frame → build → /lean-learn → /lean-promote` promotes to Full-Track when ready. Mandant/team projects default to Full from the start; Lean is for internal experimentation and bridging only.
 - **Full-Track** (P0–P8, full pipeline) — production-grade software with regulatory, A11y, security, and operational readiness. `/project-init` calls `/constitution` to ratify the project's non-negotiable rules; gates verify against the Constitution Inviolables.
 
-Spec: [`Manual/LEAN_TRACK.md`](Manual/LEAN_TRACK.md) in this repo.
+Spec: [`handbook/LEAN_TRACK.md`](handbook/LEAN_TRACK.md) in this repo.
 
 ### Phase System
 
@@ -124,7 +124,7 @@ the appropriate agents per command (max. 3-4 simultaneously).
 `project-guide` is the entry door for status snapshots and skill/agent disambiguation;
 `wingman` consolidates results after parallel agent runs.
 
-The full roster with specializations lives in [`Manual/SYSTEM_OVERVIEW.md`](Manual/SYSTEM_OVERVIEW.md#2-agent-team), or expand it here:
+The full roster with specializations lives in [`handbook/SYSTEM_OVERVIEW.md`](handbook/SYSTEM_OVERVIEW.md#2-agent-team), or expand it here:
 
 <details>
 <summary>Full agent roster</summary>
@@ -362,7 +362,7 @@ Your `memory/` and `scripts/local-llm/` are out of scope and never touched.
 ```
 </details>
 
-The human-facing **`Manual/`** folder lives in this repo and is **not** installed —
+The human-facing **`handbook/`** folder lives in this repo and is **not** installed —
 it holds the "how to drive CCPR" guides (see [Documentation](#documentation)).
 
 ---
@@ -370,48 +370,48 @@ it holds the "how to drive CCPR" guides (see [Documentation](#documentation)).
 ## Under the hood
 
 CCPR ships supporting machinery that mostly runs for you — the **WHAT** is below,
-the **HOW** (full tables, schemas, examples) lives in the Manual.
+the **HOW** (full tables, schemas, examples) lives in the handbook.
 
 - **Scripts** (`~/.claude/scripts/`) run mechanical work locally — context
   gathering, gate pre-flight, test runs, quality scans, doc-hygiene lint — so
   Claude spends tokens on judgement, not bookkeeping. Most are invoked by the
-  matching skill. → [`Manual/WORKFLOW_CHEATSHEET.md`](Manual/WORKFLOW_CHEATSHEET.md)
+  matching skill. → [`handbook/WORKFLOW_CHEATSHEET.md`](handbook/WORKFLOW_CHEATSHEET.md)
 - **Hooks & monitoring** — one hook (`hooks/agent-monitor.py`, wired via
   `settings.json`) reacts to every event: activity/error logging, loop and
   stagnation detection, a compact reminder, and approximate per-session token
   tracking. Logs land under `~/.claude/logs/`; read them with `/logs-summary`.
-  → [`Manual/system/monitoring-scripts.md`](Manual/system/monitoring-scripts.md)
+  → [`handbook/system/monitoring-scripts.md`](handbook/system/monitoring-scripts.md)
 - **Handover** — `docs/HANDOVER.md` carries work state across sessions (updated at
   the end of each command). After `/release-baseline`, docs split into **Frozen**
   and **Active** to save tokens in later iterations.
-  → [`Manual/SYSTEM_OVERVIEW.md`](Manual/SYSTEM_OVERVIEW.md)
+  → [`handbook/SYSTEM_OVERVIEW.md`](handbook/SYSTEM_OVERVIEW.md)
 - **Project memory** — knowledge is versioned in `docs/memory/` in two tiers
   (cross-cutting `{type}_{slug}.md` + persona silos `{agent}/`); `user`-type
   memories stay global and unpushed. Validate with `memory-lint.sh`.
-  → [`Manual/system/memory-instincts.md`](Manual/system/memory-instincts.md)
+  → [`handbook/system/memory-instincts.md`](handbook/system/memory-instincts.md)
 - **Document splitting (P3 + P6)** — slim phase index plus one detail file per
   sub-skill keeps context windows small; lint with `phase-docs-lint.sh`, watch
-  sizes with `doc-volume-check.sh`. → [`Manual/SYSTEM_OVERVIEW.md`](Manual/SYSTEM_OVERVIEW.md)
+  sizes with `doc-volume-check.sh`. → [`handbook/SYSTEM_OVERVIEW.md`](handbook/SYSTEM_OVERVIEW.md)
 - **Continuous learning (instincts)** — short, confidence-scored rules (0.3–0.9)
   Claude follows proportional to score and matures via `/postmortem`, across four
   scopes (global/project × cross-cutting/agent). Manage with `/instinct …`.
-  → [`Manual/system/memory-instincts.md`](Manual/system/memory-instincts.md)
+  → [`handbook/system/memory-instincts.md`](handbook/system/memory-instincts.md)
 
 ---
 
 ## Documentation
 
-The **`Manual/`** folder (in this repo, **not** installed into `~/.claude/`) holds
+The **`handbook/`** folder (in this repo, **not** installed into `~/.claude/`) holds
 the "how to drive CCPR" guides. The runtime references Claude reads during project
 work stay in `docs/`.
 
 | Document | What it covers |
 |---|---|
-| [`Manual/GETTING_STARTED.md`](Manual/GETTING_STARTED.md) | Read-along onboarding (quickstart + full walkthrough) |
-| [`Manual/WORKFLOW_CHEATSHEET.md`](Manual/WORKFLOW_CHEATSHEET.md) | Quick reference for daily work (commands + scripts) |
-| [`Manual/SYSTEM_OVERVIEW.md`](Manual/SYSTEM_OVERVIEW.md) | Agent-system architecture + all mechanics in depth |
-| [`Manual/SECTIONS_COMMANDS.md`](Manual/SECTIONS_COMMANDS.md) | All 116 commands, grouped by section |
-| [`Manual/LEAN_TRACK.md`](Manual/LEAN_TRACK.md) | Lean-Track spec (transient, sunset at v1.0) |
+| [`handbook/GETTING_STARTED.md`](handbook/GETTING_STARTED.md) | Read-along onboarding (quickstart + full walkthrough) |
+| [`handbook/WORKFLOW_CHEATSHEET.md`](handbook/WORKFLOW_CHEATSHEET.md) | Quick reference for daily work (commands + scripts) |
+| [`handbook/SYSTEM_OVERVIEW.md`](handbook/SYSTEM_OVERVIEW.md) | Agent-system architecture + all mechanics in depth |
+| [`handbook/SECTIONS_COMMANDS.md`](handbook/SECTIONS_COMMANDS.md) | All 116 commands, grouped by section |
+| [`handbook/LEAN_TRACK.md`](handbook/LEAN_TRACK.md) | Lean-Track spec (transient, sunset at v1.0) |
 | [`docs/PROJECT_PHASES.md`](docs/PROJECT_PHASES.md) | Detailed phase descriptions with theory *(runtime doc)* |
 | [`docs/CONSTITUTION.md`](docs/CONSTITUTION.md) | CCPR's own binding Inviolables *(runtime doc)* |
 | [`docs/NEXT_STEPS_REFERENCE.md`](docs/NEXT_STEPS_REFERENCE.md) | Allowed phase transitions *(runtime doc)* |

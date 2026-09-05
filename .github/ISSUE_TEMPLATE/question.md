@@ -6,7 +6,7 @@ labels:
   - question
 ---
 
-<!-- Check the README and Manual/GETTING_STARTED.md first — but if it's unclear,
+<!-- Check the README and handbook/GETTING_STARTED.md first — but if it's unclear,
      that's itself useful feedback, so ask anyway. -->
 
 ## Your question

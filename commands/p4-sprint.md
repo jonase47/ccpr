@@ -33,7 +33,7 @@ Run `python3 ~/.claude/scripts/workitems.py list`.
   already committed to a sprint or done). Treat as adopted: use the CLI — an empty `Backlog` list
   means no candidate stories, not "fall back to prose".
 
-See Manual/WORKITEMS.md §8 for the full guard rationale and the status-verb mapping.
+See handbook/WORKITEMS.md §8 for the full guard rationale and the status-verb mapping.
 
 ## Execution
 

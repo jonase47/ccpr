@@ -6,7 +6,7 @@ status: draft
 last_updated: 02.09.2026
 related:
   - ADR-0002-workitem-backend-contract.md
-  - ../../Manual/WORKITEMS.md
+  - ../../handbook/WORKITEMS.md
   - ADR-0005-claiming-runner-protocol.md
 ---
 

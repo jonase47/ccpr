@@ -31,7 +31,7 @@ directory's existence tells them apart.
   find/ask which story is next, as before. Emit one line: *"Tip: run `lift` to adopt the structured
   work-item store."*
 
-See Manual/WORKITEMS.md §8 for the full guard rationale, the directory-check requirement, and the
+See handbook/WORKITEMS.md §8 for the full guard rationale, the directory-check requirement, and the
 status-verb mapping.
 
 ## Flow
@@ -57,7 +57,7 @@ Use the wingman summary as the basis for presenting results to the user.
     pending); back to Dev → `workitems set-status <id> "In Progress"`.
   - Prose fallback: update SPRINT.md — mark story as "Approved" or "Back to Dev".
 - Once wired, item status is never hand-edited in SPRINT.md/BACKLOG.md — those are planning views
-  (Manual/WORKITEMS.md §8).
+  (handbook/WORKITEMS.md §8).
 - Document review results in reviews/ or SPRINT.md
 
 ### Handover Epilog

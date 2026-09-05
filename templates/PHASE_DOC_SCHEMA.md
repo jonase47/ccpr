@@ -27,7 +27,7 @@
 |---|---|---|
 | `related` | YAML list (inline or block) | Paths to related phase docs. **Document-relative** (relative to the file's own directory) is the documented, preferred form. The lint also accepts a **project-root-relative** path (e.g. `docs/architecture/SECURITY.md`) as a fallback when the document-relative resolution misses — reported as an `info` finding, not silently, so root-relative usage stays visible instead of unnoticed drift (WI-0071). |
 | `parent_index` | Path | Sub-indexes link to their phase index (e.g. `ARCHITECTURE.md`). Phase indexes leave this field empty. Resolved the same document-relative-first, project-root-fallback way as `related` above. |
-| `kind` | See `## kind` below | Document genre — a free-standing marker used ALONGSIDE (`commands/*.md` templates) or INSTEAD OF (`Manual/**`, `docs/adr/*.md`, `templates/*_TEMPLATE.md`) the phase/subskill/status triple above. Validated against a fixed vocabulary by `scripts/manual-lint.sh` when set; `phase-docs-lint.sh` does not read this field at all except for the single literal `review` (see below). |
+| `kind` | See `## kind` below | Document genre — a free-standing marker used ALONGSIDE (`commands/*.md` templates) or INSTEAD OF (`handbook/**`, `docs/adr/*.md`, `templates/*_TEMPLATE.md`) the phase/subskill/status triple above. Validated against a fixed vocabulary by `scripts/manual-lint.sh` when set; `phase-docs-lint.sh` does not read this field at all except for the single literal `review` (see below). |
 | `base_commit`, `reviewed_head`, `reviewed_base` | Commit SHA | Written by `/p4-sprint` (`base_commit`, the sprint's starting `HEAD`) and by `/p5-review-sprint` (`reviewed_head`, the `HEAD` the review covered); `/gate-p5` compares `reviewed_head` against the current `HEAD` to decide whether a sprint review is stale. When present, the lint checks the **form** (7–40 hex characters, error) and, in a git repository, whether the SHA **resolves** to a commit (warning — a shallow clone, a rewritten history or a SHA from another repository are legitimate reasons to miss). Not to be confused with the anchor of ADR-0009, which is a separate key. |
 | `covers` | YAML list (inline or block) | **Code** paths (not doc paths) this document describes, e.g. `internal/auth/`, `src/domain/` — **relative to the project root**, exclusively (no document-relative fallback, unlike `related`/`parent_index` above). Lint checks path existence and flags an existing-but-empty directory. A directory whose only content is a vcs emptiness placeholder (`.gitkeep`, `.keep`, `.placeholder`) is flagged with its own, distinct warning instead — "reserved, not built" is a different statement than "holds nothing" (WI-0122). A placeholder alongside real content stays silent. |
 
@@ -129,7 +129,7 @@ in the list above is what keeps it silent in `manual-lint.sh` too. No other `kin
 
 `bash ~/.claude/scripts/manual-lint.sh [<root-dir>]` validates the checks below over any
 documentation tree that carries `kind:`/`parent_index:` frontmatter — generic over the root
-argument, NOT hardwired to `Manual/` (this repository's own `Manual/` is the reference
+argument, NOT hardwired to `handbook/` (this repository's own `handbook/` is the reference
 example, but `install.sh` does not ship it into `~/.claude/`, so the script cannot default to
 it). Exit codes: 0 clean, 1 warnings, 2 errors.
 
@@ -138,7 +138,7 @@ it). Exit codes: 0 clean, 1 warnings, 2 errors.
   in for `PROJECT_DIR`.
 - **(b) the reverse direction** — the index a working `parent_index:` resolves to must itself
   contain a markdown link to the claiming file (document-relative from the index's own
-  directory, the exact shape this repository's `Manual/` links already use — no leading `./`,
+  directory, the exact shape this repository's `handbook/` links already use — no leading `./`,
   no anchor). A miss is a `warning`, not an `error`: the child's own pointer is still correct,
   only the index's back-reference is missing.
 - **(c) `kind:` vocabulary** — checked against the known list above; opt-in, only fires when the
@@ -194,7 +194,7 @@ Two further expectations are **conventions**, unchecked **by `phase-docs-lint.sh
    sub-index. Still unvalidated by anything shipped as of WI-0112a.
 2. The index named by `parent_index:` should list the detail file back. `manual-lint.sh`'s check
    (b) above now validates exactly this — but it is a separate script you must point at the tree
-   in question (`docs/<phase>/`, `Manual/`, or any other `kind`/`parent_index` tree); it does not
+   in question (`docs/<phase>/`, `handbook/`, or any other `kind`/`parent_index` tree); it does not
    run as part of `phase-docs-lint.sh`, and a clean `phase-docs-lint.sh` run is still not evidence
    that (2) holds.
 

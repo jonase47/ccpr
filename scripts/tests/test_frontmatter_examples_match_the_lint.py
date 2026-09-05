@@ -35,7 +35,7 @@ A "phase-doc frontmatter example" is a ```yaml fence containing a top-level
 `phase:` key. Documents that carry their OWN, unrelated frontmatter schema
 under a `status:` key with no accompanying `phase:` key in the same block
 (an ADR's `kind: adr` header, a docs/memory/ file under MEMORY_SCHEMA.md,
-Manual/'s memory-instincts status field) are a different vocabulary
+handbook/'s memory-instincts status field) are a different vocabulary
 entirely and are correctly invisible to this test -- validating them against
 VALID_STATUS would be checking the wrong schema, not finding a bug.
 
@@ -104,10 +104,10 @@ RISK_DETAIL_KIND = "risk-detail"
 # shipped generator surface itself, and are gitignored working state rather
 # than something a project author is taught to copy from -- scanning them
 # would risk a future work-item write-up that quotes an offending line
-# verbatim producing a false failure here. Manual/ is out of scope too: the
+# verbatim producing a false failure here. handbook/ is out of scope too: the
 # task that authored this test is explicitly barred from touching it, and
 # the corpus this test binds to is the set of GENERATOR commands/docs/
-# templates, which Manual/ documents rather than belongs to.
+# templates, which handbook/ documents rather than belongs to.
 SCAN_ROOTS = ("commands", "docs", "templates")
 EXCLUDED_DIR = REPO_ROOT / "docs" / "workitems"
 

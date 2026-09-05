@@ -6,9 +6,9 @@ No linter in this repository looked at a `kind:`/`parent_index:` documentation
 tree at all before this item: `phase-docs-lint.sh` validates a different
 schema (`phase`/`subskill`/`status`) under `docs/<phase>/`, `memory-lint.sh`
 scans `docs/memory/**` only, and `doc-volume-check.sh` measures size, not
-structure. `Manual/` (this repository's own such tree, 22 files) carries
+structure. `handbook/` (this repository's own such tree, 22 files) carries
 structure that means something and can therefore be wrong -- measured
-26.08.2026: `Manual/README.md` calls both `SYSTEM_OVERVIEW.md` and
+26.08.2026: `handbook/README.md` calls both `SYSTEM_OVERVIEW.md` and
 `SECTIONS_COMMANDS.md` "slim index -> detail files", but `SECTIONS_COMMANDS.md`
 links 0 of the 5 chapters that name it as `parent_index`, and
 `SYSTEM_OVERVIEW.md` links only 3 of its 10 (`anchored-state`,
@@ -18,11 +18,11 @@ pointers themselves DO resolve -- the forward direction was already correct
 before this item, only the reverse direction (check (b) below) was missing.
 
 `scripts/manual-lint.sh` is deliberately generic over ANY root, not hardwired
-to `Manual/` -- `install.sh` does not copy `Manual/` into `~/.claude/` (see
-`Manual/README.md:2-5`), so a shipped script defaulting to it would find
+to `handbook/` -- `install.sh` does not copy `handbook/` into `~/.claude/` (see
+`handbook/README.md:2-5`), so a shipped script defaulting to it would find
 nothing on every installed CCPR, same defect class 0e76919 fixed for
 `phase-docs-lint.sh`'s `PHASE_FOLDERS` default. This module therefore never
-reads this repository's own `Manual/` -- like `test_phase_docs_lint.py` never
+reads this repository's own `handbook/` -- like `test_phase_docs_lint.py` never
 reads this repository's own `docs/` -- every test drives the shipped script
 against a throwaway root (`tempfile.mkdtemp`) built from scratch.
 
@@ -30,7 +30,7 @@ House pattern borrowed from `test_phase_docs_lint.py`: invoke the real entry
 point as a subprocess against the shipped script, never sourced internals.
 
 Every mutation-proof test below constructs its own RED state on a synthetic
-fixture (G-107/G-109: structural swap, not deletion) since `Manual/` is
+fixture (G-107/G-109: structural swap, not deletion) since `handbook/` is
 read-only for this work item and the real corpus cannot be edited to
 manufacture a failure -- see `ReverseLinkMutationProofTest`,
 `KindVocabularyMutationProofTest` and `CheckFMutationProofTest`.
@@ -281,7 +281,7 @@ class CheckBReverseLinkTest(ManualLintTestBase):
 
     def test_link_with_extra_text_around_it_is_still_recognised(self):
         """The corpus style this check's substring match is built for --
-        Manual/SYSTEM_OVERVIEW.md's real links read like
+        handbook/SYSTEM_OVERVIEW.md's real links read like
         `Details: [system/discipline-gate.md](system/discipline-gate.md)`,
         never a bare link on its own line."""
         # Same companion-pair liveness proof as
@@ -589,7 +589,7 @@ class EmptyScopeTest(ManualLintTestBase):
     exercised for BOTH ways a scope can end up empty: the root does not
     exist at all, and the root exists but carries no markdown files. Both
     still render the full report (Files scanned: 0) and exit 0 -- an empty
-    scope on a generic, not-hardwired-to-Manual/ script is the NORMAL state
+    scope on a generic, not-hardwired-to-handbook/ script is the NORMAL state
     on a freshly installed CCPR (0e76919's reasoning, translated to this
     script's own generic root)."""
 
@@ -1196,7 +1196,7 @@ class CheckFInlineCodeSpanLimitationTest(CheckFMarkerBase):
     (backtick runs of arbitrary length, escapes) is a markdown parser, not a
     guard clause; and the failure is fail-LOUD (an error nobody can miss),
     never a silent pass. Measured at the time of writing: no line inside
-    `Manual/` -- the only tree check-all.sh points this linter at -- writes
+    `handbook/` -- the only tree check-all.sh points this linter at -- writes
     the marker syntax inline.
 
     This test pins the CURRENT behaviour. If the limitation is closed later,

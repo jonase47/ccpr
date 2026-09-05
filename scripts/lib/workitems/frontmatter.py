@@ -1,6 +1,6 @@
 """frontmatter.py – Minimal YAML-frontmatter reader/writer for work-item files.
 
-Handles exactly the subset used by docs/workitems/<id>.md (ADR-0002 / Manual/WORKITEMS.md):
+Handles exactly the subset used by docs/workitems/<id>.md (ADR-0002 / handbook/WORKITEMS.md):
 flat scalar values, inline lists (`refs: [ADR-0011]`), quoted strings, and trailing
 `# comment` fragments. This is deliberately not a general YAML parser — the repo has
 no PyYAML dependency today (scripts/ is stdlib-only), and the frontmatter schema here

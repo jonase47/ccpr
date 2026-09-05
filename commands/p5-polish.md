@@ -35,7 +35,7 @@ Run `python3 ~/.claude/scripts/workitems.py list`.
 - **`[]` but `docs/workitems/` exists** → adopted store, just empty right now. Treat as adopted: use
   the CLI, not the prose fallback.
 
-See Manual/WORKITEMS.md §8 for the full guard rationale and the status-verb mapping.
+See handbook/WORKITEMS.md §8 for the full guard rationale and the status-verb mapping.
 
 ### 1. Read Context
 Read the following files (if available):

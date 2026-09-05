@@ -577,7 +577,7 @@ class LocalBackendUnbulletedSectionShapeTest(unittest.TestCase):
         )
 
     def test_a_section_containing_only_the_shipped_placeholder_comment_returns_no_entries(self):
-        """Finding: the shipped item template (Manual/WORKITEMS.md, mirrored in
+        """Finding: the shipped item template (handbook/WORKITEMS.md, mirrored in
         ITEM_TEMPLATE above) puts an HTML-comment placeholder as the first line of a
         freshly created `## Result`/`## Comments` section --
         `<!-- append-result writes PR/commit links here -->`. Before this fix,
