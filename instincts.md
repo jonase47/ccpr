@@ -50,7 +50,7 @@ Last updated: 01.06.2026 (snapshot refresh — 27 generalised instincts ported f
 
 ## Skill / Workflow / Sprint → `instincts/workflow.md`
 
-15 instincts: PO decisions, session length, frontmatter-vs-schema, stagnation-warning filter, plan-mode triggers, gate hygiene, conditional-go tracking, doc-language default, skill outputs, doc coverage, PoC-verdict cascade, TaskCreate-reminder filter.
+16 instincts: PO decisions, session length, frontmatter-vs-schema, stagnation-warning filter, plan-mode triggers, gate hygiene, conditional-go tracking, doc-language default, skill outputs, doc coverage, PoC-verdict cascade, TaskCreate-reminder filter, dependent-AC reconciliation.
 
 - G-015 [0.9] Document PO decisions immediately
 - G-016 [0.9] End sessions after 2 sprints (incl. multi-skill + re-setup + bulk-curation sub-rules)
@@ -65,6 +65,7 @@ Last updated: 01.06.2026 (snapshot refresh — 27 generalised instincts ported f
 - G-037 [0.4] Plan-mode trigger for multi-wave sprints
 - G-039 [0.4] Read skill preconditions before a plan-mode multi-skill sequence
 - G-041 [0.4] Offer push points in long pipelines proactively
+- G-056 [0.4] On a requirement change, reconcile dependent stories' ACs immediately
 - G-065 [0.4] PoC-verdict cascade — after a ❌ spike, re-check other assumptions/features/ADRs
 - G-069 [0.4] Ignore the TaskCreate reminder in a linear skill flow
 
@@ -109,7 +110,7 @@ Some global instincts that exist in productive local `~/.claude/instincts.md` fi
 - **G-055** (Bash CWD persistence) — same pattern as the broader CCPR-shipped guidance, but the concrete evidence is project-specific.
 
 **Platform-specific (Apple / Xcode / SwiftPM — irrelevant to non-Apple stacks):**
-- **G-056** (pre-commit hooks don't cover the real xcodebuild build), **G-058** (0.000-sec test-failure cluster = signal-trap crash, use xcresult), **G-059** (SourceKit editor index-lag — xcodebuild is ground-truth), **G-063** (XcodeBuildMCP `test_sim` rejects a domain sub-target test filter). Mint your own platform instincts if you work on Apple platforms.
+- an Apple/Xcode pre-commit-vs-xcodebuild instinct (named here without an ID — it used to be labelled `G-056` in a different, local numbering scheme, which collided with this repo's own `G-056` above; see CCP-1152), **G-058** (0.000-sec test-failure cluster = signal-trap crash, use xcresult), **G-059** (SourceKit editor index-lag — xcodebuild is ground-truth), **G-063** (XcodeBuildMCP `test_sim` rejects a domain sub-target test filter). Mint your own platform instincts if you work on Apple platforms.
 
 **CCPR-maintainer-only (relevant only to whoever maintains this distribution repo):**
 - **G-062** (release-cut hygiene: CHANGELOG rename + link targets + annotated tag). Lives in the maintainer's local instincts, not in the shipped snapshot.
