@@ -6,7 +6,7 @@ status: active
 last_updated: 15.05.2026
 related:
   - ../CONSTITUTION.md
-  - ../../Manual/LEAN_TRACK.md
+  - ../../handbook/LEAN_TRACK.md
   - ../../CHANGELOG.md
 ---
 

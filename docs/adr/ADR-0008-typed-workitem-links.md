@@ -7,7 +7,7 @@ last_updated: 09.07.2026
 related:
   - ADR-0002-workitem-backend-contract.md
   - ADR-0003-youtrack-backend.md
-  - ../../Manual/WORKITEMS.md
+  - ../../handbook/WORKITEMS.md
 ---
 
 > **Correction (verified against a live instance, 09.07.2026):** a live smoke test found two paired
