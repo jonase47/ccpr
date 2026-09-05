@@ -443,7 +443,7 @@ are exactly what helps.
 - **Open an issue** on GitHub: [github.com/jonase47/ccpr/issues](https://github.com/jonase47/ccpr/issues). Templates are provided for **bug**, **feedback / UX**, and **question**.
 - See [`BETA.md`](BETA.md) for what we're especially looking for and the current known limitations.
 - Want to contribute code or docs? See [`CONTRIBUTING.md`](CONTRIBUTING.md). The shipped
-  scripts are covered by a **2623-test Python suite** — run it from the repository root
+  scripts are covered by a Python suite of **2,600+ tests** — run it from the repository root
   with `python3 -m unittest discover -s scripts/tests -t .` (the `-t .` is required;
   `scripts/run-tests.sh` is for *your* projects, not for CCPR's own).
 - Found a security issue? Report it privately — see [`SECURITY.md`](SECURITY.md), not a public issue.

@@ -92,6 +92,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 README_PATH = REPO_ROOT / "README.md"
 MANUAL_README_PATH = REPO_ROOT / "Manual" / "README.md"
 CONTRIBUTING_PATH = REPO_ROOT / "CONTRIBUTING.md"
+CLAUDE_PATH = REPO_ROOT / "CLAUDE.md"
 SYSTEM_OVERVIEW_PATH = REPO_ROOT / "Manual" / "SYSTEM_OVERVIEW.md"
 SECTIONS_COMMANDS_PATH = REPO_ROOT / "Manual" / "SECTIONS_COMMANDS.md"
 AGENTS_DIR = REPO_ROOT / "agents"
@@ -186,8 +187,15 @@ def measured_utility_command_names():
 # Claim extraction -- text-in, never path-in (the scratch-copy seam)
 # ---------------------------------------------------------------------------
 
-def parse_test_count_claims(readme_text, manual_readme_text, contributing_text):
-    """The three "N-test suite" claims, each in its own doc's own wording.
+def parse_test_count_claims(readme_text, contributing_text):
+    """CCP-1152 follow-up (PO decision, 05.09.2026): only TWO of the three
+    former "N-test suite" claims remain typed numbers. Manual/README.md's own
+    "the 2623-test suite" phrase is gone -- see `TestCountAgreementTest`'s
+    docstring for why a third copy of the same number bought no reader
+    benefit its cross-reference to CONTRIBUTING.md didn't already provide.
+    README.md now states a FLOOR ("a Python suite of **2,600+ tests**"), not
+    the exact count; CONTRIBUTING.md is unchanged, still the exact count.
+
     Keys are prefixed `test_count_*` -- `parse_agent_count_claims` and
     `parse_command_count_claims` below extract claims from some of the SAME
     files and would otherwise collide on plain names like "readme" or
@@ -196,10 +204,8 @@ def parse_test_count_claims(readme_text, manual_readme_text, contributing_text):
     there would let a `None` from one parser be overwritten by an unrelated
     parser's real value before the "nothing is unparsed" check ever runs."""
     claims = {}
-    m = re.search(r"a \*\*(\d+)-test Python suite\*\*", readme_text)
-    claims["test_count_readme"] = int(m.group(1)) if m else None
-    m = re.search(r"the (\d+)-test suite", manual_readme_text)
-    claims["test_count_manual_readme"] = int(m.group(1)) if m else None
+    m = re.search(r"a Python suite of \*\*([\d,]+)\+ tests\*\*", readme_text)
+    claims["test_count_readme_floor"] = int(m.group(1).replace(",", "")) if m else None
     flat = _collapse_ws(contributing_text)
     m = re.search(r"discovery collects \*\*(\d+) tests, (\d+) import errors\*\*", flat)
     claims["contributing_count"] = int(m.group(1)) if m else None
@@ -305,7 +311,12 @@ def parse_command_breakdown_claims(system_overview_text, sections_commands_text)
     return claims
 
 
-def parse_instinct_count_claims(readme_text, starter_instincts_text):
+def parse_instinct_count_claims(readme_text, starter_instincts_text, claude_text):
+    """CCP-1152 Auftrag 2 added `claude_split_layout_total`: `CLAUDE.md`'s own
+    "carry **N instincts**" sentence drifted to 45 against a measured 46 in
+    the very commit that built this module's own `InstinctCountAgreementTest`
+    -- the ADR-0012 enforcement pass introduced fresh drift in the doc every
+    session loads at start. Pinned here rather than left to prose review."""
     claims = {}
     m = re.search(
         r"compact 13-instinct sampler \(split layout ships the full (\d+)\)",
@@ -319,6 +330,8 @@ def parse_instinct_count_claims(readme_text, starter_instincts_text):
     claims["body_index_total"] = int(m.group(1)) if m else None
     m = re.search(r"ships the full (\d+)-instinct set", flat)
     claims["split_layout_total"] = int(m.group(1)) if m else None
+    m = re.search(r"carry \*\*(\d+) instincts\*\*", claude_text)
+    claims["claude_split_layout_total"] = int(m.group(1)) if m else None
     return claims
 
 
@@ -327,11 +340,20 @@ def parse_instinct_count_claims(readme_text, starter_instincts_text):
 # ---------------------------------------------------------------------------
 
 class TestCountAgreementTest(unittest.TestCase):
-    """README.md, Manual/README.md and CONTRIBUTING.md each state the
-    shipped Python suite's size as a fact -- all three must equal the SAME
-    derived number, and that number must come from a clean `-t .`
-    discovery (an import error would make every doc claim below
-    meaningless)."""
+    """CCP-1152 follow-up (PO decision, 05.09.2026): the exact test-suite
+    size used to be typed identically into three docs, and that institutes a
+    tax on every test-adding commit -- this very work item's own commits
+    moved the number 2606 -> 2623, three files touched for one addition.
+    Now only CONTRIBUTING.md states the exact count (unchanged: it is the
+    one doc that already argues its correlated figures should be re-measured
+    together, not adjusted one at a time). README.md states a FLOOR instead
+    -- an order of magnitude that keeps the adopter signal but only breaks
+    if the suite SHRINKS, which is exactly when someone should be woken up.
+    Manual/README.md carries no number at all any more: it already
+    cross-references CONTRIBUTING.md for the invocation, and a third typed
+    copy of the same fact bought nothing a reader couldn't get from that
+    link. All three checks below still require a clean `-t .` discovery --
+    an import error would make every doc claim meaningless."""
 
     def test_measured_count_has_zero_import_errors(self):
         _, errors = measured_test_count()
@@ -341,22 +363,43 @@ class TestCountAgreementTest(unittest.TestCase):
             "module checks assume a clean discovery",
         )
 
-    def test_docs_agree_with_the_measured_test_count(self):
+    def test_contributing_agrees_with_the_measured_test_count(self):
         count, _ = measured_test_count()
-        claims = parse_test_count_claims(
-            _read(README_PATH), _read(MANUAL_README_PATH), _read(CONTRIBUTING_PATH),
-        )
-        expected = {
-            "test_count_readme": count,
-            "test_count_manual_readme": count,
-            "contributing_count": count,
-            "contributing_errors": 0,
+        claims = parse_test_count_claims(_read(README_PATH), _read(CONTRIBUTING_PATH))
+        expected = {"contributing_count": count, "contributing_errors": 0}
+        actual = {
+            "contributing_count": claims["contributing_count"],
+            "contributing_errors": claims["contributing_errors"],
         }
         self.assertEqual(
-            expected, claims,
-            f"README.md, Manual/README.md and/or CONTRIBUTING.md quote a "
-            f"test-suite size that disagrees with the measured "
-            f"unittest-discover count ({count})",
+            expected, actual,
+            f"CONTRIBUTING.md quotes a test-suite size that disagrees with "
+            f"the measured unittest-discover count ({count})",
+        )
+
+    def test_readme_floor_still_holds(self):
+        """A FLOOR, not an equality (PIN_GROUPS["floor"] in
+        scripts/tests/pin_registry.py names this exact shape): it protects
+        against one thing only -- the measured count dropping below what
+        README.md still claims, i.e. the suite shrinking or the scanner
+        going blind -- and stays silent while the suite grows. The floor
+        value is not duplicated as a literal here: it lives in README.md's
+        own prose and is compared against dynamically, so raising it is a
+        one-line README edit, made by hand, at leisure -- never typed here
+        under the pressure of a red run. Both sides are DERIVED (measured
+        count vs. parsed doc claim), which is also why neither is a literal
+        this corpus's `# pin:` marker machinery would flag as a candidate --
+        that machinery targets a HARD-CODED number drifting out of sync with
+        its source, and there is no hard-coded number at this site to drift."""
+        count, _ = measured_test_count()
+        claims = parse_test_count_claims(_read(README_PATH), _read(CONTRIBUTING_PATH))
+        floor = claims["test_count_readme_floor"]
+        self.assertGreaterEqual(
+            count, floor,
+            f"the measured unittest-discover test count ({count}) fell "
+            f"below the floor README.md states (\"{floor}+ tests\") -- "
+            f"either the suite shrank (investigate) or the floor is stale "
+            f"and due a deliberate raise in README.md",
         )
 
 
@@ -500,29 +543,36 @@ class ClassificationCompletenessTest(unittest.TestCase):
 
 
 class InstinctCountAgreementTest(unittest.TestCase):
-    """README.md's structure listing and templates/STARTER_INSTINCTS.md's
-    own self-description both state the shipped index's total bullet count
-    -- must equal `read_index_entries()`'s own pinned baseline
-    (`test_instinct_registers_agree.py`'s `ClassificationCountsTest`), not
-    retyped here."""
+    """README.md's structure listing, templates/STARTER_INSTINCTS.md's own
+    self-description, and (since CCP-1152 Auftrag 2) CLAUDE.md's own "Two
+    ways to adopt the starter content" sentence all state the shipped
+    index's total bullet count -- must equal `read_index_entries()`'s own
+    pinned baseline (`test_instinct_registers_agree.py`'s
+    `ClassificationCountsTest`), not retyped here. CLAUDE.md's own claim
+    (45) drifted against a measured 46 in the very commit that first built
+    this class -- the ADR-0012 enforcement pass introduced fresh drift in
+    the doc every session loads at start, which is why it is pinned rather
+    than left to prose review a second time."""
 
     def test_docs_agree_with_the_measured_index_total(self):
         total = len(read_index_entries())
         claims = parse_instinct_count_claims(
             _read(README_PATH),
             _read(REPO_ROOT / "templates" / "STARTER_INSTINCTS.md"),
+            _read(CLAUDE_PATH),
         )
         expected = {
             "readme_index_total": total,
             "frontmatter_index_total": total,
             "body_index_total": total,
             "split_layout_total": total,
+            "claude_split_layout_total": total,
         }
         self.assertEqual(
             expected, claims,
-            f"README.md and/or templates/STARTER_INSTINCTS.md quotes an "
-            f"instincts.md index total that disagrees with the measured "
-            f"index bullet count ({total})",
+            f"README.md, templates/STARTER_INSTINCTS.md and/or CLAUDE.md "
+            f"quotes an instincts.md index total that disagrees with the "
+            f"measured index bullet count ({total})",
         )
 
     def test_sampler_count_matches_its_own_pin(self):
@@ -544,7 +594,7 @@ class ClaimExtractionShapeTest(unittest.TestCase):
     def test_no_claim_is_unparsed(self):
         all_claims = {}
         all_claims.update(parse_test_count_claims(
-            _read(README_PATH), _read(MANUAL_README_PATH), _read(CONTRIBUTING_PATH),
+            _read(README_PATH), _read(CONTRIBUTING_PATH),
         ))
         all_claims.update(parse_agent_count_claims(
             _read(README_PATH), _read(SYSTEM_OVERVIEW_PATH),
@@ -558,6 +608,7 @@ class ClaimExtractionShapeTest(unittest.TestCase):
         ))
         all_claims.update(parse_instinct_count_claims(
             _read(README_PATH), _read(REPO_ROOT / "templates" / "STARTER_INSTINCTS.md"),
+            _read(CLAUDE_PATH),
         ))
         unparsed = sorted(key for key, value in all_claims.items() if value is None)
         self.assertEqual(
@@ -569,21 +620,33 @@ class ClaimExtractionShapeTest(unittest.TestCase):
 
 
 class ParserDiscriminatesFromUnrelatedNumbersTest(unittest.TestCase):
-    """Permanent, committed proof that each extractor's anchor phrase is
+    """Permanent, committed proof that EVERY extractor's anchor phrase is
     specific enough not to grab an unrelated nearby number -- synthetic
     text with a decoy number next to the real one, asserting only the
-    anchored value is returned."""
+    anchored value is returned. CCP-1152 Auftrag 3 closed the gap the
+    class docstring already claimed was closed: 2 of the 5 `parse_*`
+    functions above had a red-proof test here and 3 did not
+    (`parse_command_count_claims`, `parse_command_breakdown_claims`,
+    `parse_instinct_count_claims`) -- an extractor with no specificity
+    proof is the same failure class as a check stage never seen red: it
+    can look correct while being one loose regex away from silently
+    reading the wrong number out of a doc that quotes several. The PO
+    decided against narrowing this docstring instead: the riskiest
+    extractor, `parse_command_breakdown_claims` (ten integers anchored in
+    one sentence, five more scattered nearby), is exactly the one a
+    narrowed docstring would have left unverified."""
 
     def test_test_count_extractor_ignores_an_adjacent_unrelated_number(self):
-        readme = "In 2026 the scripts are covered by a **2606-test Python suite** here.\n"
-        manual_readme = "See page 42 for details; the 2606-test suite lives here.\n"
+        readme = (
+            "In 2026 the scripts are covered by a Python suite of "
+            "**2,606+ tests**, see page 42 for details.\n"
+        )
         contributing = (
             "Measured on 05.09.2026 (issue #17): discovery collects "
             "**2606 tests, 0\nimport errors**, exit 0.\n"
         )
-        claims = parse_test_count_claims(readme, manual_readme, contributing)
-        self.assertEqual(2606, claims["test_count_readme"])
-        self.assertEqual(2606, claims["test_count_manual_readme"])
+        claims = parse_test_count_claims(readme, contributing)
+        self.assertEqual(2606, claims["test_count_readme_floor"])
         self.assertEqual(2606, claims["contributing_count"])
         self.assertEqual(0, claims["contributing_errors"])
 
@@ -602,6 +665,99 @@ class ParserDiscriminatesFromUnrelatedNumbersTest(unittest.TestCase):
         self.assertEqual(15, claims["ascii_box"])
         self.assertEqual(15, claims["mermaid"])
         self.assertEqual(15, claims["summary_line"])
+
+    def test_command_count_extractor_ignores_an_adjacent_unrelated_number(self):
+        readme = (
+            "+-- v2/\n"
+            "+-- commands/                # 116 slash commands (P0-P8 + Lean-Track "
+            "+ cross-cutting), see issue 42\n"
+            "\n"
+            "Filed under issue 42, see All 116 commands, grouped by section for "
+            "the full list.\n"
+        )
+        manual_readme = "Issue #7: Browse all 116 commands grouped by section here.\n"
+        overview = "Released in v2.3 (issue 42): **Total: 116 commands**, up from 82.\n"
+        sections = (
+            "Chapter 5 (page 42) covers **116 Commands** – full granularity, "
+            "see page 7.\n\n"
+            "## Summary: 116 Commands\n\n"
+            "Filed under issue #9 (was 42).\n\n"
+            "| Category | Count |\n"
+            "|---|---|\n"
+            "| **Total** | **116** |\n"
+        )
+        claims = parse_command_count_claims(readme, manual_readme, overview, sections)
+        self.assertEqual(116, claims["command_readme_structure"])
+        self.assertEqual(116, claims["readme_table"])
+        self.assertEqual(116, claims["command_manual_readme"])
+        self.assertEqual(116, claims["system_overview_total"])
+        self.assertEqual(116, claims["sections_commands_top"])
+        self.assertEqual(116, claims["sections_commands_summary_heading"])
+        self.assertEqual(116, claims["sections_commands_summary_table"])
+
+    def test_command_breakdown_extractor_ignores_adjacent_unrelated_numbers(self):
+        """The riskiest extractor: ten integers anchored in one sentence
+        (the P0..P8 breakdown) plus four more scattered decoys nearby, all
+        distinct from the real values -- a loose capture group here would
+        silently read a page number, an issue number or a stale historical
+        figure into a documented breakdown instead of the real one."""
+        overview = (
+            "See page 999 for the roadmap. **82 phase commands** (P0: 3, P1: 5, "
+            "P2: 4, P3: 23, P4: 4, P5: 12, P6: 22, P7: 5, P8: 4). Historical "
+            "count was 79 in v1.\n\n"
+            "**12 gates** (was 11 last release), **2 learning commands** "
+            "(roadmap adds 1 more), **14 utility commands** (issue #42), and "
+            "**6 track + cross-cutting commands** (see page 3).\n"
+        )
+        sections = (
+            "Phase Commands (P0–P8, 82 commands), previously 79 -- see "
+            "issue 42.\n\n"
+            "Gates (12 commands), up from 11.\n\n"
+            "Continuous Learning (2 commands), roadmap +1.\n\n"
+            "Utility (14 commands), issue #42.\n\n"
+            "Track-Skills (Cross-Cutting, 6 commands), see page 3.\n\n"
+            "**Subtotal — phase commands** | **82** |\n\n"
+            "Gates (main + sub-gates) | 12 | previously 11\n\n"
+            "| Continuous Learning | 2 | +1 roadmap |\n\n"
+            "| Utility | 14 | issue 42 |\n\n"
+            "Track + Cross-Cutting (track + learning) | 6 | page 3\n"
+        )
+        claims = parse_command_breakdown_claims(overview, sections)
+        self.assertEqual(82, claims["overview_phase_total"])
+        self.assertEqual([3, 5, 4, 23, 4, 12, 22, 5, 4], claims["overview_phase_breakdown"])
+        self.assertEqual(12, claims["overview_gates"])
+        self.assertEqual(2, claims["overview_learning"])
+        self.assertEqual(14, claims["overview_utility"])
+        self.assertEqual(6, claims["overview_track"])
+        self.assertEqual(82, claims["sections_phase_header"])
+        self.assertEqual(12, claims["sections_gates_header"])
+        self.assertEqual(2, claims["sections_learning_header"])
+        self.assertEqual(14, claims["sections_utility_header"])
+        self.assertEqual(6, claims["sections_track_header"])
+        self.assertEqual(82, claims["sections_phase_subtotal"])
+        self.assertEqual(12, claims["sections_gates_row"])
+        self.assertEqual(2, claims["sections_learning_row"])
+        self.assertEqual(14, claims["sections_utility_row"])
+        self.assertEqual(6, claims["sections_track_row"])
+
+    def test_instinct_count_extractor_ignores_an_adjacent_unrelated_number(self):
+        readme = (
+            "The index ships a compact 13-instinct sampler (split layout ships "
+            "the full 46), see page 42.\n"
+        )
+        starter = (
+            "status: COMPLETE shipped snapshot (46 instincts), not the sampler.\n\n"
+            "This **complete** CCPR instinct snapshot holds **46 instincts** as "
+            "of issue #17.\n\n"
+            "The split layout ships the full 46-instinct set, page 7.\n"
+        )
+        claude = "the layout and carry **46 instincts** (issue #42). Copy them as-is.\n"
+        claims = parse_instinct_count_claims(readme, starter, claude)
+        self.assertEqual(46, claims["readme_index_total"])
+        self.assertEqual(46, claims["frontmatter_index_total"])
+        self.assertEqual(46, claims["body_index_total"])
+        self.assertEqual(46, claims["split_layout_total"])
+        self.assertEqual(46, claims["claude_split_layout_total"])
 
 
 if __name__ == "__main__":

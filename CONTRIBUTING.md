@@ -84,8 +84,8 @@ python3 -m unittest discover -s scripts/tests -t .
 
 - **`-t .` is not optional**, and the failure mode is worth knowing because it is
   partly silent. It sets the top-level directory imports resolve against. Measured
-  on the current tree (05.09.2026): **with** it, discovery collects **2623 tests, 0
-  import errors**, exit 0; **without** it, **1939 tests and 17 modules that fail to
+  on the current tree (05.09.2026): **with** it, discovery collects **2627 tests, 0
+  import errors**, exit 0; **without** it, **1943 tests and 17 modules that fail to
   import**, exit 1 — the eight that use a relative import
   (`from .test_phase_docs_lint import …` in four modules,
   `from .test_artifact_gate import …` in two,
@@ -103,11 +103,11 @@ python3 -m unittest discover -s scripts/tests -t .
   silently, on anyone who forgets the flag.
 
   **Re-measure these numbers when you change them, rather than adjusting one.** The
-  pair is the point: 2623 alone says nothing, and the four figures have now been
+  pair is the point: 2627 alone says nothing, and the four figures have now been
   found stale together three times — the file claimed 1691 / 1185 / 14 / ~510
   against a tree at 1848 / 1339 / 15 / 509, then 1848 / 1339 / 15 / 509 against a
   tree at 1987 / 1477 / 16 / 510, and now 1987 / 1477 / 16 / 510 against a tree at
-  2623 / 1939 / 17 / 684. These runs, back to back, take about eight minutes.
+  2627 / 1943 / 17 / 684. These runs, back to back, take about eight minutes.
 - The full run takes **a couple of minutes**. If you drive it from an agent whose
   tool calls time out, start it in the background and wait for it once rather than
   polling.

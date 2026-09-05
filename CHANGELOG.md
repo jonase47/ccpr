@@ -1028,6 +1028,28 @@ All notable changes to this project are documented in this file. The format is b
   track/learning/utility command classification checked for completeness against the real
   `commands/*.md` file set — and fails loudly if any doc location disagrees.
 
+- **CCP-1152 follow-up, external-review round (PO decisions): the exact test-suite size
+  retyped in three docs institutionalised a tax on every test-adding commit, and one of
+  the two dividing-line docs it landed in had drifted again within the same session.**
+  Retyping the exact count (2606 → 2623) into README.md, Manual/README.md and
+  CONTRIBUTING.md alike meant every test-adding commit had to touch three unrelated files
+  or leave two of them stale — so README.md now states an order-of-magnitude **floor**
+  ("a Python suite of **2,600+ tests**"), checked as `assertGreaterEqual` against the
+  measured count rather than equality: silent while the suite grows, and it goes red only
+  if the suite shrinks below what README.md still claims (`PIN_GROUPS["floor"]`'s shape,
+  reused, not a new mechanism). Manual/README.md drops the number entirely — it already
+  cross-references CONTRIBUTING.md for the invocation, and a third copy bought nothing.
+  CONTRIBUTING.md keeps the exact, dated count unchanged in shape (still an equality
+  check) — separately, `CLAUDE.md:137` claimed the shipped instinct index "carr[ies] 45
+  instincts" while the measured index (`instincts.md` bullets vs. `instincts/*.md` topic
+  headings) is 46; `test_doc_counts_agree.py`'s `InstinctCountAgreementTest` now derives
+  and pins this claim too, rather than leaving it to prose review a second time — the
+  ADR-0012 enforcement pass itself had introduced this drift, in the doc every session
+  loads at start. `ParserDiscriminatesFromUnrelatedNumbersTest`'s docstring used to claim
+  every extractor was proven specific against an adjacent unrelated number while only 2 of
+  5 actually were; the three missing proofs are added, including the riskiest one
+  (`parse_command_breakdown_claims`, ten integers anchored in one sentence).
+
 - **`instincts.md`'s index was missing a bullet for an instinct its own topic file already
   documented in full.** `instincts/workflow.md` carried a complete `### G-056: On a
   requirement change, reconcile dependent stories' ACs immediately` block, but `instincts.md`
