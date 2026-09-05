@@ -781,6 +781,34 @@ PENDING = frozenset({
     ('test_conformance_run.py', 'RequiredSkeletonLineCountPinTest',
      'test_generic_branch_requires_three_lines',
      '[generic]+len+parse_rule3_required_lines:call', 'T3'),
+    # CCP-1152, new module: every candidate here is a Boolean/completeness
+    # check over the classification declared by TRACK_COMMAND_NAMES /
+    # LEARNING_COMMAND_NAMES -- a declared value in ADR-0012's own
+    # carve-out sense (an editorial judgement, not derivable from a
+    # filename alone), so none of the four registered marker groups
+    # (derived / floor / set / anchor) describes it truthfully. Same
+    # unresolved-vocabulary reasoning T2 already recorded for the 15
+    # count-shaped candidates it left behind.
+    ('test_doc_counts_agree.py', 'ClassificationCompletenessTest',
+     'test_declared_names_are_real_command_files',
+     'ghosts:name', 'T4'),
+    ('test_doc_counts_agree.py', 'ClassificationCompletenessTest',
+     'test_every_command_is_classified_exactly_once',
+     'classified+utility:binop', 'T4'),
+    ('test_doc_counts_agree.py', 'ClassificationCompletenessTest',
+     'test_no_command_name_is_claimed_by_two_categories',
+     'overlap_learning:name', 'T4'),
+    ('test_doc_counts_agree.py', 'ClassificationCompletenessTest',
+     'test_no_command_name_is_claimed_by_two_categories',
+     'overlap_track:name', 'T4'),
+    # A pure cross-check against test_instinct_registers_agree.py's own
+    # pinned sampler count (13), not a fresh measurement of anything --
+    # same "not a pin" reasoning as this module's other constructed-input
+    # PatternLimitsTest siblings, carried in PENDING for the same
+    # no-group-means-"not-a-pin" reason.
+    ('test_doc_counts_agree.py', 'InstinctCountAgreementTest',
+     'test_sampler_count_matches_its_own_pin',
+     'len+read_sampler_entries:call', 'T4'),
     ('test_external_tool_exit_status.py', 'ExternalToolExitStatusTest',
      'test_classification_counts',
      'by_disposition:name', 'T2'),
@@ -814,6 +842,9 @@ PENDING = frozenset({
     ('test_instinct_registers_agree.py', 'ClassificationCountsTest',
      'test_classification_counts',
      'len+sampler_ids:call', 'T2'),
+    ('test_instinct_registers_agree.py', 'TopicFileClassificationCountTest',
+     'test_topic_block_total_equals_the_index_pin',
+     'total:name', 'T4'),
     ('test_live_status_claims.py', 'DriftedRegisterHistoricalRedProofTest',
      'test_the_same_file_in_the_working_tree_is_clean',
      'DRIFTED_REGISTER_PATH+current+scan_text:call', 'T4'),
@@ -1915,6 +1946,8 @@ SAME_SHAPE_MULTI_SITE_METHODS = frozenset({
      'test_gate_p6_and_p7_are_absent_from_the_claim_set_for_a_different_reason'),
     ('test_conformance_run.py', 'CheckTableAlignmentTest',
      'test_all_seven_columns_are_five_entries_long'),
+    ('test_doc_counts_agree.py', 'ClassificationCompletenessTest',
+     'test_no_command_name_is_claimed_by_two_categories'),
     ('test_handover_epilogue_bullet.py', 'EpilogueOpenBulletTest',
      'test_104_files_carry_the_disambiguated_wording'),
     ('test_heredoc_interpolation_scan.py', 'ClassificationCountsTest',

@@ -1008,6 +1008,64 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Fixed
 
+- **Several human-facing docs quoted a counted fact (test-suite size, agent count, command
+  count, shipped-instinct-index total) that had gone stale, with nothing checking any of
+  them against the repository (ADR-0012, "derived values are not stored").** README.md and
+  Manual/README.md each claimed a different, both-wrong Python-suite size (1458 and 1691);
+  CONTRIBUTING.md's own `-t .` paragraph — the one document that explicitly argues these
+  numbers should be re-measured together, not adjusted one at a time — had drifted the same
+  way twice already and needed all four of its correlated figures (with-`-t .` count,
+  without-`-t .` count, import-error-module count, skipped-test count) re-measured in one
+  pass rather than patching the single number a work item happened to name; leaving the
+  other three stale next to a freshly-corrected headline would have been strictly worse than
+  not touching the paragraph at all. Manual/SYSTEM_OVERVIEW.md's own system-architecture
+  diagram said "14 agents" in two places while a sentence two paragraphs later, in the same
+  file, correctly said 15 — an ASCII-art box needed a same-width replacement to fix without
+  breaking its own border alignment. A new test module, `scripts/tests/test_doc_counts_agree.py`
+  (modelled on the existing `test_instinct_registers_agree.py`'s text-in/path-default parsing
+  seam), now derives every one of these numbers at runtime — `unittest.TestLoader().discover()`
+  counted without executing a single test, `Path.glob()` file counts, and an editorial
+  track/learning/utility command classification checked for completeness against the real
+  `commands/*.md` file set — and fails loudly if any doc location disagrees.
+
+- **CCP-1152 follow-up, external-review round (PO decisions): the exact test-suite size
+  retyped in three docs institutionalised a tax on every test-adding commit, and one of
+  the two dividing-line docs it landed in had drifted again within the same session.**
+  Retyping the exact count (2606 → 2623) into README.md, Manual/README.md and
+  CONTRIBUTING.md alike meant every test-adding commit had to touch three unrelated files
+  or leave two of them stale — so README.md now states an order-of-magnitude **floor**
+  ("a Python suite of **2,600+ tests**"), checked as `assertGreaterEqual` against the
+  measured count rather than equality: silent while the suite grows, and it goes red only
+  if the suite shrinks below what README.md still claims (`PIN_GROUPS["floor"]`'s shape,
+  reused, not a new mechanism). Manual/README.md drops the number entirely — it already
+  cross-references CONTRIBUTING.md for the invocation, and a third copy bought nothing.
+  CONTRIBUTING.md keeps the exact, dated count unchanged in shape (still an equality
+  check) — separately, `CLAUDE.md:137` claimed the shipped instinct index "carr[ies] 45
+  instincts" while the measured index (`instincts.md` bullets vs. `instincts/*.md` topic
+  headings) is 46; `test_doc_counts_agree.py`'s `InstinctCountAgreementTest` now derives
+  and pins this claim too, rather than leaving it to prose review a second time — the
+  ADR-0012 enforcement pass itself had introduced this drift, in the doc every session
+  loads at start. `ParserDiscriminatesFromUnrelatedNumbersTest`'s docstring used to claim
+  every extractor was proven specific against an adjacent unrelated number while only 2 of
+  5 actually were; the three missing proofs are added, including the riskiest one
+  (`parse_command_breakdown_claims`, ten integers anchored in one sentence).
+
+- **`instincts.md`'s index was missing a bullet for an instinct its own topic file already
+  documented in full.** `instincts/workflow.md` carried a complete `### G-056: On a
+  requirement change, reconcile dependent stories' ACs immediately` block, but `instincts.md`
+  had no matching `- G-056 [...]` bullet — invisible from the autoloaded entry point a reader
+  actually starts from. The reason nothing caught it: `instincts.md`'s own "Intentionally NOT
+  in this starter set" section separately named "G-056" in bold prose, but as a reference to
+  an unrelated, Apple/Xcode-specific instinct from a different, local numbering scheme — an ID
+  collision, not a duplicate allocation, and `test_instinct_registers_agree.py`'s exclusion
+  list had (correctly, for that note) `G-056` down as "never a real bullet", which the fix
+  needed to become false. Fixed by adding the missing bullet, renaming the Apple/Xcode note
+  to drop the colliding ID entirely (it never needed one), and extending
+  `test_instinct_registers_agree.py` with a new structural cross-check between the index and
+  every `instincts/*.md` topic file's own `### G-NNN: title` headings (46 of them, both
+  directions checked) — the comparison that would have caught this the first time, and now
+  will catch its sibling.
+
 - **`settings.json` shipped a deprecated attribution key that no longer does anything.**
   `includeCoAuthoredBy` has been superseded by the `attribution` object; Claude Code does not
   read the old key any more. It sat in the shipped template looking like a setting while having

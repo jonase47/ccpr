@@ -45,8 +45,8 @@ Last updated: 26.08.2026
 |                        |                                      |
 |               +--------+--------+                             |
 |               v        v        v                             |
-|         +------+ +------+ +------+   14 agents +             |
-|         |Agent | |Agent | |Agent |   1 wingman               |
+|         +------+ +------+ +------+   15 agents               |
+|         |Agent | |Agent | |Agent |   (wingman)               |
 |         |  A   | |  B   | |  C   |   (max 3-4 parallel)     |
 |         +--+---+ +--+---+ +--+---+                           |
 |            +--------+--------+                                |
@@ -75,7 +75,7 @@ flowchart TD
         Hand["HANDOVER · context"]
         Skills["Skills · commands"]
     end
-    CC --> Agents["14 agents + wingman · max 3-4 parallel"]
+    CC --> Agents["15 agents (incl. wingman) · max 3-4 parallel"]
     Agents --> Wing["wingman · result consolidation"]
     CC --> Hooks["hooks · agent-monitor.py"]
     CC --> Scripts["local scripts · shell/python"]

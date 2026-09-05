@@ -84,27 +84,30 @@ python3 -m unittest discover -s scripts/tests -t .
 
 - **`-t .` is not optional**, and the failure mode is worth knowing because it is
   partly silent. It sets the top-level directory imports resolve against. Measured
-  on the current tree (30.08.2026): **with** it, discovery collects **1987 tests, 0
-  import errors**, exit 0; **without** it, **1477 tests and 16 modules that fail to
-  import**, exit 1 — the seven that use a relative import
+  on the current tree (05.09.2026): **with** it, discovery collects **2627 tests, 0
+  import errors**, exit 0; **without** it, **1943 tests and 17 modules that fail to
+  import**, exit 1 — the eight that use a relative import
   (`from .test_phase_docs_lint import …` in four modules,
-  `from .test_artifact_gate import …` in two, and
-  `from . import …` of four sibling modules in the skip budget), plus the nine
+  `from .test_artifact_gate import …` in two,
+  `from .test_gitattributes_crlf_guard import …` in one, and
+  `from . import …` of five sibling modules in the skip budget), plus the nine
   modules of the `scripts/tests/workitems/` subpackage. The run does go red on those
-  16, so you will notice something — but **510 tests simply never execute**, and
+  17, so you will notice something — but **684 tests simply never execute**, and
   nothing in the output says so.
 
   That skipped count moves whenever a module gains a relative import:
-  340 → 350 → 480 → 510 across four commits on 27–28.08.2026, 509 on 29.08., and
-  510 today. Each jump bought something — most came from sharing one parser instead
-  of retyping a shipped list into four test modules (WI-0126) — but the cost lands
-  here, silently, on anyone who forgets the flag.
+  340 → 350 → 480 → 510 across four commits on 27–28.08.2026, 509 on 29.08., 510 on
+  30.08.2026, and 684 today. Each jump bought something — most came from sharing one
+  parser instead of retyping a shipped list into four test modules (WI-0126), or
+  from a fifth module joining the skip-budget import — but the cost lands here,
+  silently, on anyone who forgets the flag.
 
   **Re-measure these numbers when you change them, rather than adjusting one.** The
-  pair is the point: 1987 alone says nothing, and the four figures have twice been
-  found stale together — the file claimed 1691 / 1185 / 14 / ~510 against a tree at
-  1848 / 1339 / 15 / 509, and then 1848 / 1339 / 15 / 509 against a tree at
-  1987 / 1477 / 16 / 510. Both runs, back to back, take about eight minutes.
+  pair is the point: 2627 alone says nothing, and the four figures have now been
+  found stale together three times — the file claimed 1691 / 1185 / 14 / ~510
+  against a tree at 1848 / 1339 / 15 / 509, then 1848 / 1339 / 15 / 509 against a
+  tree at 1987 / 1477 / 16 / 510, and now 1987 / 1477 / 16 / 510 against a tree at
+  2627 / 1943 / 17 / 684. These runs, back to back, take about eight minutes.
 - The full run takes **a couple of minutes**. If you drive it from an agent whose
   tool calls time out, start it in the background and wait for it once rather than
   polling.

@@ -1,6 +1,6 @@
 ---
 name: CCPR Starter Instincts
-description: Compact flat sampler of 13 high-value generic instincts from productive multi-project sessions. The COMPLETE shipped snapshot (45 instincts) lives in the split layout ~/Workspace/ccpr/{instincts.md, instincts/, instincts-archive/}. Use this flat file only if you want a small starter and prefer not to split; for the full set adopt the split layout.
+description: Compact flat sampler of 13 high-value generic instincts from productive multi-project sessions. The COMPLETE shipped snapshot (46 instincts) lives in the split layout ~/Workspace/ccpr/{instincts.md, instincts/, instincts-archive/}. Use this flat file only if you want a small starter and prefer not to split; for the full set adopt the split layout.
 status: starter-set
 last_updated: 01.06.2026
 ---
@@ -9,7 +9,7 @@ last_updated: 01.06.2026
 
 **What this is:** A flat sampler of 13 high-value behavioural / workflow rules (instincts) that have proven themselves across multiple projects. They are generic enough to serve as an immediate starting point for any CCPR user.
 
-**What this is NOT:** Not the full shipped snapshot. As of 01.06.2026, the **complete** CCPR instinct snapshot holds **45 instincts** and lives in the split layout (`instincts.md` + `instincts/{theme}.md` + `instincts-archive/HISTORY.md`). This single file intentionally stays a small, flat subset to keep the "no-split" path light. If you want everything, adopt the split layout.
+**What this is NOT:** Not the full shipped snapshot. The **complete** CCPR instinct snapshot holds **46 instincts** and lives in the split layout (`instincts.md` + `instincts/{theme}.md` + `instincts-archive/HISTORY.md`). This single file intentionally stays a small, flat subset to keep the "no-split" path light. If you want everything, adopt the split layout.
 
 **What this is NOT, part 2:** Not a complete substitute for your own session experience. Confidence values are **suggestions** — they should mature organically through your own `/postmortem` runs (confirmed +0.1 or decayed −0.1) until they fit your way of working.
 
@@ -17,7 +17,7 @@ last_updated: 01.06.2026
 
 Pick whichever layout fits your workflow:
 
-- **Split structure (recommended — and the only path that ships the full 45-instinct set)**: the CCPR repo ships `instincts.md` (slim index) + `instincts/{theme}.md` (full Rule/Why/How) + `instincts-archive/HISTORY.md` modelling the layout. Copy them as-is to `~/.claude/` and let `/postmortem` extend them. Five themes: agents / files / workflow / shell-git / external.
+- **Split structure (recommended — and the only path that ships the full 46-instinct set)**: the CCPR repo ships `instincts.md` (slim index) + `instincts/{theme}.md` (full Rule/Why/How) + `instincts-archive/HISTORY.md` modelling the layout. Copy them as-is to `~/.claude/` and let `/postmortem` extend them. Five themes: agents / files / workflow / shell-git / external.
 - **Single-file alternative (this file)**: a flat list of 13 sampler instincts. Copy the contents into your `~/.claude/instincts.md`. Use this if you prefer not to split AND are happy with a reduced set. You can switch to the split layout later without losing anything.
 
 ## How to use
@@ -233,7 +233,7 @@ Some global instincts are deliberately kept out of the CCPR snapshot, for three 
 - **G-054** (HANDOVER read-overflow pre-check), **G-055** (Bash CWD persistence) — project-shape-dependent evidence
 
 **Platform-specific (Apple / Xcode / SwiftPM — irrelevant to non-Apple stacks):**
-- **G-056**, **G-058**, **G-059**, **G-063** — xcodebuild / SourceKit / xcresult / XcodeBuildMCP quirks. Mint your own platform instincts if you work on Apple platforms.
+- an Apple/Xcode pre-commit-vs-xcodebuild instinct (named here without an ID — see `instincts.md`'s own note for why), **G-058**, **G-059**, **G-063** — xcodebuild / SourceKit / xcresult / XcodeBuildMCP quirks. Mint your own platform instincts if you work on Apple platforms.
 
 **CCPR-maintainer-only (relevant only to whoever maintains this distribution repo):**
 - **G-062** (release-cut hygiene). Lives in the maintainer's local instincts, not the shipped snapshot.

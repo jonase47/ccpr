@@ -1937,6 +1937,7 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
             "test_command_check.py",
             "test_command_frontmatter.py",
             "test_conformance_run.py",
+            "test_doc_counts_agree.py",
             "test_doc_volume_check.py",
             "test_docs_dotfile_gitignore_coverage.py",
             "test_external_tool_exit_status.py",
@@ -1989,11 +1990,12 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
             "workitems/test_youtrack.py",
             ],
             names,
-            "the scripts/tests corpus (66 -> 67, 03.09.2026, CCP-1137R3 "
-            "Auflage 2: test_install_push_gate_hook.py added; proven an "
-            "addition rather than a swap by `git status --porcelain "
-            "scripts/tests` -- one `??` line plus this module's own ` M`; "
-            "nothing deleted, nothing renamed)",
+            "the scripts/tests corpus (67 -> 68, 05.09.2026, CCP-1152: "
+            "test_doc_counts_agree.py added; proven an addition rather "
+            "than a swap by `git status --porcelain scripts/tests` -- one "
+            "`??` line (this new module) plus one ` M` line "
+            "(test_instinct_registers_agree.py, already a corpus member, "
+            "extended in place); nothing deleted, nothing renamed)",
         )
 
 
