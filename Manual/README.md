@@ -16,7 +16,7 @@ phase system, the agent team, installation). The runtime references Claude reads
 | [GETTING_STARTED.md](GETTING_STARTED.md) | Onboard from zero — quickstart, then a full read-along walkthrough |
 | [WORKFLOW_CHEATSHEET.md](WORKFLOW_CHEATSHEET.md) | Look up commands and scripts quickly during daily work |
 | [SYSTEM_OVERVIEW.md](SYSTEM_OVERVIEW.md) | Understand the architecture and every mechanism in depth (slim index → `system/` detail files) |
-| [SECTIONS_COMMANDS.md](SECTIONS_COMMANDS.md) | Browse all 116 commands grouped by section (slim index → `commands/` detail files) |
+| [SECTIONS_COMMANDS.md](SECTIONS_COMMANDS.md) | Browse all 116 commands grouped by section (slim index → `commands/` detail files) <!-- pin: count ../commands/*.md --> |
 | [LEAN_TRACK.md](LEAN_TRACK.md) | Understand the Lean-Track decision tree and design (transient — sunset at v1.0) |
 | [WORKITEMS.md](WORKITEMS.md) | Use the work-item CLI and its backend contract (ADR-0002) |
 | [system/scripts-conventions.md](system/scripts-conventions.md) | **Change a shipped script** — the two conventions the test suite enforces, and how to run it |

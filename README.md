@@ -347,7 +347,7 @@ Your `memory/` and `scripts/local-llm/` are out of scope and never touched.
 |   +-- tests/             # The project's own test suite (see CONTRIBUTING.md)
 |   +-- memory-lint.sh     # Validate docs/memory/** against schema
 |   +-- phase-docs-lint.sh # Validate docs/<phase>/** against schema
-|   +-- manual-lint.sh     # Validate an index<->detail doc contract (parent_index, back-links, kind)
+|   +-- manual-lint.sh     # Validate an index<->detail doc contract (parent_index, back-links, kind, marked counts)
 |   +-- doc-volume-check.sh # Watch for files ≥25/40/50 KB (G-017 protection)
 |   +-- artifact-gate.sh   # Secret / personal-data sweep over tracked files
 |   +-- anchor.sh          # Anchored-state check behind /anchor
