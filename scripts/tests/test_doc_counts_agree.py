@@ -52,11 +52,17 @@ module was written and is exactly the kind of claim `CommandCountAgreementTest`
 below would need to catch if it ever drifted. Verified during authoring by
 incrementing that one literal to "117" in the tracked file, in a single
 uninterruptible script (mutate -> run -> restore, never `git stash`, never
-two separate commands), confirming `test_readme_structure_matches` (and
-only that assertion) goes red with the exact "README.md claims 117
-commands, but commands/*.md holds 116" message, then restoring the byte-
-exact original and confirming `git diff --stat README.md` reports nothing.
-The transcript is in this work item's session report, not encoded here --
+two separate commands), confirming
+`CommandCountAgreementTest.test_docs_agree_with_the_measured_command_count`
+(and only that test in the whole module) goes red -- the failing dict diff
+names exactly one changed key, `command_readme_structure` (116 -> 117),
+every other key still 116, with the test's own custom message ("README.md
+claims a command count that disagrees with the measured commands/*.md file
+count (116), or one of the other doc locations quoting the same total
+does") attached -- then restoring the byte-exact original (`sha256` compared
+before/after inside the same script) and confirming `git diff --stat
+README.md` reports nothing. The transcript is in this work item's session
+report, not encoded here --
 matching this module's sibling's own convention of reporting authoring-time
 red-proofs rather than shipping a permanent mutation of a tracked file.
 """
@@ -66,6 +72,16 @@ import sys
 import unittest
 from pathlib import Path
 
+# sys.path.insert, deliberately, rather than `from .test_instinct_registers_agree
+# import ...`: same idiom as test_pin_inventory.py:244-250's `pin_registry`
+# import (and test_manual_lint.py:53's `read_enum` import) -- a relative
+# import here would add THIS module to CONTRIBUTING.md's own tracked
+# "modules that need -t ." count, which the -t . paragraph this module's
+# own TestCountAgreementTest checks explicitly documents as costly to
+# discover. This round's write boundary happens to include CONTRIBUTING.md
+# already (see the docstring above), but the module is still written the
+# same way its siblings are -- one relative-import site fewer to ever need
+# auditing again is a fixed cost paid once, not a cost tied to this round.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from test_instinct_registers_agree import (  # noqa: E402
     read_index_entries,
@@ -171,12 +187,19 @@ def measured_utility_command_names():
 # ---------------------------------------------------------------------------
 
 def parse_test_count_claims(readme_text, manual_readme_text, contributing_text):
-    """The three "N-test suite" claims, each in its own doc's own wording."""
+    """The three "N-test suite" claims, each in its own doc's own wording.
+    Keys are prefixed `test_count_*` -- `parse_agent_count_claims` and
+    `parse_command_count_claims` below extract claims from some of the SAME
+    files and would otherwise collide on plain names like "readme" or
+    "manual_readme"; `ClaimExtractionShapeTest` merges every `parse_*`
+    function's dict into one via `dict.update`, and a silent key collision
+    there would let a `None` from one parser be overwritten by an unrelated
+    parser's real value before the "nothing is unparsed" check ever runs."""
     claims = {}
     m = re.search(r"a \*\*(\d+)-test Python suite\*\*", readme_text)
-    claims["readme"] = int(m.group(1)) if m else None
+    claims["test_count_readme"] = int(m.group(1)) if m else None
     m = re.search(r"the (\d+)-test suite", manual_readme_text)
-    claims["manual_readme"] = int(m.group(1)) if m else None
+    claims["test_count_manual_readme"] = int(m.group(1)) if m else None
     flat = _collapse_ws(contributing_text)
     m = re.search(r"discovery collects \*\*(\d+) tests, (\d+) import errors\*\*", flat)
     claims["contributing_count"] = int(m.group(1)) if m else None
@@ -185,12 +208,15 @@ def parse_test_count_claims(readme_text, manual_readme_text, contributing_text):
 
 
 def parse_agent_count_claims(readme_text, system_overview_text):
+    """Keys prefixed `agent_*` -- see `parse_test_count_claims`'s docstring
+    for why (a plain "readme_structure" here would collide with
+    `parse_command_count_claims`'s own README-structure-line claim)."""
     claims = {}
     m = re.search(
         r"agents/\s*# 13 domain agents \+ project-guide \+ wingman = (\d+)",
         readme_text,
     )
-    claims["readme_structure"] = int(m.group(1)) if m else None
+    claims["agent_readme_structure"] = int(m.group(1)) if m else None
     m = re.search(r"\+------\+ \+------\+ \+------\+\s+(\d+) agents", system_overview_text)
     claims["ascii_box"] = int(m.group(1)) if m else None
     m = re.search(r'Agents\["(\d+) agents', system_overview_text)
@@ -206,16 +232,19 @@ def parse_agent_count_claims(readme_text, system_overview_text):
 def parse_command_count_claims(
     readme_text, manual_readme_text, system_overview_text, sections_commands_text,
 ):
+    """Keys prefixed `command_*` -- see `parse_test_count_claims`'s
+    docstring for why (both "readme_structure" and "manual_readme" here
+    would otherwise collide with a sibling `parse_*` function's own keys)."""
     claims = {}
     m = re.search(
         r"commands/\s*# (\d+) slash commands \(P0-P8 \+ Lean-Track \+ cross-cutting\)",
         readme_text,
     )
-    claims["readme_structure"] = int(m.group(1)) if m else None
+    claims["command_readme_structure"] = int(m.group(1)) if m else None
     m = re.search(r"All (\d+) commands, grouped by section", readme_text)
     claims["readme_table"] = int(m.group(1)) if m else None
     m = re.search(r"Browse all (\d+) commands grouped by section", manual_readme_text)
-    claims["manual_readme"] = int(m.group(1)) if m else None
+    claims["command_manual_readme"] = int(m.group(1)) if m else None
     flat_overview = _collapse_ws(system_overview_text)
     m = re.search(r"\*\*Total: (\d+) commands\*\*", flat_overview)
     claims["system_overview_total"] = int(m.group(1)) if m else None
@@ -318,12 +347,17 @@ class TestCountAgreementTest(unittest.TestCase):
             _read(README_PATH), _read(MANUAL_README_PATH), _read(CONTRIBUTING_PATH),
         )
         expected = {
-            "readme": count,
-            "manual_readme": count,
+            "test_count_readme": count,
+            "test_count_manual_readme": count,
             "contributing_count": count,
             "contributing_errors": 0,
         }
-        self.assertEqual(expected, claims)
+        self.assertEqual(
+            expected, claims,
+            f"README.md, Manual/README.md and/or CONTRIBUTING.md quote a "
+            f"test-suite size that disagrees with the measured "
+            f"unittest-discover count ({count})",
+        )
 
 
 class AgentCountAgreementTest(unittest.TestCase):
@@ -331,12 +365,17 @@ class AgentCountAgreementTest(unittest.TestCase):
         count = measured_agent_count()
         claims = parse_agent_count_claims(_read(README_PATH), _read(SYSTEM_OVERVIEW_PATH))
         expected = {
-            "readme_structure": count,
+            "agent_readme_structure": count,
             "ascii_box": count,
             "mermaid": count,
             "summary_line": count,
         }
-        self.assertEqual(expected, claims)
+        self.assertEqual(
+            expected, claims,
+            f"README.md and/or Manual/SYSTEM_OVERVIEW.md quote an agent "
+            f"count that disagrees with the measured agents/*.md file "
+            f"count ({count})",
+        )
 
 
 class CommandCountAgreementTest(unittest.TestCase):
@@ -347,15 +386,20 @@ class CommandCountAgreementTest(unittest.TestCase):
             _read(SYSTEM_OVERVIEW_PATH), _read(SECTIONS_COMMANDS_PATH),
         )
         expected = {
-            "readme_structure": count,
+            "command_readme_structure": count,
             "readme_table": count,
-            "manual_readme": count,
+            "command_manual_readme": count,
             "system_overview_total": count,
             "sections_commands_top": count,
             "sections_commands_summary_heading": count,
             "sections_commands_summary_table": count,
         }
-        self.assertEqual(expected, claims)
+        self.assertEqual(
+            expected, claims,
+            f"README.md claims a command count that disagrees with the "
+            f"measured commands/*.md file count ({count}), or one of the "
+            f"other doc locations quoting the same total does",
+        )
 
 
 class CommandBreakdownAgreementTest(unittest.TestCase):
@@ -393,7 +437,12 @@ class CommandBreakdownAgreementTest(unittest.TestCase):
             "sections_utility_row": utility,
             "sections_track_row": track,
         }
-        self.assertEqual(expected, claims)
+        self.assertEqual(
+            expected, claims,
+            "Manual/SYSTEM_OVERVIEW.md and/or Manual/SECTIONS_COMMANDS.md "
+            "quotes a phase/gate/learning/utility/track command breakdown "
+            "that disagrees with the measured commands/*.md classification",
+        )
 
 
 class ClassificationCompletenessTest(unittest.TestCase):
@@ -438,8 +487,16 @@ class ClassificationCompletenessTest(unittest.TestCase):
         # track/learning, which the two tests above catch. This test pins
         # the partition arithmetic itself: classified + utility == all,
         # disjoint.
-        self.assertEqual(all_names, classified | utility)
-        self.assertEqual(set(), classified & utility)
+        self.assertEqual(
+            all_names, classified | utility,
+            "classified + residual utility commands do not cover every "
+            "commands/*.md file",
+        )
+        self.assertEqual(
+            set(), classified & utility,
+            "a command name is both explicitly classified and counted as "
+            "residual utility",
+        )
 
 
 class InstinctCountAgreementTest(unittest.TestCase):
@@ -461,7 +518,12 @@ class InstinctCountAgreementTest(unittest.TestCase):
             "body_index_total": total,
             "split_layout_total": total,
         }
-        self.assertEqual(expected, claims)
+        self.assertEqual(
+            expected, claims,
+            f"README.md and/or templates/STARTER_INSTINCTS.md quotes an "
+            f"instincts.md index total that disagrees with the measured "
+            f"index bullet count ({total})",
+        )
 
     def test_sampler_count_matches_its_own_pin(self):
         """Sanity cross-check, not a new measurement: the sampler count
@@ -520,8 +582,8 @@ class ParserDiscriminatesFromUnrelatedNumbersTest(unittest.TestCase):
             "**2606 tests, 0\nimport errors**, exit 0.\n"
         )
         claims = parse_test_count_claims(readme, manual_readme, contributing)
-        self.assertEqual(2606, claims["readme"])
-        self.assertEqual(2606, claims["manual_readme"])
+        self.assertEqual(2606, claims["test_count_readme"])
+        self.assertEqual(2606, claims["test_count_manual_readme"])
         self.assertEqual(2606, claims["contributing_count"])
         self.assertEqual(0, claims["contributing_errors"])
 
@@ -536,7 +598,7 @@ class ParserDiscriminatesFromUnrelatedNumbersTest(unittest.TestCase):
             "13 domain subagents + `project-guide` + `wingman` = 15 agents. Step 2.\n"
         )
         claims = parse_agent_count_claims(readme, overview)
-        self.assertEqual(15, claims["readme_structure"])
+        self.assertEqual(15, claims["agent_readme_structure"])
         self.assertEqual(15, claims["ascii_box"])
         self.assertEqual(15, claims["mermaid"])
         self.assertEqual(15, claims["summary_line"])
