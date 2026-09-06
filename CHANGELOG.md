@@ -8,7 +8,7 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Added
 
-- **CCP-1162: the pre/post apparatus is unfrozen — an exact comparison replaces a byte-length pin.**
+- **CCP-1162: the pre/post apparatus is unfrozen — an exact comparison replaces a length-delta pin.**
   `scripts/tests/test_agent_frontmatter.py`'s `test_the_two_states_differ_only_by_the_inserted_sentence`
   asserted `len(current) − len(git show 17bc391:agents/<name>.md) == len(sentence)`. That froze the
   **length** of `agents/code-reviewer.md` and `agents/business-analyst.md` against a git blob — which,
@@ -34,8 +34,9 @@ All notable changes to this project are documented in this file. The format is b
   of deliberate later edits applied — `KNOWN_POST_CONTRACT_EDITS`, one entry today. It is strictly stronger
   than the delta in one direction and deliberately weaker in another. **Stronger:** a length-preserving
   rewrite is now caught, and the delta was blind to it — measured by transposing two adjacent lines of the
-  tiebreaker list in `code-reviewer.md`, where the old assertion **passed** (byte count identical, 16971
-  either way) and the replacement fails naming line 192. **Weaker:** an edit named in the pinned set is let
+  tiebreaker list in `code-reviewer.md`, where the old assertion **passed** (length identical either way —
+  16971 code points, 17033 bytes; the delta used Python `len`, so code points) and the replacement fails
+  naming line 192. **Weaker:** an edit named in the pinned set is let
   through. The guard no longer refuses every later edit; it refuses every later edit **that nobody wrote
   down**, and widening it is an edit to the test module, visible in review. Re-anchoring to a newer blob
   was rejected by the PO for the reason that survives the next sweep too: it moves the wall instead of
@@ -54,6 +55,18 @@ All notable changes to this project are documented in this file. The format is b
   was never a Block-C site — it carries **zero** occurrences of the swept word — and is untouched by this
   cut. Both the stage-2 commit message and CCP-1162's description named it as frozen alongside
   `code-reviewer.md`; re-measuring is what corrected that, not re-reading the report that said it.
+
+  **From the review, recorded at the site rather than in a report.** The class docstring still summarised
+  the invariant as "differ ONLY by the inserted sentence" — true before the carve-out, false after it, and
+  the kind of claim this repo treats as checkable; corrected. Two constraints now sit above
+  `KNOWN_POST_CONTRACT_EDITS` because they are unreachable with one entry and would first be violated by
+  the second: entries for one agent must not textually depend on each other (the helper applies them in
+  sequence, the exhaustion test measures both ends against the *pristine* states), and `occurrences`
+  matches by count rather than by place, so a count above 1 should be anchored to a location the way
+  `test_heredoc_interpolation_scan.py`'s `KNOWN_FINDINGS` pins `(path, line, marker)`. The method name
+  overstates the invariant and was deliberately **not** renamed: `test_pin_inventory.py`'s PENDING register
+  identifies the assertion by `(file, class, method, subject)`, so a rename is an edit to a governance
+  register bought with a wording gain. A docstring carries the correction instead.
 
 - **CCP-1151 stage 3, review follow-up: one occurrence was excluded for a reason its own grammar
   refutes.** `handbook/SYSTEM_OVERVIEW.md:762` reads "Each `/pX-…` **sub-skill** *overwrites* its

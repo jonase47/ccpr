@@ -919,9 +919,12 @@ CONTRACT_SENTENCE_TIER1 = (
 # unrelated files.
 #
 # WHY THIS SET EXISTS, AND WHY IT IS ITSELF A PIN. Until 06.09.2026 the
-# comparison was a byte-length delta (`len(current) - len(pre) ==
-# len(sentence)`). It did catch smuggling -- but it also froze both files'
-# LENGTH against a git blob, and a blob cannot be moved in the same commit as
+# comparison was a length delta (`len(current) - len(pre) == len(sentence)`).
+# Python's `len` counts CODE POINTS, not bytes, and these files are not
+# ASCII -- code-reviewer.md carries 31 multi-byte characters, so its two
+# lengths differ by 62 (16971 vs 17033). The delta did catch smuggling --
+# but it also froze both files' LENGTH against a git blob, and a blob cannot
+# be moved in the same commit as
 # the file the way a fixture in the tree can. A two-character terminology
 # sweep was therefore rejected with "129 != 127" and had to be backed out
 # (b433034, CCP-1151 stage 2 block C). Re-anchoring to a newer blob was
@@ -934,10 +937,30 @@ CONTRACT_SENTENCE_TIER1 = (
 # count, one named file -- and while widening it stays an edit to THIS file,
 # visible in review. `test_every_pinned_post_contract_edit_is_still_load_
 # bearing` is what keeps a spent entry from lingering as a blanket.
+#
+# TWO CONSTRAINTS ON A SECOND ENTRY, from the 06.09.2026 review. Neither is
+# reachable with one entry; both are recorded here, where they would be
+# violated, rather than in a report nobody reads at the keystroke.
+#
+# 1. Entries for the same agent MUST NOT TEXTUALLY DEPEND ON EACH OTHER.
+#    `with_known_post_contract_edits` applies them in order, each to a text
+#    its predecessors have already rewritten, while the exhaustion test
+#    measures both ends against the PRISTINE pre-state and the current file.
+#    If a later entry's `old` exists only because an earlier entry's `new`
+#    created it, those counts stop describing the substitution that actually
+#    runs, and "both ends checked" quietly stops meaning what it says.
+#
+# 2. `occurrences` MATCHES BY COUNT, NOT BY PLACE. It therefore cannot tell
+#    one edit occurring at N positions from N independent, undocumented
+#    edits that happen to share a before/after wording -- both balance. With
+#    `occurrences: 1` no ambiguity is reachable. If a second entry ever needs
+#    a count above 1, anchor it to a location the way
+#    `test_heredoc_interpolation_scan.py`'s `KNOWN_FINDINGS` pins
+#    `(path, line, marker)`, instead of raising the number here.
 KNOWN_POST_CONTRACT_EDITS = (
     # CCP-1151 stage 2 block C: the memory tiebreaker's referent is a shipped
     # slash command, not a skill. Swept in eleven sibling agent files on
-    # 06.09.2026 (b433034); code-reviewer.md was held back by the byte-length
+    # 06.09.2026 (b433034); code-reviewer.md was held back by the length-delta
     # form of this very guard and lands with CCP-1162.
     ("code-reviewer",
      "a specific agent, file path, skill, or tool-chain symbol",
@@ -1262,8 +1285,15 @@ class ProjectMemoryContractHistoricalRedProofTest(unittest.TestCase):
     GLOBAL silo's contract while being told to write project-scope memory.
     That is the shape a naive "is a contract stated?" rule passes, and it is
     the shape the finding had. Both fixtures are asserted to differ from
-    their current counterpart ONLY by the inserted sentence, so the two
-    directions compare the same file and not two unrelated states."""
+    their current counterpart by the inserted sentence AND BY NOTHING ELSE
+    THAT IS NOT NAMED IN `KNOWN_POST_CONTRACT_EDITS`, so the two directions
+    compare the same file and not two unrelated states.
+
+    That carve-out is not a loosening, and the distinction is the whole
+    point: a deliberate later edit (a terminology sweep, say) has to be
+    written down to pass, which is what keeps it distinguishable from
+    smuggling. See that constant's own comment for the trade-off and for the
+    two constraints on adding to it."""
 
     @classmethod
     def setUpClass(cls):
@@ -1303,12 +1333,19 @@ class ProjectMemoryContractHistoricalRedProofTest(unittest.TestCase):
                 self.assertTrue(declares_project_memory_contract(body))
 
     def test_the_two_states_differ_only_by_the_inserted_sentence(self):
+        """The name predates the carve-out and overstates it: since
+        06.09.2026 the two states may also differ by anything named in
+        `KNOWN_POST_CONTRACT_EDITS`. The name is kept rather than corrected
+        because `test_pin_inventory.py`'s PENDING register identifies this
+        assertion by (file, class, METHOD, subject), so a rename is an edit
+        to a governance register bought with a wording gain -- the wrong
+        trade. This docstring is the correction."""
         # The fixture's own claim, pinned: if a later edit changes anything
         # else in these files, the "both directions" proof is comparing two
         # unrelated states and this says so instead of passing quietly.
         #
         # The comparison is an EXACT equality on the sentence-removed form,
-        # not the byte-length delta it was until 06.09.2026. Two gains over
+        # not the length delta it was until 06.09.2026. Two gains over
         # the delta: it also catches a rewrite that happens to keep the
         # length, which a delta cannot see at all; and it lets a reviewed
         # later edit through by NAMING it in KNOWN_POST_CONTRACT_EDITS rather
