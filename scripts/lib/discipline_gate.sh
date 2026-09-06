@@ -21,13 +21,13 @@
 #   context            yes     NO        the colour-vision / accessibility markers
 #                                        are a de-personalisation rule for memory
 #                                        content; "red-green" is ordinary   # gate-pattern-source
-#                                        vocabulary in a TDD or a11y skill prompt
+#                                        vocabulary in a TDD or a11y command prompt
 #   type-user          yes     NO        a promotion rule about where a memory
 #                                        file may go, not about leaked data;
 #                                        shipped schema docs describe the value
 #   network            yes     yes       an internal address is an identifier
 #   content            yes     NO        "Next Steps" headings and checkboxes are
-#                                        legitimate skill-prompt structure
+#                                        legitimate command-prompt structure
 #   denylist           yes     yes       tenant / project names, from personal
 #                                        config only — never from this repo
 #

@@ -148,7 +148,7 @@ CI_TEMPLATE = REPO_ROOT / "templates" / "ci" / "artifact-gate.ci.sh"
 # artifact profile must not.
 CLEAN_TEXT = """# Title
 
-Some ordinary prose about a skill prompt.
+Some ordinary prose about a command prompt.
 
 ## Next Steps
 
@@ -285,7 +285,7 @@ class AdoptedCategoriesTest(GateTestBase):
         self.assert_fires("the box answers on " + IPV4 + " today\n", "network")
 
     def test_the_memory_only_content_check_is_not_part_of_this_profile(self):
-        # Skill prompts legitimately carry "Next Steps" headings and checkboxes.
+        # Command prompts legitimately carry "Next Steps" headings and checkboxes.
         self.assert_silent("## Next Steps\n\n- [ ] do the thing\n\nTODO: later\n")
 
     def test_the_memory_only_type_user_check_is_not_part_of_this_profile(self):
@@ -331,7 +331,7 @@ class FalsePositiveCorpusTest(GateTestBase):
     def test_fp_the_tdd_cycle_name_is_not_personal_data(self):
         self.assert_silent("TDD Workflow (Red-Green-Refactor)\n")
 
-    def test_fp_red_green_colour_vision_wording_in_an_a11y_skill_is_not_personal_data(self):
+    def test_fp_red_green_colour_vision_wording_in_an_a11y_command_is_not_personal_data(self):
         self.assert_silent(
             "Use a colour-blind-friendly palette; red-green combinations fail.\n"
         )

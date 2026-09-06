@@ -43,7 +43,7 @@ if [ -f "${TEMPLATES_DIR}/PROJECT_CLAUDE_TEMPLATE.md" ]; then
 fi
 
 # Generate empty P0 phase index (Document Splitting Convention).
-# Subskill commands (/p0-problem etc.) write detail files into this directory
+# Subcommands (/p0-problem etc.) write detail files into this directory
 # and refresh the index; gate-p0 reads the index first.
 TODAY=$(date +%d.%m.%Y)
 cat > "${PROJECT_DIR}/docs/discovery/DISCOVERY.md" <<EOF
@@ -53,11 +53,11 @@ cat > "${PROJECT_DIR}/docs/discovery/DISCOVERY.md" <<EOF
 **Last Updated:** ${TODAY}
 
 ## Key Decisions
-<!-- One-liners lifted by /p0-* subskills (link to detail file). -->
+<!-- One-liners lifted by /p0-* subcommands (link to detail file). -->
 - _none yet_
 
 ## Open Risks / Open Questions
-<!-- Critical items surfaced by /p0-* subskills. -->
+<!-- Critical items surfaced by /p0-* subcommands. -->
 - _none yet_
 
 ## Detail Files

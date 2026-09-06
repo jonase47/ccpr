@@ -1783,7 +1783,7 @@ def handle_post_tool_use(data: dict, session_id: str):
         })
 
     # Size cap right after a HANDOVER write: this is the moment the file grows, and a full
-    # skill run can cross the cap between two SessionStarts. The gate keeps the cost of the
+    # command run can cross the cap between two SessionStarts. The gate keeps the cost of the
     # check off every other tool call — a set lookup plus one basename comparison.
     if is_handover_write(tool_name, data.get("tool_input", {})):
         check_handover_size(session_id, "PostToolUse")

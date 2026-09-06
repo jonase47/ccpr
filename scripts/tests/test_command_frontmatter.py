@@ -484,7 +484,7 @@ class ClassifyFunctionBoundaryTest(unittest.TestCase):
         self.assertTrue(expected)
 
     def test_a_phase_named_file_is_classified_in_scope_by_pattern_alone(self):
-        classified, expected = classify("p3-new-subskill", "plain body")
+        classified, expected = classify("p3-new-subcommand", "plain body")
         self.assertTrue(classified)
         self.assertTrue(expected)
 

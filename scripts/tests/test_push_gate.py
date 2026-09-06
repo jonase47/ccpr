@@ -99,7 +99,7 @@ CREDENTIAL = leak("api", "_key = \"", "A1b2C3d4E5f6G7h8I9j0K1l2M3\"")
 
 # Clean under BOTH profiles: no work-item shapes the memory profile flags,
 # no deny name, no secret/personal/network shape.
-CLEAN_TEXT = "# Title\n\nSome ordinary prose about a skill prompt.\n"
+CLEAN_TEXT = "# Title\n\nSome ordinary prose about a command prompt.\n"
 
 # Clean under the artifact profile (no secret/personal/network/denylist
 # shape) but dirty under the memory profile: "TODO:" is a work-item marker

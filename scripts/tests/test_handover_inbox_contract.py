@@ -2,7 +2,7 @@
 commands/cleanup.md, commands/release-baseline.md and templates/HANDOVER_TEMPLATE.md.
 
 These three files are natural-language prompts, not executable code: no subprocess drives
-"the skill" the way test_memory_lint.py drives memory-lint.sh or test_handover_size_hook.py
+"the command" the way test_memory_lint.py drives memory-lint.sh or test_handover_size_hook.py
 drives agent-monitor.py. A test for a prompt can therefore only pin two things:
 
 1. **The mechanical parts that are genuinely executable** — the marker regex `^- INBOX [|]`

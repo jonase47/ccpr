@@ -60,7 +60,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Phase → folder mapping (matches gate skill conventions)
+# Phase → folder mapping (matches gate command conventions)
 case "$PHASE" in
     P0) FOLDER="discovery" ;;
     P1) FOLDER="concept" ;;
