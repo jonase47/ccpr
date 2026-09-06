@@ -1221,6 +1221,66 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Changed
 
+- **CCP-1151 stage 2: the three shared building blocks of the `skill` → `command` sweep are
+  renamed — 211 occurrences in 211 files, in three commits.** The blocks are the lever of the
+  whole sweep: none of them comes from a template, all three were hand-copied, and together they
+  are a quarter of the corpus fixed in three edits.
+
+  **Every figure was re-measured before the first write, not carried in from stage 1.** Corpus by
+  the item's recipe v2 on `de08c49`: **926**. Block A, the HANDOVER size-cap sentence, **97
+  occurrences in 97 files, one distinct line** — `git ls-files -z | xargs -0 /usr/bin/grep -oF
+  'one skill run has been measured adding 1021 B' | wc -l`. Block B, the next-steps line, **88 +
+  15 = 103 of the 116 command files** in exactly two wordings. Block C, the Tier-2 tiebreaker,
+  **13 occurrences in 13 files over 3 wording variants**. The measured `file:line` set of each
+  block `diff`s empty against the stage-1 register's own site list — sets compared, not sums —
+  and the 213 target line-keys were checked disjoint from the taboo class before anything was
+  written. That last figure needs its derivation stated, because the register does not carry it: the
+  register counts K1 as **225 occurrences**, which collapse to **206 distinct `file:line` keys**
+  because 19 lines carry more than one occurrence. 206 is the line-key count, 225 the occurrence
+  count; the intersection with the 213 targets is empty either way.
+
+  **Block B's `fit`/`match` drift is modernised and left divergent, on purpose (PO decision,
+  CCP-1159).** 88 files say `... commands that fit the current phase/sub-command status`, 15 say
+  `... that match ...`; the 15 are the P4 and P5 command families. Normalising them here would
+  mix mechanical substitution with editorial judgement and make the diff reviewable as neither.
+
+  **Why `sub-command` and not `sub-skill` on that line — settled at the source, because the register
+  could not settle it.** K2 is a class of *shape* (shared hand-copied blocks); K3 and K4 are classes
+  of *referent*. The register therefore never recorded a referent for any of K2's 213 occurrences,
+  and its own tie-break warns that "sub-skill → sub-command" is factually wrong wherever the referent
+  is a document slot. The line's own item 2 names the deciding document: `docs/NEXT_STEPS_REFERENCE.md`
+  uses "sub-skill" **13 times and every one of them is a slash command** — "Architecture sub-skills
+  (via `/p3-architecture`)" over `p3-arch-components -> p3-arch-techstack -> …` — and it defines no
+  document-slot status at all (zero hits for detail-file, document slot, frontmatter or `subskill:`).
+  Its line 159, "When all sub-skills of a phase are done, recommend the corresponding gate", is the
+  verbatim antecedent of the block's own item 4. The referent is the sub-command's execution state.
+
+  **What the sweep does not reach, stated rather than assumed.** The `subskill:` frontmatter key
+  (`subskill` also occurs as ordinary prose in 15 command files, so the hyphen is not a
+  classifier); the `Skill` tool integration in `hooks/agent-monitor.py`; the `Track-Skills`
+  heading pinned by a literal regex in `scripts/tests/test_doc_counts_agree.py:299`; G-026's
+  vendor filename literals; ratified text in `docs/CONSTITUTION.md`; and the 22 title literals
+  CCP-1160 pinned in `scripts/tests/test_instinct_registers_agree.py` an hour earlier.
+
+  **Two occurrences of Block C are deliberately left behind, and the second is a finding.**
+  `handbook/system/memory-instincts.md:26` carries the thirteenth copy of the tiebreaker and lies
+  outside this cut's write boundary (`handbook/` is stage 3). `agents/code-reviewer.md:191` was
+  swept, went red, and was **backed out rather than the test bent**:
+  `scripts/tests/test_agent_frontmatter.py:1254` pins the total **byte length** of
+  `agents/code-reviewer.md` and `agents/business-analyst.md` against the historical commit
+  `17bc391`, asserting each grew by exactly the 127-character contract sentence. `skill` →
+  `command` adds two characters, the delta became 129, and the guard failed by design. It is a
+  fourth coupling of the kind stage 1 catalogued, and a stricter one: the pre-state is a git blob,
+  not a fixture in the tree, so it **cannot** be satisfied by moving a fixture in the same commit
+  the way the `test_instinct_registers_agree.py` title pins can. Until the guard is re-anchored
+  those two agent files are frozen in length — which stage 4, whose corpus is every agent file,
+  will meet again. Re-anchoring is a PO decision, not a sweep decision.
+
+  Corpus after the cut: **715** (926 − 211), with the drop landing exactly in `commands/` (383 →
+  182), `agents/` (26 → 17) and `CLAUDE.md` (20 → 19) and nowhere else. The rename target
+  K2+K3 falls from **645 to 434**; `check-all.sh` reports 9 catalogued, 9 matched, 0 divergent,
+  and the suite is green on 2692 tests before and after.
+
 - **CCP-1150, second and final cut: the human handbook is renamed `Manual/` → `handbook/`,
   and the sites that break travel in the same commit as the `git mv`.** ADR-0014 decided the
   namespace; this cut performs it. 23 tracked files move; `install.sh:43` never shipped

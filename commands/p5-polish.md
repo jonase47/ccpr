@@ -211,5 +211,5 @@ Update `docs/HANDOVER.md`:
 Recommend 1-3 sensible next commands to the user:
 1. Read `docs/HANDOVER.md` for the current project status
 2. Consult `~/.claude/docs/NEXT_STEPS_REFERENCE.md` for allowed transitions
-3. Only suggest commands that match the current phase/sub-skill status
+3. Only suggest commands that match the current phase/sub-command status
 4. After polish: recommend `/p4-sprint` to start the next sprint (or `/p6-functional` if all sprints are done)

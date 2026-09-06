@@ -78,7 +78,7 @@ Read the slim index `~/.claude/instincts.md` first (one-liner per instinct + con
     `docs/memory/{agent}/{topic}.md`, update `docs/memory/{agent}/MEMORY.md`
   - **When in doubt, do NOT default to Tier 1** — that tiebreaker was withdrawn because it caused
     Tier-1 drift (persona-specific patterns leaking into the global file). Decision order:
-    1. Does the rule name a specific agent, file path, skill, or tool-chain symbol? → **Tier 2**.
+    1. Does the rule name a specific agent, file path, command, or tool-chain symbol? → **Tier 2**.
     2. Do **≥2 agent domains genuinely consume it today** (not "might one day")? → **Tier 1**.
     3. Still uncertain → **Tier 2** of the persona that surfaced it; promote to Tier 1 at the
        **3rd cross-reference from a different domain**.
@@ -151,7 +151,7 @@ $ARGUMENTS
 **Before writing.** `docs/HANDOVER.md` is capped — the file states its own limit in its header
 (default: ≤5 KB / ~150 lines). Two rules follow from that, and neither is optional:
 - **Replace this command's previous epilogue block, do not append a second one.** Stacking is what
-  pushes the file over; one skill run has been measured adding 1021 B, ~20 % of the cap.
+  pushes the file over; one command run has been measured adding 1021 B, ~20 % of the cap.
 - **If the file is already near its cap, shorten before you add.** Reading the cap sentence is not
   the same as measuring: check the actual size, and when there is no room, condense existing content
   or hand the user `/cleanup` instead of growing the file further.
@@ -164,5 +164,5 @@ Update `docs/HANDOVER.md`:
 Recommend 1-3 sensible next commands to the user:
 1. Read `docs/HANDOVER.md` for the current project status
 2. Consult `~/.claude/docs/NEXT_STEPS_REFERENCE.md` for allowed transitions
-3. Only suggest commands that fit the current phase/sub-skill status
+3. Only suggest commands that fit the current phase/sub-command status
 4. If the current phase appears complete: recommend the gate
