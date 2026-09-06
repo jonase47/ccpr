@@ -8,6 +8,38 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Added
 
+- **CCP-1151: the terminology sweep's own divergence is now pinned, in
+  `scripts/tests/test_handover_cap_sentence_echoes.py`.** Stage 2 rewrote the HANDOVER-cap
+  measurement sentence in 97 `commands/` files; three echoes of the same sentence outside that
+  scope — `hooks/agent-monitor.py:82` and `scripts/tests/test_handover_size_hook.py:77` and `:718`
+  — still carry the pre-sweep wording. The split is deliberate and belongs to stage 4, but until
+  now **nothing in the tree could see it**: a fourth echo, or a well-meaning repair closing one of
+  the three, would have left the suite reporting the same result either way. A register note
+  cannot go red.
+
+  **Set equality over `(path, line, column)` keys, not a count** (ADR-0012 obligation 2): a count
+  cannot tell "one added" from "one added, one gone". Proven in all three directions against a
+  scratch-controlled mutation, restored under a trap and byte-verified afterwards — a fourth
+  occurrence fails as `new:`, a closed one as `gone:`, and a **swap** (one closed, one opened,
+  tree-wide occurrence count unchanged at five) fails naming both sides. The swap is the case a
+  count pin structurally cannot see, so it is the one that decides whether this pin is a guard or
+  a ceremony.
+
+  **The scan's scope is asserted, not assumed.** It reads every tracked file; `scanned` and
+  `skipped` are proven to partition `git ls-files`, so narrowing the scan has to surface as growth
+  in a pinned skip set. `CHANGELOG.md` is the one skip by decision — protocol, historical entries
+  are not rewritten retroactively — and a separate test fails if that exclusion ever stops
+  excusing anything. The needles are assembled from fragments rather than written out, so the
+  module sits **inside its own scope**: the first draft spelled them into a comment and the pin
+  went red on itself before the file was ever committed.
+
+  Bookkeeping the new module obliges, each a deliberate set bump rather than a silent edit: its
+  three `# pin:` markers in `test_pin_inventory.py`'s inventory, its filename in
+  `test_absence_only_assertions.py`'s corpus, and the four coupled discovery figures in
+  `CONTRIBUTING.md`, re-measured together as that section requires — 2692 / 1975 / 17 / 717
+  against a tree at **2698 / 1981 / 17 / 717**, the second round running in which the skipped
+  figure did not move with the others.
+
 - **CCP-1160: `scripts/tests/test_instinct_registers_agree.py` stops comparing the three instinct
   registers on ids alone and starts comparing what they SAY.** All three parsers captured the id
   token and stopped (`INDEX_ENTRY_RE`, `SAMPLER_ENTRY_RE`, `TOPIC_ENTRY_RE`), so a terminology

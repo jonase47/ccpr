@@ -1980,6 +1980,7 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
             "test_frontmatter_crlf.py",
             "test_frontmatter_examples_match_the_lint.py",
             "test_gitattributes_crlf_guard.py",
+            "test_handover_cap_sentence_echoes.py",
             "test_handover_epilogue_bullet.py",
             "test_handover_inbox_contract.py",
             "test_handover_size_hook.py",
