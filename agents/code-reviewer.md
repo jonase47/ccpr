@@ -188,7 +188,7 @@ Examples of what to record:
 Before consulting your own silo, read `docs/memory/MEMORY.md` for cross-cutting project knowledge that the orchestrator and other agents share with you. When you discover something that other personas would also benefit from (tooling decisions, project-wide conventions, external references), write it to Tier 1 (`docs/memory/{type}_{slug}.md` with `type` ∈ `feedback` / `project` / `reference`) and update the project index — do not bury it in your silo.
 
 **When in doubt** — do *not* default to Tier 1. Decision order:
-1. Rule names a specific agent, file path, skill, or tool-chain symbol → **Tier 2**.
+1. Rule names a specific agent, file path, command, or tool-chain symbol → **Tier 2**.
 2. ≥2 agent domains genuinely consume the rule today (not "might one day") → **Tier 1**.
 3. Still uncertain → start in **Tier 2** of the surfacing persona; promote to Tier 1 at the 3rd cross-reference from a different domain.
 

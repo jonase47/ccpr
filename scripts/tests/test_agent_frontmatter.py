@@ -911,6 +911,91 @@ CONTRACT_SENTENCE_TIER1 = (
     "`name`, `description`, `type` and `last_updated` are required."
 )
 
+# Deliberate edits made to a PRE_CONTRACT_FIXTURE after PRE_CONTRACT_COMMIT,
+# other than the contract sentence itself. Each entry is
+# (agent, historical wording, current wording, occurrences) and is applied to
+# the HISTORICAL side before the two states are compared, so that a known,
+# reviewed rename does not turn the pre/post pair into a comparison of two
+# unrelated files.
+#
+# WHY THIS SET EXISTS, AND WHY IT IS ITSELF A PIN. Until 06.09.2026 the
+# comparison was a length delta (`len(current) - len(pre) == len(sentence)`).
+# Python's `len` counts CODE POINTS, not bytes, and these files are not
+# ASCII -- code-reviewer.md carries 31 multi-byte characters, so its two
+# lengths differ by 62 (16971 vs 17033). The delta did catch smuggling --
+# but it also froze both files' LENGTH against a git blob, and a blob cannot
+# be moved in the same commit as
+# the file the way a fixture in the tree can. A two-character terminology
+# sweep was therefore rejected with "129 != 127" and had to be backed out
+# (b433034, CCP-1151 stage 2 block C). Re-anchoring to a newer blob was
+# rejected by the PO: it moves the wall rather than removing it, and the next
+# sweep meets it again.
+#
+# The trade-off this set buys, stated plainly: the guard no longer refuses
+# every later edit, it refuses every later edit that nobody wrote down. That
+# is only worth anything while the set stays narrow -- one literal, one pinned
+# count, one named file -- and while widening it stays an edit to THIS file,
+# visible in review. `test_every_pinned_post_contract_edit_is_still_load_
+# bearing` is what keeps a spent entry from lingering as a blanket.
+#
+# TWO CONSTRAINTS ON A SECOND ENTRY, from the 06.09.2026 review. Neither is
+# reachable with one entry; both are recorded here, where they would be
+# violated, rather than in a report nobody reads at the keystroke.
+#
+# 1. Entries for the same agent MUST NOT TEXTUALLY DEPEND ON EACH OTHER.
+#    `with_known_post_contract_edits` applies them in order, each to a text
+#    its predecessors have already rewritten, while the exhaustion test
+#    measures both ends against the PRISTINE pre-state and the current file.
+#    If a later entry's `old` exists only because an earlier entry's `new`
+#    created it, those counts stop describing the substitution that actually
+#    runs, and "both ends checked" quietly stops meaning what it says.
+#
+# 2. `occurrences` MATCHES BY COUNT, NOT BY PLACE. It therefore cannot tell
+#    one edit occurring at N positions from N independent, undocumented
+#    edits that happen to share a before/after wording -- both balance. With
+#    `occurrences: 1` no ambiguity is reachable. If a second entry ever needs
+#    a count above 1, anchor it to a location the way
+#    `test_heredoc_interpolation_scan.py`'s `KNOWN_FINDINGS` pins
+#    `(path, line, marker)`, instead of raising the number here.
+KNOWN_POST_CONTRACT_EDITS = (
+    # CCP-1151 stage 2 block C: the memory tiebreaker's referent is a shipped
+    # slash command, not a skill. Swept in eleven sibling agent files on
+    # 06.09.2026 (b433034); code-reviewer.md was held back by the length-delta
+    # form of this very guard and lands with CCP-1162.
+    ("code-reviewer",
+     "a specific agent, file path, skill, or tool-chain symbol",
+     "a specific agent, file path, command, or tool-chain symbol",
+     1),
+)
+
+
+def with_known_post_contract_edits(name, historical):
+    """`historical` rewritten with the deliberate edits made to `name`'s file
+    after PRE_CONTRACT_COMMIT. Pure text substitution -- whether an entry
+    still describes a real edit is asserted separately, so a stale entry
+    fails under its own name instead of silently doing nothing here."""
+    for agent, old, new, _occurrences in KNOWN_POST_CONTRACT_EDITS:
+        if agent == name:
+            historical = historical.replace(old, new)
+    return historical
+
+
+def first_divergence(expected, actual):
+    """A compact description of where two texts first diverge. unittest's own
+    multi-line diff starts at line 1, and maxDiff cuts it off long before it
+    reaches the divergence in a 17 KB agent file."""
+    exp = expected.splitlines()
+    act = actual.splitlines()
+    for i in range(max(len(exp), len(act))):
+        left = exp[i] if i < len(exp) else "<no such line>"
+        right = act[i] if i < len(act) else "<no such line>"
+        if left != right:
+            return ("first divergence at line {}:\n"
+                    "  pre-state (+ pinned edits): {!r}\n"
+                    "  current (- sentence):       {!r}".format(
+                        i + 1, left, right))
+    return "the texts differ only in trailing bytes, not in any whole line"
+
 
 def mask_fenced_code_blocks(text):
     """Blanks every line of a ``` fenced block (the fence lines included)
@@ -1200,8 +1285,15 @@ class ProjectMemoryContractHistoricalRedProofTest(unittest.TestCase):
     GLOBAL silo's contract while being told to write project-scope memory.
     That is the shape a naive "is a contract stated?" rule passes, and it is
     the shape the finding had. Both fixtures are asserted to differ from
-    their current counterpart ONLY by the inserted sentence, so the two
-    directions compare the same file and not two unrelated states."""
+    their current counterpart by the inserted sentence AND BY NOTHING ELSE
+    THAT IS NOT NAMED IN `KNOWN_POST_CONTRACT_EDITS`, so the two directions
+    compare the same file and not two unrelated states.
+
+    That carve-out is not a loosening, and the distinction is the whole
+    point: a deliberate later edit (a terminology sweep, say) has to be
+    written down to pass, which is what keeps it distinguishable from
+    smuggling. See that constant's own comment for the trade-off and for the
+    two constraints on adding to it."""
 
     @classmethod
     def setUpClass(cls):
@@ -1241,21 +1333,67 @@ class ProjectMemoryContractHistoricalRedProofTest(unittest.TestCase):
                 self.assertTrue(declares_project_memory_contract(body))
 
     def test_the_two_states_differ_only_by_the_inserted_sentence(self):
+        """The name predates the carve-out and overstates it: since
+        06.09.2026 the two states may also differ by anything named in
+        `KNOWN_POST_CONTRACT_EDITS`. The name is kept rather than corrected
+        because `test_pin_inventory.py`'s PENDING register identifies this
+        assertion by (file, class, METHOD, subject), so a rename is an edit
+        to a governance register bought with a wording gain -- the wrong
+        trade. This docstring is the correction."""
         # The fixture's own claim, pinned: if a later edit changes anything
         # else in these files, the "both directions" proof is comparing two
         # unrelated states and this says so instead of passing quietly.
+        #
+        # The comparison is an EXACT equality on the sentence-removed form,
+        # not the length delta it was until 06.09.2026. Two gains over
+        # the delta: it also catches a rewrite that happens to keep the
+        # length, which a delta cannot see at all; and it lets a reviewed
+        # later edit through by NAMING it in KNOWN_POST_CONTRACT_EDITS rather
+        # than by loosening what the guard asserts.
         for name in PRE_CONTRACT_FIXTURES:
             current = (AGENTS_DIR / (name + ".md")).read_text(encoding="utf-8")
             sentence = (CONTRACT_SENTENCE_OWN_SILO if name == "code-reviewer"
                         else CONTRACT_SENTENCE_TIER1)
-            added = len(current) - len(self.pre[name])
+            expected = with_known_post_contract_edits(name, self.pre[name])
+            without_sentence = current.replace(sentence, "", 1)
             with self.subTest(agent=name):
                 self.assertEqual(current.count(sentence), 1)
-                self.assertEqual(added, len(sentence),
-                                 "{}: {} chars changed, not the {}-char "
-                                 "sentence".format(name, added, len(sentence)))
+                self.assertEqual(
+                    without_sentence, expected,
+                    "{}: the current file differs from its pre-state by more "
+                    "than the contract sentence and the edits pinned in "
+                    "KNOWN_POST_CONTRACT_EDITS.\n{}".format(
+                        name, first_divergence(expected, without_sentence)))
                 self.assertIn("MEMORY_SCHEMA", current)
                 self.assertNotIn("MEMORY_SCHEMA", self.pre[name])
+
+    def test_every_pinned_post_contract_edit_is_still_load_bearing(self):
+        """Exhaustion for KNOWN_POST_CONTRACT_EDITS. A spent entry is worse
+        than no entry: it widens what the comparison above tolerates while
+        proving nothing, and the next drift hides behind it. Both ends are
+        checked because either can go stale on its own -- the old wording
+        must still be in the pre-state exactly as often as pinned, and the
+        new wording must be in the current file exactly as often."""
+        for agent, old, new, occurrences in KNOWN_POST_CONTRACT_EDITS:
+            with self.subTest(entry=old):
+                self.assertIn(
+                    agent, PRE_CONTRACT_FIXTURES,
+                    "{}: an entry for a file this apparatus does not "
+                    "compare tolerates nothing and proves nothing".format(
+                        agent))
+                current = (AGENTS_DIR / (agent + ".md")).read_text(
+                    encoding="utf-8")
+                self.assertEqual(
+                    self.pre[agent].count(old), occurrences,
+                    "stale entry: {}.md at {} carries the OLD wording {} "
+                    "times, not the pinned {}".format(
+                        agent, PRE_CONTRACT_COMMIT,
+                        self.pre[agent].count(old), occurrences))
+                self.assertEqual(
+                    current.count(new), occurrences,
+                    "stale entry: agents/{}.md carries the NEW wording {} "
+                    "times, not the pinned {}".format(
+                        agent, current.count(new), occurrences))
 
     def test_removing_the_global_contract_does_not_clear_the_rule(self):
         # Keys on WHICH contract, not how many: dropping the global sentence

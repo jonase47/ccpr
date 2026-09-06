@@ -8,6 +8,66 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Added
 
+- **CCP-1162: the pre/post apparatus is unfrozen — an exact comparison replaces a length-delta pin.**
+  `scripts/tests/test_agent_frontmatter.py`'s `test_the_two_states_differ_only_by_the_inserted_sentence`
+  asserted `len(current) − len(git show 17bc391:agents/<name>.md) == len(sentence)`. That froze the
+  **length** of `agents/code-reviewer.md` and `agents/business-analyst.md` against a git blob — which,
+  unlike every other coupling on record in this repo, cannot be moved in the same commit as the file it
+  is compared with. CCP-1151 stage 2 hit it with a two-character rename, and backed the rename out rather
+  than bend the test (b433034; block C left at 11 of 13, on purpose).
+
+  **What the guard actually is, measured, because the item description got it wrong twice.** It is not a
+  spent build supervision whose purpose was served. The historical text is consumed by **three** tests of
+  `ProjectMemoryContractHistoricalRedProofTest` — the guard itself, plus
+  `test_the_pre_state_states_the_global_contract_and_not_the_project_one` and
+  `test_each_trigger_carries_its_own_fixture` — whose two current-tree siblings form the other half of the
+  "both directions" pair. The item claimed **ten** consumers; that figure counts every test in the module
+  reading *any* historical blob through a `self.pre*` attribute, across **four** classes and **three**
+  different refs (Rule 4 pulls `7af990d^`; Rule 5 and Rule 8 pull `qa-tester.md` and `wingman.md` at the
+  same `PRE_CONTRACT_COMMIT`). Those carry their own fixtures and their own integrity checks; this guard
+  covers the `code-reviewer`/`business-analyst` pair alone. Its failure mode is nonetheless real and live:
+  without it a drifted file turns the both-directions proof into a comparison of two unrelated states that
+  passes quietly.
+
+  **The replacement, and the trade-off it buys.** The comparison is now an exact equality on the
+  sentence-removed form (`current.replace(sentence, "", 1)`) against the historical text with a pinned set
+  of deliberate later edits applied — `KNOWN_POST_CONTRACT_EDITS`, one entry today. It is strictly stronger
+  than the delta in one direction and deliberately weaker in another. **Stronger:** a length-preserving
+  rewrite is now caught, and the delta was blind to it — measured by transposing two adjacent lines of the
+  tiebreaker list in `code-reviewer.md`, where the old assertion **passed** (length identical either way —
+  16971 code points, 17033 bytes; the delta used Python `len`, so code points) and the replacement fails
+  naming line 192. **Weaker:** an edit named in the pinned set is let
+  through. The guard no longer refuses every later edit; it refuses every later edit **that nobody wrote
+  down**, and widening it is an edit to the test module, visible in review. Re-anchoring to a newer blob
+  was rejected by the PO for the reason that survives the next sweep too: it moves the wall instead of
+  removing it.
+
+  **Exhaustion, because a pinned set nobody re-measures becomes a blanket.**
+  `test_every_pinned_post_contract_edit_is_still_load_bearing` checks both ends of every entry — the old
+  wording must still be in the pre-state exactly as often as pinned, the new wording in the current file
+  exactly as often — and rejects an entry naming a file this apparatus does not compare. All three
+  staleness forms were mutated and seen red under their own names, with the module sha256-identical after
+  restore. That the permission is entry-driven rather than a loosening was measured the same way: with the
+  single entry removed, the swept file is rejected again.
+
+  **Block C is complete at 13 of 13.** `agents/code-reviewer.md:191` now reads `command`; stage 3 had
+  already closed the thirteenth site (`handbook/system/memory-instincts.md:26`). `agents/business-analyst.md`
+  was never a Block-C site — it carries **zero** occurrences of the swept word — and is untouched by this
+  cut. Both the stage-2 commit message and CCP-1162's description named it as frozen alongside
+  `code-reviewer.md`; re-measuring is what corrected that, not re-reading the report that said it.
+
+  **From the review, recorded at the site rather than in a report.** The class docstring still summarised
+  the invariant as "differ ONLY by the inserted sentence" — true before the carve-out, false after it, and
+  the kind of claim this repo treats as checkable; corrected. Two constraints now sit above
+  `KNOWN_POST_CONTRACT_EDITS` because they are unreachable with one entry and would first be violated by
+  the second: entries for one agent must not textually depend on each other (the helper applies them in
+  sequence, the exhaustion test measures both ends against the *pristine* states), and `occurrences`
+  matches by count rather than by place, so a count above 1 should be anchored to a location the way
+  `test_heredoc_interpolation_scan.py`'s `KNOWN_FINDINGS` pins `(path, line, marker)`. The method name
+  overstates the invariant and was deliberately **not** renamed: `test_pin_inventory.py`'s PENDING register
+  identifies the assertion by `(file, class, method, subject)`, so a rename is an edit to a governance
+  register bought with a wording gain. A docstring carries the correction instead.
+
 - **CCP-1151 stage 3, review follow-up: one occurrence was excluded for a reason its own grammar
   refutes.** `handbook/SYSTEM_OVERVIEW.md:762` reads "Each `/pX-…` **sub-skill** *overwrites* its
   detail file (never appends), then refreshes the index row…". It was booked as naming the
