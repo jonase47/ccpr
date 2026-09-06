@@ -15,7 +15,7 @@ Behavioural rules for talking to external systems: WebFetch fallback strategies 
 ### G-020: WebFetch bot-protection → Playwright-MCP fallback
 **Confidence: 0.5** | Last confirmed: starter set
 
-> **Rule**: Validation/research skills with desk research on consumer-oriented platforms (Reddit, Google Trends, App-Store detail pages, niche search tools) must expect bot protection (HTTP 429 / Anubis 403 / Cloudflare challenge) as the **normal** case for direct WebFetch.
+> **Rule**: Validation/research commands with desk research on consumer-oriented platforms (Reddit, Google Trends, App-Store detail pages, niche search tools) must expect bot protection (HTTP 429 / Anubis 403 / Cloudflare challenge) as the **normal** case for direct WebFetch.
 >
 > **Tier flow**:
 > 1. **WebFetch first** (fast, cheap, ~1-3 KB per page).

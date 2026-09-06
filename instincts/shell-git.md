@@ -92,20 +92,20 @@ Behavioural rules around Bash state (CWD persistence), verifying user claims bef
 
 ---
 
-### G-060: Skill-output commits need a standard conventional-commit type
+### G-060: Command-output commits need a standard conventional-commit type
 **Confidence: 0.4** | Last confirmed: starter set
 
-> **Rule**: When a skill output is committed (gate result, postmortem update, polish closeout), the commit type must come **only from the project hook whitelist** — typically `{feat, fix, refactor, docs, test, chore, perf, build, ci, style, revert}`. Skill-specific custom types like `gate(...)`, `postmortem(...)`, `polish(...)` are rejected by the hook even when they seem semantically fitting. The skill name goes into the **scope**, not the type.
+> **Rule**: When a command output is committed (gate result, postmortem update, polish closeout), the commit type must come **only from the project hook whitelist** — typically `{feat, fix, refactor, docs, test, chore, perf, build, ci, style, revert}`. Command-specific custom types like `gate(...)`, `postmortem(...)`, `polish(...)` are rejected by the hook even when they seem semantically fitting. The command name goes into the **scope**, not the type.
 >
-> **Pattern for skill outputs**:
+> **Pattern for command outputs**:
 > - Gate result: `docs(gate-pN):` or `docs(gate-pN-sprint-NN):`
 > - Postmortem: `docs(postmortem):` (or `chore(postmortem):` for a pure memory/hygiene update)
 > - Polish closeout (doc): `docs(p5-polish):`
 > - Cleanup output: `chore(cleanup):`
 > - Sprint plan (`/p4-sprint`): `docs(p4-sprint):`
 >
-> **Why**: A pre-commit hook validates only the 11 standard Conventional-Commits types — skill names are not hook-compatible. A custom-type attempt (e.g. `gate(p5-sprint-8): …`) is rejected and forces a re-commit, which can break the atomic-commit flow.
+> **Why**: A pre-commit hook validates only the 11 standard Conventional-Commits types — command names are not hook-compatible. A custom-type attempt (e.g. `gate(p5-sprint-8): …`) is rejected and forces a re-commit, which can break the atomic-commit flow.
 >
-> **Anti-pattern indicator**: commit type is a skill name (`gate`, `postmortem`, `polish`, `sprint`, `cleanup`, `review`, `acceptance`, `bugfix`) → hook rejects.
+> **Anti-pattern indicator**: commit type is a command name (`gate`, `postmortem`, `polish`, `sprint`, `cleanup`, `review`, `acceptance`, `bugfix`) → hook rejects.
 >
-> **Related**: G-053 above (conventional-commits scope takes no comma) — sister rule on scope form. G-044 in `workflow.md` (skill-prescribed frontmatter vs project schema) — same base rule: project convention beats skill default.
+> **Related**: G-053 above (conventional-commits scope takes no comma) — sister rule on scope form. G-044 in `workflow.md` (command-prescribed frontmatter vs project schema) — same base rule: project convention beats command default.

@@ -145,8 +145,8 @@ The relation is **annotation, not compression** -- the index appends
 **The rule is "exactly one side is annotated", NOT "strip the parenthetical
 from both sides".** The looser reading was measured and rejected: it also
 absorbs G-016 and G-019, where both sides carry a parenthetical and the two
-say different things (`(incl. multi-skill + re-setup + bulk-curation
-sub-rules)` against `(multi-skill hygiene)`). Two different annotations on
+say different things (`(incl. multi-command + re-setup + bulk-curation
+sub-rules)` against `(multi-command hygiene)`). Two different annotations on
 one stem are two statements, not one statement annotated -- and those two
 are half of the four divergences CCP-1159 was originally opened for, so the
 looser rule would have blinded this guard to its own founding cases.
@@ -434,8 +434,8 @@ def titles_agree(relation, title_a, title_b):
     "strip the parenthetical from both sides". The looser reading was
     measured and REJECTED: it also absorbs G-016 and G-019, where BOTH sides
     carry a parenthetical and the two say different things
-    ("(incl. multi-skill + re-setup + bulk-curation sub-rules)" against
-    "(multi-skill hygiene)"). Those are two statements, not one statement
+    ("(incl. multi-command + re-setup + bulk-curation sub-rules)" against
+    "(multi-command hygiene)"). Those are two statements, not one statement
     annotated -- and they are two of the four divergences CCP-1159 was
     originally opened for, so the looser rule would have made this guard
     blind to half of its own founding cases.
@@ -591,11 +591,11 @@ KNOWN_TITLE_DIVERGENCES = frozenset({
      'Delegate bulk file operations',
      'Delegate bulk file operations to parallel agents'),
     ('G-016', 'index', 'sampler',
-     'End sessions after 2 sprints (incl. multi-skill + re-setup + bulk-curation sub-rules)',
-     'End sessions after 2 sprints (multi-skill hygiene)'),
+     'End sessions after 2 sprints (incl. multi-command + re-setup + bulk-curation sub-rules)',
+     'End sessions after 2 sprints (multi-command hygiene)'),
     ('G-025', 'index', 'sampler',
      'Minimise read-heavy pre-briefing when the agent reads on its own',
-     'Read share in skill sessions'),
+     'Read share in command sessions'),
     ('G-030', 'index', 'sampler',
      'Orchestrator reads with a verified filename via `ls` / `Glob`',
      'Orchestrator reads with verified filename via ls / Glob'),
@@ -606,14 +606,14 @@ KNOWN_TITLE_DIVERGENCES = frozenset({
      'Agent prompts: always specify exact file paths (incl. folder-disambiguation sub-rule)',
      'Agent prompts always specify exact file paths'),
     ('G-016', 'index', 'topic',
-     'End sessions after 2 sprints (incl. multi-skill + re-setup + bulk-curation sub-rules)',
-     'End sessions after 2 sprints (multi-skill hygiene)'),
+     'End sessions after 2 sprints (incl. multi-command + re-setup + bulk-curation sub-rules)',
+     'End sessions after 2 sprints (multi-command hygiene)'),
     ('G-018', 'index', 'topic',
      'Edit "String not found" → grep-then-edit (incl. subagent-shared + boundary + proactive-writes sub-rules)',
      'Edit "String not found" → grep-then-edit recovery'),
     ('G-019', 'index', 'topic',
-     'Multi-agent skills via temp-files (parallel + sequential)',
-     'Multi-agent skills via temp-files (extends G-008; parallel + sequential)'),
+     'Multi-agent commands via temp-files (parallel + sequential)',
+     'Multi-agent commands via temp-files (extends G-008; parallel + sequential)'),
     ('G-026', 'index', 'topic',
      'Avoid `skill.md` / SKILL system filenames on macOS',
      'Avoid `skill.md` (and other SKILL system filenames) in `.claude/commands/` on macOS'),
@@ -630,7 +630,7 @@ KNOWN_TITLE_DIVERGENCES = frozenset({
      'Delegate bulk file operations to parallel agents',
      'Delegate bulk file operations'),
     ('G-025', 'sampler', 'topic',
-     'Read share in skill sessions',
+     'Read share in command sessions',
      'Minimise read-heavy pre-briefing when the agent reads on its own'),
     ('G-030', 'sampler', 'topic',
      'Orchestrator reads with verified filename via ls / Glob',

@@ -49,7 +49,7 @@ Behavioural rules for briefing, parallelism, wingman consolidation and read disc
 
 > **Rule**: Before delegating to an agent, only sample-read files for briefing context — do not exhaustively pre-read everything the agent will read itself. A pointer + 1–2 sample files is enough; the agent reads the rest within its own token budget.
 >
-> **Why**: Empirically, in typical skill sessions (P3/P4/P5/P6) the `Read` tool share lies between 44 % and 54 % of orchestrator tool calls. Deviations >60 % indicate orchestrator full-text reads of files that the agent will read again — pure token waste.
+> **Why**: Empirically, in typical command sessions (P3/P4/P5/P6) the `Read` tool share lies between 44 % and 54 % of orchestrator tool calls. Deviations >60 % indicate orchestrator full-text reads of files that the agent will read again — pure token waste.
 >
 > **How to apply**:
 > - When the agent brief contains "read X, Y, Z", the orchestrator only needs 1–2 files for brief comprehension (typically the phase-index file + one sample detail file)
@@ -62,12 +62,12 @@ Behavioural rules for briefing, parallelism, wingman consolidation and read disc
 ### G-007: Max 3 parallel agents
 **Confidence: 0.8** | Last confirmed: starter set
 
-> **Rule**: Maximum 3 sub-agents in parallel per skill run. For larger workloads, use sequential waves with wingman consolidation between waves.
+> **Rule**: Maximum 3 sub-agents in parallel per command run. For larger workloads, use sequential waves with wingman consolidation between waves.
 >
 > **Why**: Beyond 3 parallel agents, wingman consolidation becomes unwieldy, per-agent token budget drops below the quality threshold, and race conditions on file writes become possible.
 >
 > **How to apply**:
-> - Max 3 parallel explore/review/audit agents per skill
+> - Max 3 parallel explore/review/audit agents per command
 > - Plan-Mode phase 1 (explore) has a hard cap of 3
 > - On larger workloads: sequential waves (e.g. P3 architecture: components + tech-stack + ADR in parallel, then NFR sequentially)
 
@@ -84,7 +84,7 @@ Behavioural rules for briefing, parallelism, wingman consolidation and read disc
 >
 > **TDD-phase sub-rule**: `DuplicateBatchWarning` for senior-developer in `/p5-implement` is **expected** and **not** a consolidation trigger when each batch represents a distinct TDD phase (RED → GREEN → REFACTOR — separated by time gaps + a thematic jump + its own conventional commit). The anti-pattern remains: unplanned correction iterations over the same artefact area.
 >
-> **Multi-tranche-review sub-rule**: `DuplicateBatchWarning` for identical reviewer sets (e.g. `code-reviewer` + `security-master`) across multi-tranche review skills (e.g. `/p5-review` with 4 tranches) is **expected** — each tranche writes its own findings files (output instead of commit as the phase boundary).
+> **Multi-tranche-review sub-rule**: `DuplicateBatchWarning` for identical reviewer sets (e.g. `code-reviewer` + `security-master`) across multi-tranche review commands (e.g. `/p5-review` with 4 tranches) is **expected** — each tranche writes its own findings files (output instead of commit as the phase boundary).
 >
 > **Related**: G-009 (exact paths), G-057 (lint constraints in the brief) — all briefing-completeness rules.
 
@@ -114,10 +114,10 @@ Behavioural rules for briefing, parallelism, wingman consolidation and read disc
 
 ---
 
-### G-019: Multi-agent skills via temp-files (extends G-008; parallel + sequential)
+### G-019: Multi-agent commands via temp-files (extends G-008; parallel + sequential)
 **Confidence: 0.7** | Last confirmed: starter set
 
-> **Rule**: For skills with 2+ agents (Lead+Support, peer, or multi-wave): instruct each agent in the prompt to write its full output DIRECTLY to `/tmp/{prefix}-{agent}.md` via the Write tool, and reply in chat with only a 50–100-word confirmation.
+> **Rule**: For commands with 2+ agents (Lead+Support, peer, or multi-wave): instruct each agent in the prompt to write its full output DIRECTLY to `/tmp/{prefix}-{agent}.md` via the Write tool, and reply in chat with only a 50–100-word confirmation.
 >
 > **Two valid orchestration shapes**:
 > - **(a) Parallel** (independent agents) → start wingman with all file paths as input; wingman returns a ~1000-word consolidated summary in chat.
@@ -127,7 +127,7 @@ Behavioural rules for briefing, parallelism, wingman consolidation and read disc
 >
 > **Cleanup**: `rm -f /tmp/{prefix}-*.md` after writing the final concept doc.
 >
-> **Context**: Multi-agent /p1-* /p2-* /p3-* /p6-* skills with Lead+Support or multi-wave, especially when agent outputs are 5+ KB each.
+> **Context**: Multi-agent /p1-* /p2-* /p3-* /p6-* commands with Lead+Support or multi-wave, especially when agent outputs are 5+ KB each.
 
 ---
 
@@ -214,12 +214,12 @@ Behavioural rules for briefing, parallelism, wingman consolidation and read disc
 ### G-042: Skip the wingman step for structured 2-agent sequences
 **Confidence: 0.4** | Last confirmed: starter set
 
-> **Rule**: When a skill recommends wingman consolidation, but Lead+Support are only two agents AND both outputs are structurally clearly separated (headings, tables, own sections), consolidate yourself — saves 1 agent call.
+> **Rule**: When a command recommends wingman consolidation, but Lead+Support are only two agents AND both outputs are structurally clearly separated (headings, tables, own sections), consolidate yourself — saves 1 agent call.
 >
 > **Why**: For `/p1-features` (konzeptor lead + ux-designer support with table-structured corrections), self-consolidation into FEATURES.md was more token-efficient than a wingman hop. For `/p1-privacy` (security-master standalone, no support agent), the support step was explicitly skipped.
 >
 > **How to apply**:
-> 1. Read the skill instruction: is there an explicit "wingman consolidation" phase?
+> 1. Read the command instruction: is there an explicit "wingman consolidation" phase?
 > 2. 2 agents? Both outputs structured (tables + sections)? → wingman skip OK.
 > 3. 3+ parallel agents OR unstructured outputs OR a content conflict between agents → keep the wingman.
 > 4. On skip: briefly note in the doc body ("wingman step skipped, outputs structurally separated") for an audit trail.
@@ -258,7 +258,7 @@ Behavioural rules for briefing, parallelism, wingman consolidation and read disc
 >
 > **Related**: G-057 (lint constraints), G-009 (exact paths), G-033 (output boundary) — sibling explicit-constraint rules.
 >
-> **Context**: Multi-cycle TDD skills (`/p5-impl-red` + `/p5-impl-green` + `/p5-impl-refactor`) where the orchestrator organises the per-phase commit split. Most common in RED phases (a clean test-only file → the agent sees "complete").
+> **Context**: Multi-cycle TDD commands (`/p5-impl-red` + `/p5-impl-green` + `/p5-impl-refactor`) where the orchestrator organises the per-phase commit split. Most common in RED phases (a clean test-only file → the agent sees "complete").
 
 ---
 
@@ -294,7 +294,7 @@ Behavioural rules for briefing, parallelism, wingman consolidation and read disc
 > **How to apply**:
 > 1. One agent per doc; waves of max 3–4; cross-check after each wave, then the next.
 > 2. Pick the most stable marker type per doc (unique IDs > table rows > headings).
-> 3. The sub-index keeps the original filename (skill/link compatibility); detail files carry `parent_index` in the same folder.
+> 3. The sub-index keeps the original filename (command/link compatibility); detail files carry `parent_index` in the same folder.
 >
 > **Related**: G-018 in `files.md` (grep-then-edit + boundary-violation sub-rule — `git status` after each run), G-033 (output boundary) + G-064 (DO-NOT-commit clause), G-050 in `workflow.md` (doc coverage via glob list).
 >
