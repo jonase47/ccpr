@@ -30,9 +30,9 @@ the patterns never change meaning between them:
 | personal — session hashes, home paths, real emails | yes | yes |
 | network — IP literals, allowlist-aware | yes | yes |
 | denylist — configured tenant/project names | yes | yes |
-| context — colour-vision/accessibility vocabulary (a de-personalisation rule specific to memory content; ordinary in a TDD/a11y skill prompt) | no | yes |
+| context — colour-vision/accessibility vocabulary (a de-personalisation rule specific to memory content; ordinary in a TDD/a11y command prompt) | no | yes |
 | type-user — a promotion rule about where a memory file may go, not about leaked data | no | yes |
-| content — "Next Steps" headings/checkboxes, legitimate skill-prompt structure | no | yes |
+| content — "Next Steps" headings/checkboxes, legitimate command-prompt structure | no | yes |
 
 The secret check no longer relies on a generic "40+ character string" rule —
 that was the source of every false positive when the gate was first pointed

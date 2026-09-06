@@ -39,7 +39,7 @@ Last updated: 26.08.2026
 |                     Claude Code (Head)                        |
 |                                                               |
 |  +----------+  +----------+  +----------+  +----------+     |
-|  | CLAUDE.md|  |instincts |  |HANDOVER  |  | Skills   |     |
+|  | CLAUDE.md|  |instincts |  |HANDOVER  |  | Commands |     |
 |  |(rules)   |  |(learning)|  |(context) |  |(commands)|     |
 |  +----------+  +----------+  +----------+  +----------+     |
 |                        |                                      |
@@ -73,7 +73,7 @@ flowchart TD
         Rules["CLAUDE.md · rules"]
         Inst["instincts · learning"]
         Hand["HANDOVER · context"]
-        Skills["Skills · commands"]
+        Commands["Commands · slash commands"]
     end
     CC --> Agents["15 agents (incl. wingman) · max 3-4 parallel"]
     Agents --> Wing["wingman · result consolidation"]
@@ -106,7 +106,7 @@ flowchart TD
 
 | Agent | Specialization | Access |
 |---|---|---|
-| **project-guide** | Entry door: status snapshot, skill/agent recommendation, disambiguation, hand-off with context bundle (via `/guide`); does no domain work itself | Read + Edit |
+| **project-guide** | Entry door: status snapshot, command/agent recommendation, disambiguation, hand-off with context bundle (via `/guide`); does no domain work itself | Read + Edit |
 | **konzeptor** | Product idea, target audience, features, MVP, value proposition | Read + Write |
 | **business-analyst** | Business model, financial planning, pricing, market analysis, KPIs | Read + Write |
 | **system-architekt** | Tech stack, data model, APIs, ADRs | Read + Write |
@@ -154,7 +154,7 @@ Every new project starts with `/track-decision`, which chooses between two paral
 ```
 /track-decision
      |
-     +-- LEAN (Prototyp/PoC/Spike, 4 skills, no gates)
+     +-- LEAN (Prototyp/PoC/Spike, 4 commands, no gates)
      |       |
      |       +-- /lean-frame -> [TDD build] -> /lean-learn
      |                                              |
@@ -172,9 +172,9 @@ Every new project starts with `/track-decision`, which chooses between two paral
 
 **Decision criteria** (see `/track-decision`): Knockouts K1-K5 (DSGVO PII, special categories, launch-imminent, BFSG/regulatory, external stakeholders) + Indicator Score I1-I5. Mid-flight re-assessment allowed; **no downgrade Full -> Lean**.
 
-### Lean-Track Skills (4)
+### Lean-Track Commands (4)
 
-| Skill | Purpose |
+| Command | Purpose |
 |---|---|
 | `/track-decision` | Lean vs Full decision (track-agnostic re-assessment tool) |
 | `/lean-frame` | `docs/FRAME.md` + `docs/CLAUDE-lean.md` (one-page Single Source of Truth) |
@@ -267,10 +267,10 @@ Detailed gate checklists are in [PROJECT_PHASES.md](../docs/PROJECT_PHASES.md).
 ```
 /p[phase]-[section]     -> e.g. /p6-pentest
 /gate-p[phase]          -> e.g. /gate-p0
-/p[phase]-[sub-skill]   -> e.g. /p5-impl-red, /p6-audit-sast
+/p[phase]-[sub-command]   -> e.g. /p5-impl-red, /p6-audit-sast
 ```
 
-### Sub-Skill Sequences
+### Sub-Command Sequences
 
 Within a phase there are fixed sequences. The most important:
 
@@ -319,13 +319,13 @@ After each command, Claude recommends 1-3 sensible next steps.
 Rules:
 1. HANDOVER.md determines the current phase state
 2. Never skip phases – no P5 command if Gate-P4 has not been passed
-3. Follow sub-skill sequences
+3. Follow sub-command sequences
 4. Gates are authoritative – only gates open the way to the next phase
 
 Full transition reference: [NEXT_STEPS_REFERENCE.md](../docs/NEXT_STEPS_REFERENCE.md)
 All commands in detail: [SECTIONS_COMMANDS.md](SECTIONS_COMMANDS.md)
 
-**Full chapter**: [system/commands.md](system/commands.md) — the command-count breakdown, naming convention, and full sub-skill sequence diagrams for P3/P5/P6 live there.
+**Full chapter**: [system/commands.md](system/commands.md) — the command-count breakdown, naming convention, and full sub-command sequence diagrams for P3/P5/P6 live there.
 
 ---
 
@@ -759,7 +759,7 @@ The index (`docs/<phase>/<PHASE>.md`, 5–15 KB) carries state, key decisions an
 each sub-skill owns one detail file beside it; P3 and P6 add a sub-index level that groups
 several detail files under one lead command.
 
-Each `/pX-…` sub-skill **overwrites** its detail file (never appends), then refreshes the
+Each `/pX-…` sub-command **overwrites** its detail file (never appends), then refreshes the
 index row and lifts any one-line key decision or risk into the index. Gate commands read
 the index first and pull a detail file only when a content check demands it — that is what
 keeps a gate's context window small.

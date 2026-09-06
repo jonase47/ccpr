@@ -8,6 +8,98 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Added
 
+- **CCP-1151 stage 3, review follow-up: one occurrence was excluded for a reason its own grammar
+  refutes.** `handbook/SYSTEM_OVERVIEW.md:762` reads "Each `/pX-…` **sub-skill** *overwrites* its
+  detail file (never appends), then refreshes the index row…". It was booked as naming the
+  `subskill:` **document slot** and therefore left alone — but a frontmatter value cannot overwrite,
+  refresh or lift anything. The subject carries an active verb and a `/pX-…` prefix; the referent is
+  the executing command, and under the excluded reading the sentence is not merely renameable but
+  nonsense. That same section's declared companion (`system/memory-instincts.md`, linked from
+  `:773` as "Full chapter") describes the identical rule and **was** swept, so the index chapter and
+  its own full chapter had ended up using two nouns for one rule. Swept; stage 3 renamed **89**, not
+  88.
+
+  **The general lesson, and it is about where a sweep is blind:** a per-occurrence referent test
+  interrogates every occurrence it renames and **none that it excludes**. The exclusion list is
+  therefore exactly where a form/referent misclassification survives an otherwise correct pass. The
+  tell here was grammatical — an active verb attributed to a noun that cannot act — and it is
+  cheaper to check than to re-derive the whole classification.
+
+  Also in this commit, from the same review: `test_handover_cap_sentence_echoes.py`'s own prose
+  carried two stale numbers (a tracked-file count that was off by one, and a `CHANGELOG.md` line
+  citation already invalidated by the entries this very work prepended above it). The line citation
+  is now **removed rather than corrected** — every changelog entry is prepended, so it would go
+  stale again, which is the drift the module's own "Keys" section warns about in the one place a
+  machine check cannot reach. The scope docstring also now states the gap the `scanned`/`skipped`
+  partition plus floor does **not** close, instead of reading more airtight than the mechanism is.
+
+- **CCP-1151 stage 3: the human documentation says "command".** `README.md` and all of
+  `handbook/` swept — **88 of 100 occurrences renamed, 12 left standing on purpose**. Re-measured
+  at the start of the cut rather than carried in from stage 2: scope **100 = README 6 + handbook
+  94**. What stays: 7 occurrences whose referent is the `subskill:` **document slot** (not a
+  command — 71 distinct `subskill:` values exist in the tree and only 7 have a
+  `commands/<value>.md`), 2 that are the frozen frontmatter field name itself, 1 frontmatter
+  value, and the two in `SYSTEM_OVERVIEW.md`'s **Change History** row for 13.05.2026 — a statement
+  about a past state, which a rename would make anachronistic. The class arithmetic said 90 rename
+  targets; the decision says 88, and the gap is that historical row.
+
+  **A form class does not replace a referent decision** (the rule stage 2's review produced): every
+  renamed occurrence was checked against "would the sentence still be true afterwards", not against
+  its bucket. Per file, four assertions before the next file was touched — the old literal falls to
+  exactly the protected count, the renamed count matches the expectation, `before = renamed +
+  protected`, and the **new** literal rises by exactly the number renamed. Only the last one catches
+  a substitution that did not grip; a no-op passes the other three.
+
+  **The one coupling reaches out of the stage's scope, and it moved as one commit.**
+  `handbook/SECTIONS_COMMANDS.md:18`'s heading is matched by a literal regex in
+  `scripts/tests/test_doc_counts_agree.py:299` and copied into that module's fixture at `:718`
+  (asserted at `:736`). All three now read `Track-Commands`, and the coupling was proved rather
+  than assumed: reverting **each site alone** was measured and each reddens the module (heading
+  alone 2 failures, fixture alone 1, regex alone 3), with both files sha256-identical after restore.
+
+  **One non-token change, named because it is not a rename.** `SYSTEM_OVERVIEW.md`'s ASCII overview
+  box has 10-character cells; `Skills` → `Commands` made one cell 12 wide and broke its alignment
+  with the `+----------+` borders. The padding was trimmed back to 10 — verified by comparing pipe
+  positions across the box rows, not by eye.
+
+  **Four stutters the rename created are reported, not repaired** (`sub-command commands`,
+  `Commands · commands`, …). The word was doing disambiguating work next to `command`; each site is
+  still true and each now reads badly. Repair is editorial judgement, and mechanical substitution
+  mixed with editorial judgement is verifiable as neither — the same split stage 1 made for the
+  title divergences. They are enumerated as a set over the whole swept scope, not sampled.
+
+- **CCP-1151: the terminology sweep's own divergence is now pinned, in
+  `scripts/tests/test_handover_cap_sentence_echoes.py`.** Stage 2 rewrote the HANDOVER-cap
+  measurement sentence in 97 `commands/` files; three echoes of the same sentence outside that
+  scope — `hooks/agent-monitor.py:82` and `scripts/tests/test_handover_size_hook.py:77` and `:718`
+  — still carry the pre-sweep wording. The split is deliberate and belongs to stage 4, but until
+  now **nothing in the tree could see it**: a fourth echo, or a well-meaning repair closing one of
+  the three, would have left the suite reporting the same result either way. A register note
+  cannot go red.
+
+  **Set equality over `(path, line, column)` keys, not a count** (ADR-0012 obligation 2): a count
+  cannot tell "one added" from "one added, one gone". Proven in all three directions against a
+  scratch-controlled mutation, restored under a trap and byte-verified afterwards — a fourth
+  occurrence fails as `new:`, a closed one as `gone:`, and a **swap** (one closed, one opened,
+  tree-wide occurrence count unchanged at five) fails naming both sides. The swap is the case a
+  count pin structurally cannot see, so it is the one that decides whether this pin is a guard or
+  a ceremony.
+
+  **The scan's scope is asserted, not assumed.** It reads every tracked file; `scanned` and
+  `skipped` are proven to partition `git ls-files`, so narrowing the scan has to surface as growth
+  in a pinned skip set. `CHANGELOG.md` is the one skip by decision — protocol, historical entries
+  are not rewritten retroactively — and a separate test fails if that exclusion ever stops
+  excusing anything. The needles are assembled from fragments rather than written out, so the
+  module sits **inside its own scope**: the first draft spelled them into a comment and the pin
+  went red on itself before the file was ever committed.
+
+  Bookkeeping the new module obliges, each a deliberate set bump rather than a silent edit: its
+  three `# pin:` markers in `test_pin_inventory.py`'s inventory, its filename in
+  `test_absence_only_assertions.py`'s corpus, and the four coupled discovery figures in
+  `CONTRIBUTING.md`, re-measured together as that section requires — 2692 / 1975 / 17 / 717
+  against a tree at **2698 / 1981 / 17 / 717**, the second round running in which the skipped
+  figure did not move with the others.
+
 - **CCP-1160: `scripts/tests/test_instinct_registers_agree.py` stops comparing the three instinct
   registers on ids alone and starts comparing what they SAY.** All three parsers captured the id
   token and stopped (`INDEX_ENTRY_RE`, `SAMPLER_ENTRY_RE`, `TOPIC_ENTRY_RE`), so a terminology

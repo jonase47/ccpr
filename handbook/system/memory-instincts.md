@@ -23,7 +23,7 @@ Memory is organised in a 2×2 matrix (tier × scope): cross-cutting (Tier 1) coe
 **Tier-separation rule** — cross-cutting → Tier 1; persona-specific → Tier 2. Global vs. project: code-independent rule (Apple toolchain, language idioms, vendor APIs) → global; codebase-specific → project.
 
 **When in doubt** — do **not** default to Tier 1. Decision order:
-1. Rule names a specific agent, file path, skill, or tool-chain symbol → Tier 2.
+1. Rule names a specific agent, file path, command, or tool-chain symbol → Tier 2.
 2. ≥2 agent domains genuinely consume the rule today → Tier 1.
 3. Still uncertain → start in Tier 2 of the surfacing persona; promote to Tier 1 at the 3rd cross-reference from a different domain.
 
@@ -204,9 +204,9 @@ docs/<phase-folder>/
 - P3: `architecture/ARCHITECTURE.md` (index) + `THREATS.md`, `ADRs.md`, `SECURITY.md` (sub-index for `/p3-sec-*`)
 - P6: `quality/QA.md` (index) + sub-indexes for each lead command (`A11Y.md`, `AUDIT.md`, `PENTEST.md`, …)
 
-### Sub-Skill Responsibilities
+### Sub-Command Responsibilities
 
-Each `/pX-...` sub-skill command must:
+Each `/pX-...` sub-command must:
 
 1. **Write detail file** — overwrite (not append) `docs/<phase>/<DETAIL>.md` with YAML frontmatter
 2. **Update phase index** — refresh the detail-file row, lift any one-line key decision or risk into the index

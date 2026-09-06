@@ -21,7 +21,7 @@ The Lean-Track compresses P0 + P1 + P3 into a single "Frame" phase, skips P2/P4/
 
 ### Core elements
 
-- **Lean-Track** with 4 skills + Constitution-Light in `FRAME.md`
+- **Lean-Track** with 4 commands + Constitution-Light in `FRAME.md`
 - **Constitution** as a versioned project anchor in the Full-Track (`docs/CONSTITUTION.md`)
 - **Cross-artifact consistency check** (`/cross-check`) as an optional pre-gate check
 - **Clear bridge** between tracks via `/lean-promote` → `/project-init`
@@ -30,7 +30,7 @@ The Lean-Track compresses P0 + P1 + P3 into a single "Frame" phase, skips P2/P4/
 
 - Issue sync to GitHub/Gitea (CCPR is markdown-first)
 - Linear "one-shot Constitution → Implement" path (would weaken the sprint loop and evolution loop)
-- A dedicated `/clarify` skill (functionally covered by `/cross-check`)
+- A dedicated `/clarify` command (functionally covered by `/cross-check`)
 
 ---
 
@@ -102,7 +102,7 @@ Full → Lean is **not foreseen**. Once knockouts or indicators are positive, th
        ↓
 /lean-frame  →  docs/FRAME.md + docs/CLAUDE-lean.md  (+ optional /constitution)
        ↓
-   Build (free, senior-developer + standard TDD loop, no dedicated skill)
+   Build (free, senior-developer + standard TDD loop, no dedicated command)
        ↓
 /lean-learn  →  docs/LEARNINGS.md  →  drop / pivot / promote
        ↓ (promote)
@@ -111,16 +111,16 @@ Full → Lean is **not foreseen**. Once knockouts or indicators are positive, th
 /project-init  →  reads promotion brief, adopts anchors, starts Full-Track from P0
 ```
 
-### Skills (4)
+### Commands (4)
 
-| Skill | Purpose | Lead |
+| Command | Purpose | Lead |
 |---|---|---|
 | `/track-decision` | Prerequisites + knockouts + indicators → Lean or Full | (no agent, interactive) |
 | `/lean-frame` | Create FRAME.md + CLAUDE-lean.md, optionally trigger `/constitution` | konzeptor (support: system-architekt) |
 | `/lean-learn` | LEARNINGS.md + decision drop/pivot/promote | konzeptor (support: business-analyst) |
 | `/lean-promote` | PROMOTION_BRIEF.md as input for `/project-init` | konzeptor + project-planner |
 
-**No `/lean-build`** — build runs freely with senior-developer and the standard TDD loop. Discipline comes from FRAME (scope, Constitution-Light) and HANDOVER, not from a skill.
+**No `/lean-build`** — build runs freely with senior-developer and the standard TDD loop. Discipline comes from FRAME (scope, Constitution-Light) and HANDOVER, not from a command.
 
 ### `docs/FRAME.md` — structure
 
@@ -205,11 +205,11 @@ YAML frontmatter (`generated_from: lean-track`, `date`, `trigger`, `code_baselin
 
 ## 4. Full-Track adaptations
 
-### A) Constitution sub-skill `/constitution`
+### A) Constitution sub-command `/constitution`
 
-**Dedicated skill.** Invoked in two scenarios:
+**Dedicated command.** Invoked in two scenarios:
 1. **Lean precursor:** optionally triggered from `/lean-frame` (Constitution-Light becomes a full constitution)
-2. **Full direct-start without Lean:** invoked by `/project-init`, alternatively as a sub-skill of P0
+2. **Full direct-start without Lean:** invoked by `/project-init`, alternatively as a sub-command of P0
 
 **Output:** `docs/CONSTITUTION.md` with three sections:
 - **Inviolable** (non-negotiable: GDPR, BFSG a11y, no secrets in code, …)
@@ -238,10 +238,10 @@ Reads phase indices & detail files, checks inconsistencies across phases.
 - NFR demands <200 ms p95, but TEST_STRATEGY.md has no performance test
 - ADR-XX was rejected, but a component still references it
 
-**First iteration:** 5–7 high-quality rules, organic growth. Skill optional before gates.
+**First iteration:** 5–7 high-quality rules, organic growth. Command optional before gates.
 
 ### Deliberately not introduced
-- Dedicated `/clarify` skill (functionally covered by `/cross-check`)
+- Dedicated `/clarify` command (functionally covered by `/cross-check`)
 - Automatic issue sync to Gitea/GitHub (CCPR stays markdown-first)
 
 ---
@@ -250,13 +250,13 @@ Reads phase indices & detail files, checks inconsistencies across phases.
 
 | # | Step | Effort | Prerequisite |
 |---|---|---|---|
-| 1 | `/track-decision` skill + TRACK_DECISION.md template | small | — |
-| 2 | `/constitution` skill + CONSTITUTION.md template (Inviolable/Default/Aspirational) | small | — |
-| 3 | `/lean-frame` skill + FRAME.md template + CLAUDE-lean.md template | small | 1, 2 |
-| 4 | `/lean-learn` skill + LEARNINGS.md template incl. pivot module table | small | 3 |
-| 5 | `/lean-promote` skill + PROMOTION_BRIEF.md template | small | 3, 4 |
+| 1 | `/track-decision` command + TRACK_DECISION.md template | small | — |
+| 2 | `/constitution` command + CONSTITUTION.md template (Inviolable/Default/Aspirational) | small | — |
+| 3 | `/lean-frame` command + FRAME.md template + CLAUDE-lean.md template | small | 1, 2 |
+| 4 | `/lean-learn` command + LEARNINGS.md template incl. pivot module table | small | 3 |
+| 5 | `/lean-promote` command + PROMOTION_BRIEF.md template | small | 3, 4 |
 | 6 | Full-Track integration: gates read constitution; `/project-init` reads PROMOTION_BRIEF when present | medium | 2, 5 |
-| 7 | `/cross-check` skill + initial rule catalogue (5–7 rules) | medium | after first Full project with constitution |
+| 7 | `/cross-check` command + initial rule catalogue (5–7 rules) | medium | after first Full project with constitution |
 
 ---
 
@@ -277,4 +277,4 @@ After rollout, update SYNC.md:
 2. **Cross-check rule catalogue v1:** which 5–7 rules first? (see examples above)
 3. **Lean-archive layout:** flat (`lean-archive/FRAME_v1.md`) or versioned subfolders (`lean-archive/v1/`)? Proposal: flat on soft pivot, subfolders on hard pivot.
 4. **`/project-init` without PROMOTION_BRIEF:** keep current behaviour; brief is optional input, not mandatory.
-5. **`/constitution` in Full-Track without Lean precursor:** sub-skill of `/project-init` (interactive Q&A) or a dedicated step before P0? Proposal: `/project-init` calls `/constitution` directly.
+5. **`/constitution` in Full-Track without Lean precursor:** sub-command of `/project-init` (interactive Q&A) or a dedicated step before P0? Proposal: `/project-init` calls `/constitution` directly.

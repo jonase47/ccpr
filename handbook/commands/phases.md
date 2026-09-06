@@ -7,7 +7,7 @@ last_updated: 26.08.2026
 
 # Phase Commands (82 commands, P0–P8)
 
-All P0–P8 phase commands grouped per phase. Lead commands appear first, then sub-skills in execution sequence where applicable.
+All P0–P8 phase commands grouped per phase. Lead commands appear first, then sub-commands in execution sequence where applicable.
 
 ## P0: Discovery (3 commands)
 
@@ -38,28 +38,28 @@ All P0–P8 phase commands grouped per phase. Lead commands appear first, then s
 
 ## P3: Architecture & Design (23 commands)
 
-Lead commands first, each followed by its sub-skills in execution sequence. After `/p3-architecture` the remaining tracks (`/p3-data-model`, `/p3-security`, `/p3-ux`, `/p3-infra`, `/p3-cost`) run in any order.
+Lead commands first, each followed by its sub-commands in execution sequence. After `/p3-architecture` the remaining tracks (`/p3-data-model`, `/p3-security`, `/p3-ux`, `/p3-infra`, `/p3-cost`) run in any order.
 
 | Command | Title | Description |
 |---|---|---|
-| `/p3-architecture` | System Architecture, Tech Stack & ADRs | Designs the system architecture, selects the tech stack and documents architectural decisions. Each concern is its own sub-skill. |
+| `/p3-architecture` | System Architecture, Tech Stack & ADRs | Designs the system architecture, selects the tech stack and documents architectural decisions. Each concern is its own sub-command. |
 | `/p3-arch-components` | Component Diagram & Data Flows | Creates the system architecture overview with component diagram, responsibilities and data flows. |
 | `/p3-arch-techstack` | Tech Stack Decision | Selects the tech stack and justifies each technology decision. |
 | `/p3-arch-adr` | Write Architecture Decision Records | Documents all significant architectural decisions as ADRs. |
 | `/p3-arch-nfa` | Define Non-Functional Requirements | Defines the non-functional requirements (scalability, performance, availability, maintainability). |
 | `/p3-data-model` | Data Model & API Design | Designs the Data Model with entities and relationships as well as the API design with interface specification. The result is DATA_MODEL.md and API_SPEC.md as the binding foundation for implementation. |
-| `/p3-security` | Security Architecture, Threat Model & Auth Concept | Creates the complete security architecture: threat model, auth concept, data security, API security and developer checklist. Each area is its own sub-skill. |
+| `/p3-security` | Security Architecture, Threat Model & Auth Concept | Creates the complete security architecture: threat model, auth concept, data security, API security and developer checklist. Each area is its own sub-command. |
 | `/p3-sec-threats` | Create STRIDE Threat Model | Analyzes the system according to the STRIDE model and identifies threats with countermeasures. |
 | `/p3-sec-auth` | Auth & Authorization Concept | Defines the authentication and authorization concept including session management. |
 | `/p3-sec-data` | Data Security Concept | Defines encryption (transit/rest), secrets management and backup security. |
 | `/p3-sec-api` | API Security Requirements | Defines input validation, rate limiting, CORS and security headers. |
 | `/p3-sec-checklist` | Developer Security Checklist | Creates a concrete checklist that every feature in phase 5 must fulfill. |
-| `/p3-ux` | UX Concept, Wireframes & Accessibility | Develops the complete UX concept: navigation, wireframes, dark mode and accessibility. Each area is its own sub-skill. |
+| `/p3-ux` | UX Concept, Wireframes & Accessibility | Develops the complete UX concept: navigation, wireframes, dark mode and accessibility. Each area is its own sub-command. |
 | `/p3-ux-navigation` | Sitemap & Information Architecture | Creates the navigation structure, sitemap and identifies critical flows. |
 | `/p3-ux-wireframes` | Wireframes for Key Screens | Creates wireframes (ASCII art) for the most important screens with interaction descriptions. |
 | `/p3-ux-darkmode` | Dark Mode Color Strategy | Defines the color strategy for dark mode with semantic colors and toggle mechanism. |
 | `/p3-ux-a11y` | Accessibility Concept | Defines WCAG target, contrast requirements, keyboard navigation, screen reader requirements and testing methods. |
-| `/p3-infra` | Infrastructure, CI/CD & Test Strategy | Plans infrastructure, CI/CD pipeline, monitoring and test strategy. Each area is its own sub-skill. |
+| `/p3-infra` | Infrastructure, CI/CD & Test Strategy | Plans infrastructure, CI/CD pipeline, monitoring and test strategy. Each area is its own sub-command. |
 | `/p3-infra-hosting` | Hosting & Deployment Strategy | Plans hosting platform, deployment model, environments and CDN strategy. |
 | `/p3-infra-cicd` | CI/CD Pipeline | Designs the CI/CD pipeline with stages, branch strategy and rollback concept. |
 | `/p3-infra-monitoring` | Monitoring & Observability | Defines logging, metrics, alerting and error tracking. |
@@ -77,15 +77,15 @@ Lead commands first, each followed by its sub-skills in execution sequence. Afte
 
 ## P5: Implementation (12 commands)
 
-Sprint workflow: `/p5-implement` (with TDD sub-skills) → `/p5-review` → `/p5-acceptance` → `/p5-bugfix` on findings → `/p5-docs` → `/p5-review-sprint` (holistic, once before the gate) → `/gate-p5` → `/p5-polish`.
+Sprint workflow: `/p5-implement` (with TDD sub-commands) → `/p5-review` → `/p5-acceptance` → `/p5-bugfix` on findings → `/p5-docs` → `/p5-review-sprint` (holistic, once before the gate) → `/gate-p5` → `/p5-polish`.
 
 | Command | Title | Description |
 |---|---|---|
-| `/p5-implement` | Implement Feature (TDD Cycle) | Implements a feature in the TDD cycle: Red → Green → Refactor. Each phase is its own sub-skill with a focused agent call. |
+| `/p5-implement` | Implement Feature (TDD Cycle) | Implements a feature in the TDD cycle: Red → Green → Refactor. Each phase is its own sub-command with a focused agent call. |
 | `/p5-impl-red` | Write Failing Tests (RED) | Writes unit tests for a feature BEFORE production code exists. Tests must fail. |
 | `/p5-impl-green` | Minimal Code for Green Tests (GREEN) | Writes the minimal production code that makes the existing tests green. No over-engineering. |
 | `/p5-impl-refactor` | Clean Up Code (REFACTOR) | Improves code quality without changing behavior. All tests must continue to pass. |
-| `/p5-review` | Code Review | Conducts a structured code review: first code quality, then security. Each dimension is its own sub-skill. |
+| `/p5-review` | Code Review | Conducts a structured code review: first code quality, then security. Each dimension is its own sub-command. |
 | `/p5-review-code` | Check Code Quality | Checks code for quality, clean code, logic errors and test coverage. Delivers review findings with severity level. |
 | `/p5-review-security` | Check Security Checklist | Checks code against the security checklist. Focus on OWASP Top 10, injection, auth and data handling. |
 | `/p5-acceptance` | Acceptance Tests | Tests an implemented feature against its requirements from a user perspective: are all acceptance criteria met? Are edge cases handled correctly? The result is test findings that determine whether the feature counts as "Done". |
@@ -96,26 +96,26 @@ Sprint workflow: `/p5-implement` (with TDD sub-skills) → `/p5-review` → `/p5
 
 ## P6: Quality Assurance (22 commands)
 
-Main sequence: `/p6-functional` → `/p6-exploratory` → `/p6-a11y` → `/p6-audit` → `/p6-pentest` → `/p6-bugfix`. Each lead command is followed by its sub-skills in execution order.
+Main sequence: `/p6-functional` → `/p6-exploratory` → `/p6-a11y` → `/p6-audit` → `/p6-pentest` → `/p6-bugfix`. Each lead command is followed by its sub-commands in execution order.
 
 | Command | Title | Description |
 |---|---|---|
-| `/p6-functional` | Integration, E2E & Regression Tests | Runs systematic functional tests at the system level. Each test level is a separate sub-skill. |
+| `/p6-functional` | Integration, E2E & Regression Tests | Runs systematic functional tests at the system level. Each test level is a separate sub-command. |
 | `/p6-func-integration` | Run Integration Tests | Tests the interaction between system components: API against DB, middleware chains, external services against mocks. |
 | `/p6-func-e2e` | E2E Tests for Critical Paths | Tests critical user journeys end-to-end – from start to the expected final result. |
 | `/p6-func-regression` | Run Regression Tests | Ensures that existing functionality has not been broken by new changes. |
 | `/p6-exploratory` | Exploratory Tests | Conducts unstructured, experience-based tests that automated tests and defined test cases do not cover. The goal is to find unexpected behaviours, usability issues, and hidden bugs that remain invisible in structured testing. |
-| `/p6-a11y` | Accessibility Check | Systematically checks the application for accessibility. Each A11y dimension is a separate sub-skill. |
+| `/p6-a11y` | Accessibility Check | Systematically checks the application for accessibility. Each A11y dimension is a separate sub-command. |
 | `/p6-a11y-visual` | Contrast, Colours & Dark Mode | Checks colour contrast (WCAG AA), colour-independence of information presentation, and dark mode conformance. |
 | `/p6-a11y-keyboard` | Keyboard Navigation & Focus | Checks full keyboard operability: tab order, focus indicator, Enter/Space, Escape, focus trap. |
 | `/p6-a11y-screenreader` | ARIA, Semantics & Alt Texts | Checks screen reader compatibility: semantic HTML, ARIA attributes, alt texts, live regions. |
-| `/p6-audit` | Security Audit, Dependency Check & DSGVO (GDPR) Compliance | Conducts a defensive security audit. Each audit area is a separate sub-skill. |
+| `/p6-audit` | Security Audit, Dependency Check & DSGVO (GDPR) Compliance | Conducts a defensive security audit. Each audit area is a separate sub-command. |
 | `/p6-audit-sast` | Static Code Analysis | Checks source code for injection vulnerabilities, insecure cryptography, secrets in code, and insecure error handling. |
 | `/p6-audit-auth` | Review Auth Implementation | Compares the auth implementation against the requirements in SECURITY.md: JWT, sessions, RBAC, password hashing. |
 | `/p6-audit-deps` | Dependency Check | Checks all dependencies for known vulnerabilities (CVEs), outdated packages, and maintenance status. |
 | `/p6-audit-config` | Review Infrastructure & Configuration | Checks security headers, CORS, DB access, secrets management, and server configuration. |
 | `/p6-audit-dsgvo` | DSGVO (GDPR) Compliance Check | Compares the implementation against the DSGVO initial assessment: data subject rights, data minimisation, deletion deadlines, data processing agreements. |
-| `/p6-pentest` | Penetration Test | Conducts an active attack simulation. Each attack phase is a separate sub-skill. |
+| `/p6-pentest` | Penetration Test | Conducts an active attack simulation. Each attack phase is a separate sub-command. |
 | `/p6-pentest-recon` | Reconnaissance | Collects publicly available information: tech fingerprinting, exposed endpoints, debug remnants. |
 | `/p6-pentest-auth` | Auth & Session Attacks | Actively tests authentication: brute-force protection, token predictability, session invalidation, JWT confusion. |
 | `/p6-pentest-authz` | Authorisation & Access Control | Tests IDOR, horizontal/vertical privilege escalation, and unprotected endpoints. |

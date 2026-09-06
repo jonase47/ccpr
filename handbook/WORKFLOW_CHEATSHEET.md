@@ -9,7 +9,7 @@
 /track-decision               <- choose Lean (prototype/PoC/spike) or Full (P0-P8 full pipeline)
 ```
 
-### Lean-Track (4 skills, no gates, no sprints)
+### Lean-Track (4 commands, no gates, no sprints)
 ```
 /track-decision -> Lean
 /lean-frame                   <- docs/FRAME.md (1 page) + docs/CLAUDE-lean.md

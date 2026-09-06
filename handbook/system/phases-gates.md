@@ -14,7 +14,7 @@ Every new project starts with `/track-decision`, which chooses between two paral
 ```
 /track-decision
      |
-     +-- LEAN (Prototyp/PoC/Spike, 4 skills, no gates)
+     +-- LEAN (Prototyp/PoC/Spike, 4 commands, no gates)
      |       |
      |       +-- /lean-frame -> [TDD build] -> /lean-learn
      |                                              |
@@ -32,9 +32,9 @@ Every new project starts with `/track-decision`, which chooses between two paral
 
 **Decision criteria** (see `/track-decision`): Knockouts K1-K5 (DSGVO PII, special categories, launch-imminent, BFSG/regulatory, external stakeholders) + Indicator Score I1-I5. Mid-flight re-assessment allowed; **no downgrade Full -> Lean** (Lean is a transient fast-test shortcut, see `handbook/LEAN_TRACK.md`).
 
-## Lean-Track Skills (4)
+## Lean-Track Commands (4)
 
-| Skill | Purpose |
+| Command | Purpose |
 |---|---|
 | `/track-decision` | Lean vs Full decision (track-agnostic re-assessment tool) |
 | `/lean-frame` | `docs/FRAME.md` + `docs/CLAUDE-lean.md` (one-page Single Source of Truth) |
