@@ -13,7 +13,7 @@ last_updated: 15.05.2026
 
 | Agent | Specialization | Access |
 |---|---|---|
-| **project-guide** | Entry-door orchestrator: status snapshot, skill/agent recommendation, disambiguation, hand-off | Read |
+| **project-guide** | Entry-door orchestrator: status snapshot, command/agent recommendation, disambiguation, hand-off | Read |
 | **konzeptor** | Product idea, target audience, features, MVP, value proposition | Read + Write |
 | **business-analyst** | Business model, financial planning, pricing, market analysis, KPIs | Read + Write |
 | **system-architekt** | Tech stack, data model, APIs, ADRs | Read + Write |

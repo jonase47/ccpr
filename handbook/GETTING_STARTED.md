@@ -21,7 +21,7 @@ any project directory and type:
 ```
 
 You should get a **status snapshot** (current phase, open points) and a few
-**suggested next steps** — that confirms the skills and agents are wired up. If
+**suggested next steps** — that confirms the commands and agents are wired up. If
 `/guide` is not recognised, the copy into `~/.claude/` did not take; re-run the
 [installer](../README.md#2-run-the-installer).
 
@@ -35,19 +35,19 @@ Full for you). The rest of this guide assumes `/guide` responded.
 ## The mental model in three ideas
 
 CCPR is not an app you launch. It is a **configuration layer for Claude Code**:
-a set of skills, agents, templates and scripts that turn Claude Code into a
+a set of commands, agents, templates and scripts that turn Claude Code into a
 disciplined software-delivery process. You drive; Claude executes.
 
-**1. Skills are the verbs you type.** Anything starting with `/` is a skill —
-`/track-decision`, `/p0-problem`, `/p5-implement`, `/gate-p3`. A skill is a
+**1. Commands are the verbs you type.** Anything starting with `/` is a command —
+`/track-decision`, `/p0-problem`, `/p5-implement`, `/gate-p3`. A command is a
 prepared instruction set: it tells Claude what to do, which agents to involve,
 and where to write the result. You do not need to remember all of them; you need
-to know *which phase you are in* and the skill names follow from that.
+to know *which phase you are in* and the command names follow from that.
 
-**2. Agents are a specialist team.** Behind the skills sit 13 domain
+**2. Agents are a specialist team.** Behind the commands sit 13 domain
 agents (plus `project-guide` and `wingman`) — a `konzeptor` for product thinking,
 a `system-architekt` for architecture, a `senior-developer` who writes code
-test-first, a `security-master`, and so on. You rarely call them by name. A skill
+test-first, a `security-master`, and so on. You rarely call them by name. A command
 pulls in the right specialists automatically (max. 3–4 per step, on purpose). The
 full roster is in [`../CLAUDE.md`](../CLAUDE.md) under "Agent Team".
 
@@ -68,7 +68,7 @@ P0 Discovery -> P1 Conception <-> P2 Validation -> P3 Architecture -> P4 Plannin
 Not every idea deserves the full nine-phase pipeline. The very first thing you
 run on any new idea is `/track-decision`. It asks a few questions and routes you to:
 
-- **Lean-Track** — four skills, no gates, no sprint bookkeeping. For prototypes,
+- **Lean-Track** — four commands, no gates, no sprint bookkeeping. For prototypes,
   proofs of concept, and spikes where the goal is to *learn fast*. This is the
   best place to start as a new user: low ceremony, quick feedback.
 - **Full-Track** — the complete P0–P8 pipeline with gates and a project
@@ -119,7 +119,7 @@ Type `/guide`. The `project-guide` agent reads your current state and gives you 
 status snapshot plus three prioritised next actions — and hands you off to the
 right specialist if your request is fuzzy. It is the "I'm lost, orient me" button.
 
-That is the whole loop: **decide a track → run the phase skills → let gates keep
+That is the whole loop: **decide a track → run the phase commands → let gates keep
 you honest → read the docs → `/guide` when unsure.** The rest of this document
 makes each step concrete.
 
@@ -205,7 +205,7 @@ enforces), **Default** (standards you follow unless you justify otherwise), and
 **Aspirational** (goals). The Inviolables become a mandatory input to every gate:
 violate one and the gate verdict reads "Inviolable breach".
 
-**Then the phases, in order. The pattern is always: run the phase skills → run the gate.**
+**Then the phases, in order. The pattern is always: run the phase commands → run the gate.**
 
 - **P0 Discovery — "Is it worth it?"** `/p0-problem`, `/p0-market`,
   `/p0-regulatory`, then `/gate-p0`. Output: a clear problem, target audience,
@@ -217,7 +217,7 @@ violate one and the gate verdict reads "Inviolable breach".
   must be true; `/p2-market-validation`, `/p2-poc`, `/p2-regulatory-check` test
   the riskiest ones. `/gate-p2` can say Go, No-Go, or Pivot back to P1.
 - **P3 Architecture — "How do we build it?"** The biggest phase. `/p3-architecture`
-  (with sub-skills for components, tech stack, ADRs, NFRs), `/p3-data-model`,
+  (with sub-commands for components, tech stack, ADRs, NFRs), `/p3-data-model`,
   `/p3-ux` (incl. accessibility and dark-mode strategy), `/p3-security` (STRIDE
   threat model, auth concept), `/p3-infra` (hosting, CI/CD, monitoring, test
   strategy), `/p3-cost`. Then `/gate-p3`. Architecture decisions are recorded as
@@ -274,6 +274,6 @@ These work quietly in the background; learn them as you go.
 | Know the rules CCPR binds itself to | [`CONSTITUTION.md`](../docs/CONSTITUTION.md) |
 | Install or re-sync the config | [`../README.md`](../README.md) |
 
-The shortest possible summary: **start with `/track-decision`, follow the skills
+The shortest possible summary: **start with `/track-decision`, follow the commands
 the phase suggests, let the gates catch problems early, and type `/guide`
 whenever you lose the thread.**

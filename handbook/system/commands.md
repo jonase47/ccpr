@@ -21,10 +21,10 @@ last_updated: 21.08.2026
 ```
 /p[phase]-[section]     -> e.g. /p6-pentest
 /gate-p[phase]          -> e.g. /gate-p0
-/p[phase]-[sub-skill]   -> e.g. /p5-impl-red, /p6-audit-sast
+/p[phase]-[sub-command]   -> e.g. /p5-impl-red, /p6-audit-sast
 ```
 
-## Sub-Skill Sequences
+## Sub-Command Sequences
 
 Within a phase there are fixed sequences. The most important:
 
@@ -73,7 +73,7 @@ After each command, Claude recommends 1-3 sensible next steps.
 Rules:
 1. HANDOVER.md determines the current phase state
 2. Never skip phases — no P5 command if Gate-P4 has not been passed
-3. Follow sub-skill sequences
+3. Follow sub-command sequences
 4. Gates are authoritative — only gates open the way to the next phase
 
 Full transition reference: [NEXT_STEPS_REFERENCE.md](../../docs/NEXT_STEPS_REFERENCE.md)

@@ -189,7 +189,7 @@ that case as `unattributed`, a third, distinct value.
 ## The agent clause, and its limit — stated honestly
 
 **Never run `anchor ack` yourself. Report the delta, let the user decide.** — every
-`/anchor` skill prompt and subagent briefing carries this clause verbatim.
+`/anchor` command prompt and subagent briefing carries this clause verbatim.
 
 State the limit plainly rather than implying a guarantee that is not there: **there is no
 hard technical boundary.** `anchor ack` does refuse its interactive fallback prompt

@@ -9,13 +9,13 @@
 
 ## Naming Convention
 - Section commands: `/p[phase]-[section]` -> e.g. `/p6-pentest`
-- Sub-skill commands: `/p[phase]-[section]-[subskill]` -> e.g. `/p3-sec-auth`
+- Sub-command commands: `/p[phase]-[section]-[subcommand]` -> e.g. `/p3-sec-auth`
 - Gate commands: `/gate-p[phase]` -> e.g. `/gate-p0`
 - Arguments: `/p5-implement Login-Feature` -> `$ARGUMENTS` = "Login-Feature"
 
 ---
 
-## Track-Skills (Cross-Cutting, 6 commands)
+## Track-Commands (Cross-Cutting, 6 commands)
 
 Entry-point and cross-cutting commands. `/track-decision` runs first and decides Lean vs. Full-Track; `/constitution`, `/lean-frame`, `/lean-learn` and `/lean-promote` carry out that decision; `/cross-check` is an optional pre-gate consistency check available on either track.
 
@@ -23,7 +23,7 @@ Entry-point and cross-cutting commands. `/track-decision` runs first and decides
 
 ## Phase Commands (P0–P8, 82 commands)
 
-All P0–P8 phase commands, grouped per phase. Lead commands appear first, then sub-skills in execution sequence where applicable. P3 (Architecture & Design, 23 commands) and P6 (Quality Assurance, 22 commands) are the largest phases — each has its own lead-command-plus-sub-skills structure, documented in full in the chapter.
+All P0–P8 phase commands, grouped per phase. Lead commands appear first, then sub-commands in execution sequence where applicable. P3 (Architecture & Design, 23 commands) and P6 (Quality Assurance, 22 commands) are the largest phases — each has its own lead-command-plus-sub-commands structure, documented in full in the chapter.
 
 **Full chapter**: [commands/phases.md](commands/phases.md).
 
@@ -51,7 +51,7 @@ Cross-cutting commands that operate outside the phase flow.
 
 | Category | Count |
 |---|---|
-| P0 Discovery (incl. sub-skills) | 3 |
+| P0 Discovery (incl. sub-commands) | 3 |
 | P1 Conception | 5 |
 | P2 Validation | 4 |
 | P3 Architecture & Design | 23 |
@@ -75,13 +75,13 @@ Cross-cutting commands that operate outside the phase flow.
 Commands with parallel agents (e.g. `/konzept`, `/p1-features`, `/p3-architecture`, `/p5-review`) call the **wingman** agent at the end, which consolidates results into a compact summary. All agents write their full results to files and return only a brief summary (max. 5 sentences).
 
 ### Project-Guide Entry Door
-`/guide` invokes the **project-guide** agent, which delivers a status snapshot plus three prioritised next-step recommendations and handles skill/agent disambiguation when the next move is unclear. Not a domain agent itself — it routes work to the right domain agent with a bundled context hand-off.
+`/guide` invokes the **project-guide** agent, which delivers a status snapshot plus three prioritised next-step recommendations and handles command/agent disambiguation when the next move is unclear. Not a domain agent itself — it routes work to the right domain agent with a bundled context hand-off.
 
 ### Handover (HANDOVER.md)
 Key commands update `docs/HANDOVER.md` with the work state at the end. This enables seamless session transitions. The agent-monitor warns at 100 tool calls (compact reminder) and 150 tool calls (update HANDOVER).
 
-### Sub-Skill Structure (P3 + P6)
-Phases P3 and P6 use a sub-skill pattern: a lead command (e.g. `/p3-architecture`, `/p6-audit`) orchestrates focused sub-skill commands that each handle one concern with a single dedicated agent call. This keeps individual context windows small and produces detail files alongside a phase index.
+### Sub-Command Structure (P3 + P6)
+Phases P3 and P6 use a sub-command pattern: a lead command (e.g. `/p3-architecture`, `/p6-audit`) orchestrates focused sub-command commands that each handle one concern with a single dedicated agent call. This keeps individual context windows small and produces detail files alongside a phase index.
 
 ---
 

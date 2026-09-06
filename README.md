@@ -18,7 +18,7 @@ Concretely: 15 specialised subagents cover the whole arc of a project — discov
 
 **Who it's for:** Product Owners and tech leads who want a traceable process, solo developers who want a quality bar, small teams, and projects with DSGVO (GDPR) or other compliance requirements. CCPR is opinionated by design — it fits structured work well, and there's a learning curve. That's a deliberate trade-off.
 
-**Two tracks:** Full-Track (P0–P8) for production projects; Lean-Track (4 skills, no gates) for quick prototypes and internal experiments.
+**Two tracks:** Full-Track (P0–P8) for production projects; Lean-Track (4 commands, no gates) for quick prototypes and internal experiments.
 
 > **Status: public beta (`v0.3.0-beta`).** CCPR is usable end-to-end but pre-1.0 — expect rough edges (see [`BETA.md`](BETA.md) for known limitations). Feedback is exactly what's wanted right now: [open an issue](https://github.com/jonase47/ccpr/issues), the bar is low.
 
@@ -82,7 +82,7 @@ Try it without committing to anything: `./install.sh --dry-run`, then run
 
 Projects start with `/track-decision` which chooses based on Knockouts (DSGVO, BFSG, regulatory, stakeholders, launch-imminent) and Indicators (lifespan, team-growth, complexity):
 
-- **Lean-Track** (4 skills, no gates, *transient — sunset at CCPR v1.0*) — fast-test shortcut for CCPR itself and a bridge into Full. `/track-decision → /lean-frame → build → /lean-learn → /lean-promote` promotes to Full-Track when ready. Mandant/team projects default to Full from the start; Lean is for internal experimentation and bridging only.
+- **Lean-Track** (4 commands, no gates, *transient — sunset at CCPR v1.0*) — fast-test shortcut for CCPR itself and a bridge into Full. `/track-decision → /lean-frame → build → /lean-learn → /lean-promote` promotes to Full-Track when ready. Mandant/team projects default to Full from the start; Lean is for internal experimentation and bridging only.
 - **Full-Track** (P0–P8, full pipeline) — production-grade software with regulatory, A11y, security, and operational readiness. `/project-init` calls `/constitution` to ratify the project's non-negotiable rules; gates verify against the Constitution Inviolables.
 
 Spec: [`handbook/LEAN_TRACK.md`](handbook/LEAN_TRACK.md) in this repo.
@@ -121,7 +121,7 @@ that must be passed before proceeding.
 
 15 agents: 13 domain subagents + `project-guide` + `wingman`. Claude automatically selects
 the appropriate agents per command (max. 3-4 simultaneously).
-`project-guide` is the entry door for status snapshots and skill/agent disambiguation;
+`project-guide` is the entry door for status snapshots and command/agent disambiguation;
 `wingman` consolidates results after parallel agent runs.
 
 The full roster with specializations lives in [`handbook/SYSTEM_OVERVIEW.md`](handbook/SYSTEM_OVERVIEW.md#2-agent-team), or expand it here:
@@ -131,7 +131,7 @@ The full roster with specializations lives in [`handbook/SYSTEM_OVERVIEW.md`](ha
 
 | Agent | Focus |
 |---|---|
-| **project-guide** | Entry door: status snapshot, skill/agent recommendation, disambiguation, hand-off with context bundle (via `/guide`) |
+| **project-guide** | Entry door: status snapshot, command/agent recommendation, disambiguation, hand-off with context bundle (via `/guide`) |
 | **konzeptor** | Product idea, target audience, features, MVP, value proposition |
 | **business-analyst** | Business model, financial planning, pricing, market analysis |
 | **system-architekt** | Tech stack, data model, APIs, ADRs |
@@ -375,7 +375,7 @@ the **HOW** (full tables, schemas, examples) lives in the handbook.
 - **Scripts** (`~/.claude/scripts/`) run mechanical work locally — context
   gathering, gate pre-flight, test runs, quality scans, doc-hygiene lint — so
   Claude spends tokens on judgement, not bookkeeping. Most are invoked by the
-  matching skill. → [`handbook/WORKFLOW_CHEATSHEET.md`](handbook/WORKFLOW_CHEATSHEET.md)
+  matching command. → [`handbook/WORKFLOW_CHEATSHEET.md`](handbook/WORKFLOW_CHEATSHEET.md)
 - **Hooks & monitoring** — one hook (`hooks/agent-monitor.py`, wired via
   `settings.json`) reacts to every event: activity/error logging, loop and
   stagnation detection, a compact reminder, and approximate per-session token

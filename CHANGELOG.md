@@ -8,6 +8,41 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Added
 
+- **CCP-1151 stage 3: the human documentation says "command".** `README.md` and all of
+  `handbook/` swept — **88 of 100 occurrences renamed, 12 left standing on purpose**. Re-measured
+  at the start of the cut rather than carried in from stage 2: scope **100 = README 6 + handbook
+  94**. What stays: 7 occurrences whose referent is the `subskill:` **document slot** (not a
+  command — 71 distinct `subskill:` values exist in the tree and only 7 have a
+  `commands/<value>.md`), 2 that are the frozen frontmatter field name itself, 1 frontmatter
+  value, and the two in `SYSTEM_OVERVIEW.md`'s **Change History** row for 13.05.2026 — a statement
+  about a past state, which a rename would make anachronistic. The class arithmetic said 90 rename
+  targets; the decision says 88, and the gap is that historical row.
+
+  **A form class does not replace a referent decision** (the rule stage 2's review produced): every
+  renamed occurrence was checked against "would the sentence still be true afterwards", not against
+  its bucket. Per file, four assertions before the next file was touched — the old literal falls to
+  exactly the protected count, the renamed count matches the expectation, `before = renamed +
+  protected`, and the **new** literal rises by exactly the number renamed. Only the last one catches
+  a substitution that did not grip; a no-op passes the other three.
+
+  **The one coupling reaches out of the stage's scope, and it moved as one commit.**
+  `handbook/SECTIONS_COMMANDS.md:18`'s heading is matched by a literal regex in
+  `scripts/tests/test_doc_counts_agree.py:299` and copied into that module's fixture at `:718`
+  (asserted at `:736`). All three now read `Track-Commands`, and the coupling was proved rather
+  than assumed: reverting **each site alone** was measured and each reddens the module (heading
+  alone 2 failures, fixture alone 1, regex alone 3), with both files sha256-identical after restore.
+
+  **One non-token change, named because it is not a rename.** `SYSTEM_OVERVIEW.md`'s ASCII overview
+  box has 10-character cells; `Skills` → `Commands` made one cell 12 wide and broke its alignment
+  with the `+----------+` borders. The padding was trimmed back to 10 — verified by comparing pipe
+  positions across the box rows, not by eye.
+
+  **Four stutters the rename created are reported, not repaired** (`sub-command commands`,
+  `Commands · commands`, …). The word was doing disambiguating work next to `command`; each site is
+  still true and each now reads badly. Repair is editorial judgement, and mechanical substitution
+  mixed with editorial judgement is verifiable as neither — the same split stage 1 made for the
+  title divergences. They are enumerated as a set over the whole swept scope, not sampled.
+
 - **CCP-1151: the terminology sweep's own divergence is now pinned, in
   `scripts/tests/test_handover_cap_sentence_echoes.py`.** Stage 2 rewrote the HANDOVER-cap
   measurement sentence in 97 `commands/` files; three echoes of the same sentence outside that

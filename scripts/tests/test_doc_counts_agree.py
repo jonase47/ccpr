@@ -296,7 +296,7 @@ def parse_command_breakdown_claims(system_overview_text, sections_commands_text)
     claims["sections_learning_header"] = int(m.group(1)) if m else None
     m = re.search(r"Utility \((\d+) commands\)", flat_sections)
     claims["sections_utility_header"] = int(m.group(1)) if m else None
-    m = re.search(r"Track-Skills \(Cross-Cutting, (\d+) commands\)", flat_sections)
+    m = re.search(r"Track-Commands \(Cross-Cutting, (\d+) commands\)", flat_sections)
     claims["sections_track_header"] = int(m.group(1)) if m else None
     m = re.search(r"\*\*Subtotal — phase commands\*\* \| \*\*(\d+)\*\*", flat_sections)
     claims["sections_phase_subtotal"] = int(m.group(1)) if m else None
@@ -715,7 +715,7 @@ class ParserDiscriminatesFromUnrelatedNumbersTest(unittest.TestCase):
             "Gates (12 commands), up from 11.\n\n"
             "Continuous Learning (2 commands), roadmap +1.\n\n"
             "Utility (14 commands), issue #42.\n\n"
-            "Track-Skills (Cross-Cutting, 6 commands), see page 3.\n\n"
+            "Track-Commands (Cross-Cutting, 6 commands), see page 3.\n\n"
             "**Subtotal — phase commands** | **82** |\n\n"
             "Gates (main + sub-gates) | 12 | previously 11\n\n"
             "| Continuous Learning | 2 | +1 roadmap |\n\n"

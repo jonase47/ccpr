@@ -5,7 +5,7 @@ section: track-skills
 last_updated: 26.08.2026
 ---
 
-# Track Skills (cross-cutting, 6 commands)
+# Track Commands (cross-cutting, 6 commands)
 
 Entry-point and cross-cutting commands. `/track-decision` runs first; the others compose Lean-Track / Full-Track / consistency checks.
 
