@@ -78,7 +78,7 @@ Read the slim index `~/.claude/instincts.md` first (one-liner per instinct + con
     `docs/memory/{agent}/{topic}.md`, update `docs/memory/{agent}/MEMORY.md`
   - **When in doubt, do NOT default to Tier 1** — that tiebreaker was withdrawn because it caused
     Tier-1 drift (persona-specific patterns leaking into the global file). Decision order:
-    1. Does the rule name a specific agent, file path, skill, or tool-chain symbol? → **Tier 2**.
+    1. Does the rule name a specific agent, file path, command, or tool-chain symbol? → **Tier 2**.
     2. Do **≥2 agent domains genuinely consume it today** (not "might one day")? → **Tier 1**.
     3. Still uncertain → **Tier 2** of the persona that surfaced it; promote to Tier 1 at the
        **3rd cross-reference from a different domain**.

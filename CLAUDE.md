@@ -169,7 +169,7 @@ memory and are not pushed.
 > Global vs. project: pick **global** when the rule is independent of the codebase (Apple toolchain quirks, language idioms, vendor APIs); pick **project** when the rule depends on this codebase's setup.
 >
 > **When in doubt** — do **not** default to Tier 1. The old "visibility wins over isolation" tiebreaker created Tier-1 drift (persona-specific patterns leaked into the global file). New decision order:
-> 1. Does the rule name a specific agent, file path, skill, or tool-chain symbol? → **Tier 2** (the named persona owns it).
+> 1. Does the rule name a specific agent, file path, command, or tool-chain symbol? → **Tier 2** (the named persona owns it).
 > 2. Do ≥2 agent domains genuinely consume the rule today (not "might one day")? → **Tier 1**.
 > 3. Still uncertain → start in **Tier 2** of the persona that surfaced the pattern. Promote to Tier 1 at the **3rd cross-reference from a different domain** (`[[..]]` link from another agent's silo or a `related:` entry in a project file).
 
