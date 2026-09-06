@@ -8,6 +8,98 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Added
 
+- **CCP-1160: `scripts/tests/test_instinct_registers_agree.py` stops comparing the three instinct
+  registers on ids alone and starts comparing what they SAY.** All three parsers captured the id
+  token and stopped (`INDEX_ENTRY_RE`, `SAMPLER_ENTRY_RE`, `TOPIC_ENTRY_RE`), so a terminology
+  sweep — which moves no id — passed silently green. Three title parsers, a normalisation rule and
+  a divergence comparison close that, and the module's own "boundary this test does NOT cover"
+  section is corrected in the same cut rather than left claiming the module is silent about
+  wording.
+
+  **The measurement corrected the work items it came from.** CCP-1159 and CCP-1160 both state
+  "10 title-bearing instincts in >= 2 registers (25 occurrences)" and **four** divergences (G-016,
+  G-019, G-025, G-026). Re-measured against the tracked files: **46** ids appear in >= 2 registers
+  across **105** occurrences, and a strict comparison of the three register pairs reports **23**
+  disagreements over **15** ids (index/topic 12, index/sampler 7, sampler/topic 4) — the four named
+  are a subset, the other eleven had never been looked at. **18 of the 23, over 11 ids, survive the
+  annotation rule and are the pinned set; the other five are design, not debt.** Cross-checked with two further instruments, a `/usr/bin/grep` +
+  `sed` extraction of all 105 `(id, register, title)` rows diffed byte-for-byte against the
+  register's 37 rows, and an `awk` pass over that table that arrives at the same 15 ids
+  independently. The dominant shape is not a typo: the index bullet enumerates sub-rules the topic
+  heading or the sampler compresses away. Whether that is a defect or a deliberate compression is
+  the per-title judgement CCP-1159 owns; the fifteen are **declared, not repaired**, and no
+  instinct register was edited here.
+
+  **The three registers do not stand in one relation, and comparing them as if they did books
+  design as debt (PO decision, 06.09.2026).** The sampler and the topic files are the same kind of
+  artifact — both are `### G-NNN: Title` headings — and disagree 4 times out of the 13 ids they
+  share; `instincts.md` is a one-liner carrying a confidence score that calls itself a slim entry
+  point. So **sampler ↔ topic is compared strictly**, and the two index pairs tolerate an
+  annotation: over the 46 ids the index and the topic files share, **34 titles are identical and 12
+  differ**; of those 12, six involve a trailing parenthetical and six are pure wording differences
+  with none. Of the six, **four are absorbed** (exactly one side annotated) and **two — G-016 and
+  G-019 — carry a different parenthetical on each side and stay divergent**, so the index/topic
+  pair contributes 4 absorptions and 8 divergences. The index appends `(incl. … sub-rules)` to the
+  rule the heading states bare: the relation is annotation, not compression.
+
+  **The rule is "exactly one side is annotated", not "strip the parenthetical from both".** The
+  looser reading was measured and rejected because it also absorbs G-016 and G-019, where both
+  sides carry a parenthetical saying different things (`(incl. multi-skill + re-setup +
+  bulk-curation sub-rules)` against `(multi-skill hygiene)`) — two of the four divergences
+  CCP-1159 was opened for. Widening the rule to that variant is a mutation probe here, and it makes
+  exactly those two vanish. **A tolerance rule silently removes findings**, so
+  `ANNOTATION_ABSORBED` pins what it accepts, and a third assertion ties the two registers
+  together: under a strict comparison of every pair the population is exactly the declared
+  divergences plus the declared absorptions, disjoint, with nothing falling between them.
+  Case-folding was proposed alongside and rejected on the same measurement — it changes nothing in
+  any of the three pairs (12/7/4 either way) and would cost the ability to see a capitalisation
+  sweep.
+
+  **The rule had one wrong answer in it, found by measuring the edge rather than reading it.** With
+  an empty title on one side and a fully parenthetical title on the other, both stems reduce to
+  nothing, exactly one side is annotated, and the rule reported *agreement*. An empty title agrees
+  with nothing — it is a malformed entry, not an un-annotated one. Guarded twice: in the rule, and
+  at the source, so no register may carry an empty title at all. Neither the divergence nor the
+  absorption set moves as a result, which is what makes it a fix rather than a reclassification.
+  The second pinned register earned its keep in the same pass: an index title that GAINS an
+  annotation over a bare heading becomes absorbed **without ever having been a divergence**, so the
+  divergence pin stays green and only `ANNOTATION_ABSORBED` sees it — detection the first pin
+  structurally cannot do, now fixed in a test rather than claimed.
+
+  **The comparison is whitespace-normalised and otherwise exact, and the choice is stated where it
+  is made.** Runs of whitespace collapse and the ends are stripped; case, punctuation, backticks
+  and wording compare byte-for-byte. Normalising further would silently accept the very drift the
+  check exists for — a sweep rewriting one word in one register is a word change and must fail;
+  normalising less would go red on a trailing space nobody can see in rendered Markdown. Measured:
+  both spellings select the same fifteen divergences today, so the choice costs nothing now and is
+  purely prospective. `TitleComparisonSemanticsTest` tests both sides of that line.
+
+  **The sampler's reduced set is not a divergence, and the guard is tested against crying wolf over
+  it.** `templates/STARTER_INSTINCTS.md` carries 13 of the index's 46 entries by design, so the
+  comparison applies only where an id appears in two or more registers and a register that lacks an
+  id is *absent* from that id's map rather than present with an empty title. A comparator reaching a
+  missing register through a `""` default would report 33 of 46 index entries as sampler
+  divergences and look, from outside, like a working guard; `SamplerReducedSetBoundaryTest` rules
+  that version out synthetically and against the tracked files. Records are keyed by register PAIR
+  rather than by id, because which two registers disagree is what the reconciliation needs in order
+  to decide which one carries the true statement.
+
+  **Seen red against structure, not removal, and with its silent half shown.** Changing one word of
+  one title in one register (`instincts/agents.md`, G-008 `parallel` → `concurrent`) fails exactly
+  one test and names exactly that record — every id-level check stays green, which is precisely the
+  gap being closed. Reconciling a real divergence while leaving its pinned entry behind
+  (G-002's topic title raised to the index wording) fails the same assertion from the other
+  direction, `gone: [G-002 …]`: a stale exception is how the next finding hides, so the accepted set
+  can only shrink deliberately. And demoting G-015's sampler heading — an id leaving the sampler
+  while index and topic keep it — moves the id-level count pin and leaves the title comparison
+  **green**. All mutations were applied and restored in one uninterruptible run with a grip proof
+  per mutation and sha256 identity after it.
+
+  `scripts/tests/test_pin_inventory.py` gains two tuples in `PinMarkerInventoryTest` — the
+  `# pin: set instinct-title-divergences` and `# pin: set instinct-title-annotation-absorbed`
+  markers. Pure additions, each proven by the failure message's own `new: [1] / gone: []`, and the
+  only governance pin this cut moves.
+
 - **CCP-1150, first cut: `docs/adr/ADR-0014-documentation-namespace.md` ratifies the folder cut,
   and `templates/ADR_TEMPLATE.md` extracts the convention it had to reconstruct to write it.**
   The framework keeps `docs/` as its project namespace; human documentation is called
