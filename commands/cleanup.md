@@ -104,7 +104,7 @@ It is a single calibrated constant; read it instead of restating it:
 grep -m1 '^HANDOVER_WARN_PCT' ~/.claude/hooks/agent-monitor.py
 ```
 
-The comment above that constant carries the measurement behind the value: a threshold one skill
+The comment above that constant carries the measurement behind the value: a threshold one command
 run's growth below the cap is the last moment at which a warning is still preventive. If the grep
 finds nothing (no hook installed), `/cleanup` still runs — fall back to the two-branch behaviour
 below (under cap / over cap) and note in the report that the preventive branch was skipped for lack
