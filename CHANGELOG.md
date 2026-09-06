@@ -8,6 +8,31 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Added
 
+- **CCP-1151 stage 3, review follow-up: one occurrence was excluded for a reason its own grammar
+  refutes.** `handbook/SYSTEM_OVERVIEW.md:762` reads "Each `/pX-…` **sub-skill** *overwrites* its
+  detail file (never appends), then refreshes the index row…". It was booked as naming the
+  `subskill:` **document slot** and therefore left alone — but a frontmatter value cannot overwrite,
+  refresh or lift anything. The subject carries an active verb and a `/pX-…` prefix; the referent is
+  the executing command, and under the excluded reading the sentence is not merely renameable but
+  nonsense. That same section's declared companion (`system/memory-instincts.md`, linked from
+  `:773` as "Full chapter") describes the identical rule and **was** swept, so the index chapter and
+  its own full chapter had ended up using two nouns for one rule. Swept; stage 3 renamed **89**, not
+  88.
+
+  **The general lesson, and it is about where a sweep is blind:** a per-occurrence referent test
+  interrogates every occurrence it renames and **none that it excludes**. The exclusion list is
+  therefore exactly where a form/referent misclassification survives an otherwise correct pass. The
+  tell here was grammatical — an active verb attributed to a noun that cannot act — and it is
+  cheaper to check than to re-derive the whole classification.
+
+  Also in this commit, from the same review: `test_handover_cap_sentence_echoes.py`'s own prose
+  carried two stale numbers (a tracked-file count that was off by one, and a `CHANGELOG.md` line
+  citation already invalidated by the entries this very work prepended above it). The line citation
+  is now **removed rather than corrected** — every changelog entry is prepended, so it would go
+  stale again, which is the drift the module's own "Keys" section warns about in the one place a
+  machine check cannot reach. The scope docstring also now states the gap the `scanned`/`skipped`
+  partition plus floor does **not** close, instead of reading more airtight than the mechanism is.
+
 - **CCP-1151 stage 3: the human documentation says "command".** `README.md` and all of
   `handbook/` swept — **88 of 100 occurrences renamed, 12 left standing on purpose**. Re-measured
   at the start of the cut rather than carried in from stage 2: scope **100 = README 6 + handbook

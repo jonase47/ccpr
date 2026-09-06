@@ -759,7 +759,7 @@ The index (`docs/<phase>/<PHASE>.md`, 5–15 KB) carries state, key decisions an
 each sub-skill owns one detail file beside it; P3 and P6 add a sub-index level that groups
 several detail files under one lead command.
 
-Each `/pX-…` sub-skill **overwrites** its detail file (never appends), then refreshes the
+Each `/pX-…` sub-command **overwrites** its detail file (never appends), then refreshes the
 index row and lifts any one-line key decision or risk into the index. Gate commands read
 the index first and pull a detail file only when a content check demands it — that is what
 keeps a gate's context window small.

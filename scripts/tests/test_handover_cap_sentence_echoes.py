@@ -40,19 +40,31 @@ The scan reads **every tracked file** (`git ls-files`), with two declared
 skips, both pinned in `DECLARED_SKIPS` below:
 
 * `CHANGELOG.md` -- **protocol, deliberately excluded**. It carries two
-  further echoes (lines 1232 and 3773). They are historical entries about a
-  past state and are not rewritten retroactively -- the same rule G-026's own
-  fix step states and the same line `handbook/SYSTEM_OVERVIEW.md`'s Change
-  History was held to during the `Manual/` -> `handbook/` rename. Excluding
-  the file is a decision, and `ExclusionIsNotStaleTest` below checks that the
-  exclusion still excuses something rather than sitting there dead.
+  further echoes, in released entries about a past state, and those are not
+  rewritten retroactively -- the same rule G-026's own fix step states and the
+  same line `handbook/SYSTEM_OVERVIEW.md`'s Change History was held to during
+  the `Manual/` -> `handbook/` rename. **Deliberately cited without line
+  numbers**: every new entry is prepended, so a line citation here would be
+  stale by the next commit -- which is the drift this module's own "Keys"
+  section warns about, in the one place a machine check cannot reach.
+  `ExclusionIsNotStaleTest` below checks that the exclusion still excuses
+  something rather than sitting there dead.
 * the two tracked PNGs under `docs/logo/`, which are not text.
 
-Everything else tracked is scanned, and that is enforced rather than assumed:
-`scanned` and `skipped` partition the tracked tree, so a file quietly dropped
-from the scan has to appear in the skipped set and reddens the pin. The floor
-beside it covers the direction the set cannot see -- a tree that shrinks
+Everything else tracked is scanned, and the boundary is enforced rather than
+assumed: `scanned` and `skipped` partition the tracked tree, so a file quietly
+dropped from the scan has to appear in the skipped set and reddens the pin. The
+floor beside it covers the direction the set cannot see -- a tree that shrinks
 without any file changing its bucket.
+
+**What the pair still does not close**, stated because the sentence above reads
+more airtight than the mechanism is: a `tracked_files()` regression that narrows
+the scope while still returning the three declared skips AND staying above the
+floor (organic growth elsewhere can pay for it) passes all three assertions.
+That is the documented limitation of the `floor` group itself
+(`pin_registry.PIN_GROUPS["floor"]`: "silent while the subject grows"), not a
+gap peculiar to this module -- but it is a gap, and pretending otherwise is the
+same defect as an unchecked number.
 
 ## The needle is assembled, never written out
 
@@ -180,11 +192,16 @@ def _house_set_assertion():
 
     Returned rather than wrapped: test_pin_inventory.py binds a `# pin:`
     marker to the assertion below it by recognising `assert_set_matches`
-    **by name** (test_pin_inventory.py:102). A local wrapper with a different
-    name leaves every marker over it unbound -- measured, not assumed: the
-    first draft of this module wrapped the call and
-    `MarkerBindsToOneAssertionTest` reported both `set` markers as naming no
-    pin-shaped assertion.
+    **by name** (test_pin_inventory.py:102). What is matched is the **spelling
+    of the local variable at the call site**, not the identity of the callable
+    it holds -- `pin_registry._assertion_operands` compares `ast.Name.id`
+    against the string, so this is a purely syntactic test and renaming the
+    local variable breaks the binding even though the same function is called.
+    A local wrapper with a different name therefore leaves every marker over it
+    unbound -- measured, not assumed: the first draft of this module wrapped
+    the call and `MarkerBindsToOneAssertionTest` reported both `set` markers as
+    naming no pin-shaped assertion. That test is also the net: a future rename
+    of the local variable goes red there rather than silently.
     """
     import sys as _sys
     _sys.path.insert(0, str(TESTS_DIR))
@@ -259,11 +276,11 @@ class ScanScopeTest(unittest.TestCase):
     def test_the_scanned_scope_does_not_shrink(self):
         """The direction the set pin structurally cannot see: every file stays
         in its bucket while the tree itself gets smaller. Measured 06.09.2026
-        at `ef5a34b` + this module: 351 tracked, 3 declared skips, 349 scanned
-        (this file included -- see the docstring on why it is in its own
-        scope). A floor, not an equality: files are added here weekly, and a
-        pin that reddens on every unrelated addition gets bumped without being
-        read."""
+        at `f3b06f8` (`ef5a34b` + this module, the module already tracked):
+        **352** tracked, 3 declared skips, 349 scanned -- this file included,
+        see the docstring on why it is in its own scope. A floor, not an
+        equality: files are added here weekly, and a pin that reddens on every
+        unrelated addition gets bumped without being read."""
         _found, scanned, _skipped = scan_tree()
         self.assertGreaterEqual(  # pin: floor handover-cap-sentence-scope
             len(scanned), 349,
