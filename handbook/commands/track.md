@@ -1,7 +1,7 @@
 ---
 kind: commands-doc-detail
 parent_index: ../SECTIONS_COMMANDS.md
-section: track-skills
+section: track-commands
 last_updated: 26.08.2026
 ---
 

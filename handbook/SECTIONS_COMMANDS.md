@@ -9,7 +9,7 @@
 
 ## Naming Convention
 - Section commands: `/p[phase]-[section]` -> e.g. `/p6-pentest`
-- Sub-command commands: `/p[phase]-[section]-[subcommand]` -> e.g. `/p3-sec-auth`
+- Sub-commands: `/p[phase]-[section]-[subcommand]` -> e.g. `/p3-sec-auth`
 - Gate commands: `/gate-p[phase]` -> e.g. `/gate-p0`
 - Arguments: `/p5-implement Login-Feature` -> `$ARGUMENTS` = "Login-Feature"
 
@@ -81,7 +81,7 @@ Commands with parallel agents (e.g. `/konzept`, `/p1-features`, `/p3-architectur
 Key commands update `docs/HANDOVER.md` with the work state at the end. This enables seamless session transitions. The agent-monitor warns at 100 tool calls (compact reminder) and 150 tool calls (update HANDOVER).
 
 ### Sub-Command Structure (P3 + P6)
-Phases P3 and P6 use a sub-command pattern: a lead command (e.g. `/p3-architecture`, `/p6-audit`) orchestrates focused sub-command commands that each handle one concern with a single dedicated agent call. This keeps individual context windows small and produces detail files alongside a phase index.
+Phases P3 and P6 use a sub-command pattern: a lead command (e.g. `/p3-architecture`, `/p6-audit`) orchestrates focused sub-commands that each handle one concern with a single dedicated agent call. This keeps individual context windows small and produces detail files alongside a phase index.
 
 ---
 

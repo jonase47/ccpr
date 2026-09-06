@@ -73,7 +73,7 @@ flowchart TD
         Rules["CLAUDE.md · rules"]
         Inst["instincts · learning"]
         Hand["HANDOVER · context"]
-        Commands["Commands · commands"]
+        Commands["Commands · slash commands"]
     end
     CC --> Agents["15 agents (incl. wingman) · max 3-4 parallel"]
     Agents --> Wing["wingman · result consolidation"]

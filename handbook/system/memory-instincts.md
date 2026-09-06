@@ -206,7 +206,7 @@ docs/<phase-folder>/
 
 ### Sub-Command Responsibilities
 
-Each `/pX-...` sub-command command must:
+Each `/pX-...` sub-command must:
 
 1. **Write detail file** — overwrite (not append) `docs/<phase>/<DETAIL>.md` with YAML frontmatter
 2. **Update phase index** — refresh the detail-file row, lift any one-line key decision or risk into the index
