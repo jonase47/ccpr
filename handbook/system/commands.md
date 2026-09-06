@@ -2,7 +2,7 @@
 kind: system-doc-detail
 parent_index: ../SYSTEM_OVERVIEW.md
 section: command-system
-last_updated: 21.08.2026
+last_updated: 06.09.2026 (CCP-1151)
 ---
 
 # Command System
@@ -15,6 +15,25 @@ last_updated: 21.08.2026
 - **14 utility commands** (/konzept, /konzept-update, /decision, /epic, /user-stories, /roadmap, /roadmap-update, /project-init, /logs-summary, /guide, /release-baseline, /cleanup, /specialize, /anchor)
 - **6 track + cross-cutting commands** (/track-decision, /constitution, /lean-frame, /lean-learn, /lean-promote, /cross-check)
 - **Total: 116 commands**
+
+## Terminology
+
+> This section is a **glossary seed**, not the glossary itself — a future handbook restructuring
+> should MOVE these entries into a dedicated glossary rather than copy them there. Two
+> word-identical registers cannot check each other; a duplicate is exactly how the next drift
+> starts.
+
+- **command** — a CCPR slash command, `commands/<name>.md`, installed to `~/.claude/commands/`.
+  Since 06.09.2026 this is the only prose word for it; "skill" was swept out.
+- **`subskill:`** — a frontmatter field key in phase detail files, deliberately NOT renamed. Its
+  values are slot identifiers, not command names: measured 26.08.2026 against a real
+  CCPR-using project, **117 distinct `subskill` values against 116 shipped commands**, and
+  values like `index` and `gate` name no command at all. Renaming it would make the field's own
+  documentation false and break `scripts/phase-docs-lint.sh`, which reads the literal. This is
+  why table headers still read "Sub-Skill" — that is the field, not a missed sweep.
+- **Agent Skills** — Claude Code's own feature (a vendor term). Never translated, never renamed.
+  It is the reason the sweep happened at all: CCPR's prose "skill" collided with the vendor's
+  real feature in the same context window.
 
 ## Naming Convention
 

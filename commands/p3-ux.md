@@ -29,6 +29,7 @@ Make sure `docs/architecture/UX_CONCEPT.md` exists as a **sub-index** with the s
 
 ### 5. Roll Up Sub-Index to Phase Index
 After all `p3-ux-*` sub-commands have run, summarise the UX sub-index into the phase index `docs/architecture/ARCHITECTURE.md`:
+<!-- "sub-skill" here is the frozen subskill: frontmatter field key, not a missed rename. -->
 - Add an entry in the phase-index **Detail Files** table for `[UX_CONCEPT.md](UX_CONCEPT.md)` (the sub-index itself), status `complete` once all four sub-skill rows are `complete`.
 - Lift the headline UX decisions (navigation pattern, WCAG target, dark mode toggle) into the phase-index **Key Decisions**.
 

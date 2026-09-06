@@ -192,6 +192,7 @@ Optional cross-reference files in `docs/planning/backlog/`:
 Create from index template if missing — see `~/.claude/docs/PROJECT_PHASES.md`. Populate:
 - `## Key Decisions`: lift the milestone names + their dates (e.g. `- M1: MVP feature-complete by 30.06.2026 → see PROJECT_PLAN.md (Milestones section)`).
 - `## Detail Files` table: add a row for `[BACKLOG.md](BACKLOG.md)` with status `living` and the chosen layout (flat or sub-index). Other P4 detail files (`SPRINT.md`, `RISKS.md`, `SETUP.md`, `DOCS.md`) get added by their respective subcommands.
+<!-- "subskill" here is the frozen subskill: frontmatter field key, not a missed rename. -->
 - A new top-level body section in the index titled `## Milestones & Release Planning` with the milestones, their target dates, and risk areas — this stays inside the index because milestones are aggregate planning info, not a per-subskill artefact.
 
 ## Ticket ID Schema (Reference)

@@ -26,6 +26,7 @@ Make sure `docs/quality/FUNCTIONAL.md` exists as a **sub-index** with the standa
 
 ### 4. Roll Up Sub-Index to Phase Index
 After all `p6-func-*` sub-commands have run, summarise the FUNCTIONAL sub-index into the phase index `docs/quality/QA.md`:
+<!-- "sub-skill" here is the frozen subskill: frontmatter field key, not a missed rename. -->
 - Add an entry in the phase-index **Detail Files** table for `[FUNCTIONAL.md](FUNCTIONAL.md)` (the sub-index itself), status `complete` once all three sub-skill rows are `complete` (or `needs-rework`).
 - Lift any blocking functional failure into the phase-index **Open Risks**.
 

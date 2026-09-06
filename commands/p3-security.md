@@ -32,6 +32,7 @@ Make sure `docs/architecture/SECURITY.md` exists as a **sub-index** with the sta
 
 ### 6. Roll Up Sub-Index to Phase Index
 After all `p3-sec-*` sub-commands have run, summarise the security sub-index into the phase index `docs/architecture/ARCHITECTURE.md`:
+<!-- "sub-skill" here is the frozen subskill: frontmatter field key, not a missed rename. -->
 - Add an entry in the phase-index **Detail Files** table for `[SECURITY.md](SECURITY.md)` (the sub-index itself), status `complete` once all five sub-skill rows in `SECURITY.md` are `complete`.
 - Lift the headline security decisions (auth method, encryption strategy, top critical threat) into the phase-index **Key Decisions**.
 - Lift any unresolved Critical/High threats from `THREATS.md` into the phase-index **Open Risks**.

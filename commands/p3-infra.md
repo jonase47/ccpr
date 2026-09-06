@@ -29,6 +29,7 @@ Make sure `docs/architecture/INFRA.md` exists as a **sub-index** with the standa
 
 ### 5. Roll Up Sub-Index to Phase Index
 After all `p3-infra-*` sub-commands have run, summarise the infrastructure sub-index into the phase index `docs/architecture/ARCHITECTURE.md`:
+<!-- "sub-skill" here is the frozen subskill: frontmatter field key, not a missed rename. -->
 - Add an entry in the phase-index **Detail Files** table for `[INFRA.md](INFRA.md)` (the sub-index itself), status `complete` once all four sub-skill rows are `complete`.
 - Lift the headline infrastructure decisions (hosting platform, CI/CD tool, coverage target) into the phase-index **Key Decisions**.
 

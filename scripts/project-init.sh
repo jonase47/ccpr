@@ -61,6 +61,7 @@ cat > "${PROJECT_DIR}/docs/discovery/DISCOVERY.md" <<EOF
 - _none yet_
 
 ## Detail Files
+<!-- "Subskill" is the frozen subskill: frontmatter field key, not a missed rename. -->
 | Subskill | File | Status |
 |---|---|---|
 | Problem Definition | [PROBLEM.md](PROBLEM.md) | _missing_ |
