@@ -4,7 +4,7 @@ Reads phase indexes and selected detail files, checks inconsistencies **between*
 (architecture ↔ implementation, features ↔ stories, threats ↔ mitigations, etc.).
 
 Bridges the gap between intra-phase lints (`phase-docs-lint.sh`) and gate content evaluation —
-finds contradictions no other skill surfaces.
+finds contradictions no other command surfaces.
 
 **Recommendation, not a mandatory step.** Gates list `/cross-check` as an optional pre-flight check.
 

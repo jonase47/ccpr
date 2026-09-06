@@ -73,7 +73,7 @@ Delegate the business perspective review to the **business-analyst** agent:
 > 3. Is any important information missing that users need before getting started?
 
 ### 4. Write Files & Detail File
-This subskill produces user-facing files at the project root (not under `docs/`):
+This subcommand produces user-facing files at the project root (not under `docs/`):
 - **`RELEASE_NOTES.md`** (release notes for v$ARGUMENTS — append-only across releases)
 - **`USER_GUIDE.md`** (user guide / onboarding)
 - **`PRIVACY_POLICY.md`** (privacy policy – basic structure, legal review recommended)

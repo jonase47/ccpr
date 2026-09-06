@@ -109,7 +109,7 @@ Write `docs/LEARNINGS.md` with:
 **DROP:**
 - `LEARNINGS.md` stays in the repo as a lessons-learned archive
 - Optional: set Git tag `lean-final`
-- Recommendation: freeze the repo (no further skill needed)
+- Recommendation: freeze the repo (no further command needed)
 - Note to user: on later re-use, read the lessons learned from this file
 
 ## When to use
@@ -143,4 +143,4 @@ Write `docs/LEARNINGS.md` with:
 Update `docs/HANDOVER.md`:
 - LEARNINGS decision
 - On Pivot: module table as open items for senior-developer
-- Recommended next skill (lean-promote / lean-frame / freeze repo)
+- Recommended next command (lean-promote / lean-frame / freeze repo)

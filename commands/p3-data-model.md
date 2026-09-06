@@ -57,7 +57,7 @@ Delegate the implementability check to the **senior-developer** agent:
 > 4. Are data types and constraints compatible with the chosen tech stack (TECH_STACK.md)?
 
 ### 4. Write Detail Files
-This subskill writes **two** detail-file groups (exception to the 1-subskill = 1-file pattern, because data model and API specification are tightly coupled and produced together). Each group can be written **flat** (single file) or **as sub-index with per-entity / per-resource detail files**, depending on size. See `~/.claude/docs/PROJECT_PHASES.md` ("Sub-Index for growing detail files").
+This subcommand writes **two** detail-file groups (exception to the 1-subskill = 1-file pattern, because data model and API specification are tightly coupled and produced together). Each group can be written **flat** (single file) or **as sub-index with per-entity / per-resource detail files**, depending on size. See `~/.claude/docs/PROJECT_PHASES.md` ("Sub-Index for growing detail files").
 
 #### 4a. Choose Layout — Data Model
 

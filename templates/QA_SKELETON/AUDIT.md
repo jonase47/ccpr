@@ -8,7 +8,7 @@ parent_index: QA.md
 
 # Audit (P6 Sub-Index) — Index
 
-**Status:** Skeleton — populated by `/p6-audit` and its sub-skills.
+**Status:** Skeleton — populated by `/p6-audit` and its sub-commands.
 
 ## Findings
 

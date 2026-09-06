@@ -65,7 +65,7 @@ Delegate technical verification of the documentation to the **devops** agent:
 > 4. Is the CI/CD information correct?
 
 ### 4. Write Files & Detail File
-The primary outputs of this subskill are repo-level files (not under `docs/`):
+The primary outputs of this subcommand are repo-level files (not under `docs/`):
 - **`README.md`** (in the project root) — complete project documentation for developers
 - **`CONTRIBUTING.md`** (in the project root) — standards and processes for contributions
 

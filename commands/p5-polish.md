@@ -5,7 +5,7 @@ disable-model-invocation: true
 
 Collects small clean-up TODOs accumulated during the sprint (from `/p5-review`, `/p5-acceptance`, `/p5-bugfix`, TODO/FIXME comments) that do not justify a full story but make the next sprint easier. Triages each item into `polish-now`, `backlog`, `handover`, or `drop`. Optionally executes `polish-now` items directly (TDD mini-cycle, one commit per item). Runs **between `/gate-p5` (Sprint Done) and the next `/p4-sprint`**.
 
-This is **not** a retrospective – `/gate-p5` keeps the 3-point retro. This skill is the cleanup step before the next sprint begins.
+This is **not** a retrospective – `/gate-p5` keeps the 3-point retro. This command is the cleanup step before the next sprint begins.
 
 ## Argument: $ARGUMENTS = [mode | POL-ID]
 
@@ -200,7 +200,7 @@ Update `docs/planning/PROJECT_PLAN.md`:
 
 ## Note on Archiving
 
-The POLISH detail file stays `living` until `/p4-sprint` is called for the next sprint. At that point `/p4-sprint` moves the file to `docs/planning/.handover-archive/sprint-NN/` and sets `status: active`. Do not archive within this skill.
+The POLISH detail file stays `living` until `/p4-sprint` is called for the next sprint. At that point `/p4-sprint` moves the file to `docs/planning/.handover-archive/sprint-NN/` and sets `status: active`. Do not archive within this command.
 
 ### Handover Epilog
 Update `docs/HANDOVER.md`:

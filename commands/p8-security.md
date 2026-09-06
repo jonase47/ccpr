@@ -71,7 +71,7 @@ Delegate re-testing of critical areas to the **pentester** agent:
 > 3. Are the fixes from PENTEST_REPORT.md still effective?
 
 ### 4. Write Detail File
-This subskill maintains a **living** detail file `docs/operations/SECURITY.md`. It is overwritten on each call with the latest security update; full per-update detail can optionally be archived as `docs/operations/snapshots/SECURITY_UPDATE_<YYYY-MM-DD>.md`.
+This subcommand maintains a **living** detail file `docs/operations/SECURITY.md`. It is overwritten on each call with the latest security update; full per-update detail can optionally be archived as `docs/operations/snapshots/SECURITY_UPDATE_<YYYY-MM-DD>.md`.
 
 Write `docs/operations/SECURITY.md` (overwrite). Frontmatter:
 

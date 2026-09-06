@@ -49,7 +49,7 @@ Also update **`docs/quality/QA.md`** (phase index):
 ## Notes
 - Steps 1 and 2 can run in parallel
 - Step 3 is handled by the Orchestrator itself (no agent delegation)
-- The complete Gate-P6 checklist remains in the sub-skills
+- The complete Gate-P6 checklist remains in the sub-commands
 
 ## Possible Outcomes
 

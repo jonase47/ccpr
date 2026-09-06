@@ -3,7 +3,7 @@ disable-model-invocation: true
 ---
 # /p6-audit – Security Audit, Dependency Check & DSGVO (GDPR) Compliance
 
-Conducts a defensive security audit. Each audit area is a separate sub-skill.
+Conducts a defensive security audit. Each audit area is a separate sub-command.
 
 ## Argument: $ARGUMENTS = [focus/area]
 
@@ -13,7 +13,7 @@ If not provided: Run all audit areas.
 ## Flow
 
 ### 0. Ensure Sub-Index Exists
-Make sure `docs/quality/AUDIT.md` exists as a **sub-index** with the standard header (Status / Last Updated / Key Decisions / Open Risks / Detail Files / Gate Notes — see `~/.claude/docs/PROJECT_PHASES.md`). If missing, create it with empty placeholders. The five `p6-audit-*` sub-skills below each refresh their own row in this sub-index's **Detail Files** table.
+Make sure `docs/quality/AUDIT.md` exists as a **sub-index** with the standard header (Status / Last Updated / Key Decisions / Open Risks / Detail Files / Gate Notes — see `~/.claude/docs/PROJECT_PHASES.md`). If missing, create it with empty placeholders. The five `p6-audit-*` sub-commands below each refresh their own row in this sub-index's **Detail Files** table.
 
 ### 1. Static Code Analysis
 `/p6-audit-sast $ARGUMENTS` – Checks code for injection, cryptography, secrets.
@@ -31,15 +31,15 @@ Make sure `docs/quality/AUDIT.md` exists as a **sub-index** with the standard he
 `/p6-audit-dsgvo $ARGUMENTS` – Compares against DSGVO_INITIAL_ASSESSMENT.md.
 
 ### 6. Roll Up Sub-Index to Phase Index
-After all `p6-audit-*` sub-skills have run, summarise the AUDIT sub-index into the phase index `docs/quality/QA.md`:
+After all `p6-audit-*` sub-commands have run, summarise the AUDIT sub-index into the phase index `docs/quality/QA.md`:
 - Add an entry in the phase-index **Detail Files** table for `[AUDIT.md](AUDIT.md)` (the sub-index itself), status `complete` once all five sub-skill rows are `complete` (or `needs-rework`).
 - Lift any High/Critical audit finding into the phase-index **Open Risks**.
 
 ## Notes
-- Sub-skills 1–4 can run in parallel (no dependencies)
+- Sub-commands 1–4 can run in parallel (no dependencies)
 - DSGVO (5) can also run in parallel
 - Detail files: `audit_sast.md`, `audit_auth.md`, `audit_deps.md`, `audit_config.md`, `audit_dsgvo.md` under the `AUDIT.md` sub-index
-- For minimal scope (no auth, no deps, no PII): abbreviate affected sub-skills with `status: active` and a body note stating "N/A — out of scope for <reason>"
+- For minimal scope (no auth, no deps, no PII): abbreviate affected sub-commands with `status: active` and a body note stating "N/A — out of scope for <reason>"
 
 ### Handover Epilogue
 **Before writing.** `docs/HANDOVER.md` is capped — the file states its own limit in its header

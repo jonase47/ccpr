@@ -3,7 +3,7 @@ disable-model-invocation: true
 ---
 # /p6-functional – Integration, E2E & Regression Tests
 
-Runs systematic functional tests at the system level. Each test level is a separate sub-skill.
+Runs systematic functional tests at the system level. Each test level is a separate sub-command.
 
 ## Argument: $ARGUMENTS = [test area/feature]
 
@@ -13,7 +13,7 @@ If not provided: Read TEST_STRATEGY.md and ask about the test scope.
 ## Flow
 
 ### 0. Ensure Sub-Index Exists
-Make sure `docs/quality/FUNCTIONAL.md` exists as a **sub-index** with the standard header (Status / Last Updated / Key Decisions / Open Risks / Detail Files / Gate Notes — see `~/.claude/docs/PROJECT_PHASES.md`). If missing, create it with empty placeholders. The three `p6-func-*` sub-skills below each refresh their own row in this sub-index's **Detail Files** table.
+Make sure `docs/quality/FUNCTIONAL.md` exists as a **sub-index** with the standard header (Status / Last Updated / Key Decisions / Open Risks / Detail Files / Gate Notes — see `~/.claude/docs/PROJECT_PHASES.md`). If missing, create it with empty placeholders. The three `p6-func-*` sub-commands below each refresh their own row in this sub-index's **Detail Files** table.
 
 ### 1. Integration Tests
 `/p6-func-integration $ARGUMENTS` – Tests the interaction between system components.
@@ -25,7 +25,7 @@ Make sure `docs/quality/FUNCTIONAL.md` exists as a **sub-index** with the standa
 `/p6-func-regression $ARGUMENTS` – Ensures that existing functionality has not been broken.
 
 ### 4. Roll Up Sub-Index to Phase Index
-After all `p6-func-*` sub-skills have run, summarise the FUNCTIONAL sub-index into the phase index `docs/quality/QA.md`:
+After all `p6-func-*` sub-commands have run, summarise the FUNCTIONAL sub-index into the phase index `docs/quality/QA.md`:
 - Add an entry in the phase-index **Detail Files** table for `[FUNCTIONAL.md](FUNCTIONAL.md)` (the sub-index itself), status `complete` once all three sub-skill rows are `complete` (or `needs-rework`).
 - Lift any blocking functional failure into the phase-index **Open Risks**.
 

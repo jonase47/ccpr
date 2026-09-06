@@ -79,7 +79,7 @@ Delegate technical root cause analysis for specific code errors to the **debugge
 > 3. Which regression test would prevent this incident in the future?
 
 ### 4. Write Detail File
-This subskill maintains a **living** detail file `docs/operations/OPS_REVIEW.md` plus optional dated snapshots for individual incidents.
+This subcommand maintains a **living** detail file `docs/operations/OPS_REVIEW.md` plus optional dated snapshots for individual incidents.
 
 Write `docs/operations/OPS_REVIEW.md` (overwrite on each call with the latest summary). Frontmatter:
 

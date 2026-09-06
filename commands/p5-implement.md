@@ -3,7 +3,7 @@ disable-model-invocation: true
 ---
 # /p5-implement – Implement Feature (TDD Cycle)
 
-Implements a feature in the TDD cycle: Red → Green → Refactor. Each phase is its own sub-skill with a focused agent call.
+Implements a feature in the TDD cycle: Red → Green → Refactor. Each phase is its own sub-command with a focused agent call.
 
 ## Argument: $ARGUMENTS = [Feature name/Story ID]
 

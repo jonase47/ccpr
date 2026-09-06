@@ -4,8 +4,8 @@ disable-model-invocation: true
 # /track-decision – Decide Lean vs. Full-Track (or reassess)
 
 Interactive prerequisite check + Knockout check + Indicator score that determines whether a project
-runs in **Lean-Track** (prototype/PoC/spike, ~4 skills) or **Full-Track**
-(P0–P8, 109 skills).
+runs in **Lean-Track** (prototype/PoC/spike, ~4 commands) or **Full-Track**
+(P0–P8, 109 commands).
 
 Track-agnostic: runs at project start AND mid-flight as a re-assessment.
 
@@ -112,7 +112,7 @@ Load `~/.claude/templates/TRACK_DECISION_TEMPLATE.md` as the structural template
 
 - `docs/TRACK_DECISION.md` created or extended (newest entry on top)
 - Track decision in YAML frontmatter (`current_track: lean|full`)
-- Clear recommendation for next skill
+- Clear recommendation for next command
 
 ### Handover Epilogue
 **Before writing.** `docs/HANDOVER.md` is capped — the file states its own limit in its header
@@ -126,4 +126,4 @@ Load `~/.claude/templates/TRACK_DECISION_TEMPLATE.md` as the structural template
 Update `docs/HANDOVER.md`:
 - Track decision (initial or re-assessment #N)
 - Trigger and rationale
-- Recommended next skill
+- Recommended next command

@@ -89,7 +89,7 @@ Create a fresh HANDOVER.md according to the template (`~/.claude/templates/HANDO
 - **Open Points (append-only inbox)**: carry every matched line from the old file into the new
   file's `## Open Points` section **verbatim** — same text, same order, appended below the
   `<!-- append inbox entries below this line -->` marker. Do not triage, reword, or drop any of
-  them; that stays `/cleanup`'s job, not this skill's.
+  them; that stays `/cleanup`'s job, not this command's.
 
 Report the carried count as its own loud line, even when it is zero:
 `HANDOVER reset: N inbox entries carried over untouched`.

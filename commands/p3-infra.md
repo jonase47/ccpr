@@ -3,17 +3,17 @@ disable-model-invocation: true
 ---
 # /p3-infra – Infrastructure, CI/CD & Test Strategy
 
-Plans infrastructure, CI/CD pipeline, monitoring and test strategy. Each area is its own sub-skill.
+Plans infrastructure, CI/CD pipeline, monitoring and test strategy. Each area is its own sub-command.
 
 ## Argument: $ARGUMENTS = [Focus, e.g. "CI/CD", "Monitoring", "Hosting"]
 
-If provided: Passed through to the sub-skills.
-If not provided: All sub-skills run sequentially.
+If provided: Passed through to the sub-commands.
+If not provided: All sub-commands run sequentially.
 
 ## Flow
 
 ### 0. Ensure Sub-Index Exists
-Make sure `docs/architecture/INFRA.md` exists as a **sub-index** with the standard header (Status / Last Updated / Key Decisions / Open Risks / Detail Files / Gate Notes — see `~/.claude/docs/PROJECT_PHASES.md`). If missing, create it with empty placeholders. The four `p3-infra-*` sub-skills below each refresh their own row in this sub-index's **Detail Files** table.
+Make sure `docs/architecture/INFRA.md` exists as a **sub-index** with the standard header (Status / Last Updated / Key Decisions / Open Risks / Detail Files / Gate Notes — see `~/.claude/docs/PROJECT_PHASES.md`). If missing, create it with empty placeholders. The four `p3-infra-*` sub-commands below each refresh their own row in this sub-index's **Detail Files** table.
 
 ### 1. Hosting & Deployment Strategy
 `/p3-infra-hosting $ARGUMENTS` – Hosting platform, deployment model, environments.
@@ -28,13 +28,13 @@ Make sure `docs/architecture/INFRA.md` exists as a **sub-index** with the standa
 `/p3-infra-teststrategy $ARGUMENTS` – Test levels, tools, coverage targets, critical paths.
 
 ### 5. Roll Up Sub-Index to Phase Index
-After all `p3-infra-*` sub-skills have run, summarise the infrastructure sub-index into the phase index `docs/architecture/ARCHITECTURE.md`:
+After all `p3-infra-*` sub-commands have run, summarise the infrastructure sub-index into the phase index `docs/architecture/ARCHITECTURE.md`:
 - Add an entry in the phase-index **Detail Files** table for `[INFRA.md](INFRA.md)` (the sub-index itself), status `complete` once all four sub-skill rows are `complete`.
 - Lift the headline infrastructure decisions (hosting platform, CI/CD tool, coverage target) into the phase-index **Key Decisions**.
 
 ### 6. Final HANDOVER Update (Orchestrator-owned)
 
-The orchestrator owns the final `docs/HANDOVER.md` update for this P3 section. Sub-skills (`/p3-infra-*`) also contain a Handover Epilogue — this is intentional, so the sub-skills remain usable on their own. **However, when this orchestrator runs, the orchestrator's HANDOVER update is the authoritative one and supersedes individual sub-skill updates.** Consolidate the four infra detail files into a single HANDOVER entry.
+The orchestrator owns the final `docs/HANDOVER.md` update for this P3 section. Sub-commands (`/p3-infra-*`) also contain a Handover Epilogue — this is intentional, so the sub-commands remain usable on their own. **However, when this orchestrator runs, the orchestrator's HANDOVER update is the authoritative one and supersedes individual sub-command updates.** Consolidate the four infra detail files into a single HANDOVER entry.
 
 ## Notes
 - Steps 1-2 sequential (CI/CD requires hosting information)

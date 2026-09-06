@@ -50,7 +50,7 @@ For prototypes, PoCs, tech-spikes, and validation projects, the full P0–P8 pip
 /project-init → reads Brief, starts Full-Track from P0 (same repo, Lean artifacts in docs/lean-archive/)
 ```
 
-**Lean-Track skills (4):** `/lean-frame`, `/lean-learn`, `/lean-promote` + entry point `/track-decision`. Constitution is optional (Constitution-Light in FRAME sufficient); use `/constitution` if needed.
+**Lean-Track commands (4):** `/lean-frame`, `/lean-learn`, `/lean-promote` + entry point `/track-decision`. Constitution is optional (Constitution-Light in FRAME sufficient); use `/constitution` if needed.
 
 **Promotion trigger (Lean → Full, mid-flight):** Real-person PII enters scope, lifetime >3 months, stakeholder requires gates, compliance audit announced, codebase >5,000 LOC. **No downgrade Full → Lean.**
 
@@ -62,7 +62,7 @@ Full spec: `handbook/LEAN_TRACK.md`.
 
 ### Cross-Cutting Mechanisms
 
-**Constitution (Full-Track mandatory artifact):** Every Full-Track project has `docs/CONSTITUTION.md` with three sections (Inviolable / Default / Aspirational). Created by `/project-init` (via the `/constitution` sub-skill) — either as a greenfield with a domain bootstrap (`saas-b2c`, `mobile-b2c`, `b2b-tool`, `b2c-marketplace`, `on-device-privacy`) or as a promotion from Lean (with constitution candidates from `docs/PROMOTION_BRIEF.md`). Gates read the Inviolable section as a mandatory input (via `gate-preflight.py constitution_check`); a violation = "Inviolable breach". Versioning: semver-light, MAJOR bump on Inviolable change requires an ADR.
+**Constitution (Full-Track mandatory artifact):** Every Full-Track project has `docs/CONSTITUTION.md` with three sections (Inviolable / Default / Aspirational). Created by `/project-init` (via the `/constitution` sub-command) — either as a greenfield with a domain bootstrap (`saas-b2c`, `mobile-b2c`, `b2b-tool`, `b2c-marketplace`, `on-device-privacy`) or as a promotion from Lean (with constitution candidates from `docs/PROMOTION_BRIEF.md`). Gates read the Inviolable section as a mandatory input (via `gate-preflight.py constitution_check`); a violation = "Inviolable breach". Versioning: semver-light, MAJOR bump on Inviolable change requires an ADR.
 
 **Cross-Check (optional consistency check):** `/cross-check` runs optionally before gates and checks inconsistencies across phases via 7 rules (features ↔ auth, tech stack ↔ data model, threats ↔ mitigations, NFR ↔ test strategy, ADR status ↔ components, Constitution ↔ ADRs, story ↔ epic). Output: `docs/.cross-check-report.md`. Recommended, not a mandatory step (performance consideration).
 
@@ -80,7 +80,7 @@ docs/<phase-folder>/
 └── <SUBSKILL>.md           ← Detail file per subskill (independently readable)
 ```
 
-P3 and P6 carry an additional **sub-index level** under their lead-commands (e.g. `architecture/SECURITY.md` is a sub-index for the `/p3-sec-*` subskills, with `THREATS.md`, `AUTH.md`, etc. as detail files underneath).
+P3 and P6 carry an additional **sub-index level** under their lead-commands (e.g. `architecture/SECURITY.md` is a sub-index for the `/p3-sec-*` subcommands, with `THREATS.md`, `AUTH.md`, etc. as detail files underneath).
 
 **Sub-Index for growing detail files (generic)**: Any detail file that grows beyond ~20 KB or aggregates many discrete entities (epics, threats, journeys, ADRs, etc.) MAY become a **sub-index** with its own detail files in a sibling subfolder. This is the same mechanism P3/P6 use, generalised to any phase.
 
@@ -113,9 +113,9 @@ docs/planning/
 
 *When to introduce a sub-index*: When a single detail file passes ~20 KB, or whenever a "living document" (e.g. backlog) is expected to grow substantially. Sub-indexes are optional — small phases stay flat.
 
-*Concrete thresholds per skill (when in doubt, prefer Sub-Index — splitting later is more painful than splitting early):*
+*Concrete thresholds per command (when in doubt, prefer Sub-Index — splitting later is more painful than splitting early):*
 
-| Skill | File | Threshold (entity-count / size) | Sub-Index target |
+| Command | File | Threshold (entity-count / size) | Sub-Index target |
 |---|---|---|---|
 | `/p3-arch-components` | `COMPONENTS.md` | ≥7 components OR ≥20 KB | `components/<COMPONENT>.md` |
 | `/p3-data-model` | `DATA_MODEL.md` | ≥7 entities OR ≥25 KB | `data-model/<ENTITY>.md` |
@@ -165,7 +165,7 @@ last_updated: DD.MM.YYYY
 ```
 
 *Rules:*
-- **Subskill commands** write their result to `docs/<phase-folder>/<DETAIL>.md` (overwrite, not append) and afterwards update the phase index: refresh the detail-file row and lift any one-line key decision or risk into the index.
+- **Subcommands** write their result to `docs/<phase-folder>/<DETAIL>.md` (overwrite, not append) and afterwards update the phase index: refresh the detail-file row and lift any one-line key decision or risk into the index.
 - **Gate commands** read the phase index first, walk the detail-file table, and load detail files only when content checks demand it.
 - Tier-1 memory (`docs/memory/`) is unaffected — it lives parallel to the phase folders.
 
