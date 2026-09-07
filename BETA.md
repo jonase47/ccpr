@@ -21,8 +21,8 @@ low — half-formed thoughts count. A few questions that are most useful:
   clear enough? Anything surprising?
 - **Which phase felt too heavy?** The P0–P8 pipeline is thorough on purpose, but
   if a phase or gate felt like overkill for your project, say so.
-- **Did a skill produce something useless or wrong?** Concrete examples (which
-  skill, what you expected, what you got) are gold.
+- **Did a command produce something useless or wrong?** Concrete examples (which
+  command, what you expected, what you got) are gold.
 - **Naming & docs.** Anything you had to re-read, or a term that didn't mean what
   you assumed.
 
@@ -52,7 +52,7 @@ needed. Reports of *anything else* are very welcome.
 - **Lean-Track is transient.** It exists for fast internal experimentation and as
   a bridge into Full-Track; it is scheduled to be sunset after v1.0. Mandant/team
   projects should start on Full-Track.
-- **Large skill surface.** ~116 slash commands; some sub-skills always run in
+- **Large command surface.** ~116 slash commands; some sub-commands always run in
   sequence. Consolidation is planned (tracked as an Aspirational goal, reviewed at
   each `/postmortem`).
 - **Multi-tenant / multi-person use is not yet "without local patches".** Running

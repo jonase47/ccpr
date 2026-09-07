@@ -16,7 +16,7 @@ See BETA.md for what we're especially looking for.
 
 ## What felt off
 
-<!-- Onboarding unclear? A phase too heavy? A skill produced something useless?
+<!-- Onboarding unclear? A phase too heavy? A command produced something useless?
      Naming, docs, the install — anything. -->
 
 ## What would have helped

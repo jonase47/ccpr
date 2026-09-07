@@ -101,33 +101,50 @@ unrelated check (a)/(f) finding on the same root.
 
 A second test, `test_run_against_full_repository_notes_preexisting_
 unrelated_findings`, runs the same configuration against the REPOSITORY
-ROOT — but against a `git archive HEAD` snapshot in a scratch directory,
+ROOT -- but against a `git archive HEAD` snapshot in a scratch directory,
 never the live working tree (`RealCorpusRegressionTest`'s own class
 docstring explains why: the live tree carries gitignored working state,
 `docs/HANDOVER.md` and `docs/.workitems-archive-*/` among it, that
 legitimately mentions the retired word in an ever-changing way this item's
-own scope never covered). Against that clean, tracked-only snapshot, five
-genuine strays remain outside the five wired roots — two GitHub issue
-templates and three lines in `BETA.md` — none of them a documented,
-deliberate exemption the way the wired roots' sub-skill and meta-narrative
-cases are; this cut's own boundary ("builds a guard, does not sweep")
-means they are pinned by name (`KNOWN_STRAY_FINDINGS`) and reported, not
-fixed and not silently exempted. The pin is a set-equality check, not a
-zero-error one, so it fails in BOTH directions: a sixth stray appearing
-unnoticed, or one of these five disappearing without this test being
-updated.
+own scope never covered). At 187794d, the commit this module was written
+against, that clean, tracked-only snapshot carried five genuine strays
+outside the five wired roots -- two GitHub issue templates and three lines
+in `BETA.md` -- none of them a documented, deliberate exemption the way
+the wired roots' sub-skill and meta-narrative cases are; cut 4's own
+boundary ("builds a guard, does not sweep") pinned them by name
+(`KNOWN_STRAY_FINDINGS`) and reported rather than fixed them. Cut 6
+(CCP-1151 stage 4, PO decision 07.09.2026: sweep them and name the corpus
+gap rather than pin it as a permanent known finding) swept all five, so
+`KNOWN_STRAY_FINDINGS` is now EMPTY rather than a fixed list of five
+paths. The comparison stays a set-equality check and stays non-vacuous:
+`g_error_files` is measured fresh from a live subprocess run every time
+this test runs, never a literal, so `assertEqual(g_error_files,
+KNOWN_STRAY_FINDINGS)` still exercises a real comparison and still FAILS
+the moment a stray reappears. What an empty pin can no longer do is catch
+one of the five silently disappearing -- there is nothing left in the set
+to vanish from; that was always the less load-bearing of the two
+directions, and it is exactly the one cut 6 is firing on purpose.
 
 **Count re-derived, not copied**: the work item that commissioned this
 guard quotes "329 legitimate occurrences" from an earlier measurement.
 Repeating that number here without re-running the count would be exactly
 the mistake G-165 exists to name (a figure from someone else's measurement,
-carried forward instead of re-derived) -- and it would have been wrong: a
-fresh count of every case-insensitive `skill` substring the shipped config
-excuses across `.md`/`.py`/`.sh` in this tree, at the commit this module
-was written against, is 352, not 329 (the difference is almost certainly
-scope -- 329 likely counted `.md` files alone, while `hooks/agent-
-monitor.py` and `scripts/project-init.sh` alone account for a double-digit
-share of the gap). `EXCUSED_OCCURRENCE_FLOOR` below is a `floor`, not a
+carried forward instead of re-derived) -- and it would have been wrong,
+though not for the reason first guessed here. 329 and 352 are not one
+count measured twice; they are two different probes over two different
+scopes. 329 is this item's own recipe: a fixed root list (`README.md`,
+`handbook`, `docs`, `commands`, `agents`, `templates`, `hooks`, `scripts`,
+`instincts.md`, `instincts`, `CLAUDE.md`) counted across every file type.
+352 is this module's own probe: every case-insensitive `skill` substring
+across every tracked `.md`/`.py`/`.sh` file anywhere in the tree, recipe
+root or not. `.github/` and root-level files like `BETA.md` sit inside the
+second scope and outside the first -- which is exactly how cut 6 found
+the five stray sites the paragraph above describes. Re-derived fresh at
+187794d rather than copied from either prior figure, the two counts are
+427 (recipe roots) and 453 (tracked-tree probe) -- both have grown since
+the 329/352 pair was written, and the roughly 25-occurrence gap between
+them was always the recipe/tree scope difference, never a handful of
+large files. `EXCUSED_OCCURRENCE_FLOOR` below is a `floor`, not a
 `count`, for the same reason `test_doc_counts_agree.py`'s own guidance
 argues against `count` for anything that legitimately grows: this
 configuration will keep excusing more occurrences as the corpus grows, and
@@ -609,30 +626,38 @@ class RealCorpusRegressionTest(unittest.TestCase):
                     f"{result.stdout}",
                 )
 
-    # Every check-(g) finding outside the five wired roots, at the commit
-    # this module was written against -- five genuine strays this cut's
-    # own measurement found and deliberately did NOT fix (the boundary is
-    # "this cut builds a guard, it does not sweep") and did NOT add to the
-    # config either (unlike the sub-skill/meta-narrative cases the wired
-    # roots needed, these read as plain leftover prose in a GitHub issue
-    # template and BETA.md, not a documented, deliberate exemption -- see
-    # this item's own session report for the full reasoning). Pinned by
-    # NAME rather than asserted-absent: a set-equality check here can FAIL
-    # in both directions -- a sixth stray appearing unnoticed, or one of
-    # these five silently disappearing (fixed, or newly and silently
-    # exempted) without anyone updating this pin.
-    KNOWN_STRAY_FINDINGS = {
-        ".github/ISSUE_TEMPLATE/bug.md",
-        ".github/ISSUE_TEMPLATE/feedback.md",
-        "BETA.md",
-    }
+    # At 187794d, the commit this module was written against, five genuine
+    # strays sat outside the five wired roots -- two GitHub issue templates
+    # and three lines in BETA.md -- that cut 4's own measurement found and
+    # deliberately did NOT fix (the boundary was "this cut builds a guard,
+    # it does not sweep") and did NOT add to the config either (unlike the
+    # sub-skill/meta-narrative cases the wired roots needed, these read as
+    # plain leftover prose, not a documented, deliberate exemption -- see
+    # the module docstring's "standing regression test" section for the
+    # full reasoning). Cut 6 (CCP-1151 stage 4, PO decision 07.09.2026)
+    # swept all five, so this pin is now EMPTY rather than a fixed list of
+    # five paths.
+    #
+    # The comparison below stays a set-equality check, not a zero-error
+    # one, and it stays non-vacuous: `g_error_files` is measured fresh
+    # from a live subprocess run over a `git archive HEAD` snapshot every
+    # time this test runs, never a literal, so `assertEqual(g_error_files,
+    # KNOWN_STRAY_FINDINGS)` still exercises a real comparison and still
+    # FAILS the moment a stray reappears. What it can no longer do is
+    # catch one of these five silently disappearing -- there is nothing
+    # left in the set to vanish from. That was always the less
+    # load-bearing of the two directions: it exists to catch someone
+    # fixing a stray without updating this pin, which is exactly what
+    # cut 6 is doing on purpose.
+    KNOWN_STRAY_FINDINGS = set()
 
     def test_run_against_full_repository_notes_preexisting_unrelated_findings(self):
         """The repository root, scanned as a CLEAN TRACKED-ONLY checkout
         (this class's own `git archive` snapshot -- see the class
-        docstring), carries exactly five check-(g) findings outside the
-        five wired roots (KNOWN_STRAY_FINDINGS above) and NO check (f)
-        findings at all.
+        docstring), carries NO check-(g) findings outside the five wired
+        roots (KNOWN_STRAY_FINDINGS above, emptied by cut 6's sweep -- see
+        the comment above that assignment) and NO check (f) findings at
+        all.
 
         This is worth stating explicitly because the two check (f)
         findings this item's own briefing measured against the LIVE
