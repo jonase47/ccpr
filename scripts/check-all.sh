@@ -450,7 +450,27 @@ while [ "$ci" -lt "$CHECK_COUNT" ]; do
         invoke_args=()
         case "$name" in
           phase-docs-lint|memory-lint) invoke_args=("$PROJECT_DIR") ;;
-          manual-lint)                 invoke_args=("$PROJECT_DIR/handbook") ;;
+          # CCP-1151 stage 4 cut 4: manual-lint.sh now accepts more than one
+          # root in a single invocation (see its own header and
+          # scripts/tests/test_manual_lint_multi_root.py) and check (a)/(b)/
+          # (c)/(f) were previously checked against handbook/ alone, leaving
+          # commands/, agents/, templates/ and instincts/ — which carry the
+          # identical kind:/parent_index: contract and measure clean today —
+          # entirely unguarded. Same "may not exist for a foreign project"
+          # cost this list already accepted for handbook/ alone: a
+          # downstream project without one of these directories gets an
+          # extra "root does not exist" stderr notice, not a failure (a
+          # missing root scans 0 files and stays exit 0 — manual-lint.sh's
+          # own EmptyScopeTest contract).
+          manual-lint)
+            invoke_args=(
+              "$PROJECT_DIR/handbook"
+              "$PROJECT_DIR/commands"
+              "$PROJECT_DIR/agents"
+              "$PROJECT_DIR/templates"
+              "$PROJECT_DIR/instincts"
+            )
+            ;;
           doc-volume-check)            invoke_args=("$PROJECT_DIR/docs") ;;
           artifact-gate)
             if [ "$GATE_DENY_STATE" = "configured" ]; then

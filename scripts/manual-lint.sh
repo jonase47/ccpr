@@ -31,6 +31,14 @@
 #       repository. See the "Check (f)" block below for the full grammar and
 #       the reasoning behind each of its rules. Every finding is an ERROR;
 #       check (f) raises no warnings.
+#   (g) forbidden-prose terms — OPT-IN, CCP-1151 stage 4 cut 4. A project may
+#       configure a term that must not appear as ordinary prose, plus three
+#       lists of contexts that excuse a real occurrence (the frozen field key
+#       it collides with, a vendor filename, a protocol document). See the
+#       "Check (g)" block below for the configuration shape and the reasoning
+#       behind each list. Every finding is an ERROR; check (g) raises no
+#       warnings. With NOTHING configured, check (g) checks nothing — the
+#       generic script never hardcodes any project's retired vocabulary.
 #
 # WHY THE LETTERS JUMP FROM (c) TO (f) — this gap is deliberate, not a
 # numbering accident. (d) and (e) are RESERVED by documentation standard v0.7
@@ -38,10 +46,11 @@
 # "repair" the sequence by renaming (f) to (d): the letter is referenced from
 # the report's `**Checks:**` line, from templates/PHASE_DOC_SCHEMA.md, from
 # scripts/tests/test_manual_lint.py and from CHANGELOG.md, and renaming it
-# breaks all of them at once for no gain.
+# breaks all of them at once for no gain. (g) is simply the next letter after
+# (f), no gap involved.
 #
 # Usage:
-#   bash scripts/manual-lint.sh [<root-dir>]
+#   bash scripts/manual-lint.sh [<root-dir> ...]
 #
 # Generic over ANY documentation root — NOT hardwired to handbook/.
 # install.sh does not copy handbook/ into ~/.claude (see handbook/README.md:2-5),
@@ -49,6 +58,12 @@
 # CCPR — the exact defect 0e76919 fixed for phase-docs-lint.sh's
 # PHASE_FOLDERS default. Point it at whichever tree carries the
 # kind/parent_index contract, e.g. `bash scripts/manual-lint.sh handbook`.
+#
+# More than one root may be given (CCP-1151 stage 4 cut 4): every root is
+# scanned and the findings are combined into ONE report, with file counts
+# summed and each finding's path shown relative to the root that produced
+# it. A single root, or none at all (defaulting to the current working
+# directory), behaves exactly as before this capability existed.
 #
 # Exit-Codes: 0 clean, 1 warnings, 2 errors.
 
@@ -58,7 +73,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/frontmatter.sh
 source "$SCRIPT_DIR/lib/frontmatter.sh"
 
-ROOT="${1:-$(pwd)}"
+# ROOTS — one or more root directories, in the order given. Empty means
+# "no positional argument at all", not "one empty-string root": the
+# default-to-cwd behaviour below must fire for zero args, not for an
+# array holding one blank element.
+ROOTS=("$@")
+if [[ ${#ROOTS[@]} -eq 0 ]]; then
+    ROOTS=("$(pwd)")
+fi
 
 # The kind: KNOWN set — measured across this repository 26.08.2026 (WI-0112a):
 # every distinct value any shipped file, template, or command prescribes.
@@ -300,12 +322,284 @@ f_count_glob() {
     F_GLOB_COUNT="$out"
 }
 
+# ---------------------------------------------------------------------------
+# Check (g) — forbidden-prose terms (CCP-1151 stage 4 cut 4)
+# ---------------------------------------------------------------------------
+#
+# CONFIGURATION. Opt-in, same precedent as artifact-gate.sh's gate.denyNames
+# (scripts/lib/discipline_gate.sh): a personal, non-distributed
+# ~/.claude/memory-sync.json (key `lint.forbiddenProse`), or an env override,
+# CCPR_LINT_FORBIDDEN_PROSE. The env value is a JSON ARRAY, not the flat
+# comma/newline-separated shape gate.denyNames uses — a denyNames entry is one
+# bare string, but a forbiddenProse entry is a
+# {term, tokenContexts, lineContains, pathContains} object, and there is no
+# natural flat encoding for a list of objects. When the env var is set (even
+# to "[]"), it REPLACES the file — same precedent as
+# lib/discipline_gate.sh:gate_load_config's GATE_DENY_SOURCE handling.
+#
+# Absent python3, check (g) reads as "not configured" rather than refusing to
+# run (the Constitution's "installable and runnable on a clean machine"
+# Inviolable) — but once python3 IS present, a config the operator actually
+# wrote wrong (a missing `term`, an unknown key, invalid JSON) is REFUSED
+# (exit 2), never silently narrowed — the same "refuse rather than guess"
+# discipline conformance-run.sh's own config reader applies to a structurally
+# similar list-of-objects config.
+#
+# THREE INDEPENDENT EXCUSE LISTS per term, checked in this order but none
+# depending on another:
+#   tokenContexts — the text immediately preceding the match (case-
+#     insensitively, no character skipped) ends with one of these strings.
+#     A PREFIX check, not enclosing-token equality: CCPR's own measured
+#     corpus needed to excuse "subskill", "1-subskill", "per-subskill" and
+#     the hyphenated "sub-skill"/"Sub-Skill" alike, and a naive "the
+#     surrounding alnum-only token equals subskill" rule catches only the
+#     first of those four real spellings. `["sub", "sub-"]` catches all four
+#     with two entries instead of enumerating every possible prefix before a
+#     hyphen (scripts/tests/test_manual_lint_check_g.py documents the
+#     measurement).
+#   lineContains — literal, CASE-SENSITIVE substrings of the RAW line
+#     (markup included — a marker inside an HTML comment must still be
+#     read, unlike check (f)'s markup-stripped prose count).
+#   pathContains — literal, case-sensitive substrings of the file's path
+#     relative to the scanned root's OWN directory name (that root's
+#     basename, prefixed onto its path — NOT the file's full absolute
+#     path: an ancestor directory above the scanned root, e.g. a checkout
+#     path or a username, must never silently widen what a configured
+#     substring excuses). A match excuses the WHOLE FILE for that term (a
+#     protocol document, a fixture that pins a pre-sweep literal on
+#     purpose), not just one line.
+#
+# An occurrence excused by none of the three is an ERROR. Check (g) raises
+# no warnings.
+#
+# FILE SCOPE. Check (g) scans *.md, *.py and *.sh under each root — wider
+# than checks (a)/(b)/(c)/(f), which are markdown-only because kind:/
+# parent_index: is a markdown-frontmatter contract. A prose-word guard has
+# no such restriction, and CCPR's own real corpus needs it: the frozen field
+# key's marker comments live inside scripts/project-init.sh (a heredoc that
+# generates markdown) and a vendor integration lives in hooks/agent-
+# monitor.py, neither of which any *.md-only scan would ever reach.
+LINT_TERMS=()
+LINT_TOKENS=()   # newline-joined blob per term index
+LINT_LINES=()
+LINT_PATHS=()
+
+_lint_config_path() {
+    printf '%s' "${MEMORY_SYNC_CONFIG:-$HOME/.claude/memory-sync.json}"
+}
+
+# _lint_read_config — one "KEY\tVALUE" record per line on stdout:
+#   TERM\t<term>     starts a new forbiddenProse entry
+#   TOKEN\t<value>   one tokenContexts entry of the CURRENT term
+#   LINE\t<value>    one lineContains entry of the CURRENT term
+#   PATHC\t<value>   one pathContains entry of the CURRENT term
+#   ERROR\t<message> the config is malformed; nothing else is emitted
+# Exit 0 on success (zero or more TERM entries), exit 1 with exactly one
+# ERROR record on a malformed config. This function's own exit status IS the
+# caller's signal — checked via `if OUT=$(...); then rc=0; else rc=$?; fi`,
+# never `2>/dev/null || true`, because a malformed config must be refused,
+# not silently read as "not configured" (contrast with lib/discipline_gate.sh
+# _gate_read_config, which IS best-effort, for a deny-list where "not
+# configured" is itself an accepted, common state).
+_lint_read_config() {
+    python3 - "$(_lint_config_path)" <<'PY'  # exit-status: exempt propagates-as-function-return
+import json, os, sys
+
+def emit_error(msg):
+    print("ERROR\t" + str(msg).replace("\n", " ").replace("\t", " "))
+    sys.exit(1)
+
+def validate_and_emit(entries):
+    if not isinstance(entries, list):
+        emit_error("'lint.forbiddenProse' is not a list")
+    for i, e in enumerate(entries, start=1):
+        if not isinstance(e, dict):
+            emit_error("forbiddenProse[%d] is not an object" % i)
+        known = {"term", "tokenContexts", "lineContains", "pathContains", "_comment"}
+        unknown = sorted(k for k in e if k not in known)
+        if unknown:
+            emit_error("forbiddenProse[%d] has unknown key(s): %s" % (i, ", ".join(unknown)))
+        term = e.get("term")
+        if not isinstance(term, str) or not term:
+            emit_error("forbiddenProse[%d] is missing a non-empty string 'term'" % i)
+        if "\n" in term or "\t" in term:
+            emit_error("forbiddenProse[%d].term contains a newline or tab" % i)
+        print("TERM\t" + term)
+        for field, rec in (("tokenContexts", "TOKEN"), ("lineContains", "LINE"), ("pathContains", "PATHC")):
+            vals = e.get(field, [])
+            if not isinstance(vals, list):
+                emit_error("forbiddenProse[%d].%s is not a list" % (i, field))
+            for v in vals:
+                if not isinstance(v, str) or not v:
+                    emit_error("forbiddenProse[%d].%s contains a non-string or empty entry" % (i, field))
+                if "\n" in v or "\t" in v:
+                    emit_error("forbiddenProse[%d].%s entry contains a newline or tab" % (i, field))
+                print(rec + "\t" + v)
+    sys.exit(0)
+
+env_val = os.environ.get("CCPR_LINT_FORBIDDEN_PROSE", "")
+if env_val.strip():
+    try:
+        entries = json.loads(env_val)
+    except Exception as e:
+        emit_error("CCPR_LINT_FORBIDDEN_PROSE is not valid JSON: %s" % e)
+    validate_and_emit(entries)
+
+path = sys.argv[1]
+try:
+    with open(path, encoding="utf-8") as fh:
+        cfg = json.load(fh)
+except FileNotFoundError:
+    sys.exit(0)
+except Exception as e:
+    emit_error("%s is not valid JSON: %s" % (path, e))
+
+lint = cfg.get("lint")
+if lint is None:
+    sys.exit(0)
+if not isinstance(lint, dict):
+    emit_error("'lint' is not an object")
+unknown = sorted(k for k in lint if k not in {"forbiddenProse", "_comment"})
+if unknown:
+    emit_error("unknown key(s) in 'lint': %s" % ", ".join(unknown))
+validate_and_emit(lint.get("forbiddenProse", []))
+PY
+}
+
+# lint_load_forbidden_prose — fills LINT_TERMS/LINT_TOKENS/LINT_LINES/
+# LINT_PATHS. Absent python3, or absent config entirely, leaves all four
+# empty (check (g) then checks nothing — see the module header). A config
+# the operator actually wrote wrong is refused: printed to stderr, exit 2.
+lint_load_forbidden_prose() {
+    LINT_TERMS=(); LINT_TOKENS=(); LINT_LINES=(); LINT_PATHS=()
+    command -v python3 >/dev/null 2>&1 || return 0
+
+    local rc=0 out cur
+    if out="$(_lint_read_config)"; then rc=0; else rc=$?; fi
+    if [[ "$rc" -ge 1 ]]; then
+        echo "manual-lint: $(printf '%s\n' "$out" | awk -F'\t' '$1 == "ERROR" { print $2; exit }')" >&2  # exit-status: exempt internal-record-parsing
+        exit 2
+    fi
+
+    cur=-1
+    while IFS= read -r line; do
+        [[ -n "$line" ]] || continue
+        key="${line%%$'\t'*}"
+        val="${line#*$'\t'}"
+        case "$key" in
+            TERM)
+                LINT_TERMS+=("$val")
+                LINT_TOKENS+=("")
+                LINT_LINES+=("")
+                LINT_PATHS+=("")
+                cur=$((${#LINT_TERMS[@]} - 1))
+                ;;
+            TOKEN) LINT_TOKENS[$cur]="${LINT_TOKENS[$cur]}${LINT_TOKENS[$cur]:+$'\n'}$val" ;;
+            LINE)  LINT_LINES[$cur]="${LINT_LINES[$cur]}${LINT_LINES[$cur]:+$'\n'}$val" ;;
+            PATHC) LINT_PATHS[$cur]="${LINT_PATHS[$cur]}${LINT_PATHS[$cur]:+$'\n'}$val" ;;
+        esac
+    done <<< "$out"
+}
+
+# g_line_has_any <text> <blob> — true if <text> contains (case-sensitive
+# substring) ANY of the newline-separated entries in <blob>. An empty blob
+# never matches (an unconfigured list excuses nothing).
+g_line_has_any() {
+    local text="$1" blob="$2" needle
+    [[ -n "$blob" ]] || return 1
+    while IFS= read -r needle; do
+        [[ -n "$needle" ]] || continue
+        [[ "$text" == *"$needle"* ]] && return 0
+    done <<< "$blob"
+    return 1
+}
+
+# g_excused_by_token <line_lower> <offset> <blob> — true if the text of
+# <line_lower> immediately before character position <offset> ends with any
+# of <blob>'s newline-separated prefixes (case-insensitively — <blob>'s own
+# entries are lowered here, <line_lower> is already lowered by the caller).
+g_excused_by_token() {
+    local line_lower="$1" offset="$2" blob="$3" before needle needle_lower
+    [[ -n "$blob" ]] || return 1
+    before="${line_lower:0:offset}"
+    while IFS= read -r needle; do
+        [[ -n "$needle" ]] || continue
+        needle_lower="$(printf '%s' "$needle" | LC_ALL=C tr '[:upper:]' '[:lower:]')"
+        [[ "$before" == *"$needle_lower" ]] && return 0
+    done <<< "$blob"
+    return 1
+}
+
+# g_find_offsets <line_lower> <term_lower> — every 0-based character offset
+# at which <term_lower> occurs in <line_lower>, into G_OFFSETS. Pure bash,
+# mirroring f_extract_numbers's own prefix-strip loop above: G-153 requires
+# every OCCURRENCE, not just whether the line matched at all, since a line
+# can carry the forbidden term more than once.
+G_OFFSETS=()
+g_find_offsets() {
+    local remaining="$1" term_lower="$2" prefix offset=0
+    G_OFFSETS=()
+    [[ -n "$term_lower" ]] || return 0
+    while [[ "$remaining" == *"$term_lower"* ]]; do
+        prefix="${remaining%%"$term_lower"*}"
+        offset=$((offset + ${#prefix}))
+        G_OFFSETS+=("$offset")
+        offset=$((offset + ${#term_lower}))
+        remaining="${remaining#*"$term_lower"}"
+    done
+}
+
 errors=()
 warnings=()
 infos=()
 err()  { errors+=("$1"); }
 warn() { warnings+=("$1"); }
 info() { infos+=("$1"); }
+
+# PARENT_LINKS — "idx_abs_path|child_abs_path" entries, one per file whose
+# parent_index resolved (via check (a)'s cascade) to an existing index.
+# Consumed by check (b) below, once every root's per-file pass has finished
+# — bash 3.2 has no associative arrays, so this is a flat pair list rather
+# than an idx -> [children] map, grouped back out by a sort -u over the idx
+# column. Declared once, OUTSIDE the per-root loop below, so it accumulates
+# across every root rather than being reset by the second one.
+PARENT_LINKS=()
+
+# ROOTS_ABS — every given root resolved to an absolute path, in the same
+# order as ROOTS, skipping any that do not exist. Consumed by display_rel()
+# below (check (b)'s human-readable path in a warning) so a warning about a
+# file under the SECOND root is not stripped against the first root's own
+# absolute path — the single-ROOT_ABS scalar this replaced would have
+# produced exactly that misattribution the moment a second root was given.
+ROOTS_ABS=()
+
+# display_rel <abs_path> — <abs_path> relative to whichever configured root
+# it lives under, tried in the order the roots were given; the absolute
+# path itself if none match (should not happen for a path this script
+# itself produced, but a silent wrong answer is worse than an unstripped
+# one here).
+display_rel() {
+    local abs="$1" r
+    for r in ${ROOTS_ABS[@]+"${ROOTS_ABS[@]}"}; do
+        case "$abs" in
+            "$r"/*) printf '%s' "${abs#$r/}"; return 0 ;;
+        esac
+    done
+    printf '%s' "$abs"
+}
+
+FILES_TOTAL=0
+
+# lint_load_forbidden_prose() populates LINT_TERMS/LINT_TOKENS/LINT_LINES/
+# LINT_PATHS once, ROOT-independent — check (g)'s configuration is not a
+# per-root concept. "Not configured" is reported here, once, rather than
+# once per root: it is a fact about the RUN, not about any one tree.
+lint_load_forbidden_prose
+if [[ ${#LINT_TERMS[@]} -eq 0 ]]; then
+    info "check (g) NOT CONFIGURED — no forbidden-prose terms were checked. Set lint.forbiddenProse in $(_lint_config_path), or pass CCPR_LINT_FORBIDDEN_PROSE."
+fi
+
+for ROOT in "${ROOTS[@]}"; do
 
 # Collect files. A missing ROOT is not distinguished from an existing-but-
 # empty one in FILES_TOTAL — both end up scanning zero files — but the
@@ -318,9 +612,10 @@ if [[ -d "$ROOT" ]]; then
         FILES+=("$line")
     done < <(find "$ROOT" -type f -name "*.md")
 fi
-FILES_TOTAL=${#FILES[@]}
+ROOT_FILES_TOTAL=${#FILES[@]}
+FILES_TOTAL=$((FILES_TOTAL + ROOT_FILES_TOTAL))
 
-if [[ "$FILES_TOTAL" -eq 0 ]]; then
+if [[ "$ROOT_FILES_TOTAL" -eq 0 ]]; then
     if [[ ! -d "$ROOT" ]]; then
         echo "manual-lint: root '$ROOT' does not exist" >&2
     else
@@ -328,21 +623,17 @@ if [[ "$FILES_TOTAL" -eq 0 ]]; then
     fi
 fi
 
-# ROOT_ABS — ROOT resolved to an absolute path once, up front, so every
-# later "make this path human-readable relative to ROOT" strip (both in
-# the per-file loop below and in check (b)) works against the SAME base
-# regardless of whether ROOT itself was given relative or absolute on the
-# command line. Only computed when ROOT exists — find() above already
-# left FILES empty for a missing ROOT, so this is unreachable in that case.
+# ROOT_ABS — ROOT resolved to an absolute path once per iteration, so every
+# later "make this path human-readable relative to ROOT" strip (in the
+# per-file loop below) works against the SAME base regardless of whether
+# ROOT itself was given relative or absolute on the command line. Only
+# computed when ROOT exists — find() above already left FILES empty for a
+# missing ROOT, so this is unreachable in that case.
 ROOT_ABS=""
-[[ -d "$ROOT" ]] && ROOT_ABS="$(cd "$ROOT" && pwd)"
-
-# PARENT_LINKS — "idx_abs_path|child_abs_path" entries, one per file whose
-# parent_index resolved (via check (a)'s cascade) to an existing index.
-# Consumed by check (b) below, once the per-file pass has finished — bash
-# 3.2 has no associative arrays, so this is a flat pair list rather than a
-# idx -> [children] map, grouped back out by a sort -u over the idx column.
-PARENT_LINKS=()
+if [[ -d "$ROOT" ]]; then
+    ROOT_ABS="$(cd "$ROOT" && pwd)"
+    ROOTS_ABS+=("$ROOT_ABS")
+fi
 
 for file in ${FILES[@]+"${FILES[@]}"}; do
     rel="${file#$ROOT/}"
@@ -477,6 +768,98 @@ for file in ${FILES[@]+"${FILES[@]}"}; do
     done < "$file"
 done
 
+# (g) forbidden-prose terms — scanned over *.md/*.py/*.sh under THIS root,
+# only when at least one term is configured (LINT_TERMS empty means "not
+# configured", see lint_load_forbidden_prose above — no find() cost paid
+# for a check nobody turned on).
+if [[ ${#LINT_TERMS[@]} -gt 0 && -d "$ROOT" ]]; then
+    G_FILES=()
+    while IFS= read -r gline; do
+        G_FILES+=("$gline")
+    done < <(find "$ROOT" -type f \( -name "*.md" -o -name "*.py" -o -name "*.sh" \))
+
+    for gfile in ${G_FILES[@]+"${G_FILES[@]}"}; do
+        grel="${gfile#$ROOT/}"
+        # gfile_display — grel, prefixed with the SCANNED ROOT's own
+        # directory name (never its full ancestor chain). pathContains
+        # entries are written as repository-relative substrings ("docs/
+        # adr/", "instincts/external.md"), which only ever appear in
+        # $grel when ROOT happens to be the repository root itself — a
+        # measured defect (CCP-1151 stage 4 cut 4 authoring): pointing this
+        # script at ROOT=instincts strips "instincts/" off the very path
+        # the exemption is written against, so "instincts/external.md"
+        # never matches "external.md" alone. The first fix tried here
+        # matched against the file's FULL absolute path instead, which
+        # does resolve that case but widens the blast radius to every
+        # ANCESTOR directory above the scanned root — a checkout path, a
+        # username, a CI workspace name that happens to contain a
+        # configured substring would silently (and wrongly) excuse a file
+        # nobody meant to exempt (code-reviewer finding, CCP-1151 stage 4
+        # cut 4). Prefixing only the root's OWN basename — resolved via
+        # ROOT_ABS, never the raw $ROOT string, since `basename .` returns
+        # "." literally rather than the real directory name — reproduces
+        # the repository-relative shape pathContains entries are written
+        # against without exposing anything above the root the operator
+        # actually pointed this script at.
+        gfile_display="$(basename "$ROOT_ABS")/$grel"
+        for ((ti = 0; ti < ${#LINT_TERMS[@]}; ti++)); do
+            term="${LINT_TERMS[$ti]}"
+
+            # pathContains excuses the WHOLE FILE for this term — skip
+            # before ever opening it.
+            if g_line_has_any "$gfile_display" "${LINT_PATHS[$ti]}"; then
+                continue
+            fi
+
+            # File-level pre-filter (WI-style performance note, CCP-1151
+            # stage 4 cut 4): the vast majority of files in a real tree do
+            # not contain the term at all, and forking `tr` twice per LINE
+            # regardless — the first version of this loop did exactly that
+            # — made a full-repo run take minutes. One `grep -qi` decides
+            # whether this (file, term) pair needs any further work; a miss
+            # here costs one process, not one per line.
+            grep -qiF -- "$term" "$gfile" 2>/dev/null || continue
+
+            term_lower="$(printf '%s' "$term" | LC_ALL=C tr '[:upper:]' '[:lower:]')"
+
+            # ORIG_LINES/LOWER_LINES — the file's lines, and the SAME lines
+            # lowercased, read as two parallel arrays built from ONE `tr`
+            # invocation over the whole file rather than one per line. bash
+            # 3.2 (this repo's floor, ADR-0011) has no built-in one-shot
+            # "read every line into an array" command (that arrived in a
+            # later bash major version), hence the two explicit read loops.
+            # The `|| [[ -n "$l" ]]` keeps a final line that has no trailing
+            # newline, matching the read idiom used throughout this script's
+            # other per-file loops.
+            ORIG_LINES=()
+            while IFS= read -r l || [[ -n "$l" ]]; do ORIG_LINES+=("$l"); done < "$gfile"
+            LOWER_LINES=()
+            while IFS= read -r l || [[ -n "$l" ]]; do LOWER_LINES+=("$l"); done \
+                < <(LC_ALL=C tr '[:upper:]' '[:lower:]' < "$gfile")
+
+            for ((li = 0; li < ${#ORIG_LINES[@]}; li++)); do
+                gline="${ORIG_LINES[$li]}"
+                line_lower="${LOWER_LINES[$li]}"
+                g_line_no=$((li + 1))
+                [[ "$line_lower" == *"$term_lower"* ]] || continue
+
+                g_find_offsets "$line_lower" "$term_lower"
+                for off in ${G_OFFSETS[@]+"${G_OFFSETS[@]}"}; do
+                    if g_excused_by_token "$line_lower" "$off" "${LINT_TOKENS[$ti]}"; then
+                        continue
+                    fi
+                    if g_line_has_any "$gline" "${LINT_LINES[$ti]}"; then
+                        continue
+                    fi
+                    err "$grel:$g_line_no:$((off + 1)) — forbidden prose term '$term' found outside its configured allowed contexts (lint.forbiddenProse) — excuse it via tokenContexts/lineContains/pathContains, or fix the wording"
+                done
+            done
+        done
+    done
+fi
+
+done
+
 # (b) Reverse direction — the index an existing parent_index resolved to
 # must itself link the claiming file back. Grouped by unique index path so
 # each index's content is read once, not once per child.
@@ -485,12 +868,12 @@ if [[ ${#PARENT_LINKS[@]} -gt 0 ]]; then
         [[ -z "$idx_path" ]] && continue
         idx_dir="$(dirname "$idx_path")"
         idx_content="$(cat "$idx_path")"
-        idx_rel="${idx_path#$ROOT_ABS/}"
+        idx_rel="$(display_rel "$idx_path")"
         for pair in "${PARENT_LINKS[@]}"; do
             this_idx="${pair%%|*}"
             [[ "$this_idx" == "$idx_path" ]] || continue
             child="${pair#*|}"
-            child_rel="${child#$ROOT_ABS/}"
+            child_rel="$(display_rel "$child")"
             target="$(rel_path "$idx_dir" "$child")"
             # A here-string, not a pipe: under `set -o pipefail` a
             # `printf | grep -qF` can report the whole pipeline as failed
@@ -520,8 +903,9 @@ fi
 NOW="$(date '+%d.%m.%Y %H:%M')"
 echo "# Manual Lint Report"
 echo
-echo "**Root:** $ROOT"
-echo "**Checks:** (a) parent_index resolves (document-relative first, root-fallback second) · (b) the resolved index links the claiming file back · (c) kind: is in the known vocabulary (warning if not) · (f) a marked number agrees with the value derived from its glob"
+ROOTS_JOINED="$(IFS=','; echo "${ROOTS[*]}")"
+echo "**Roots:** $ROOTS_JOINED"
+echo "**Checks:** (a) parent_index resolves (document-relative first, root-fallback second) · (b) the resolved index links the claiming file back · (c) kind: is in the known vocabulary (warning if not) · (f) a marked number agrees with the value derived from its glob · (g) a configured forbidden-prose term is not used outside its allowed contexts (opt-in — not configured means not checked)"
 echo "**Run:** $NOW"
 echo "**Files scanned:** $FILES_TOTAL"
 echo

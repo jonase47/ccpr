@@ -33,6 +33,17 @@
       }
     ]
   },
+  "lint": {
+    "_comment": "Read by scripts/manual-lint.sh check (g) (CCP-1151 stage 4 cut 4). forbiddenProse is a list of {term, tokenContexts, lineContains, pathContains} objects -- a project-specific terminology decision (e.g. a retired prose word your own project swept out) that must not ship hardcoded in the generic script. The default is empty: with nothing configured here (and no CCPR_LINT_FORBIDDEN_PROSE env var), check (g) checks nothing -- it never assumes any project's retired vocabulary. term is matched as a case-insensitive SUBSTRING in prose (markup included -- an occurrence inside an HTML comment is still read). An occurrence is excused (not an error) if ANY of the three lists match: tokenContexts excuses it when the text immediately preceding the match, case-insensitively, ends with one of these strings (a PREFIX check -- e.g. [\"sub\", \"sub-\"] excuses both a frozen `subskill` field key and the hyphenated `sub-skill` spelling alike); lineContains excuses it when the RAW line (case-sensitive substring) contains one of these phrases; pathContains excuses the WHOLE FILE for this term when its path, prefixed with the SCANNED ROOT's own directory name (never the file's full absolute path -- an ancestor directory above the root, e.g. a checkout path or username, must never silently widen what a substring excuses), contains one of these substrings (a protocol document, a fixture that pins a pre-sweep literal on purpose). A CI job that cannot read this file can pass the same list, as a JSON array, via the CCPR_LINT_FORBIDDEN_PROSE environment variable -- which REPLACES this key entirely rather than merging with it, same precedent as gate.denyNames/CCPR_GATE_DENY_NAMES above. Keep this file out of every repository, same reasoning as gate.denyNames: a retired-vocabulary decision is project-specific configuration, not shipped-artifact secrecy, but hardcoding it into the generic script would still make every downstream project inherit it.",
+    "forbiddenProse": [
+      {
+        "term": "<retired-prose-word>",
+        "tokenContexts": ["<frozen-field-prefix>"],
+        "lineContains": ["<vendor filename or protocol phrase that legitimately contains the word>"],
+        "pathContains": ["<protocol-doc-or-fixture-path/>"]
+      }
+    ]
+  },
   "overlay": {
     "instinctsFileInRepo": "instincts/shared.md",
     "instinctsTarget": "~/.claude/instincts/shared.md",

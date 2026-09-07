@@ -183,7 +183,10 @@ class CheckAParentIndexResolutionTest(ManualLintTestBase):
         result = self.run_lint()
 
         errors = self.findings(result.stdout, "Errors")
-        infos = self.findings(result.stdout, "Info")
+        # check (g)'s own "NOT CONFIGURED" notice (CCP-1151 stage 4 cut 4) is
+        # unconditional and unrelated to check (a) — filtered out here so
+        # this assertion stays about what it was written to prove.
+        infos = [i for i in self.findings(result.stdout, "Info") if "check (g)" not in i]
         warnings = self.findings(result.stdout, "Warnings")
         self.assertFalse(any("parent_index=" in e for e in errors), errors)
         self.assertEqual(infos, [], infos)
@@ -781,7 +784,11 @@ class CheckFGlobScopeTest(CheckFMarkerBase):
         errors = self.findings(result.stdout, "Errors")
         self.assertFalse(any("chapters/doc.md" in e for e in errors), errors)
         self.assertTrue(any("chapters/wrong.md" in e for e in errors), errors)
-        self.assertEqual(self.findings(result.stdout, "Info"), [], result.stdout)
+        # check (g)'s own "NOT CONFIGURED" notice (CCP-1151 stage 4 cut 4) is
+        # unconditional and unrelated to check (f) — filtered out here so
+        # this assertion stays about what it was written to prove.
+        infos = [i for i in self.findings(result.stdout, "Info") if "check (g)" not in i]
+        self.assertEqual(infos, [], result.stdout)
 
     def test_a_root_fallback_glob_resolves_and_is_reported_as_info(self):
         # `assets/` sits at the ROOT, not next to the document -- the same

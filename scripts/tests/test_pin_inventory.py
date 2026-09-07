@@ -1228,6 +1228,8 @@ class PinMarkerInventoryTest(unittest.TestCase):
               "mention-only-ids-index"),
              ("test_instinct_registers_agree.py", "set",
               "mention-only-ids-sampler"),
+             ("test_manual_lint_check_g.py", "set",
+              "wired-roots-check-g-clean"),
              ("test_pin_inventory.py", "derived", "fixture-corpus-site-counts"),
              ("test_pin_inventory.py", "set", "divergent-shape-methods"),
              ("test_pin_inventory.py", "set", "fixture-corpus-exclusion"),
