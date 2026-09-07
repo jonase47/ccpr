@@ -462,6 +462,24 @@ while [ "$ci" -lt "$CHECK_COUNT" ]; do
           # extra "root does not exist" stderr notice, not a failure (a
           # missing root scans 0 files and stays exit 0 — manual-lint.sh's
           # own EmptyScopeTest contract).
+          #
+          # CCP-1163: manual-lint.sh now also accepts a single FILE as a
+          # root (see test_manual_lint_single_file_root.py), which closes
+          # the second half of the same gap — four loose top-level
+          # documents (CLAUDE.md, instincts.md, README.md,
+          # docs/PROJECT_PHASES.md) and the shipped scripts/ tree carried
+          # the identical kind:/parent_index: contract (or, for
+          # scripts/, check (g)'s wider *.md/*.py/*.sh scope) and were
+          # entirely unwired — measured clean at 1aa705c (checks a/b/c/f:
+          # zero findings on all five; scripts/ has no *.md files at all,
+          # the same "empty scope" state handbook/ already tolerates for a
+          # foreign project). `docs/` as a WHOLE is deliberately NOT wired
+          # here: it carries pre-existing derived-count-marker errors
+          # under the gitignored docs/memory/** persona-notes tree (never
+          # part of this repository's tracked corpus, and out of this
+          # item's scope) — wiring the single file that needs the guard
+          # (docs/PROJECT_PHASES.md) is the targeted fix, not the whole
+          # tree.
           manual-lint)
             invoke_args=(
               "$PROJECT_DIR/handbook"
@@ -469,6 +487,11 @@ while [ "$ci" -lt "$CHECK_COUNT" ]; do
               "$PROJECT_DIR/agents"
               "$PROJECT_DIR/templates"
               "$PROJECT_DIR/instincts"
+              "$PROJECT_DIR/CLAUDE.md"
+              "$PROJECT_DIR/instincts.md"
+              "$PROJECT_DIR/README.md"
+              "$PROJECT_DIR/docs/PROJECT_PHASES.md"
+              "$PROJECT_DIR/scripts"
             )
             ;;
           doc-volume-check)            invoke_args=("$PROJECT_DIR/docs") ;;
