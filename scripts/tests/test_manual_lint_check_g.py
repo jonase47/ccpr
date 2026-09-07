@@ -173,6 +173,27 @@ ENV_VAR = "CCPR_LINT_FORBIDDEN_PROSE"
 # it, so a future edit to the real corpus that needs a new exemption has
 # exactly one call site to change.
 def forbidden_prose_config():
+    """CCPR's own check-(g) configuration, carried here so the guard runs in CI
+    without anyone's personal `~/.claude/memory-sync.json`.
+
+    NOTHING IS ADDED TO THESE THREE LISTS UNASKED (PO decision 07.09.2026, after
+    Olli's review of CCP-1151 stage 4). Every entry EXCUSES an occurrence, so
+    growing a list is LOOSENING the guard, and it is the one edit here that can
+    make a real regression pass in silence. An entry therefore needs a named
+    reason and a decision behind it -- not a green suite, which a new entry
+    produces by construction.
+
+    The direction that gets this wrong is always the same: a check fires on
+    something legitimate, and the cheapest way to green is to widen the excuse
+    rather than to ask whether the finding is real. If a new occurrence trips
+    check (g), the first question is whether the word belongs there at all.
+
+    This is a comment, and a comment cannot go red -- so it is not a control.
+    Making it one means pinning these lists the way `KNOWN_POST_CONTRACT_EDITS`
+    in `test_agent_frontmatter.py` is pinned, so that any growth reddens until
+    it is written down deliberately. Recorded here as the known next step rather
+    than done silently.
+    """
     return [
         {
             "term": "skill",
