@@ -1229,6 +1229,10 @@ class PinMarkerInventoryTest(unittest.TestCase):
              ("test_instinct_registers_agree.py", "set",
               "mention-only-ids-sampler"),
              ("test_manual_lint_check_g.py", "set",
+              "forbidden-prose-context-entries"),
+             ("test_manual_lint_check_g.py", "set",
+              "forbidden-prose-spent-entries"),
+             ("test_manual_lint_check_g.py", "set",
               "wired-roots-check-g-clean"),
              ("test_pin_inventory.py", "derived", "fixture-corpus-site-counts"),
              ("test_pin_inventory.py", "set", "divergent-shape-methods"),
@@ -1994,12 +1998,31 @@ SAME_SHAPE_MULTI_SITE_METHODS = frozenset({
 
 # Markers that name no pin-shaped assertion at all. LEGAL, and the register is
 # here so the population is visible rather than merely permitted: a marker must
-# be allowed on a pin `find_sites` cannot see (boundary clause gap 8), and both
-# entries below are exactly that. Nothing enforces marker-implies-site and
-# nothing should -- but an unbound marker is also what a MISPLACED marker looks
-# like from here, so the two have to be told apart by a person, once, and
-# recorded.
+# be allowed on a pin `find_sites` cannot see. Nothing enforces marker-implies-
+# site and nothing should -- but an unbound marker is also what a MISPLACED
+# marker looks like from here, so the two have to be told apart by a person,
+# once, and recorded.
+#
+# Two reasons sit in this set, not one:
+#
+# * boundary clause gap 8 -- a DECLARED side computed from a register rather
+#   than written out (`fixture-corpus-exclusion`, `origin-tracking-form-table`
+#   above: both declared sides are a set intersection / comprehension).
+# * CCP-1163's two entries below are the opposite shape: the DECLARED side is
+#   a plain literal (`PINNED_CONTEXT_ENTRIES` / `KNOWN_SPENT_CONTEXT_ENTRIES`,
+#   both satisfy `stores_a_value` cleanly) and the MEASURED side is the one
+#   `_taint` cannot follow -- `context_entries(forbidden_prose_config())` and
+#   the loop-built `measured_spent` never touch `__file__`, `REPO_ROOT`, or any
+#   name the module-scope fixpoint marks repo-derived, because
+#   `forbidden_prose_config()` is a hand-written Python literal, not a file
+#   this repository ships and reads at runtime. What these two pins actually
+#   guard is two hand-maintained structures in the SAME FILE staying in sync
+#   with each other, not a fact about the wider tree -- a shape this pattern
+#   was never built to see, distinct from and not on the documented 8-item
+#   gap list.
 UNBOUND_MARKERS = frozenset({
+    ('test_manual_lint_check_g.py', 'set', 'forbidden-prose-context-entries'),
+    ('test_manual_lint_check_g.py', 'set', 'forbidden-prose-spent-entries'),
     ('test_pin_inventory.py', 'set', 'fixture-corpus-exclusion'),
     ('test_pin_inventory.py', 'set', 'origin-tracking-form-table'),
 })
@@ -2217,10 +2240,12 @@ class MarkerBindsToOneAssertionTest(unittest.TestCase):
         self.assertEqual([("probe.py", 3, "set", "stray-id")], unbound)
 
     def test_the_unbound_markers_in_the_corpus_are_the_registered_ones(self):
-        """The live half. Both entries sit on gap-8 sites -- a declared side
-        computed from a register, which carries a marker and is not a
-        candidate. Registered rather than merely tolerated, because an unbound
-        marker and a MISPLACED marker look identical from here."""
+        """The live half. Two entries sit on gap-8 sites (a declared side
+        computed from a register); the CCP-1163 pair sit on the opposite
+        shape (a plain declared literal, an unfollowable measured side) --
+        UNBOUND_MARKERS' own comment names both. Registered rather than
+        merely tolerated, because an unbound marker and a MISPLACED marker
+        look identical from here."""
         _bound, unbound = bind_markers(all_sites(), all_markers())
         assert_set_matches(  # pin: set unbound-markers
             self, UNBOUND_MARKERS,

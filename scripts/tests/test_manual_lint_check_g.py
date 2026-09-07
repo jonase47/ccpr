@@ -150,6 +150,66 @@ argues against `count` for anything that legitimately grows: this
 configuration will keep excusing more occurrences as the corpus grows, and
 the floor only fires if today's stock of legitimately-excused text
 disappears.
+
+## The pin, the exhaustion half, and the `why`-field decision (CCP-1163)
+
+`ForbiddenProseContextEntriesPinTest` turns this function's own docstring
+rule ("NOTHING IS ADDED TO THESE THREE LISTS UNASKED") into a control:
+`PINNED_CONTEXT_ENTRIES` is a set-membership pin (ADR-0012 "set" group) over
+every `(term, list_name, value)` triple the config carries, so an add, a
+removal, or a same-length SWAP all redden it -- never a scalar count, which
+G-168 already names as blind to exactly the swap case.
+`RealCorpusRegressionTest.test_every_pinned_context_entry_still_excuses_a_
+real_occurrence` is the exhaustion half: every pinned entry must, on its own,
+turn at least one real occurrence in the tracked tree into a check-(g) error
+when removed -- measured by a real subprocess run against the `git archive
+HEAD` snapshot this class already builds, never asserted plausible.
+
+That measurement found five entries -- `skill.md`, `SKILL.md`, `SKILL
+system filenames`, `skill-interface`, `not a missed rename` -- that excuse
+nothing TODAY that some other still-configured entry does not already
+excuse (manual-lint.sh's `g_line_has_any` excuses a whole LINE the instant
+ANY configured `lineContains` phrase matches it, and each of these five
+co-occurs on every real line/file it would excuse with a sibling entry that
+is still configured). This item's own boundary is "make the lists
+tamper-evident, do not re-tune them" -- so they stay configured, reported
+rather than fixed, and pinned by name in `KNOWN_SPENT_CONTEXT_ENTRIES` (that
+constant's own comment carries the full reasoning) so the finding is
+tracked rather than silently re-discovered or silently accepted.
+
+**A named residual risk (code-reviewer, CCP-1163)**: `KNOWN_SPENT_CONTEXT_
+ENTRIES` is a review-discipline control, not a mechanical one, exactly like
+`KNOWN_STRAY_FINDINGS` above and `KNOWN_POST_CONTRACT_EDITS` in
+test_agent_frontmatter.py. This test cannot distinguish "spent for the
+`g_line_has_any` co-occurrence reason documented above" from "a future
+contributor added a genuinely newly-broken entry straight to this list to
+turn a red exhaustion subTest green" -- both look identical to the
+assertion. The only guard is a human reading the diff at commit time.
+Adding a name here is not a decision to fix silently; it is a decision to
+report, which this docstring and `KNOWN_SPENT_CONTEXT_ENTRIES`'s own
+comment are what make that reportable.
+
+**The `why`-field question, decided**: `conformance-run.sh`'s pins require a
+mandatory `why` string, printed beside a violation (ADR-0010 SS5). This item
+asked whether check (g)'s three lists should carry the same. Decided NO for
+`templates/memory-sync.example.json`'s `lint.forbiddenProse` schema -- that
+shape is the ADOPTER-FACING contract (a project writes its OWN retired-word
+config there), and adding a mandatory field to it changes what every
+downstream CCPR project must write, which is a schema change this item's
+scope does not cover; it is also not this item's decision to make on behalf
+of every adopter's own tooling preference. Decided YES in spirit, but NO in
+STRUCTURE, for CCPR's own configuration in `forbidden_prose_config()` above:
+a `why` travels as a comment at the addition site, the same convention
+`KNOWN_POST_CONTRACT_EDITS` already uses in test_agent_frontmatter.py (an
+inline comment above each tuple, not a schema field) -- and the reason a
+structural field does not fit here is granularity: `PINNED_CONTEXT_ENTRIES`
+pins one entry per STRING VALUE inside a list, not per config object, so a
+`why` field would need one per value, which is exactly what a grouped
+comment block already gives for free without inventing a fourth key
+(`term`/`tokenContexts`/`lineContains`/`pathContains`, now `why`) that
+`MalformedConfigTest.test_unknown_key_is_refused` would then have to accept
+only in this test module and nowhere else, a divergence between CCPR's own
+config and the schema it ships that seems worse than the discipline it buys.
 """
 
 import json
@@ -219,6 +279,143 @@ def forbidden_prose_config():
             ],
         }
     ]
+
+
+# CCP-1163: forbidden_prose_config()'s docstring says the three context
+# lists "do not grow unasked" (PO decision 07.09.2026), but a docstring is a
+# comment and a comment cannot go red -- see docs/decisions/2026-09-05_
+# skill-terminology-classification.md Section 13.2 for the identical lesson
+# from CCP-1151 ("a register note cannot go red, so the note was not a
+# control") and KNOWN_POST_CONTRACT_EDITS in test_agent_frontmatter.py for
+# the pin/exhaustion shape this follows.
+#
+# PINNED_CONTEXT_ENTRIES is a set-membership pin (ADR-0012 "set" group) over
+# every (term, list_name, value) triple forbidden_prose_config() currently
+# carries. context_entries() flattens the config's list-of-dict shape into
+# that triple because dicts and lists are unhashable and cannot sit in a
+# frozenset directly -- the triple is also the smallest unit a set-diff
+# failure message can name (ForbiddenProseContextEntriesPinTest reports
+# exactly which term/list/value arrived or left, never a bare count).
+#
+def context_entries(config):
+    """Flattens forbidden_prose_config()'s list-of-dict shape into the
+    (term, list_name, value) triples PINNED_CONTEXT_ENTRIES compares
+    against."""
+    out = set()
+    for entry in config:
+        term = entry["term"]
+        for list_name in ("tokenContexts", "lineContains", "pathContains"):
+            for value in entry.get(list_name, []):
+                out.add((term, list_name, value))
+    return out
+
+
+def _config_without_entry(config, term, list_name, value):
+    """A copy of `config` with exactly one context-list VALUE removed from
+    the matching term entry -- the mutation the exhaustion test measures
+    against. Never touches the real forbidden_prose_config() function."""
+    mutated = []
+    for entry in config:
+        entry_copy = dict(entry)
+        if entry_copy.get("term") == term and list_name in entry_copy:
+            entry_copy[list_name] = [
+                v for v in entry_copy[list_name] if v != value
+            ]
+        mutated.append(entry_copy)
+    return mutated
+
+
+PINNED_CONTEXT_ENTRIES = frozenset({
+    # tokenContexts -- TokenContextPrefixTest's four measured real-corpus
+    # spellings of the frozen `subskill:` field key (module docstring,
+    # "The three context lists" section).
+    ("skill", "tokenContexts", "sub"),
+    ("skill", "tokenContexts", "sub-"),
+
+    # lineContains -- literal, case-sensitive phrases copied verbatim from
+    # the real corpus this config was measured against (module docstring).
+    ("skill", "lineContains", "Agent Skills"),
+    ("skill", "lineContains", "skill.md"),
+    ("skill", "lineContains", "SKILL.md"),
+    ("skill", "lineContains", "SKILL system filenames"),
+    ("skill", "lineContains", "skill-interface"),
+    ("skill", "lineContains", "not a missed rename"),
+    ("skill", "lineContains", '"skill" was swept out'),
+    ("skill", "lineContains",
+     "CCPR's prose \"skill\" collided with the vendor's"),
+    ("skill", "lineContains", "Lean-Track introduced (parallel to Full-Track)"),
+
+    # pathContains -- whole-file exemptions for protocol documents and
+    # fixtures that pin a pre-sweep literal on purpose (module docstring).
+    ("skill", "pathContains", "CHANGELOG.md"),
+    ("skill", "pathContains", "docs/adr/"),
+    ("skill", "pathContains", "docs/CONSTITUTION.md"),
+    ("skill", "pathContains", "scripts/tests/"),
+    ("skill", "pathContains", "instincts/external.md"),
+    ("skill", "pathContains", "hooks/agent-monitor.py"),
+})
+
+
+# CCP-1163 finding, REPORTED and NOT re-tuned (this item's own boundary:
+# "do not change what check (g) detects, and do not change which
+# occurrences it currently excuses"). These five lineContains entries are
+# measured, TODAY, to excuse no real occurrence that some OTHER already-
+# configured entry does not also excuse -- not because the phrase never
+# appears, but because manual-lint.sh:848's `g_line_has_any` excuses a whole
+# LINE the instant ANY configured lineContains phrase matches it, and every
+# real line/file these five would excuse already carries a second, still-
+# configured phrase alongside them:
+#   - "skill.md" / "SKILL.md" / "SKILL system filenames" all three appear
+#     together on instincts.md:87 and instincts/external.md:37/40/44 (the
+#     latter also whole-file-excused by pathContains "instincts/
+#     external.md"); scripts/tests/test_instinct_registers_agree.py and this
+#     module's own file are whole-file-excused by pathContains
+#     "scripts/tests/" regardless.
+#   - "skill-interface" appears only in CHANGELOG.md and docs/adr/**/
+#     docs/CONSTITUTION.md -- every site already whole-file-excused by
+#     pathContains.
+#   - "not a missed rename" appears only on lines whose "skill" occurrence
+#     is inside "subskill" (the frozen field key), already excused by
+#     tokenContexts "sub".
+# A future, narrower occurrence (e.g. a line naming "SKILL.md" without also
+# naming "skill.md") could still need exactly one of these -- removing them
+# now would be a re-tuning decision, not a tamper-evidence one, so they stay
+# configured. This set is the load-bearing half of the exhaustion proof:
+# ForbiddenProseContextEntryExhaustionTest measures it fresh every run and
+# reddens the moment the SET of currently-spent entries changes in either
+# direction -- a new spent entry, or one of these five becoming load-bearing
+# again -- rather than silently tolerating drift the way an unpinned "it
+# looks fine" would.
+KNOWN_SPENT_CONTEXT_ENTRIES = frozenset({
+    ("skill", "lineContains", "skill.md"),
+    ("skill", "lineContains", "SKILL.md"),
+    ("skill", "lineContains", "SKILL system filenames"),
+    ("skill", "lineContains", "skill-interface"),
+    ("skill", "lineContains", "not a missed rename"),
+})
+
+
+class ForbiddenProseContextEntriesPinTest(unittest.TestCase):
+    """G-160/ADR-0012: forbidden_prose_config()'s three exemption lists may
+    not grow, shrink, or swap an entry without this pin being edited in the
+    SAME commit -- the docstring's rule ("NOTHING IS ADDED TO THESE THREE
+    LISTS UNASKED") made enforceable rather than merely stated."""
+
+    def test_pinned_context_entries_match_the_config(self):
+        import sys as _sys
+        # Local import rather than a module-level one: CONTRIBUTING.md pins
+        # in prose how many modules fail to import without `-t .`, and a new
+        # module-level import edge moves those numbers (same reasoning as
+        # test_absence_only_assertions.py's identical local import).
+        _sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from pin_registry import assert_set_matches
+
+        assert_set_matches(  # pin: set forbidden-prose-context-entries
+            self,
+            PINNED_CONTEXT_ENTRIES,
+            context_entries(forbidden_prose_config()),
+            "check (g)'s allowed-context entries",
+        )
 
 
 # The roots check-all.sh now wires manual-lint.sh to (this cut), plus
@@ -732,6 +929,72 @@ class RealCorpusRegressionTest(unittest.TestCase):
             f"expected at least {EXCUSED_OCCURRENCE_FLOOR} excused "
             f"occurrences, measured {excused} ({total} total, "
             f"{error_count} check-(g) errors)",
+        )
+
+    def test_every_pinned_context_entry_still_excuses_a_real_occurrence(self):
+        """Exhaustion for PINNED_CONTEXT_ENTRIES -- the second half of the
+        pin, KNOWN_POST_CONTRACT_EDITS's shape in test_agent_frontmatter.py.
+        A pin stops a list growing silently; this stops a SPENT entry
+        lingering as a blanket excuse with nothing behind it, where the next
+        drift would hide. An entry earns its place only if REMOVING it turns
+        at least one real occurrence in THIS ARCHIVED SNAPSHOT into a
+        check-(g) error -- measured fresh via a real subprocess run against
+        the same `git archive HEAD` snapshot this class already built,
+        never guessed or asserted plausible.
+
+        KNOWN_SPENT_CONTEXT_ENTRIES (CCP-1163 finding, its own comment above
+        explains why and reports rather than fixes it) are measured here
+        too, not skipped -- every entry gets exactly one subprocess pass
+        either way. An entry named there is asserted NOT-load-bearing
+        instead of load-bearing, so this test still reddens the moment one
+        of the five quietly becomes the sole excuse for something (a real
+        gain, caught the same as a real loss) or a SIXTH entry goes spent
+        without being named."""
+        full_config = forbidden_prose_config()
+        baseline = check_g_errors(
+            run_lint(self.archive_dir, config=full_config).stdout
+        )
+        measured_spent = set()
+
+        for term, list_name, value in sorted(PINNED_CONTEXT_ENTRIES):
+            mutated_config = _config_without_entry(
+                full_config, term, list_name, value
+            )
+            mutated = check_g_errors(
+                run_lint(self.archive_dir, config=mutated_config).stdout
+            )
+            is_load_bearing = len(mutated) > len(baseline)
+            if (term, list_name, value) in KNOWN_SPENT_CONTEXT_ENTRIES:
+                with self.subTest(
+                    term=term, list_name=list_name, value=value,
+                    expect="known-spent",
+                ):
+                    self.assertFalse(
+                        is_load_bearing,
+                        "{}/{} {!r} is pinned in KNOWN_SPENT_CONTEXT_ENTRIES "
+                        "as non-load-bearing, but removing it DID turn a "
+                        "real occurrence into a check-(g) error -- it has "
+                        "become load-bearing again and belongs off that "
+                        "list".format(term, list_name, value),
+                    )
+            else:
+                with self.subTest(term=term, list_name=list_name, value=value):
+                    self.assertTrue(
+                        is_load_bearing,
+                        "{}/{} {!r} excuses no real occurrence in this tree "
+                        "-- removing it produced no new check-(g) finding, "
+                        "so it is a spent entry".format(term, list_name, value),
+                    )
+            if not is_load_bearing:
+                measured_spent.add((term, list_name, value))
+
+        import sys as _sys
+        _sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from pin_registry import assert_set_matches
+
+        assert_set_matches(  # pin: set forbidden-prose-spent-entries
+            self, KNOWN_SPENT_CONTEXT_ENTRIES, measured_spent,
+            "check (g)'s currently non-load-bearing context entries",
         )
 
 

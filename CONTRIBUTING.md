@@ -84,8 +84,8 @@ python3 -m unittest discover -s scripts/tests -t .
 
 - **`-t .` is not optional**, and the failure mode is worth knowing because it is
   partly silent. It sets the top-level directory imports resolve against. Measured
-  on the current tree (07.09.2026): **with** it, discovery collects **2745 tests, 0
-  import errors**, exit 0; **without** it, **2028 tests and 17 modules that fail to
+  on the current tree (07.09.2026): **with** it, discovery collects **2747 tests, 0
+  import errors**, exit 0; **without** it, **2030 tests and 17 modules that fail to
   import**, exit 1 — the eight that use a relative import
   (`from .test_phase_docs_lint import …` in four modules,
   `from .test_artifact_gate import …` in two,
@@ -108,7 +108,7 @@ python3 -m unittest discover -s scripts/tests -t .
 
   **Re-measure these numbers when you change them, rather than adjusting one.** The
   pair is the point: 2698 alone says nothing, and the four figures have now been
-  found stale together ten times — the file claimed 1691 / 1185 / 14 / ~510
+  found stale together eleven times — the file claimed 1691 / 1185 / 14 / ~510
   against a tree at 1848 / 1339 / 15 / 509, then 1848 / 1339 / 15 / 509 against a
   tree at 1987 / 1477 / 16 / 510, then 1987 / 1477 / 16 / 510 against a tree at
   2627 / 1943 / 17 / 684, then 2627 / 1943 / 17 / 684 against a tree at
@@ -118,8 +118,9 @@ python3 -m unittest discover -s scripts/tests -t .
   2699 / 1982 / 17 / 717, then 2699 / 1982 / 17 / 717 against a tree at
   2729 / 2012 / 17 / 717, then 2729 / 2012 / 17 / 717 against a tree at
   2730 / 2013 / 17 / 717, then 2730 / 2013 / 17 / 717 against a tree at
-  2733 / 2016 / 17 / 717, and now 2733 / 2016 / 17 / 717 against a tree at
-  2745 / 2028 / 17 / 717 — the seventh round running in which the skipped figure did
+  2733 / 2016 / 17 / 717, then 2733 / 2016 / 17 / 717 against a tree at
+  2745 / 2028 / 17 / 717, and now 2745 / 2028 / 17 / 717 against a tree at
+  2747 / 2030 / 17 / 717 — the eighth round running in which the skipped figure did
   NOT move with the others, because the same delta lands on both sides of its
   subtraction. These runs, back to back, take about eleven minutes.
 - The full run takes **a couple of minutes**. If you drive it from an agent whose
