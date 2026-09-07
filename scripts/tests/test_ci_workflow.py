@@ -92,6 +92,11 @@ FAILING_EXIT_RE = re.compile(r"\bexit\s+1\b")
 BASH_VERSION_TOKEN = "BASH_VERSION"
 FLOOR_PREFIX_TOKEN = "3.2"
 JUSTIFICATION_ANCHOR = "test_agent_frontmatter.py"
+BRANCHES_LIST_RE = re.compile(r"^\s*branches:\s*\[(.*)\]\s*$")
+REQUIRED_PUSH_BRANCHES = frozenset({"main", "ticket/**"})
+CONCURRENCY_GROUP_RE = re.compile(r"^\s*group:\s*(.+?)\s*$")
+CANCEL_IN_PROGRESS_RE = re.compile(r"^\s*cancel-in-progress:\s*(true|false)\s*$")
+GROUP_FALLBACK_ORDER_RE = re.compile(r"github\.head_ref\s*\|\|\s*github\.ref_name")
 
 
 # --- the minimal structural reader (see module docstring) -------------------
@@ -185,6 +190,135 @@ def _comment_block_above(lines, idx, floor):
         block.append(lines[j])
         j -= 1
     return "\n".join(reversed(block))
+
+
+def _find_top_level_block(lines, key):
+    """Returns (start, end) exclusive bounds of a top-level `<key>:` block --
+    same indent-0 boundary logic `_find_jobs` uses for `jobs:`, generalised
+    to any top-level key. `start` is the line after `<key>:`; `end` is the
+    next indent-0, non-blank/non-comment line, or len(lines). Returns None
+    if the key is absent (used by `check_push_branches` for `on:`, which
+    must always exist, and `check_concurrency` for `concurrency:`, which is
+    optional -- its own absence is the violation)."""
+    key_line = None
+    for i, line in enumerate(lines):
+        if not _is_blank_or_comment(line) and _indent(line) == 0 and line.rstrip() == f"{key}:":
+            key_line = i
+            break
+    if key_line is None:
+        return None
+    end = len(lines)
+    for i in range(key_line + 1, len(lines)):
+        if not _is_blank_or_comment(lines[i]) and _indent(lines[i]) == 0:
+            end = i
+            break
+    return key_line + 1, end
+
+
+# --- the checks ---------------------------------------------------------
+
+def check_push_branches(lines):
+    """Pins the push trigger's `branches:` list as a SET, not a count --
+    CCP-1149: a length-only check cannot distinguish a removal from a
+    substitution (same list length, different branches). `ticket/**` covers
+    this repo's own `docs/CONSTITUTION.md` branch convention (every session
+    starts work on its own `ticket/**` branch); `main` must remain so a
+    direct push to `main` still triggers both jobs."""
+    block = _find_top_level_block(lines, "on")
+    if block is None:
+        return ["no top-level 'on:' key found -- cannot verify push branches"]
+    start, end = block
+    branch_line = None
+    for i in range(start, end):
+        if BRANCHES_LIST_RE.match(lines[i]):
+            branch_line = i
+            break
+    if branch_line is None:
+        return [
+            "on.push.branches: no 'branches: [...]' list found in the push "
+            "trigger -- cannot verify it covers the required branches"
+        ]
+    raw = BRANCHES_LIST_RE.match(lines[branch_line]).group(1)
+    found = frozenset(b.strip() for b in raw.split(",") if b.strip())
+    if found != REQUIRED_PUSH_BRANCHES:
+        missing = sorted(REQUIRED_PUSH_BRANCHES - found)
+        extra = sorted(found - REQUIRED_PUSH_BRANCHES)
+        detail = []
+        if missing:
+            detail.append(f"missing: {missing}")
+        if extra:
+            detail.append(f"unexpected: {extra}")
+        return [
+            f"on.push.branches: found {sorted(found)}, required exactly "
+            f"{sorted(REQUIRED_PUSH_BRANCHES)} ({'; '.join(detail)}) -- a "
+            "length-only check cannot distinguish a removal from a "
+            "substitution (same list length, different branches)"
+        ]
+    return []
+
+
+def check_concurrency(lines):
+    """CCP-1149: once `push` covers `ticket/**` alongside `pull_request:`,
+    the same commit can trigger BOTH events when a PR is open on a ticket
+    branch (a push to a branch with an open PR fires `push` AND a
+    `pull_request: synchronize`) -- every job would run twice. This pins a
+    top-level `concurrency:` block that merges those two runs into one
+    group and cancels the superseded one.
+
+    The group expression must fall back between `github.head_ref` (set only
+    on pull_request events, SHORT unprefixed branch name, e.g.
+    'ticket/CCP-1149') and `github.ref_name` (SHORT unprefixed form for push
+    events too). `github.ref` -- the FULL ref, e.g.
+    'refs/heads/ticket/CCP-1149' -- must NOT be the fallback: it is a
+    different STRING than `github.head_ref`'s value for the identical
+    branch, so a `github.head_ref || github.ref` expression would silently
+    fail to merge the push-triggered and pull_request-triggered runs of the
+    same commit into the same group -- the exact bug this check exists to
+    catch a regression into.
+    """
+    block = _find_top_level_block(lines, "concurrency")
+    if block is None:
+        return [
+            "no top-level 'concurrency:' block -- a push to a ticket "
+            "branch with an open PR fires both the push and pull_request "
+            "events for the same commit, running every job twice"
+        ]
+    start, end = block
+    group_expr = None
+    cancel_value = None
+    for i in range(start, end):
+        m = CONCURRENCY_GROUP_RE.match(lines[i])
+        if m:
+            group_expr = m.group(1)
+        m2 = CANCEL_IN_PROGRESS_RE.match(lines[i])
+        if m2:
+            cancel_value = m2.group(1)
+
+    violations = []
+    if group_expr is None:
+        violations.append("concurrency block has no 'group:' key")
+    elif not GROUP_FALLBACK_ORDER_RE.search(group_expr):
+        violations.append(
+            f"concurrency.group ({group_expr!r}) must fall back between "
+            "github.head_ref and github.ref_name, IN THAT ORDER, joined by "
+            "'||' -- both are the SHORT, unprefixed branch-name form; "
+            "github.ref is the FULL ref (refs/heads/...) and would not "
+            "equal github.head_ref's value for the same branch, silently "
+            "failing to merge the push-run's and pull_request-run's group "
+            "keys; and github.ref_name is truthy on BOTH push and "
+            "pull_request events, so head_ref||ref_name reversed to "
+            "ref_name||head_ref would never fall back to head_ref on a "
+            "pull_request run, defeating the merge just the same"
+        )
+    if cancel_value is None:
+        violations.append("concurrency block has no 'cancel-in-progress:' key")
+    elif cancel_value != "true":
+        violations.append(
+            "concurrency.cancel-in-progress is not 'true' -- the duplicate "
+            "run this block exists to prevent would keep running instead "
+            "of being cancelled"
+        )
+    return violations
 
 
 # --- the three checks, plus one bonus consistency check ---------------------
@@ -312,6 +446,8 @@ def lint_ci_workflow(path):
     violations += check_bash_version_assert(lines, jobs)
     violations += check_no_swallowed_failures(lines)
     violations += check_python_version_pinned(lines, jobs)
+    violations += check_push_branches(lines)
+    violations += check_concurrency(lines)
     return violations
 
 
@@ -529,3 +665,158 @@ class PythonVersionConsistencyMutationTest(unittest.TestCase):
             any("different python-version" in v for v in violations),
             f"mismatched python-version across jobs was not flagged: {violations}",
         )
+
+
+class PushBranchesMutationTest(unittest.TestCase):
+    def setUp(self):
+        self.text = CI_YML.read_text(encoding="utf-8")
+
+    def test_required_branches_present_in_real_file_including_main(self):
+        # Regression proxy for "push to main still triggers both jobs": this
+        # module cannot execute a real GitHub Actions run (see the module
+        # docstring's "What this module does NOT prove"), so the static
+        # proxy is -- the required set still contains "main", AND the real
+        # file's own parsed branches set equals it exactly.
+        self.assertIn("main", REQUIRED_PUSH_BRANCHES)
+        lines = self.text.split("\n")
+        block = _find_top_level_block(lines, "on")
+        self.assertIsNotNone(block, "no top-level 'on:' key found in the real file")
+        start, end = block
+        branch_line = next(i for i in range(start, end) if BRANCHES_LIST_RE.match(lines[i]))
+        found = frozenset(
+            b.strip()
+            for b in BRANCHES_LIST_RE.match(lines[branch_line]).group(1).split(",")
+            if b.strip()
+        )
+        self.assertEqual(REQUIRED_PUSH_BRANCHES, found)
+
+    def test_ticket_glob_removed_entirely_is_flagged(self):
+        mutated = _mutate_once(
+            self.text, r"branches: \[main, ticket/\*\*\]", "branches: [main]"
+        )
+        scratch = _write_scratch(self, mutated)
+        violations = lint_ci_workflow(scratch)
+        self.assertTrue(
+            any("on.push.branches" in v and "missing" in v for v in violations),
+            f"removing ticket/** from the branches list was not flagged: {violations}",
+        )
+
+    def test_ticket_glob_substituted_for_a_different_glob_is_flagged(self):
+        # Same list LENGTH as the compliant file (two entries), different
+        # SET -- exactly the case a count-only check would miss.
+        mutated = _mutate_once(
+            self.text, r"branches: \[main, ticket/\*\*\]", "branches: [main, feature/**]"
+        )
+        scratch = _write_scratch(self, mutated)
+        violations = lint_ci_workflow(scratch)
+        self.assertTrue(
+            any("on.push.branches" in v and "unexpected" in v for v in violations),
+            f"substituting ticket/** for feature/** (same length) was not flagged: {violations}",
+        )
+
+
+class ConcurrencyMutationTest(unittest.TestCase):
+    def setUp(self):
+        self.text = CI_YML.read_text(encoding="utf-8")
+
+    def test_concurrency_block_removed_entirely_is_flagged(self):
+        mutated = _mutate_once(
+            self.text,
+            r"\nconcurrency:\n  group: .*\n  cancel-in-progress: true\n",
+            "\n",
+        )
+        scratch = _write_scratch(self, mutated)
+        violations = lint_ci_workflow(scratch)
+        self.assertTrue(
+            any("no top-level 'concurrency:' block" in v for v in violations),
+            f"removing the whole concurrency block was not flagged: {violations}",
+        )
+
+    def test_cancel_in_progress_false_is_flagged(self):
+        mutated = _mutate_once(
+            self.text, r"cancel-in-progress: true", "cancel-in-progress: false"
+        )
+        scratch = _write_scratch(self, mutated)
+        violations = lint_ci_workflow(scratch)
+        self.assertTrue(
+            any("cancel-in-progress is not 'true'" in v for v in violations),
+            f"cancel-in-progress: false was not flagged: {violations}",
+        )
+
+    def test_group_expression_regressed_to_bare_github_ref_is_flagged(self):
+        # Structural regression: the fallback's SECOND operand swapped from
+        # github.ref_name (short, matches head_ref's format) to github.ref
+        # (the FULL ref, refs/heads/... -- does not match head_ref's format
+        # for the same branch). This is the exact bug the check exists to
+        # catch a regression into, per CCP-1149.
+        #
+        # Anchored to the operative "  group: " line, not a bare phrase
+        # match: the explanatory comment above the concurrency block names
+        # the very same "github.head_ref || github.ref_name" string in
+        # prose, and `_mutate_once`'s count==1 assertion only guards against
+        # ZERO matches (re.subn's count parameter caps how many it performs,
+        # not how many exist) -- an unanchored pattern would silently mutate
+        # the comment instead of the code and this test would pass for the
+        # wrong reason.
+        mutated = _mutate_once(
+            self.text,
+            r"  group: \$\{\{ github\.workflow \}\}-\$\{\{ github\.head_ref \|\| github\.ref_name \}\}\n",
+            "  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}\n",
+        )
+        scratch = _write_scratch(self, mutated)
+        violations = lint_ci_workflow(scratch)
+        self.assertTrue(
+            any("must fall back between" in v for v in violations),
+            f"regressing the fallback to bare github.ref was not flagged: {violations}",
+        )
+
+    def test_group_expression_operand_order_swapped_is_flagged(self):
+        # Structural regression, different from the bare-github.ref case
+        # above: both operands are still present -- github.head_ref AND
+        # github.ref_name -- but swapped, so the expression reads
+        # `github.ref_name || github.head_ref`. github.ref_name is the
+        # SHORT branch name on a push event too (unlike github.ref, the
+        # full ref, which is empty on neither event either -- it is a
+        # different string), so it is truthy on BOTH push and
+        # pull_request runs; the fallback to github.head_ref would never
+        # trigger on a pull_request run, defeating the merge just as
+        # surely as the bare-github.ref regression -- but a check that
+        # only tests substring membership of both names would not catch
+        # this, since both names are still present in the swapped
+        # expression.
+        #
+        # Anchored to the operative "  group: " line for the same reason
+        # as the sibling test above: the explanatory comment names both
+        # identifiers too, and an unanchored pattern could silently
+        # mutate the comment instead of the code.
+        mutated = _mutate_once(
+            self.text,
+            r"  group: \$\{\{ github\.workflow \}\}-\$\{\{ github\.head_ref \|\| github\.ref_name \}\}\n",
+            "  group: ${{ github.workflow }}-${{ github.ref_name || github.head_ref }}\n",
+        )
+        scratch = _write_scratch(self, mutated)
+        violations = lint_ci_workflow(scratch)
+        self.assertTrue(
+            any("must fall back between" in v for v in violations),
+            f"swapping the fallback operand order was not flagged: {violations}",
+        )
+
+    def test_group_key_removed_but_cancel_in_progress_kept_is_flagged(self):
+        mutated = _mutate_once(self.text, r"  group: .*\n", "")
+        scratch = _write_scratch(self, mutated)
+        violations = lint_ci_workflow(scratch)
+        self.assertTrue(
+            any("no 'group:' key" in v for v in violations),
+            f"removing only the group key was not flagged: {violations}",
+        )
+
+    def test_does_not_interact_with_swallowed_failure_check(self):
+        # The concurrency block's own tokens ('true'/'false' YAML booleans,
+        # 'github.head_ref || github.ref_name') do not contain
+        # 'continue-on-error' or '|| true' -- check_no_swallowed_failures
+        # must stay silent on the compliant file, same as
+        # RealWorkflowIsCompliantTest already proves for the whole lint,
+        # but pinned here independently so a future change to either check
+        # cannot make one mask the other.
+        lines = self.text.split("\n")
+        self.assertEqual([], check_no_swallowed_failures(lines))

@@ -18,8 +18,35 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    # `ticket/**` matches this repo's own branch convention (every session
+    # starts work on its own ticket/<ID> branch, see CLAUDE.md's "Git
+    # Workflow" section and docs/adr/ADR-0005) -- without it, a push to a
+    # ticket branch ran no CI at all; checks only fired once the branch
+    # reached `main` or a PR was opened. `main` stays so a direct push to
+    # `main` still triggers both jobs. Pinned as a SET, not a count, by
+    # scripts/tests/test_ci_workflow.py's check_push_branches -- a
+    # length-only check cannot tell a removal from a substitution.
+    branches: [main, ticket/**]
   pull_request:
+
+# A push to a ticket branch that already has an open PR fires BOTH the
+# `push` event above and a `pull_request: synchronize` event for the same
+# commit -- every job would otherwise run twice for one code change. This
+# group merges the two runs and cancels the superseded one.
+#
+# The fallback is `github.head_ref || github.ref_name`, NOT
+# `github.head_ref || github.ref`: `github.head_ref` (set only on
+# pull_request events) and `github.ref_name` (used here on push events,
+# where head_ref is unset) are both the SHORT, unprefixed branch-name form
+# ("ticket/CCP-1149"). `github.ref` is the FULL ref
+# ("refs/heads/ticket/CCP-1149") -- a different string than head_ref's
+# value for the identical branch, so falling back to it would silently
+# fail to merge the two runs' group keys despite the concurrency block
+# looking correct. Pinned by check_concurrency in
+# scripts/tests/test_ci_workflow.py.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
 
 jobs:
   python-tests:

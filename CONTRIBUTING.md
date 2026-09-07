@@ -84,8 +84,8 @@ python3 -m unittest discover -s scripts/tests -t .
 
 - **`-t .` is not optional**, and the failure mode is worth knowing because it is
   partly silent. It sets the top-level directory imports resolve against. Measured
-  on the current tree (07.09.2026): **with** it, discovery collects **2760 tests, 0
-  import errors**, exit 0; **without** it, **2043 tests and 17 modules that fail to
+  on the current tree (07.09.2026): **with** it, discovery collects **2769 tests, 0
+  import errors**, exit 0; **without** it, **2052 tests and 17 modules that fail to
   import**, exit 1 — the eight that use a relative import
   (`from .test_phase_docs_lint import …` in four modules,
   `from .test_artifact_gate import …` in two,
@@ -115,7 +115,7 @@ python3 -m unittest discover -s scripts/tests -t .
 
   **Re-measure these numbers when you change them, rather than adjusting one.** The
   pair is the point: 2698 alone says nothing, and the four figures have now been
-  found stale together thirteen times — the file claimed 1691 / 1185 / 14 / ~510
+  found stale together fourteen times — the file claimed 1691 / 1185 / 14 / ~510
   against a tree at 1848 / 1339 / 15 / 509, then 1848 / 1339 / 15 / 509 against a
   tree at 1987 / 1477 / 16 / 510, then 1987 / 1477 / 16 / 510 against a tree at
   2627 / 1943 / 17 / 684, then 2627 / 1943 / 17 / 684 against a tree at
@@ -128,10 +128,14 @@ python3 -m unittest discover -s scripts/tests -t .
   2733 / 2016 / 17 / 717, then 2733 / 2016 / 17 / 717 against a tree at
   2745 / 2028 / 17 / 717, then 2745 / 2028 / 17 / 717 against a tree at
   2747 / 2030 / 17 / 717, then 2747 / 2030 / 17 / 717 against a tree at
-  2756 / 2039 / 17 / 717, and now 2756 / 2039 / 17 / 717 against a tree at
-  2760 / 2043 / 17 / 717 — the tenth round running in which the skipped figure did
-  NOT move with the others, because the same delta lands on both sides of its
-  subtraction. These runs, back to back, take about eleven minutes.
+  2756 / 2039 / 17 / 717, then 2756 / 2039 / 17 / 717 against a tree at
+  2760 / 2043 / 17 / 717, and now 2760 / 2043 / 17 / 717 against a tree at
+  2769 / 2052 / 17 / 717 — the eleventh round running in which the skipped figure
+  did NOT move with the others, because CCP-1149's nine new tests
+  (`scripts/tests/test_ci_workflow.py`'s push-branches and concurrency-block
+  mutation classes) import cleanly with or without the flag, so the addition
+  lands on both sides of the subtraction and cancels, same as every round since
+  05.09.2026. These runs, back to back, take about eleven minutes.
 - The full run takes **a couple of minutes**. If you drive it from an agent whose
   tool calls time out, start it in the background and wait for it once rather than
   polling.
