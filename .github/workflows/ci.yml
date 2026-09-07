@@ -44,6 +44,15 @@ on:
 # fail to merge the two runs' group keys despite the concurrency block
 # looking correct. Pinned by check_concurrency in
 # scripts/tests/test_ci_workflow.py.
+# CONSEQUENCE FOR READING THE RESULT, measured on this change's own PR: a
+# ticket branch with an open PR now has TWO runs, and the cancelled one stays
+# visible. `gh pr checks <n>` therefore lists four entries -- two `pass` from
+# the pull_request run and two `fail` from the cancelled push run -- and
+# whoever reads the TAIL of that output concludes the PR is red when it is
+# green. Its EXIT CODE is still 0, so a script is fine; a human, or a summary
+# that quotes the last lines, is not. Read the conclusion per run
+# (`gh run list --branch <b>`) or the rollup (`gh pr view --json
+# statusCheckRollup`), never the tail of `gh pr checks`.
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: true
