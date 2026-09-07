@@ -601,13 +601,33 @@ fi
 
 for ROOT in "${ROOTS[@]}"; do
 
-# Collect files. A missing ROOT is not distinguished from an existing-but-
-# empty one in FILES_TOTAL — both end up scanning zero files — but the
-# stderr notice below names which of the two it was, since "0 files
-# scanned, 0 errors" would otherwise read as a clean pass either way
-# (WI-0090/WI-0121 convention: an empty scan says so on stderr, not silence).
+# Collect files. CCP-1163: ROOT may now be a single FILE, not only a
+# directory — manual-lint.sh describes itself as "generic over ANY
+# documentation root", and a lone top-level document (CLAUDE.md,
+# instincts.md, a script) is a legitimate root of exactly one file, not a
+# degenerate directory. A FILE root contributes itself when it matches
+# *.md (the shape checks (a)/(b)/(c)/(f) understand); a file root that does
+# NOT match *.md — a shell script, say — correctly contributes nothing to
+# THIS array (check (g) below has its own, wider match), the same "empty
+# scope" state a directory with no markdown files already produces, not a
+# new state.
+#
+# A missing ROOT is not distinguished from an existing-but-empty one in
+# FILES_TOTAL — both end up scanning zero files — but the stderr notice
+# below names which of the two it was, since "0 files scanned, 0 errors"
+# would otherwise read as a clean pass either way (WI-0090/WI-0121
+# convention: an empty scan says so on stderr, not silence). The existence
+# test for that notice is `-e` (any kind of directory entry), never the
+# old `! -d` — that test misreported an EXISTING file as "does not exist"
+# solely because a file fails `-d`, the exact defect that made
+# `bash scripts/manual-lint.sh instincts.md` read as a missing root before
+# this fix.
 FILES=()
-if [[ -d "$ROOT" ]]; then
+if [[ -f "$ROOT" ]]; then
+    case "$ROOT" in
+        *.md) FILES=("$ROOT") ;;
+    esac
+elif [[ -d "$ROOT" ]]; then
     while IFS= read -r line; do
         FILES+=("$line")
     done < <(find "$ROOT" -type f -name "*.md")
@@ -616,7 +636,7 @@ ROOT_FILES_TOTAL=${#FILES[@]}
 FILES_TOTAL=$((FILES_TOTAL + ROOT_FILES_TOTAL))
 
 if [[ "$ROOT_FILES_TOTAL" -eq 0 ]]; then
-    if [[ ! -d "$ROOT" ]]; then
+    if [[ ! -e "$ROOT" ]]; then
         echo "manual-lint: root '$ROOT' does not exist" >&2
     else
         echo "manual-lint: no markdown files found under $ROOT" >&2
@@ -628,15 +648,40 @@ fi
 # per-file loop below) works against the SAME base regardless of whether
 # ROOT itself was given relative or absolute on the command line. Only
 # computed when ROOT exists — find() above already left FILES empty for a
-# missing ROOT, so this is unreachable in that case.
+# missing ROOT, so this is unreachable in that case. For a FILE root,
+# ROOT_ABS is the file's PARENT directory (not the file itself, which `cd`
+# would reject) — display_rel()'s "strip the `$r/` prefix" contract below
+# needs a directory on the left of that slash either way, directory root
+# or file root.
 ROOT_ABS=""
-if [[ -d "$ROOT" ]]; then
+if [[ -f "$ROOT" ]]; then
+    ROOT_ABS="$(cd "$(dirname "$ROOT")" && pwd)"
+    ROOTS_ABS+=("$ROOT_ABS")
+elif [[ -d "$ROOT" ]]; then
     ROOT_ABS="$(cd "$ROOT" && pwd)"
     ROOTS_ABS+=("$ROOT_ABS")
 fi
 
 for file in ${FILES[@]+"${FILES[@]}"}; do
-    rel="${file#$ROOT/}"
+    # code-reviewer finding (CCP-1163, second cut): for a FILE root, $file
+    # equals $ROOT exactly (no trailing path component) — the
+    # `${file#$ROOT/}` strip pattern never matches (it requires a literal
+    # "/" right after $ROOT), so $rel silently stayed the full, unstripped
+    # $ROOT string. Harmless when $ROOT is given relative on the command
+    # line, but check-all.sh resolves its own PROJECT_DIR to an ABSOLUTE
+    # path (`pwd -P`) before building every root argument — so every real
+    # invocation of a newly wired file root (CLAUDE.md, instincts.md, ...)
+    # leaked the full local filesystem path into every report line, the
+    # exact thing the directory case's own `rel`/`gfile_display` comments
+    # elsewhere in this file commit to never doing. A file root has no
+    # "inside" to report a path relative TO — its own basename IS its full
+    # identity, the same answer check (g)'s `gfile_display` already reaches
+    # for the identical case.
+    if [[ -f "$ROOT" ]]; then
+        rel="$(basename "$ROOT")"
+    else
+        rel="${file#$ROOT/}"
+    fi
     base_dir="$(dirname "$file")"
 
     # (c) kind: vocabulary — opt-in, only fires when kind: is actually set.
@@ -771,12 +816,21 @@ done
 # (g) forbidden-prose terms — scanned over *.md/*.py/*.sh under THIS root,
 # only when at least one term is configured (LINT_TERMS empty means "not
 # configured", see lint_load_forbidden_prose above — no find() cost paid
-# for a check nobody turned on).
-if [[ ${#LINT_TERMS[@]} -gt 0 && -d "$ROOT" ]]; then
+# for a check nobody turned on). CCP-1163: a FILE root contributes itself
+# when it matches one of the three extensions — same shape as the
+# checks-(a)/(b)/(c)/(f) FILES array above, just against check (g)'s wider
+# extension set.
+if [[ ${#LINT_TERMS[@]} -gt 0 ]] && { [[ -d "$ROOT" ]] || [[ -f "$ROOT" ]]; }; then
     G_FILES=()
-    while IFS= read -r gline; do
-        G_FILES+=("$gline")
-    done < <(find "$ROOT" -type f \( -name "*.md" -o -name "*.py" -o -name "*.sh" \))
+    if [[ -f "$ROOT" ]]; then
+        case "$ROOT" in
+            *.md|*.py|*.sh) G_FILES=("$ROOT") ;;
+        esac
+    else
+        while IFS= read -r gline; do
+            G_FILES+=("$gline")
+        done < <(find "$ROOT" -type f \( -name "*.md" -o -name "*.py" -o -name "*.sh" \))
+    fi
 
     for gfile in ${G_FILES[@]+"${G_FILES[@]}"}; do
         grel="${gfile#$ROOT/}"
@@ -801,7 +855,20 @@ if [[ ${#LINT_TERMS[@]} -gt 0 && -d "$ROOT" ]]; then
         # the repository-relative shape pathContains entries are written
         # against without exposing anything above the root the operator
         # actually pointed this script at.
-        gfile_display="$(basename "$ROOT_ABS")/$grel"
+        #
+        # CCP-1163: a FILE root has no "inside" to strip $ROOT/ off of —
+        # $grel above stayed the full, unstripped $gfile (identical to
+        # $ROOT, the single file this root names). The directory case's
+        # own safety property — never expose anything ABOVE the level the
+        # operator pointed this script at — is reproduced here the same
+        # way: just the file's OWN basename, never $ROOT_ABS (that would be
+        # the file's PARENT directory per the ROOT_ABS computation above,
+        # a level this script was never asked to scan).
+        if [[ -f "$ROOT" ]]; then
+            gfile_display="$(basename "$ROOT")"
+        else
+            gfile_display="$(basename "$ROOT_ABS")/$grel"
+        fi
         for ((ti = 0; ti < ${#LINT_TERMS[@]}; ti++)); do
             term="${LINT_TERMS[$ti]}"
 
@@ -851,7 +918,23 @@ if [[ ${#LINT_TERMS[@]} -gt 0 && -d "$ROOT" ]]; then
                     if g_line_has_any "$gline" "${LINT_LINES[$ti]}"; then
                         continue
                     fi
-                    err "$grel:$g_line_no:$((off + 1)) — forbidden prose term '$term' found outside its configured allowed contexts (lint.forbiddenProse) — excuse it via tokenContexts/lineContains/pathContains, or fix the wording"
+                    # CCP-1163 (second cut, code-reviewer finding): the
+                    # reported path was always $grel here, which — for a
+                    # FILE root — is the unstripped, potentially-absolute
+                    # $ROOT itself (see the comment on $grel above), never
+                    # fixed even after $gfile_display already computed the
+                    # correct basename-only display for the pathContains
+                    # test just above. $gfile_display for the DIRECTORY
+                    # case is deliberately NOT substituted here too — it
+                    # carries an extra root-basename prefix ($grel does
+                    # not) that would change every existing directory-root
+                    # report's path shape, a wider behaviour change than
+                    # this fix is scoped to.
+                    if [[ -f "$ROOT" ]]; then
+                        err "$gfile_display:$g_line_no:$((off + 1)) — forbidden prose term '$term' found outside its configured allowed contexts (lint.forbiddenProse) — excuse it via tokenContexts/lineContains/pathContains, or fix the wording"
+                    else
+                        err "$grel:$g_line_no:$((off + 1)) — forbidden prose term '$term' found outside its configured allowed contexts (lint.forbiddenProse) — excuse it via tokenContexts/lineContains/pathContains, or fix the wording"
+                    fi
                 done
             done
         done

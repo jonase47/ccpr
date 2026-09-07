@@ -891,7 +891,7 @@ class NoStaleKnownFindingsTest(unittest.TestCase):
 
 class ClassificationCountsTest(unittest.TestCase):
     def test_classification_counts(self):
-        """Regression pin on the measured baseline: 1352 `test_*` methods
+        """Regression pin on the measured baseline: 1361 `test_*` methods
         across the corpus call something shaped like a subprocess invocation
         and are therefore in scope for this check; 0 of those are currently
         absence-only-needs-exemption -- `KNOWN_FINDINGS` above is empty for
@@ -905,6 +905,28 @@ class ClassificationCountsTest(unittest.TestCase):
         growing paragraph:
 
           in-scope / flagged   when
+          1361 / 0             07.09.2026 (CCP-1163, second cut:
+                               manual-lint.sh gains single-FILE root
+                               support): +9, exactly the 9 new test methods
+                               added (8 in the new
+                               test_manual_lint_single_file_root.py -- 6
+                               from the initial cut plus 2 exact-path-prefix
+                               tests added after a code-reviewer finding
+                               (the file-root path was left unstripped and
+                               leaked the full local filesystem path into
+                               every report line for both checks
+                               (a)/(c)/(f) and check (g)) -- plus
+                               JointlyLoadBearingPairTest.test_removing_
+                               either_alone_stays_silent_but_both_together_
+                               errors in test_manual_lint_check_g.py) --
+                               every one calls `self.run_lint(...)` (matches
+                               `RUN_HELPER_RE`), so all 9 are in scope;
+                               confirmed via scan_tree() rather than assumed
+                               from the delta's own arithmetic. None
+                               flagged: each asserts on `result.returncode`,
+                               a named finding string, or a `**Files
+                               scanned:**`/check-(g)-error-list liveness
+                               check.
           1352 / 0             07.09.2026 (CCP-1151 stage 4, push-gate.sh's
                                self-exemption unreachable from a numbered-
                                subdirectory materialized scan): +4, not the
@@ -1779,7 +1801,7 @@ class ClassificationCountsTest(unittest.TestCase):
         count."""
         recs = scan_tree()
         flagged = [r for r in recs if r.disposition in NEEDS_EXEMPTION]
-        self.assertEqual(1352, len(recs))
+        self.assertEqual(1361, len(recs))
         self.assertEqual(0, len(flagged))
 
 
@@ -1998,7 +2020,16 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
         Proven an
         addition rather than a swap: `git status --porcelain scripts/tests`
         shows two `??` lines for the new files, nothing deleted, nothing
-        renamed."""
+        renamed.
+
+        Bumped 69 -> 70, 07.09.2026 (CCP-1163, second cut): added
+        scripts/tests/test_manual_lint_single_file_root.py (manual-lint.sh's
+        new single-FILE root support, now wired to several additional
+        roots -- see check-all.sh's own manual-lint invocation and
+        test_manual_lint_check_g.py's WIRED_ROOTS).
+        Proven an addition rather than a swap: `git status --porcelain
+        scripts/tests` shows one `??` line for the new file plus this
+        module's own ` M`, nothing deleted, nothing renamed."""
         files = sorted(TESTS_DIR.glob("*.py")) + sorted((TESTS_DIR / "workitems").glob("*.py"))
         names = sorted(f.relative_to(TESTS_DIR).as_posix() for f in files if f.name != "__init__.py")
         # The floor first, and it does exactly one job: it catches this glob
@@ -2010,9 +2041,9 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
         # floor; it is why the set pin below stands beside it. Keeping both is
         # the decision (WI-0133 T1), not redundancy left in by accident.
         self.assertGreaterEqual(  # pin: floor tests-corpus-files
-            len(names), 69,
-            "the scripts/tests corpus glob reached {} file(s); it reached 69 "
-            "when this floor was measured (06.09.2026). A SHRINKING scope is "
+            len(names), 70,
+            "the scripts/tests corpus glob reached {} file(s); it reached 70 "
+            "when this floor was measured (07.09.2026). A SHRINKING scope is "
             "a blind scanner, not a clean tree.".format(len(names)),
         )
         # The set pin, replacing a bare count (WI-0133 T1). A count cannot
@@ -2072,6 +2103,7 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
             "test_manual_lint.py",
             "test_manual_lint_check_g.py",
             "test_manual_lint_multi_root.py",
+            "test_manual_lint_single_file_root.py",
             "test_memory_lint.py",
             "test_memory_lint_checklist_binding.py",
             "test_memory_lint_commonmark_corpus.py",
@@ -2105,12 +2137,12 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
             "workitems/test_youtrack.py",
             ],
             names,
-            "the scripts/tests corpus (67 -> 68, 05.09.2026, CCP-1152: "
-            "test_doc_counts_agree.py added; proven an addition rather "
-            "than a swap by `git status --porcelain scripts/tests` -- one "
-            "`??` line (this new module) plus one ` M` line "
-            "(test_instinct_registers_agree.py, already a corpus member, "
-            "extended in place); nothing deleted, nothing renamed)",
+            "the scripts/tests corpus (69 -> 70, 07.09.2026, CCP-1163 "
+            "second cut: test_manual_lint_single_file_root.py added; "
+            "proven an addition rather than a swap by `git status "
+            "--porcelain scripts/tests` -- one `??` line (this new module) "
+            "plus this module's own ` M` line; nothing deleted, nothing "
+            "renamed)",
         )
 
 
