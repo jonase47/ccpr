@@ -613,6 +613,90 @@ _gate_abspath() {
 
 _GATE_PATTERN_SOURCE="$(_gate_abspath "${BASH_SOURCE[0]}")"
 
+# _gate_pattern_source_logical <abs-path> — this file's logical (repository-
+# relative) identity, e.g. "scripts/lib/discipline_gate.sh", derived from its
+# OWN resolved path rather than from a git query.
+#
+# A git-based derivation (ask the enclosing repository for its own root, then
+# strip it as a prefix) was tried first and measured broken in exactly the
+# deployment this exists for: the server-side pre-receive hook runs a COPY of
+# this file extracted into a plain directory next to the bare repository's
+# `hooks/` -- see test_push_gate.py's own PushGateTestBase comment, "a
+# NON-git directory at the same relative paths the server deployment uses".
+# `git rev-parse --show-toplevel` fails there (not inside a git repository at
+# all), which silently fell back to the OLD behaviour -- the very thing this
+# is supposed to fix stayed broken, only on the one deployment shape that
+# matters most for it.
+#
+# install.sh copies `scripts/` as one whole directory (FRAMEWORK=(... scripts
+# ...)), preserving its internal layout everywhere this library ships --
+# CCPR's own repository, an installed ~/.claude copy, and a server-side gate
+# bundle alike -- so "this file sits at .../scripts/lib/discipline_gate.sh"
+# is a structural invariant of the shipped layout, not a fact that needs a
+# repository to confirm. Matching the trailing "scripts/lib/discipline_gate.sh"
+# segment of the resolved path is what asserts that invariant actually holds
+# for THIS running copy, rather than assuming it unconditionally: a copy that
+# somehow does not sit there falls back to its own absolute path, exactly
+# _GATE_PATTERN_SOURCE's original value and behaviour.
+_gate_pattern_source_logical() {
+  local abs="$1" suffix="scripts/lib/discipline_gate.sh"
+  case "$abs" in
+    */"$suffix") printf '%s' "$suffix" ;;
+    *) printf '%s' "$abs" ;;
+  esac
+}
+
+# The logical (repo-relative) identity of this file. A caller that
+# materialises a scanned blob into a scratch copy elsewhere on disk --
+# push-gate.sh puts every blob in its OWN numbered subdirectory under a
+# scratch $SCANDIR, so two blobs that ever shared a path never collide on
+# one output file -- never produces a copy whose ABSOLUTE path equals
+# _GATE_PATTERN_SOURCE above, even when the copy's CONTENT and ORIGINAL path
+# are this very file. Only the original, pre-materialization path still
+# identifies it, and only the caller (which read it off `git diff-tree`)
+# knows that path. gate_scan_file's optional third argument carries it in;
+# see _gate_is_pattern_source below for the comparison and the trade-off it
+# documents.
+_GATE_PATTERN_SOURCE_LOGICAL="$(_gate_pattern_source_logical "$_GATE_PATTERN_SOURCE")"
+
+# _gate_is_pattern_source <file> <logical-path> — true when <file> is (or,
+# via <logical-path>, once was) this library.
+#
+# Two independent routes to the same verdict, either sufficient on its own:
+#
+#   1. <file>'s own absolute path resolves to _GATE_PATTERN_SOURCE -- the
+#      ORIGINAL check, unchanged. Covers every caller that scans this file
+#      in place (a repository sweep, an ad-hoc `gate_scan_file` call) and
+#      needs no logical path at all -- a caller that never passes one keeps
+#      today's exact behaviour, checked only via route 1.
+#   2. <logical-path> is non-empty and matches _GATE_PATTERN_SOURCE_LOGICAL
+#      EXACTLY (a full-string compare, never a suffix/prefix match — a
+#      foreign `vendor/scripts/lib/discipline_gate.sh` must NOT satisfy
+#      "scripts/lib/discipline_gate.sh"). Exists for exactly the
+#      materialized-copy case above.
+#
+# Trade-off, decided rather than absorbed: route 2 trusts the CALLER's claim
+# about a file's original identity — it does not re-derive it from the
+# file's own bytes or location. A file merely NAMED
+# "scripts/lib/discipline_gate.sh" in some OTHER repository, scanned by a
+# caller that (correctly, for its own repository) reports that same logical
+# path, would also be exempted line by line. No content fingerprint is
+# added to close that gap here: this is the same accepted shape
+# artifact-gate.sh's own docs-boundary self-detection already lives with
+# (see that file's _GATE_OWN_REPO_ROOT comment — "a project that vendors a
+# copy of this script into its own repository... not solved here"), the
+# exemption stays LINE-scoped (a real secret on a line without the marker
+# still fires — see the marker check below), every exempted line is still
+# counted and printed (GATE_LAST_EXEMPT_LINES / the "_exempt" record), so
+# the exemption is visible in the run rather than silent, and a change to
+# the real file is exactly what code review exists to catch.
+_gate_is_pattern_source() {
+  local f="$1" logical="$2"
+  [ "$(_gate_abspath "$f")" = "$_GATE_PATTERN_SOURCE" ] && return 0
+  [ -n "$logical" ] && [ -n "$_GATE_PATTERN_SOURCE_LOGICAL" ] \
+    && [ "$logical" = "$_GATE_PATTERN_SOURCE_LOGICAL" ]
+}
+
 _gate_emit() { printf '%s\t%s\t%s\n' "$1" "$2" "$3"; }
 
 # _gate_hits <content> <grep-flags...> — print "<line>:<match>" records.
@@ -666,13 +750,17 @@ _gate_checked() {
   return "$rc"
 }
 
-# gate_scan_file <file> <profile>
+# gate_scan_file <file> <profile> [<logical-path>]
+#
+# <logical-path> is optional and defaults to empty, in which case only the
+# original absolute-path self-check applies -- see _gate_is_pattern_source
+# above for what it adds and the trade-off it names.
 gate_scan_file() {
-  local f="$1" profile="${2:-artifact}"
+  local f="$1" profile="${2:-artifact}" logical="${3:-}"
   local content hits blob_hits cs_hits ip line found=0 rc=0
   GATE_LAST_EXEMPT_LINES=0
 
-  if [ "$(_gate_abspath "$f")" = "$_GATE_PATTERN_SOURCE" ]; then
+  if _gate_is_pattern_source "$f" "$logical"; then
     content="$(LC_ALL=C awk -v m="$GATE_EXEMPT_MARKER" 'index($0,m){print "";next}{print}' "$f")"  # exit-status: exempt set-e-sufficient
     GATE_LAST_EXEMPT_LINES="$(LC_ALL=C awk -v m="$GATE_EXEMPT_MARKER" 'index($0,m){n++}END{print n+0}' "$f")"  # exit-status: exempt set-e-sufficient
     # Callers capture this function's stdout in a command substitution, so the

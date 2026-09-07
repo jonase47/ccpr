@@ -97,6 +97,11 @@ DENY_NAME = "Quuxcorp"
 # fragment is credential-shaped on its own.
 CREDENTIAL = leak("api", "_key = \"", "A1b2C3d4E5f6G7h8I9j0K1l2M3\"")
 
+# The pattern-source self-exemption marker (see lib/discipline_gate.sh's own
+# header), spelled out here so CCP-1151's tests can prove it neither works
+# on an unrelated path NOR turns the exemption into a file-wide one.
+EXEMPT_MARKER = leak("gate-", "pattern-source")
+
 # Clean under BOTH profiles: no work-item shapes the memory profile flags,
 # no deny name, no secret/personal/network shape.
 CLEAN_TEXT = "# Title\n\nSome ordinary prose about a command prompt.\n"
@@ -1320,6 +1325,80 @@ class OmittingServerFlagOnABareRepoScansMoreNotLessTest(PushGateTestBase):
         # asserting the exact count (not just "still accepted") is what
         # proves the scan widened rather than merely "still worked by luck".
         self.assertIn("scanned 4 file(s)", self.hook_output(r), self.output(r))
+
+
+# ---------------------------------------------------------------------------
+# CCP-1151 stage 4 -- push-gate.sh materializes every scanned blob into its
+# OWN numbered subdirectory under a scratch $SCANDIR (see the materialize
+# loop's own comment: two blobs that ever shared a path must never collide
+# on one output file). A blob whose path IS scripts/lib/discipline_gate.sh
+# -- this very file, pushed like any other -- therefore never resolves to
+# _GATE_PATTERN_SOURCE (the ABSOLUTE, on-disk path the running gate sourced
+# from), so the self-exemption never applied and this file's own three
+# pattern-illustrating comment lines fired as [secret] findings on ANY push
+# that touched it. Verified by reproducing it first (see the fix's own
+# commit / report), before the mechanism below closed it.
+# ---------------------------------------------------------------------------
+class PushOfDisciplineGateLibraryItselfTest(PushGateTestBase):
+    def test_pushing_the_real_library_unmodified_is_accepted_not_false_flagged(self):
+        self.write_config(denyNames=["Blorptech"])
+        self.install_hook()
+        work = self.clone_work()
+        self.write(work, "scripts/lib/discipline_gate.sh", LIB.read_text(encoding="utf-8"))
+        self.commit_all(work, "add discipline_gate.sh")
+        r = self.push(work)
+        self.assertEqual(r.returncode, 0, self.output(r))
+        self.assertNotIn("[secret]", self.hook_output(r))
+        tree = self._git("ls-tree", "-r", "--name-only", "main", cwd=self.remote)
+        self.assertIn("scripts/lib/discipline_gate.sh", tree.stdout.splitlines())
+
+    def test_the_exempted_line_count_is_still_reported_not_silenced(self):
+        # The self-exemption must stay VISIBLE in the run, not just absent
+        # from the findings -- see gate_scan_file's own header on why every
+        # exempted line is counted and printed.
+        self.write_config(denyNames=["Blorptech"])
+        self.install_hook()
+        work = self.clone_work()
+        self.write(work, "scripts/lib/discipline_gate.sh", LIB.read_text(encoding="utf-8"))
+        self.commit_all(work, "add discipline_gate.sh")
+        r = self.push(work)
+        self.assertEqual(r.returncode, 0, self.output(r))
+        self.assertRegex(self.hook_output(r), r"\d+ pattern-source lines exempted")
+
+    def test_a_real_secret_added_without_the_marker_still_fires(self):
+        # The exemption is LINE-scoped, not file-scoped: a genuine secret
+        # planted on a line that does NOT carry the marker must still be
+        # caught, even inside a materialized copy of this very file that IS
+        # now otherwise exempted line by line.
+        self.write_config(denyNames=["Blorptech"])
+        self.install_hook()
+        work = self.clone_work()
+        dirty_lib = LIB.read_text(encoding="utf-8") + "\n# " + CREDENTIAL + "\n"
+        self.write(work, "scripts/lib/discipline_gate.sh", dirty_lib)
+        planted_sha = self.commit_all(work, "add discipline_gate.sh with a planted secret")
+        before = self.remote_state()
+        r = self.push(work)
+        self.assertNotEqual(r.returncode, 0, "expected a refusal:\n" + self.output(r))
+        self.assert_nothing_published(before, planted_sha=planted_sha, result=r)
+        # Exactly the planted line -- not the three pattern-source comment
+        # lines this copy also carries, which must stay suppressed.
+        self.assertEqual(self.hook_output(r).count("[secret]"), 1, self.output(r))
+
+    def test_a_marker_at_a_different_logical_path_does_not_exempt_a_planted_secret(self):
+        # The direction that decides whether this fix is a fix or a hole:
+        # a file that merely CARRIES the exemption marker, at a path that is
+        # NOT scripts/lib/discipline_gate.sh, must be exempted from nothing.
+        self.write_config(denyNames=["Blorptech"])
+        self.install_hook()
+        work = self.clone_work()
+        foreign = "# " + EXEMPT_MARKER + "\n" + CREDENTIAL + "\n"
+        self.write(work, "vendor/notes.sh", foreign)
+        planted_sha = self.commit_all(work, "add a foreign file carrying the marker")
+        before = self.remote_state()
+        r = self.push(work)
+        self.assertNotEqual(r.returncode, 0, "expected a refusal:\n" + self.output(r))
+        self.assert_nothing_published(before, planted_sha=planted_sha, result=r)
+        self.assertIn("[secret]", self.hook_output(r))
 
 
 if __name__ == "__main__":

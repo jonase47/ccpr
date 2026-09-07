@@ -17,10 +17,21 @@
 # is configured the run says so out loud instead of passing silently.
 #
 # Usage:
-#   artifact-gate.sh [--repo <dir>] [--require-denylist] [<file> ...]
+#   artifact-gate.sh [--repo <dir>] [--require-denylist] [--logical-map <file>] [<file> ...]
 #
 #   --repo <dir>         repository to sweep (default: the git root of $PWD)
 #   --require-denylist   treat a missing deny-list as a finding (for CI)
+#   --logical-map <file> NUL-delimited "<scanned-path>\t<original-path>" records
+#                         (the exact shape push-gate.sh's own $MATERIALIZED
+#                         file already is). Lets a caller that scans a
+#                         MATERIALIZED COPY of a tracked file -- one no
+#                         longer sitting at its real repository path -- tell
+#                         this gate what that real path was, so
+#                         gate_scan_file's pattern-source self-exemption
+#                         (lib/discipline_gate.sh) can still recognise a
+#                         materialized copy of ITSELF. Omitted by default;
+#                         a run with no map behaves exactly as one that
+#                         predates this option.
 #
 # Exit: 0 clean, 1 findings, 2 configuration or zero scope.
 #
@@ -171,14 +182,21 @@ gate_docs_boundary_violation() {
 # caller typed, which is exactly where a tenant-named path arrives from CI.
 gate_load_config
 
+# Same NUL-delimited-record separator push-gate.sh's own $MATERIALIZED file
+# uses, kept file-local rather than exported: --logical-map's file format is
+# a contract between this script and its caller, not a third register.
+TAB="$(printf '\t')"
+
 REPO=""
 REQUIRE_DENYLIST=0
 FILES=""
+LOGICAL_MAP=""
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --repo) shift; [ "$#" -gt 0 ] || die "--repo needs a directory"; REPO="$1" ;;
     --require-denylist) REQUIRE_DENYLIST=1 ;;
+    --logical-map) shift; [ "$#" -gt 0 ] || die "--logical-map needs a file"; LOGICAL_MAP="$1" ;;
     -h|--help) usage; exit 0 ;;
     --) shift; while [ "$#" -gt 0 ]; do FILES="$FILES$1
 "; shift; done ;;
@@ -198,6 +216,33 @@ done
 if [ -n "$GATE_DENY_UNUSABLE" ]; then
   die "deny-list entry $GATE_DENY_UNUSABLE is unusable (blank, or containing a line break) -- fix gate.denyNames in $(gate_config_path). Refusing to run with a shorter list than configured."
 fi
+
+if [ -n "$LOGICAL_MAP" ] && [ ! -r "$LOGICAL_MAP" ]; then
+  die "--logical-map file not found or unreadable: $LOGICAL_MAP"
+fi
+
+# gate_logical_path_of <scanned-path> — the ORIGINAL (pre-materialization)
+# path <scanned-path> was recorded under in $LOGICAL_MAP, or empty when
+# --logical-map was not given, the file has no record for it, or the
+# original path was never itself scanned as a file (a commit-message /
+# ref-name / tag-payload synthetic entry — see push-gate.sh's
+# materialize_extra). A plain linear scan, not an associative array: this
+# repository's floor is bash 3.2 (macOS's shipped /bin/bash), which has
+# none, and a push's file count is small enough that this never needs to be
+# faster than one `read` loop.
+gate_logical_path_of() {
+  local key="$1" rec scanned original
+  [ -n "$LOGICAL_MAP" ] || return 0
+  while IFS= read -r -d '' rec; do
+    scanned="${rec%%"$TAB"*}"
+    original="${rec#*"$TAB"}"
+    if [ "$scanned" = "$key" ]; then
+      printf '%s' "$original"
+      return 0
+    fi
+  done < "$LOGICAL_MAP"
+  return 0
+}
 
 # --- collect the scan set -----------------------------------------------------
 is_text() {
@@ -401,7 +446,7 @@ while IFS= read -r f; do
       # same survival property for 1 while still letting >=2 through to the
       # check below.
       scan_rc=0
-      if out="$(gate_scan_file "$f" artifact)"; then
+      if out="$(gate_scan_file "$f" artifact "$(gate_logical_path_of "$f")")"; then
         scan_rc=0
       else
         scan_rc=$?

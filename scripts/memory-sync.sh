@@ -222,8 +222,15 @@ require_usable_deny_list() {
 # The checks themselves live in lib/discipline_gate.sh (profile "memory"); this
 # wrapper only renders them in the shape this script has always printed: one line
 # per distinct finding kind, regardless of how many times it occurs in the file.
+#
+# <logical-path> (optional, second argument) is the file's real, pre-
+# materialization repository path -- see gate_scan_file's own header in
+# lib/discipline_gate.sh for what it is for. Omitted by ordinary CLI use
+# (`memory-sync.sh gate <file>`, `promote`), where <f> already IS the real
+# path; push-gate.sh is the one caller that scans a materialized copy and
+# passes it.
 run_gate() {
-  local f="$1" out
+  local f="$1" logical="${2:-}" out
   [[ -f "$f" ]] || { warn '  gate: file not found: %s' "$f"; return 2; }
 
   # gate_load_config already ran once, at the top of this script (see the
@@ -246,7 +253,7 @@ run_gate() {
   # under `set -e` — swapping it for the `if` form keeps the same survival
   # property while no longer discarding the value it survives.
   local scan_rc=0
-  if out="$(gate_scan_file "$f" memory)"; then
+  if out="$(gate_scan_file "$f" memory "$logical")"; then
     scan_rc=0
   else
     scan_rc=$?
@@ -586,7 +593,7 @@ cmd_status() {
 case "${1:-}" in
   pull)    cmd_pull ;;
   promote) shift; cmd_promote "${1:-}" "${2:-}" ;;
-  gate)    shift; run_gate "${1:-}" && note "gate: clean" || { note "gate: findings above"; exit 1; } ;;
+  gate)    shift; run_gate "${1:-}" "${2:-}" && note "gate: clean" || { note "gate: findings above"; exit 1; } ;;
   status)  cmd_status ;;
-  *) warn "usage: memory-sync.sh {pull|promote <src> <repo-dst-file>|gate <file>|status}"; exit 2 ;;
+  *) warn "usage: memory-sync.sh {pull|promote <src> <repo-dst-file>|gate <file> [<logical-path>]|status}"; exit 2 ;;
 esac

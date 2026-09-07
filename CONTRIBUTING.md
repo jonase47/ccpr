@@ -84,8 +84,8 @@ python3 -m unittest discover -s scripts/tests -t .
 
 - **`-t .` is not optional**, and the failure mode is worth knowing because it is
   partly silent. It sets the top-level directory imports resolve against. Measured
-  on the current tree (07.09.2026): **with** it, discovery collects **2733 tests, 0
-  import errors**, exit 0; **without** it, **2016 tests and 17 modules that fail to
+  on the current tree (07.09.2026): **with** it, discovery collects **2745 tests, 0
+  import errors**, exit 0; **without** it, **2028 tests and 17 modules that fail to
   import**, exit 1 — the eight that use a relative import
   (`from .test_phase_docs_lint import …` in four modules,
   `from .test_artifact_gate import …` in two,
@@ -98,8 +98,9 @@ python3 -m unittest discover -s scripts/tests -t .
   That skipped count moves whenever a module gains a relative import:
   340 → 350 → 480 → 510 across four commits on 27–28.08.2026, 509 on 29.08., 510 on
   30.08.2026, 684 on 05.09., and 717 since later that day — unchanged since, across
-  four further cuts (32, then 6, then 30, then 3 new tests, the last two both
-  CCP-1151 stage 4 cut 4) that all import cleanly with or without the flag, so each
+  five further cuts (32, then 6, then 30, then 3, then 12 new tests, the middle two
+  both CCP-1151 stage 4 cut 4, the last one CCP-1151 stage 4's own push-gate.sh
+  self-exemption fix) that all import cleanly with or without the flag, so each
   addition lands on both sides of the subtraction and cancels. Each jump bought something — most came from sharing one
   parser instead of retyping a shipped list into four test modules (WI-0126), or
   from a fifth module joining the skip-budget import — but the cost lands here,
@@ -107,7 +108,7 @@ python3 -m unittest discover -s scripts/tests -t .
 
   **Re-measure these numbers when you change them, rather than adjusting one.** The
   pair is the point: 2698 alone says nothing, and the four figures have now been
-  found stale together nine times — the file claimed 1691 / 1185 / 14 / ~510
+  found stale together ten times — the file claimed 1691 / 1185 / 14 / ~510
   against a tree at 1848 / 1339 / 15 / 509, then 1848 / 1339 / 15 / 509 against a
   tree at 1987 / 1477 / 16 / 510, then 1987 / 1477 / 16 / 510 against a tree at
   2627 / 1943 / 17 / 684, then 2627 / 1943 / 17 / 684 against a tree at
@@ -116,8 +117,9 @@ python3 -m unittest discover -s scripts/tests -t .
   2698 / 1981 / 17 / 717, then 2698 / 1981 / 17 / 717 against a tree at
   2699 / 1982 / 17 / 717, then 2699 / 1982 / 17 / 717 against a tree at
   2729 / 2012 / 17 / 717, then 2729 / 2012 / 17 / 717 against a tree at
-  2730 / 2013 / 17 / 717, and now 2730 / 2013 / 17 / 717 against a tree at
-  2733 / 2016 / 17 / 717 — the sixth round running in which the skipped figure did
+  2730 / 2013 / 17 / 717, then 2730 / 2013 / 17 / 717 against a tree at
+  2733 / 2016 / 17 / 717, and now 2733 / 2016 / 17 / 717 against a tree at
+  2745 / 2028 / 17 / 717 — the seventh round running in which the skipped figure did
   NOT move with the others, because the same delta lands on both sides of its
   subtraction. These runs, back to back, take about eleven minutes.
 - The full run takes **a couple of minutes**. If you drive it from an agent whose

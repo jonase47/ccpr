@@ -1667,6 +1667,158 @@ class PatternSourceExemptionIsLoadBearingTest(GateTestBase):
 
 
 # ---------------------------------------------------------------------------
+# 4d. CCP-1151 -- --logical-map, exercised directly against artifact-gate.sh
+# (a narrower unit than the full push-gate.sh pipeline in
+# test_push_gate.py's PushOfDisciplineGateLibraryItselfTest, which is the
+# real end-to-end proof this defect needed).
+#
+# push-gate.sh materializes every scanned blob into its OWN numbered
+# subdirectory, so a blob whose real repository path IS
+# scripts/lib/discipline_gate.sh never resolves to _GATE_PATTERN_SOURCE (an
+# absolute, on-disk path) once materialized -- see PatternSourceExemption
+# IsLoadBearingTest's WI-0023 comment above for why widening the ABSOLUTE
+# check was rejected. --logical-map instead lets the CALLER (which read the
+# path off `git diff-tree`, never off the file's own name or location)
+# assert what a scanned copy's ORIGINAL path was.
+# ---------------------------------------------------------------------------
+class LogicalMapSelfExemptionTest(GateTestBase):
+    def write_logical_map(self, pairs):
+        data = b"".join(
+            scanned.encode("utf-8") + b"\t" + original.encode("utf-8") + b"\0"
+            for scanned, original in pairs
+        )
+        p = self.work / "logical-map"
+        p.write_bytes(data)
+        return p
+
+    def test_a_materialized_copy_is_exempted_via_its_logical_path(self):
+        copy = self.write("scratch/1/discipline_gate.sh", LIB.read_text(encoding="utf-8"))
+        logical_map = self.write_logical_map([(str(copy), "scripts/lib/discipline_gate.sh")])
+        self.write_config(denyNames=["Blorptech"])
+        r = self.run_gate("--require-denylist", "--logical-map", str(logical_map), "--", str(copy))
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertRegex(r.stdout, r": \d+ pattern-source lines exempted")
+
+    def test_a_logical_map_entry_at_a_different_path_does_not_exempt(self):
+        # The direction that decides whether this is a fix or a hole: a file
+        # merely CARRYING the marker, mapped to a path that is NOT
+        # scripts/lib/discipline_gate.sh, must be exempted from nothing.
+        copy = self.write("scratch/1/notes.sh", "# " + EXEMPT_MARKER + "\n" + CREDENTIAL + "\n")
+        logical_map = self.write_logical_map([(str(copy), "vendor/notes.sh")])
+        self.write_config(denyNames=["Blorptech"])
+        r = self.run_gate("--require-denylist", "--logical-map", str(logical_map), "--", str(copy))
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("[secret]", r.stdout)
+
+    def test_a_real_secret_without_the_marker_still_fires_in_the_mapped_copy(self):
+        # Line-scoped, not file-scoped: mapping a copy to the real logical
+        # path exempts the marker lines it already carries, never a genuine
+        # secret on a line that carries no marker.
+        dirty = LIB.read_text(encoding="utf-8") + "\n# " + CREDENTIAL + "\n"
+        copy = self.write("scratch/1/discipline_gate.sh", dirty)
+        logical_map = self.write_logical_map([(str(copy), "scripts/lib/discipline_gate.sh")])
+        self.write_config(denyNames=["Blorptech"])
+        r = self.run_gate("--require-denylist", "--logical-map", str(logical_map), "--", str(copy))
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertEqual(r.stdout.count("[secret]"), 1, r.stdout)
+
+    def test_a_caller_that_passes_no_logical_map_sees_no_behaviour_change(self):
+        # Backwards compatibility, pinned directly: the exact same
+        # materialized-copy scan, with --logical-map simply omitted, must
+        # report the same three findings PatternSourceExemptionIsLoadBearing
+        # Test already pins for an unexempted copy.
+        copy = self.write("scratch/1/discipline_gate.sh", LIB.read_text(encoding="utf-8"))
+        self.write_config(denyNames=["Blorptech"])
+        r = self.run_gate("--require-denylist", "--", str(copy))
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertEqual(r.stdout.count("[secret]"), 3, r.stdout)
+
+
+# ---------------------------------------------------------------------------
+# 4e. Mutation proof that route 2 of _gate_is_pattern_source (the new
+# logical-path comparison) has discriminating power, isolated from route 1
+# (the original absolute-path check, left completely untouched by this
+# mutation). A mutation that DELETED the exemption would turn every test in
+# this file red and prove nothing about THIS mechanism specifically -- see
+# CCP-1151's own report for why that shape was rejected. This one flips a
+# single exact-match comparison to its negation, which only route 2 uses.
+#
+# Never touches the tracked library: mirrors
+# RunGateConsumesScanFileReturnContractTest.copied_memory_sync's technique
+# of writing a (possibly mutated) copy of discipline_gate.sh into an
+# isolated scratch tree and sourcing THAT.
+# ---------------------------------------------------------------------------
+class LogicalPathRouteIsLoadBearingTest(GateTestBase):
+    NEEDLE = '[ "$logical" = "$_GATE_PATTERN_SOURCE_LOGICAL" ]'
+    MUTATED = '[ "$logical" != "$_GATE_PATTERN_SOURCE_LOGICAL" ]'
+
+    def copied_lib_at_conventional_path(self, text=None):
+        """Writes a (possibly mutated) copy of discipline_gate.sh at
+        <scratch>/scripts/lib/discipline_gate.sh -- the exact trailing
+        layout _gate_pattern_source_logical's own suffix match requires to
+        derive a non-degenerate _GATE_PATTERN_SOURCE_LOGICAL at all. A
+        scratch copy sitting anywhere else would silently fall back to the
+        absolute-path-only shape and this test would prove nothing."""
+        scratch = Path(tempfile.mkdtemp(prefix="ccpr-logical-path-mutation-"))
+        self.addCleanup(shutil.rmtree, scratch, ignore_errors=True)
+        libdir = scratch / "scripts" / "lib"
+        libdir.mkdir(parents=True)
+        body = text if text is not None else LIB.read_text(encoding="utf-8")
+        (libdir / "discipline_gate.sh").write_text(body, encoding="utf-8")
+        return libdir / "discipline_gate.sh"
+
+    def call_gate_scan_file(self, lib_path, target_path, logical):
+        # Route 1 (the absolute-path self-check) must be unreachable here so
+        # only route 2 is under test: <target_path> is deliberately NOT
+        # <lib_path> and not even inside the same scratch tree.
+        script = (
+            f"source {shlex.quote(str(lib_path))}; "
+            f"gate_scan_file {shlex.quote(str(target_path))} artifact {shlex.quote(logical)} >/dev/null"
+        )
+        return subprocess.run(
+            ["bash", "-c", script], capture_output=True, text=True, env=self.env()
+        )
+
+    def test_the_needle_is_present_exactly_once(self):
+        # Fixture-assumption check (mutation-needle-adjacency.md), a plain
+        # `assert` rather than `self.assertEqual` -- the same shape
+        # RunGateConsumesScanFileReturnContractTest's own needle check uses
+        # a few classes up: not a pin (its expected value is this test
+        # module's OWN literal, not a value the repository could drift), so
+        # it stays out of the ADR-0012 pin-shaped-assertion inventory rather
+        # than needing a marker or a PENDING entry.
+        text = LIB.read_text(encoding="utf-8")
+        assert text.count(self.NEEDLE) == 1, "mutation target not found or not unique"
+
+    def test_unmutated_route_2_exempts_a_target_at_the_real_logical_path(self):
+        lib_path = self.copied_lib_at_conventional_path()
+        target = self.write("elsewhere/discipline_gate.sh", LIB.read_text(encoding="utf-8"))
+        r = self.call_gate_scan_file(lib_path, target, "scripts/lib/discipline_gate.sh")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_mutated_route_2_no_longer_exempts_it(self):
+        text = LIB.read_text(encoding="utf-8")
+        assert text.count(self.NEEDLE) == 1, "mutation target not found or not unique"
+        mutated = text.replace(self.NEEDLE, self.MUTATED, 1)
+        lib_path = self.copied_lib_at_conventional_path(text=mutated)
+        target = self.write("elsewhere/discipline_gate.sh", LIB.read_text(encoding="utf-8"))
+        r = self.call_gate_scan_file(lib_path, target, "scripts/lib/discipline_gate.sh")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+
+    def test_the_mutation_leaves_route_1_untouched(self):
+        # Same mutation, but scanning the LIBRARY COPY ITSELF (route 1: its
+        # own absolute path resolves to _GATE_PATTERN_SOURCE) -- must still
+        # be exempted, proving the mutation is isolated to route 2 and this
+        # is not just "everything is red now".
+        text = LIB.read_text(encoding="utf-8")
+        assert text.count(self.NEEDLE) == 1, "mutation target not found or not unique"
+        mutated = text.replace(self.NEEDLE, self.MUTATED, 1)
+        lib_path = self.copied_lib_at_conventional_path(text=mutated)
+        r = self.call_gate_scan_file(lib_path, lib_path, "")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+
+# ---------------------------------------------------------------------------
 # 5. Sweep mode over a repository.
 # ---------------------------------------------------------------------------
 class SweepTest(GateTestBase):

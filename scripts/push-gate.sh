@@ -584,8 +584,33 @@ worst_rc=0
 # the NEGATED (successful) status, not CMD's own failure -- the same
 # `if CMD; then rc=0; else rc=$?; fi` shape artifact-gate.sh's own
 # `gate_scan_file` call already uses, for the identical reason.
+
+# --- logical-path lookup for the two gates below ---------------------------
+# Every materialized file lives at "$SCANDIR/$i/$path", never at its real
+# repository path "$path" -- deliberately, see the numbering comment above
+# $MATERIALIZED's population loop. gate_scan_file's own pattern-source
+# self-exemption (lib/discipline_gate.sh) is bound to a resolved FILE path,
+# so a push that touches scripts/lib/discipline_gate.sh itself never
+# resolves to it once materialized, and its three pattern-illustrating
+# comment lines would report as [secret] findings on every such push. Both
+# gates below are told the real path back via --logical-map / a second
+# positional argument, sourced from THIS SAME $MATERIALIZED file -- no
+# second register of "scanned path -> real path" is created for it.
+push_gate_logical_path_of() {
+  local key="$1" rec scanned original
+  while IFS= read -r -d '' rec; do
+    scanned="${rec%%"$TAB"*}"
+    original="${rec#*"$TAB"}"
+    if [ "$scanned" = "$key" ]; then
+      printf '%s' "$original"
+      return 0
+    fi
+  done < "$MATERIALIZED"
+  return 0
+}
+
 rc=0
-if ( cd "$SCANDIR" && bash "$ARTIFACT_GATE" --require-denylist -- "${files_all[@]}" ); then
+if ( cd "$SCANDIR" && bash "$ARTIFACT_GATE" --require-denylist --logical-map "$MATERIALIZED" -- "${files_all[@]}" ); then
   rc=0
 else
   rc=$?
@@ -595,7 +620,7 @@ fi
 if [ "${#files_memory[@]}" -gt 0 ]; then
   for f in "${files_memory[@]}"; do
     rc=0
-    if ( cd "$SCANDIR" && bash "$MEMORY_SYNC" gate "$f" ); then
+    if ( cd "$SCANDIR" && bash "$MEMORY_SYNC" gate "$f" "$(push_gate_logical_path_of "$f")" ); then
       rc=0
     else
       rc=$?

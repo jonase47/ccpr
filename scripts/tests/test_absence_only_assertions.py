@@ -891,7 +891,7 @@ class NoStaleKnownFindingsTest(unittest.TestCase):
 
 class ClassificationCountsTest(unittest.TestCase):
     def test_classification_counts(self):
-        """Regression pin on the measured baseline: 1348 `test_*` methods
+        """Regression pin on the measured baseline: 1352 `test_*` methods
         across the corpus call something shaped like a subprocess invocation
         and are therefore in scope for this check; 0 of those are currently
         absence-only-needs-exemption -- `KNOWN_FINDINGS` above is empty for
@@ -905,6 +905,34 @@ class ClassificationCountsTest(unittest.TestCase):
         growing paragraph:
 
           in-scope / flagged   when
+          1352 / 0             07.09.2026 (CCP-1151 stage 4, push-gate.sh's
+                               self-exemption unreachable from a numbered-
+                               subdirectory materialized scan): +4, not the
+                               +12 test methods actually added across
+                               test_push_gate.py and test_artifact_gate.py.
+                               The 4 new PushOfDisciplineGateLibraryItself
+                               Test methods (test_push_gate.py) all call
+                               `self.push(...)`/`self._invoke(...)` --
+                               `self.<name>(...)` shapes whose NAME simply
+                               does not match RUN_HELPER_RE, a narrower miss
+                               than the 07.09.2026 entry below's module-
+                               level (non-`self.`) helper, but the same
+                               family of naming-shape blind spot in
+                               `_calls_a_subprocess`. The
+                               4 LogicalMapSelfExemptionTest methods (test_
+                               artifact_gate.py) all call `self.run_gate(
+                               ...)`, which DOES match RUN_HELPER_RE, so all
+                               4 are newly in-scope; each asserts
+                               `self.assertEqual(r.returncode, 0/1, ...)`,
+                               a recognised `_references_returncode`
+                               liveness check, so 0 newly flagged. The
+                               remaining 4 LogicalPathRouteIsLoadBearingTest
+                               methods call `self.call_gate_scan_file(...)`
+                               (not RUN_HELPER_RE-shaped) or read a file
+                               directly with no subprocess at all, so none
+                               of those four are in scope either. Confirmed
+                               via `scan_tree()`, never via the delta's own
+                               arithmetic.
           1348 / 0             07.09.2026 (CCP-1151 stage 4 cut 4, round 3,
                                post-code-review): +1, not +3, though three
                                new test methods were added responding to
@@ -1751,7 +1779,7 @@ class ClassificationCountsTest(unittest.TestCase):
         count."""
         recs = scan_tree()
         flagged = [r for r in recs if r.disposition in NEEDS_EXEMPTION]
-        self.assertEqual(1348, len(recs))
+        self.assertEqual(1352, len(recs))
         self.assertEqual(0, len(flagged))
 
 
