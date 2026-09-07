@@ -1562,6 +1562,71 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Fixed
 
+- **The discipline gate could not recognise a materialised copy of itself, so every push carrying
+  `lib/discipline_gate.sh` was refused.** `gate_scan_file`'s line-scoped self-exemption — the one
+  that blanks lines carrying the `gate-pattern-source` marker, because a gate that scans its own
+  repository necessarily meets the file spelling out what it looks for — decided membership by
+  **absolute path**: `_GATE_PATTERN_SOURCE="$(_gate_abspath "${BASH_SOURCE[0]}")"`, compared
+  against the scanned file's own resolved path.
+
+  `push-gate.sh` materialises every pushed blob into **its own numbered subdirectory** under the
+  scan directory. That is deliberate and correct: two different blobs that were ever at the same
+  path must not collide on one output file, because `gate_scan_file` needs a real file per blob,
+  not per path. The consequence was that the scanned copy lived at
+  `$SCANDIR/<n>/scripts/lib/discipline_gate.sh`, whose absolute path can never equal the sourced
+  library's — so **the self-exemption was structurally unreachable from the push gate**, for every
+  push whose diff contained that file, whatever the change was. Observed as three `[secret]`
+  findings on comment lines carrying a worked example of the connection-string pattern —
+  deliberately **not** reproduced here, because this document is itself scanned by the gate
+  this entry describes, and the `gate-pattern-source` marker exists to permit that example in
+  the ONE file allowed to spell it out. Each of the three carries that marker; the branch had
+  changed two comment words elsewhere in the file.
+
+  **Why it had never fired.** It needs two independent changes to coincide: the numbered
+  materialisation arrived with the server-side gate, and the library's own last edit predated it.
+  The two had simply never met in one push. A defect that requires two changes to meet is
+  invisible to every test that exercises one of them — which is also why no existing test caught
+  it and why the new one drives the push gate against a materialised copy rather than the live
+  file.
+
+  **The gate behaved correctly at the level it could reach**, and that is worth recording rather
+  than treating as noise. It failed **closed**, and its message named the exact check a human
+  should perform: *"verify it is a foreign or differently-resolved copy of
+  scripts/lib/discipline_gate.sh before treating it as a leak"*. That sentence turned a refusal
+  into a diagnosis in one step. A guard that fails closed **and** says what would distinguish the
+  two cases is worth more than one that fails open quietly.
+
+  **The fix** passes the logical, pre-materialisation path from the caller. `gate_scan_file` takes
+  an optional third argument; `push-gate.sh` already held the scanned-path → original-path mapping
+  and hands it through, so no second register is created. Route 1, the absolute-path check, is
+  untouched. Route 2 is a **full-string compare, never a suffix** — a foreign
+  `vendor/scripts/lib/discipline_gate.sh` must not satisfy `scripts/lib/discipline_gate.sh`.
+  Callers passing nothing behave exactly as before, which is what keeps the server-side
+  `pre-receive` deployment working until it is updated.
+
+  **A first draft was wrong in precisely the shape the fix exists for**, and the failure was
+  silent. It derived the logical path via `git rev-parse --show-toplevel`, which looks correct in
+  an interactive check and fails in the real deployment: the server-side hook bundle is a plain
+  directory copy with **no `.git`**, so `rev-parse` fails and the fallback reproduced the original
+  bug without saying so. Three tests caught it with the identical false positives. The shipped
+  version has no git dependency at all — it matches a fixed suffix against its own resolved path,
+  a structural property of `install.sh`'s directory copy rather than a fact a repository has to
+  confirm.
+
+  **The trade-off is written into the code rather than absorbed.** Route 2 trusts the caller's
+  claim about a file's original path instead of re-deriving it from content. A foreign file pushed
+  at exactly that path, whose caller correctly reports it, would be exempted line by line. No
+  content fingerprint was added, for a measured reason: it would break the very case this fixes —
+  scanning a live, in-progress edit of the library itself. Every exempted line is still counted
+  and reported, so the exemption stays visible in the run; the push that closed this shows it
+  doing so, *"48 pattern-source lines exempted in discipline_gate.sh"*, 0 findings in 123 files.
+
+  **Not yet deployed everywhere it runs.** The local `pre-push` hook executes
+  `${HOME}/.claude/scripts/push-gate.sh` — the **installed** copy — which is why the committed fix
+  appeared not to work until `install.sh --update` ran. The same library runs in the server-side
+  `pre-receive` hook on the shared instance, deployed separately. Tracked as its own item;
+  measured exposure there is currently nil, because the shared repo carries no file at that path.
+
 - **Several human-facing docs quoted a counted fact (test-suite size, agent count, command
   count, shipped-instinct-index total) that had gone stale, with nothing checking any of
   them against the repository (ADR-0012, "derived values are not stored").** README.md and
