@@ -1,7 +1,7 @@
-# /guide – Project Guide (Status, Skill Recommendation, Disambiguation)
+# /guide – Project Guide (Status, Command Recommendation, Disambiguation)
 
 Invokes the `project-guide` agent as the entry point for the current project:
-structured status snapshot, prioritised next steps with skill/agent
+structured status snapshot, prioritised next steps with command/agent
 recommendation, and disambiguation for unclear requests.
 
 ## Argument: $ARGUMENTS = [optional: concrete question / request]
@@ -56,17 +56,17 @@ recommendation, and disambiguation for unclear requests.
 # Status <DD.MM.YYYY>
 
 **Phase:** <PX [subtitle]> — <current state>
-**Last action:** <Skill + date>
+**Last action:** <Command + date>
 **Open decisions:** <count + top 1-3>
 **Cleanup notes:** <if present, otherwise _none_>
 
 ## Recommended next steps
 
-1. **`/skill-1`** — <rationale>
-2. `/skill-2` — <rationale>
-3. `/skill-3` — <rationale>
+1. **`/command-1`** — <rationale>
+2. `/command-2` — <rationale>
+3. `/command-3` — <rationale>
 
-**Recommendation:** (N) `<skill>` with rationale.
+**Recommendation:** (N) `<command>` with rationale.
 ```
 
 **For a request argument:**
@@ -76,9 +76,9 @@ recommendation, and disambiguation for unclear requests.
 
 ## When not to invoke
 
-- When you already know which skill/agent you need — trigger it directly,
+- When you already know which command/agent you need — trigger it directly,
   saves tokens.
-- In the middle of an active skill workflow (e.g. between RED/GREEN/REFACTOR) —
+- In the middle of an active command workflow (e.g. between RED/GREEN/REFACTOR) —
   status aggregation is overhead there.
 - For domain work itself (concept, code, review) — the guide mediates only,
   it does not execute.

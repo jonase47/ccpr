@@ -27,7 +27,7 @@ Code stays in the same repo; Full-Track decides per module: keep / refactor / re
 
 ### 1. Prerequisites Check
 
-- If `docs/FRAME.md` or `docs/LEARNINGS.md` is missing → STOP with a note indicating which skill must run first.
+- If `docs/FRAME.md` or `docs/LEARNINGS.md` is missing → STOP with a note indicating which command must run first.
 - If `LEARNINGS.md` decision is not `promote` AND no mid-flight trigger was specified → ask: "Which promotion trigger? (PROMOTE / mid-flight-1..5)" — for mid-flight, request a rationale.
 - Code baseline: `git status` — if the working tree is dirty, ask for user confirmation.
 - Capture commit SHA via `git rev-parse HEAD` for frontmatter.
@@ -121,7 +121,7 @@ Explanation:
 
 ## When NOT to use
 
-- If LEARNINGS says "pivot" or "drop" — other follow-up skills apply there
+- If LEARNINGS says "pivot" or "drop" — other follow-up commands apply there
 - If FRAME is not yet stabilised (run `/lean-frame` re-frame first)
 
 ## Result

@@ -69,7 +69,7 @@ Delegate product implications to the **konzeptor** agent:
 > 3. Recommendation for the evolution loop: what should be prioritised next?
 
 ### 4. Write Detail File
-This subskill maintains a **living** detail file `docs/operations/BUSINESS.md`. It is overwritten on each call with the latest KPI snapshot — historical reports can optionally be archived as `docs/operations/snapshots/KPI_REPORT_<Month-Quarter>.md` if you want to keep history (the index never tracks individual snapshots, only the latest summary).
+This subcommand maintains a **living** detail file `docs/operations/BUSINESS.md`. It is overwritten on each call with the latest KPI snapshot — historical reports can optionally be archived as `docs/operations/snapshots/KPI_REPORT_<Month-Quarter>.md` if you want to keep history (the index never tracks individual snapshots, only the latest summary).
 
 Write `docs/operations/BUSINESS.md` (overwrite). Frontmatter:
 

@@ -7,7 +7,7 @@ Source of truth for the phase model: `~/.claude/docs/PROJECT_PHASES.md`
 
 ## 0) Track Decision (Entry Point)
 
-Every new project starts with `/track-decision` — chooses **Lean-Track** (Prototyp/PoC/Spike, 4 Skills) or **Full-Track** (P0–P8, full pipeline).
+Every new project starts with `/track-decision` — chooses **Lean-Track** (Prototyp/PoC/Spike, 4 Commands) or **Full-Track** (P0–P8, full pipeline).
 
 ```
 /track-decision -> Lean  -> /lean-frame -> [TDD-Build with senior-developer] -> /lean-learn -> {PROMOTE | PIVOT-soft | PIVOT-hard | DROP}
@@ -25,7 +25,7 @@ Mid-flight Re-Assessment via `/track-decision` jederzeit erlaubt (kein Downgrade
 
 ---
 
-## A) Sub-Skill Sequences (within a phase)
+## A) Sub-Command Sequences (within a phase)
 
 Fixed order – the next step follows from the position in the sequence.
 
@@ -46,9 +46,9 @@ p2-assumptions -> p2-market-validation -> p2-regulatory-check -> p2-poc -> gate-
 
 ### Phase 3 – Architecture & Design
 
-Entry point: `/p3-architecture` (orchestrator for architecture sub-skills)
+Entry point: `/p3-architecture` (orchestrator for architecture sub-commands)
 
-**Architecture sub-skills (via /p3-architecture):**
+**Architecture sub-commands (via /p3-architecture):**
 ```
 p3-arch-components -> p3-arch-techstack -> p3-arch-adr -> p3-arch-nfa
 ```
@@ -58,17 +58,17 @@ p3-arch-components -> p3-arch-techstack -> p3-arch-adr -> p3-arch-nfa
 p3-architecture -> p3-data-model OR p3-security OR p3-ux OR p3-infra OR p3-cost
 ```
 
-**Security sub-skills (via /p3-security):**
+**Security sub-commands (via /p3-security):**
 ```
 p3-sec-threats -> p3-sec-auth -> p3-sec-data -> p3-sec-api -> p3-sec-checklist
 ```
 
-**UX sub-skills (via /p3-ux):**
+**UX sub-commands (via /p3-ux):**
 ```
 p3-ux-navigation -> p3-ux-wireframes -> p3-ux-darkmode -> p3-ux-a11y
 ```
 
-**Infra sub-skills (via /p3-infra):**
+**Infra sub-commands (via /p3-infra):**
 ```
 p3-infra-hosting -> p3-infra-cicd -> p3-infra-monitoring -> p3-infra-teststrategy
 ```
@@ -97,7 +97,7 @@ p5-impl-red -> p5-impl-green -> p5-impl-refactor
 p5-implement -> p5-review -> p5-acceptance (-> p5-bugfix on findings) -> p5-docs
 ```
 
-**Review sub-skills (via /p5-review), per story:**
+**Review sub-commands (via /p5-review), per story:**
 ```
 p5-review-code -> p5-review-security
 ```
@@ -116,22 +116,22 @@ p5-review-code -> p5-review-security
 p6-functional -> p6-exploratory -> p6-a11y -> p6-audit -> p6-pentest -> p6-bugfix
 ```
 
-**Functional sub-skills (via /p6-functional):**
+**Functional sub-commands (via /p6-functional):**
 ```
 p6-func-integration -> p6-func-e2e -> p6-func-regression
 ```
 
-**Audit sub-skills (via /p6-audit):**
+**Audit sub-commands (via /p6-audit):**
 ```
 p6-audit-sast -> p6-audit-auth -> p6-audit-deps -> p6-audit-config -> p6-audit-dsgvo
 ```
 
-**Pentest sub-skills (via /p6-pentest):**
+**Pentest sub-commands (via /p6-pentest):**
 ```
 p6-pentest-recon -> p6-pentest-auth -> p6-pentest-authz -> p6-pentest-injection -> p6-pentest-logic
 ```
 
-**A11y sub-skills (via /p6-a11y):**
+**A11y sub-commands (via /p6-a11y):**
 ```
 p6-a11y-visual -> p6-a11y-keyboard -> p6-a11y-screenreader
 ```
@@ -156,7 +156,7 @@ p8-iteration -> Evolution loop (back to P1, P3, or P5)
 
 ## B) Phase Completion -> Gate
 
-When all sub-skills of a phase are done, recommend the corresponding gate:
+When all sub-commands of a phase are done, recommend the corresponding gate:
 
 | Phase done | Gate |
 |---|---|
@@ -235,7 +235,7 @@ These commands are not bound to a specific phase:
 
 1. **Always check HANDOVER.md** – The current phase state determines the recommendation
 2. **Never skip phases** – No P5 command if Gate-P4 has not been passed
-3. **Follow sub-skill sequences** – p5-impl-red -> p5-impl-green, never reversed
+3. **Follow sub-command sequences** – p5-impl-red -> p5-impl-green, never reversed
 4. **Maximum 3 recommendations** – 1 primary next step + max. 2 alternatives
 5. **Recommend gate when phase is complete** – Don't jump directly to the next phase
 6. **Gates are authoritative** – Only gates open the way to the next phase

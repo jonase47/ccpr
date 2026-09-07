@@ -8,6 +8,88 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Added
 
+- **CCP-1151 stage 4: `command` is the only prose word, and a guard now keeps it that way.**
+  The last cut of a four-stage sweep. 345 occurrences renamed across six commits; what remains is
+  held by a named reason with a named releasing event, and nothing is left over.
+
+  **The classification came before the first edit, and it was re-run rather than reused.** §13.6 of
+  the working register and today's measurement both read 626, and that agreement was a coincidence:
+  §13.6 predates the stage-3 merge and was stale by one, while CCP-1162 closed one occurrence and
+  created two. Compared key by key rather than by subtracting totals: 625 − 1 + 2 = 626. The
+  enumeration was proved set-equal to the recipe on two projections — per-file counts (`diff` empty
+  under `LC_ALL=C`) and the matched-text multiset (`skill` 478 / `skills` 102 / `Skill` 30 / `SKILL`
+  11 / `Skills` 5).
+
+  **Re-questioning the exclusion list found three defects, and all three sat in a NEGATIVE.** A rule
+  booking every `subskill` token under `scripts/` and `hooks/` as the frozen field key also claimed
+  four lines of heredoc prose in `project-init.sh` — *"Subskill commands **write** detail files"*,
+  *"One-liners **lifted by** /p0-\* subskills"*. Active verb, command subject. Four rename targets
+  would have walked past the gate on a rule nobody had asked to justify its silences. A second rule
+  (`skill-interface`) claimed **zero** occurrences because it tested `token == "skill"` while the
+  token is `skill-interface`; a rule that matches nothing is indistinguishable from one with nothing
+  to match unless its yield is printed.
+
+  **A pin whose needle was narrower than its subject.** Stage 3 pinned "the three surviving echoes"
+  of the pre-sweep HANDOVER cap sentence. There were four: `commands/cleanup.md:107` carries it
+  broken across a line break, and the scan iterated `text.split("\n")` for a single-line literal.
+  The needle now spans whitespace. The proof that this closed a hole rather than restating a working
+  guard is the third mutation: the **pre-change module**, exec'd verbatim from `git show HEAD`
+  against the identical split-line mutation, reports nothing.
+
+  **What the count caught that reading did not.** In the prose pass, 155 occurrences of the old
+  literal left but only 152 of the new one arrived. The gap is three sites reading "Subskill
+  commands", where a token-for-token swap yields the stutter "Subcommand commands"; all three
+  collapse to "Subcommands". The assertion that finds this — *the new literal rises by exactly the
+  number renamed* — is the only one of the four a no-op cannot pass.
+
+  **The tree now explains what it kept.** A reviewer of the prose pass, working from the diff alone,
+  filed three findings: a bare `subskill` standing two words from an already-renamed sibling. The
+  review was reasonable for what it could see, and acting on it would have been wrong — the register
+  naming these reasons is gitignored. So `handbook/system/commands.md` gained a `## Terminology`
+  section (**command**, the frozen **`subskill:`** field key whose values are slot identifiers —
+  `index` and `gate` name no command at all — and the vendor's **Agent Skills**), marked a *glossary
+  seed* to be moved and not copied when the handbook is restructured; and sixteen one-line markers
+  went to the sites where the distinction is hardest to see. Self-contained, without a path
+  reference: these files get copied into other people's projects, where a pointer resolves to
+  nothing.
+
+  **check (g), at error level, configurable, empty by default.** `manual-lint.sh` ships to adopters
+  and is generic over any documentation root; the forbidden term and its allowed contexts are CCPR's,
+  not theirs. The new `lint.forbiddenProse` key follows `artifact-gate.sh`'s precedent including the
+  part that matters — with nothing configured it reports NOT CONFIGURED as an info line rather than a
+  silent pass. Allowed contexts are patterns on the token, the line and the path, never a
+  `(path, line)` allow-list, which rots on the next edit. Where it runs was measured, not inherited:
+  `check-all.sh` passed only `handbook`; each candidate root was run first (`handbook` 23 files,
+  `commands` 116, `agents` 15, `templates` 27, `instincts` 5 — all 0/0/0) and wired, while `docs` and
+  the repo root were already dirty before this work and are reported rather than narrowed around.
+  Enforcement for CCPR itself is a test module carrying its own configuration, so it runs in CI
+  without anyone's personal file. Seen red before it existed (13 of 25, plus 3 of 5 multi-root tests
+  — `ROOT="${1:-…}"` silently dropped every root after the first), and the mutation that decides
+  whether it is a guard is the **length-preserving** one: substituting a context entry for an
+  unrelated same-shape string reddens the excused occurrence; reordering does not.
+
+  **The sweep was complete against its declared corpus and incomplete against the repository.** The
+  wider probe built for check (g) found six occurrences across five lines that the recipe's root list
+  never reached — the two GitHub issue templates and `BETA.md`, which is the prose a beta tester
+  actually fills in. Both statements are true; only naming the scope makes them compatible. Swept,
+  with the gap recorded rather than pinned as a permanent known finding.
+
+  **Recurring throughout, five times: securing the sweep grows the taboo share, not the work.** The
+  recipe corpus went 626 → 291 by the sweep and then back up to 427, every added occurrence belonging
+  to a guard's own needles, fixtures or explanatory markers. (427 and the 447 the wider tracked-tree
+  probe reports are two scopes, not one number measured twice — the same distinction that surfaced
+  the six strays above.) The headline figure for this item is the
+  rename target, never the corpus — otherwise each additional safeguard makes the work look larger
+  while leaving it untouched.
+
+  Held back with their releasing events named: the frozen `subskill:` field key and its slot sense
+  (nothing releases it), the vendor's Agent Skills and G-026's filename literals (nothing),
+  `docs/CONSTITUTION.md`'s 12 plus the `skill-interface` identifier (the v1.3 bump), ADR bodies,
+  `CHANGELOG.md` and Change-History rows (nothing — protocol is not rewritten retroactively).
+
+  Suite 2699 → 2733, green at every cut. `check-all.sh` 9 catalogued / 9 matched / exit 0, conformance
+  included.
+
 - **CCP-1162: the pre/post apparatus is unfrozen — an exact comparison replaces a length-delta pin.**
   `scripts/tests/test_agent_frontmatter.py`'s `test_the_two_states_differ_only_by_the_inserted_sentence`
   asserted `len(current) − len(git show 17bc391:agents/<name>.md) == len(sentence)`. That froze the

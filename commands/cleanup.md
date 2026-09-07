@@ -104,7 +104,7 @@ It is a single calibrated constant; read it instead of restating it:
 grep -m1 '^HANDOVER_WARN_PCT' ~/.claude/hooks/agent-monitor.py
 ```
 
-The comment above that constant carries the measurement behind the value: a threshold one skill
+The comment above that constant carries the measurement behind the value: a threshold one command
 run's growth below the cap is the last moment at which a warning is still preventive. If the grep
 finds nothing (no hook installed), `/cleanup` still runs — fall back to the two-branch behaviour
 below (under cap / over cap) and note in the report that the preventive branch was skipped for lack
@@ -211,12 +211,12 @@ Recommended triggers:
 ## When NOT to use
 
 - During an active `/p5-implement` TDD cycle (avoid context disruption)
-- Inside a Gate skill — gates already do their own cleanup (preflight rm, phase freeze). `/cleanup` is the broader, manual workflow.
+- Inside a Gate command — gates already do their own cleanup (preflight rm, phase freeze). `/cleanup` is the broader, manual workflow.
 
 ## Notes
 
-- Phase-freeze (setting `status: frozen` on phase detail files) is the responsibility of the **Gate skills**, not `/cleanup`. This skill only reports phase-doc status issues; it does not change them.
+- Phase-freeze (setting `status: frozen` on phase detail files) is the responsibility of the **Gate commands**, not `/cleanup`. This command only reports phase-doc status issues; it does not change them.
 - The HANDOVER archive convention (`docs/.handover-archive/<YYYY-MM-DD>-<slug>.md`) is already established in real-world projects. `/cleanup` keeps that filename pattern.
-- **The cap is watched automatically.** `~/.claude/hooks/agent-monitor.py` measures `docs/HANDOVER.md` at session start and after every write to that file, and prints one stderr warning when it reaches the warn threshold and another once it is over cap. The hook never blocks and never edits anything — it points here. `/cleanup` measures the file itself, so the skill works unchanged when the hook is absent; it must not assume a warning has already been shown.
+- **The cap is watched automatically.** `~/.claude/hooks/agent-monitor.py` measures `docs/HANDOVER.md` at session start and after every write to that file, and prints one stderr warning when it reaches the warn threshold and another once it is over cap. The hook never blocks and never edits anything — it points here. `/cleanup` measures the file itself, so the command works unchanged when the hook is absent; it must not assume a warning has already been shown.
 - The inbox is the receiving end of an existing flow, not a new one: `/p5-polish` already triages sprint TODOs into `polish-now | backlog | handover | drop` and appends its `handover` items to `docs/HANDOVER.md` under "Open Points" — in the same marker format (`commands/p5-polish.md` §6), with the POL-ID in the `ref` field, so they triage here without special-casing. `/p5-polish` runs once per sprint between `/gate-p5` and `/p4-sprint`; `/cleanup` runs any time, which is why the general inbox lives here.
 - `/cleanup` does not append to the inbox — it only triages. Appending is for agents that find something while working on something else.

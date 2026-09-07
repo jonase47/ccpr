@@ -8,7 +8,7 @@ parent_index: QA.md
 
 # Functional Tests (P6 Sub-Index) — Index
 
-**Status:** Skeleton — populated by `/p6-functional` and its sub-skills.
+**Status:** Skeleton — populated by `/p6-functional` and its sub-commands.
 
 ## Test-Suite-Status
 
@@ -16,6 +16,7 @@ parent_index: QA.md
 
 ## Detail Files
 
+<!-- "Sub-Skill" is the frozen subskill: frontmatter field key, not a missed rename. -->
 | Sub-Skill | File | Status |
 |---|---|---|
 | Integration Tests | INTEGRATION.md | pending |

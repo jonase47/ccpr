@@ -3,7 +3,7 @@ disable-model-invocation: true
 ---
 # /p5-review – Code Review
 
-Conducts a structured code review: first code quality, then security. Each dimension is its own sub-skill.
+Conducts a structured code review: first code quality, then security. Each dimension is its own sub-command.
 
 ## Argument: $ARGUMENTS = [File/module/feature name]
 

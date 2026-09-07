@@ -27,7 +27,7 @@ Last updated: 01.06.2026 (snapshot refresh — 27 generalised instincts ported f
 - G-024 [0.8] Consolidate the multi-pass sequence in the first briefing (incl. TDD + multi-tranche sub-rules)
 - G-032 [0.8] Verify optional memory / instinct paths beforehand
 - G-002 [0.7] Review / consolidation agents — write boundaries (incl. wingman sub-rule)
-- G-019 [0.7] Multi-agent skills via temp-files (parallel + sequential)
+- G-019 [0.7] Multi-agent commands via temp-files (parallel + sequential)
 - G-033 [0.7] Subagent briefing with an explicit output boundary
 - G-014 [0.5] Delegate bulk file operations
 - G-045 [0.5] AskUserQuestion with preview boxes on worker-output divergence
@@ -48,36 +48,36 @@ Last updated: 01.06.2026 (snapshot refresh — 27 generalised instincts ported f
 - G-030 [0.5] Orchestrator reads with a verified filename via `ls` / `Glob`
 - G-051 [0.4] Out-of-scope files — grep only, no Read
 
-## Skill / Workflow / Sprint → `instincts/workflow.md`
+## Command / Workflow / Sprint → `instincts/workflow.md`
 
-16 instincts: PO decisions, session length, frontmatter-vs-schema, stagnation-warning filter, plan-mode triggers, gate hygiene, conditional-go tracking, doc-language default, skill outputs, doc coverage, PoC-verdict cascade, TaskCreate-reminder filter, dependent-AC reconciliation.
+16 instincts: PO decisions, session length, frontmatter-vs-schema, stagnation-warning filter, plan-mode triggers, gate hygiene, conditional-go tracking, doc-language default, command outputs, doc coverage, PoC-verdict cascade, TaskCreate-reminder filter, dependent-AC reconciliation.
 
 - G-015 [0.9] Document PO decisions immediately
-- G-016 [0.9] End sessions after 2 sprints (incl. multi-skill + re-setup + bulk-curation sub-rules)
-- G-044 [0.6] Verify skill-prescribed frontmatter against the project schema
+- G-016 [0.9] End sessions after 2 sprints (incl. multi-command + re-setup + bulk-curation sub-rules)
+- G-044 [0.6] Verify command-prescribed frontmatter against the project schema
 - G-067 [0.6] StagnationWarning is a false-positive during long subagents OR user-decision waits
 - G-035 [0.5] Clarify open decision points before ExitPlanMode
 - G-036 [0.5] Pre-gate working-tree clean sweep
 - G-043 [0.5] Track conditional-go conditions with persistent C-IDs
-- G-068 [0.5] Skill output language defaults to chat language instead of the project doc convention
-- G-049 [0.4] Volatile skill outputs need an immediate gitignore entry
+- G-068 [0.5] Command output language defaults to chat language instead of the project doc convention
+- G-049 [0.4] Volatile command outputs need an immediate gitignore entry
 - G-050 [0.4] Doc coverage via Glob list, not from memory
 - G-037 [0.4] Plan-mode trigger for multi-wave sprints
-- G-039 [0.4] Read skill preconditions before a plan-mode multi-skill sequence
+- G-039 [0.4] Read command preconditions before a plan-mode multi-command sequence
 - G-041 [0.4] Offer push points in long pipelines proactively
 - G-056 [0.4] On a requirement change, reconcile dependent stories' ACs immediately
 - G-065 [0.4] PoC-verdict cascade — after a ❌ spike, re-check other assumptions/features/ADRs
-- G-069 [0.4] Ignore the TaskCreate reminder in a linear skill flow
+- G-069 [0.4] Ignore the TaskCreate reminder in a linear command flow
 
 ## Shell / Git / Mass-Edit → `instincts/shell-git.md`
 
-5 instincts: destructive-action verify, mass-substitution tool choice, tranche discipline, commit-scope form, skill-output commit type.
+5 instincts: destructive-action verify, mass-substitution tool choice, tranche discipline, commit-scope form, command-output commit type.
 
 - G-040 [0.4] Verify user claims before destructive action
 - G-048 [0.4] Mass substitution via find+xargs+perl
 - G-052 [0.4] Multi-tranche pattern for mass-edit / translation / refactor sweeps
 - G-053 [0.4] Conventional-commits scope takes no comma
-- G-060 [0.4] Skill-output commits need a standard conventional-commit type
+- G-060 [0.4] Command-output commits need a standard conventional-commit type
 
 ## External APIs / MCP / OS-Quirks → `instincts/external.md`
 
@@ -103,7 +103,7 @@ When adding a new instinct: pick the matching topic file, insert an H3 block the
 Some global instincts that exist in productive local `~/.claude/instincts.md` files are deliberately kept out of the CCPR snapshot, for three reasons:
 
 **Personal-context (per-user memory / project-specific anti-patterns):**
-- **G-005** (skill commits) — has a sub-rule "no Anthropic co-author trailer" rooted in a user-specific commit-message memory.
+- **G-005** (command commits) — has a sub-rule "no Anthropic co-author trailer" rooted in a user-specific commit-message memory.
 - **G-046** (project memory pre-default-action) — examples cite personal memory files.
 - **G-047** (PII in HTTP calls) — generic in concept, but the trigger example is a personal email in the User-Agent.
 - **G-054** (HANDOVER read-overflow pre-check) — emerged from a specific project's HANDOVER growth pattern; useful but project-shape-dependent.

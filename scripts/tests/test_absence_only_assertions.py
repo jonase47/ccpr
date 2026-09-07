@@ -891,7 +891,7 @@ class NoStaleKnownFindingsTest(unittest.TestCase):
 
 class ClassificationCountsTest(unittest.TestCase):
     def test_classification_counts(self):
-        """Regression pin on the measured baseline: 1325 `test_*` methods
+        """Regression pin on the measured baseline: 1352 `test_*` methods
         across the corpus call something shaped like a subprocess invocation
         and are therefore in scope for this check; 0 of those are currently
         absence-only-needs-exemption -- `KNOWN_FINDINGS` above is empty for
@@ -905,6 +905,73 @@ class ClassificationCountsTest(unittest.TestCase):
         growing paragraph:
 
           in-scope / flagged   when
+          1352 / 0             07.09.2026 (CCP-1151 stage 4, push-gate.sh's
+                               self-exemption unreachable from a numbered-
+                               subdirectory materialized scan): +4, not the
+                               +12 test methods actually added across
+                               test_push_gate.py and test_artifact_gate.py.
+                               The 4 new PushOfDisciplineGateLibraryItself
+                               Test methods (test_push_gate.py) all call
+                               `self.push(...)`/`self._invoke(...)` --
+                               `self.<name>(...)` shapes whose NAME simply
+                               does not match RUN_HELPER_RE, a narrower miss
+                               than the 07.09.2026 entry below's module-
+                               level (non-`self.`) helper, but the same
+                               family of naming-shape blind spot in
+                               `_calls_a_subprocess`. The
+                               4 LogicalMapSelfExemptionTest methods (test_
+                               artifact_gate.py) all call `self.run_gate(
+                               ...)`, which DOES match RUN_HELPER_RE, so all
+                               4 are newly in-scope; each asserts
+                               `self.assertEqual(r.returncode, 0/1, ...)`,
+                               a recognised `_references_returncode`
+                               liveness check, so 0 newly flagged. The
+                               remaining 4 LogicalPathRouteIsLoadBearingTest
+                               methods call `self.call_gate_scan_file(...)`
+                               (not RUN_HELPER_RE-shaped) or read a file
+                               directly with no subprocess at all, so none
+                               of those four are in scope either. Confirmed
+                               via `scan_tree()`, never via the delta's own
+                               arithmetic.
+          1348 / 0             07.09.2026 (CCP-1151 stage 4 cut 4, round 3,
+                               post-code-review): +1, not +3, though three
+                               new test methods were added responding to
+                               the review (two PathContextTest methods in
+                               test_manual_lint_check_g.py proving the
+                               pathContains/absolute-path fix, one
+                               CheckBCrossRootAttributionTest method in
+                               test_manual_lint_multi_root.py proving
+                               check (b)'s multi-root path attribution).
+                               The two PathContextTest methods call the
+                               MODULE-LEVEL `run_lint(...)` helper, not
+                               `self.run_lint(...)` -- invisible to
+                               `_calls_a_subprocess`, which only recognises
+                               `self.<name>(...)`/`subprocess.run(...)`
+                               shapes (the module docstring's own named
+                               blind spot). Only the third method, which
+                               DOES call `self.run_lint(...)`, is newly
+                               in-scope; its own `assertEqual(len(warnings),
+                               2, ...)` is a recognised `_is_len_nonzero_
+                               pair` liveness assertion, so 0 newly flagged.
+          1347 / 0             06.09.2026 (CCP-1151 stage 4 cut 4, round 2):
+                               +1 -- test_manual_lint_check_g.py gained
+                               MalformedConfigTest.test_a_term_containing_a_
+                               newline_is_refused (a `returncode == 2`
+                               liveness assertion, recognised via
+                               `_references_returncode`).
+          1346 / 0             06.09.2026 (CCP-1151 stage 4 cut 4): +21 from
+                               scripts/tests/test_manual_lint_check_g.py (new
+                               module, check (g)) and
+                               test_manual_lint_multi_root.py (new module,
+                               multi-root support) combined. Five methods in
+                               the check-(g) module were flagged on first
+                               measurement (an `assertEqual(..., [])` with no
+                               other assertion in the method cannot
+                               distinguish a clean run from a crashed
+                               subprocess with empty stdout) and each was
+                               given a `**Files scanned:** N` liveness
+                               assertion before this pin was written -- 0
+                               flagged, not a baselined exemption.
           1325 / 0             05.09.2026 (CCP-1152, check (f) in
                                manual-lint.sh): +33 from
                                scripts/tests/test_manual_lint.py -- 32 new
@@ -1712,7 +1779,7 @@ class ClassificationCountsTest(unittest.TestCase):
         count."""
         recs = scan_tree()
         flagged = [r for r in recs if r.disposition in NEEDS_EXEMPTION]
-        self.assertEqual(1325, len(recs))
+        self.assertEqual(1352, len(recs))
         self.assertEqual(0, len(flagged))
 
 
@@ -1921,7 +1988,17 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
         `pre-push` hook installer). Proven an addition rather than a swap
         the same way as the row above: `git status --porcelain
         scripts/tests` shows one `??` line for the new file plus this
-        module's own ` M`, nothing deleted, nothing renamed."""
+        module's own ` M`, nothing deleted, nothing renamed.
+
+        Bumped 67 -> 69, 06.09.2026 (CCP-1151 stage 4 cut 4): added
+        scripts/tests/test_manual_lint_check_g.py (manual-lint.sh's new
+        check (g), an opt-in forbidden-prose-term guard) and
+        scripts/tests/test_manual_lint_multi_root.py (manual-lint.sh's new
+        multi-root support, now wired to several roots by check-all.sh).
+        Proven an
+        addition rather than a swap: `git status --porcelain scripts/tests`
+        shows two `??` lines for the new files, nothing deleted, nothing
+        renamed."""
         files = sorted(TESTS_DIR.glob("*.py")) + sorted((TESTS_DIR / "workitems").glob("*.py"))
         names = sorted(f.relative_to(TESTS_DIR).as_posix() for f in files if f.name != "__init__.py")
         # The floor first, and it does exactly one job: it catches this glob
@@ -1933,9 +2010,9 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
         # floor; it is why the set pin below stands beside it. Keeping both is
         # the decision (WI-0133 T1), not redundancy left in by accident.
         self.assertGreaterEqual(  # pin: floor tests-corpus-files
-            len(names), 67,
-            "the scripts/tests corpus glob reached {} file(s); it reached 67 "
-            "when this floor was measured (03.09.2026). A SHRINKING scope is "
+            len(names), 69,
+            "the scripts/tests corpus glob reached {} file(s); it reached 69 "
+            "when this floor was measured (06.09.2026). A SHRINKING scope is "
             "a blind scanner, not a clean tree.".format(len(names)),
         )
         # The set pin, replacing a bare count (WI-0133 T1). A count cannot
@@ -1993,6 +2070,8 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
             "test_live_status_claims.py",
             "test_log_cleanup_behavior.py",
             "test_manual_lint.py",
+            "test_manual_lint_check_g.py",
+            "test_manual_lint_multi_root.py",
             "test_memory_lint.py",
             "test_memory_lint_checklist_binding.py",
             "test_memory_lint_commonmark_corpus.py",

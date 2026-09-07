@@ -28,7 +28,7 @@
 - Test-Driven Development: Red → Green → Refactor
 - No production code without tests
 - **1 TDD cycle = 1 commit** (Conventional Commits: feat/fix/refactor/docs/chore) → Details: `~/.claude/docs/PROJECT_PHASES.md`
-- **Commits in skills are authorized**: When a skill prompt instructs "Commit after Fix/GREEN/REFACTOR", the commit is executed as part of the skill workflow – without a separate user prompt. The skill instruction takes precedence over the system default.
+- **Commits in commands are authorized**: When a command prompt instructs "Commit after Fix/GREEN/REFACTOR", the commit is executed as part of the command workflow – without a separate user prompt. The command instruction takes precedence over the system default.
 - Clean Code, SOLID where sensible, YAGNI
 - Simplest solution that works
 
@@ -47,7 +47,7 @@
 
 | Agent | Focus |
 |---|---|
-| **project-guide** | Entry point: status snapshot, skill/agent recommendation, disambiguation, hand-off with context bundle (on-demand via `/guide`) |
+| **project-guide** | Entry point: status snapshot, command/agent recommendation, disambiguation, hand-off with context bundle (on-demand via `/guide`) |
 | **konzeptor** | Product idea, target audience, features, MVP, value proposition |
 | **business-analyst** | Business model, financial planning, pricing, market analysis, KPIs |
 | **system-architekt** | Tech stack, data model, APIs, architecture decisions (ADRs) |
@@ -90,13 +90,13 @@ When multiple agents have produced results in parallel:
 `project-guide` is the entry point for unclear requests and status snapshots. Hand off to it proactively when:
 
 - The user asks "what's the state?" / "where are we?" / "what should I do next?"
-- The user is unsure which skill/agent is responsible ("should I use konzeptor or business-analyst?")
-- A session starts and no concrete skill goal is clear
+- The user is unsure which command/agent is responsible ("should I use konzeptor or business-analyst?")
+- A session starts and no concrete command goal is clear
 - Cleanup awareness is needed (HANDOVER too large, stale memory)
 
 Trigger via `/guide [optional: request]` or by calling the agent directly. The guide delivers a status snapshot + 3 prioritised actions and hands off to the matching domain agent with a context bundle when needed.
 
-**When NOT to mediate:** when the user clearly knows which skill they want, or in the middle of an active skill workflow (e.g. between RED/GREEN/REFACTOR) — status aggregation would be overhead.
+**When NOT to mediate:** when the user clearly knows which command they want, or in the middle of an active command workflow (e.g. between RED/GREEN/REFACTOR) — status aggregation would be overhead.
 
 ## Handover Protocol
 
@@ -140,7 +140,7 @@ Instincts are short rules with confidence scores (0.3-0.9) derived from session 
 **Sharing instincts/memory across a team (org tier).** When several people run CCPR against a shared setup, promote team-/platform-relevant instincts and memories into a **shared org-tier repo** (ADR-0006/0007) instead of re-learning them per person — while personal knowledge stays local. `scripts/memory-sync.sh` implements it:
 - **`memory-sync.sh pull`** clones/fetches the shared repo and materializes a **read-only overlay**: shared instincts → `~/.claude/instincts/<shared>.md` (autoloaded via an index block), shared persona instincts → `~/.claude/memory/{agent}/<shared>.md`, shared facts → `~/.claude/memory/<ns>/`.
 - **`memory-sync.sh promote <file> <repo-path>`** shares a local entry (direct-push). A **discipline gate** blocks the push if it finds secrets (token blobs, connection strings, private keys), personal data (home paths, emails, session hashes, `type: user`), non-allowlisted IPs, or work-item/TODO markers — memory holds durable knowledge, work-items belong in your tracker. The gate is a client-side best-effort lint (not server-enforced); add a CI/pre-receive backstop before a large contributor circle.
-- All deployment specifics (repo URL, token file, namespace, overlay paths, IP allowlist) live in a **personal, non-distributed** `~/.claude/memory-sync.json` — copy `templates/memory-sync.example.json` and add it plus `~/.claude/.memory-sync/` to your sync exclusions. The script itself stays generic. That file now serves three readers, not one: `memory-sync.sh` (repo, token, overlay paths), `artifact-gate.sh` (`gate.denyNames`) and `conformance-run.sh` (`conformance.consumers`, the local paths of projects that consume CCPR — see ADR-0010). Each reads its own key; none of them ships a value.
+- All deployment specifics (repo URL, token file, namespace, overlay paths, IP allowlist) live in a **personal, non-distributed** `~/.claude/memory-sync.json` — copy `templates/memory-sync.example.json` and add it plus `~/.claude/.memory-sync/` to your sync exclusions. The script itself stays generic. That file now serves four readers, not one: `memory-sync.sh` (repo, token, overlay paths), `artifact-gate.sh` (`gate.denyNames`), `conformance-run.sh` (`conformance.consumers`, the local paths of projects that consume CCPR — see ADR-0010) and `manual-lint.sh`'s check (g) (`lint.forbiddenProse`, a project-specific retired-prose-word guard — see CCP-1151 stage 4 cut 4). Each reads its own key; none of them ships a value.
 - **Namespaces** keep sources from colliding and re-syncs idempotent: native `G-NNN`/`{XX}-G-NNN`; **imported** foreign-contributor overlays `{SRC}-G-NNN` (e.g. a teammate's `OL-`), externally maintained; **shared org-tier** `{ORG}-G-NNN`, team-maintained by push (not by your own `/postmortem` decay). See `templates/MEMORY_SCHEMA.md` → "Instinct ID namespaces".
 
 ## Project Memory (Two-tier × two scopes)
@@ -218,7 +218,7 @@ subskill** (`docs/<phase-folder>/<SUBSKILL>.md`). P3 and P6 add a sub-index
 level under their lead-commands (e.g. `architecture/SECURITY.md` is a sub-index
 for `/p3-sec-*`).
 
-**Subskill commands** must:
+**Subcommands** must:
 1. Write their result to `docs/<phase-folder>/<DETAIL>.md` (overwrite, not append) with YAML frontmatter (`phase`, `subskill`, `status`, `last_updated`).
 2. Update `docs/<phase-folder>/<PHASE>.md` (index): refresh the detail-file row, lift any one-line key decision or risk into the index.
 
@@ -237,20 +237,20 @@ Never recommend commands from a later phase if the current phase's gate has not 
 
 ## Track Decision (Lean vs. Full)
 
-Every new project starts with `/track-decision` (entry-point skill). The skill runs a knockout check (K1–K5: GDPR PII, special data categories, imminent launch, regulatory scope, external sign-off) + indicator score (I1–I5) and decides:
+Every new project starts with `/track-decision` (entry-point command). The command runs a knockout check (K1–K5: GDPR PII, special data categories, imminent launch, regulatory scope, external sign-off) + indicator score (I1–I5) and decides:
 
-- **Lean-Track** (4 skills, *transient — sunset at CCPR v1.0*) — fast-test shortcut for CCPR dogfooding and a bridge into Full. `/lean-frame → build → /lean-learn → /lean-promote`. No gates, no BACKLOG/SPRINT, slim `docs/CLAUDE-lean.md` instead of the full CLAUDE. Constitution-Light in FRAME.md is sufficient. **Not** the default for mandant/team projects — those start on Full.
+- **Lean-Track** (4 commands, *transient — sunset at CCPR v1.0*) — fast-test shortcut for CCPR dogfooding and a bridge into Full. `/lean-frame → build → /lean-learn → /lean-promote`. No gates, no BACKLOG/SPRINT, slim `docs/CLAUDE-lean.md` instead of the full CLAUDE. Constitution-Light in FRAME.md is sufficient. **Not** the default for mandant/team projects — those start on Full.
 - **Full-Track** (P0–P8) — `/project-init → /constitution → /p0-problem → …`. Full phase pipeline with gates, constitution mandatory.
 
 **No downgrade Full → Lean.** Reassessment via `/track-decision` is allowed at any time.
 
 **Constitution mandatory in Full-Track:** `/project-init` calls `/constitution`, creates `docs/CONSTITUTION.md` with Inviolable/Default/Aspirational. All gates read the Inviolable section (via the `gate-preflight.py` extension) as a mandatory input. A violation = "Inviolable breach" in the gate verdict.
 
-**CCPR is bound by its own constitution.** The worker repo ratified `docs/CONSTITUTION.md` (v1.1, 05.06.2026) to apply the same Inviolable discipline to itself. Changes to skills, agents, templates and shipped scripts must respect CCPR's own Inviolables — see the file for the binding rules.
+**CCPR is bound by its own constitution.** The worker repo ratified `docs/CONSTITUTION.md` (v1.1, 05.06.2026) to apply the same Inviolable discipline to itself. Changes to commands, agents, templates and shipped scripts must respect CCPR's own Inviolables — see the file for the binding rules.
 
 **Domain bootstraps:** `~/.claude/templates/constitution-bootstraps/` provides starter seeds for common project types (`b2b-tool`, `b2c-marketplace`, `mobile-b2c`, `on-device-privacy`, `saas-b2c`). `/constitution` selects one when bootstrapping greenfield projects.
 
-**P6 sub-index skeletons:** `~/.claude/templates/QA_SKELETON/` ships pre-filled sub-index files (`QA.md`, `A11Y.md`, `AUDIT.md`, `AUTHZ.md`, `FUNCTIONAL.md`, `PENTEST.md`) that P6 sub-skills extend rather than re-create from scratch.
+**P6 sub-index skeletons:** `~/.claude/templates/QA_SKELETON/` ships pre-filled sub-index files (`QA.md`, `A11Y.md`, `AUDIT.md`, `AUTHZ.md`, `FUNCTIONAL.md`, `PENTEST.md`) that P6 sub-commands extend rather than re-create from scratch.
 
 ## Cross-Check (optional pre-flight check)
 

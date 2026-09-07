@@ -111,7 +111,7 @@ build/
 
 ### 4a. Create Constitution (Full-Track mandatory)
 
-Full-Track projects require `docs/CONSTITUTION.md`. Call `/constitution` as a subskill:
+Full-Track projects require `docs/CONSTITUTION.md`. Call `/constitution` as a subcommand:
 
 - **On promotion** (step 0 detected a brief): pass the Constitution candidates from the brief to `/constitution`. "Lean-precursor" mode applies implicitly (brief serves as template).
 - **On greenfield** (no brief): `/constitution` runs in greenfield mode with domain bootstrap selection (`saas-b2c`, `mobile-b2c`, `b2b-tool`, `b2c-marketplace`, `on-device-privacy`, or `custom`).

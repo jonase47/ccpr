@@ -76,7 +76,7 @@ Also update **`docs/concept/CONCEPT.md`** (phase index):
 - Append the verdict and any Conditional-Go conditions under the **Gate Notes** section.
 - Add a row in the detail-file table for `[GATE_P1.md](GATE_P1.md)` with the verdict.
 
-The phase index is the consolidated concept document — no separate "summary CONCEPT.md" needs to be regenerated; the index already aggregates Key Decisions and Open Risks from all five subskills.
+The phase index is the consolidated concept document — no separate "summary CONCEPT.md" needs to be regenerated; the index already aggregates Key Decisions and Open Risks from all five subcommands.
 
 ---
 

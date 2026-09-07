@@ -55,12 +55,12 @@ Pick whichever layout fits your workflow:
 ### G-007: Max 3 parallel agents
 **Confidence: 0.8** | Type: Generic
 
-> **Rule**: maximum 3 sub-agents in parallel per skill run. For larger workloads, use sequential waves with wingman consolidation between waves.
+> **Rule**: maximum 3 sub-agents in parallel per command run. For larger workloads, use sequential waves with wingman consolidation between waves.
 >
 > **Why**: beyond 3 parallel agents, wingman consolidation becomes unwieldy, per-agent token budget drops below the quality threshold, and race conditions on file writes become possible.
 >
 > **How to apply**:
-> - Max 3 parallel explore/review/audit agents per skill
+> - Max 3 parallel explore/review/audit agents per command
 > - Plan-Mode phase 1 (explore) has a hard cap of 3
 > - On larger workloads: sequential waves (e.g. P3 architecture: first components + tech-stack + ADR in parallel, then NFR sequentially)
 
@@ -112,16 +112,16 @@ Pick whichever layout fits your workflow:
 > - Persistence in **one** pass (not "I'll do it later" — that gets forgotten)
 > - Date + phase + rationale in the table
 
-### G-016: End sessions after 2 sprints (multi-skill hygiene)
+### G-016: End sessions after 2 sprints (multi-command hygiene)
 **Confidence: 0.9** | Type: Generic
 
-> **Rule**: limit sessions to max. 2 skill workflows or 1 sprint. At HighToolCount=200 or TokenBudgetWarning@150: close the session cleanly (commit + push + HANDOVER update), then `/compact` or a new session.
+> **Rule**: limit sessions to max. 2 command workflows or 1 sprint. At HighToolCount=200 or TokenBudgetWarning@150: close the session cleanly (commit + push + HANDOVER update), then `/compact` or a new session.
 >
-> **Why**: long sessions accumulate stagnation warnings, the token budget runs low, context drift makes later skills less accurate. Empirically: 4-skill sessions reach 200+ tool calls and reasoning quality drops.
+> **Why**: long sessions accumulate stagnation warnings, the token budget runs low, context drift makes later commands less accurate. Empirically: 4-command sessions reach 200+ tool calls and reasoning quality drops.
 >
 > **How to apply**:
 > - Watch the indicators: HighToolCount=200, TokenBudgetWarning, ≥100 stagnation warnings
-> - Skill limit: max. 2 substantive skills (e.g. `/p5-implement` + `/p5-review`) or 1 large skill (`/p4-backlog`)
+> - Command limit: max. 2 substantive commands (e.g. `/p5-implement` + `/p5-review`) or 1 large command (`/p4-backlog`)
 > - Sprint limit: 1 sprint close-out per session
 > - Before a new session: commit HANDOVER.md, optionally `/compact`
 
@@ -137,12 +137,12 @@ Pick whichever layout fits your workflow:
 > - At >15 KB, work pre-emptively with `offset` / `limit`
 > - **Intra-session sub-rule**: if a file has already failed a read in the session, every subsequent read of the same file must use offset/limit (no repeating the error!)
 
-### G-025: Read share in skill sessions
+### G-025: Read share in command sessions
 **Confidence: 0.9** | Type: Statistical / observational
 
-> **Rule**: in typical skill sessions (P3-architecture, P4-backlog, P5-implement, P5-review, P6-audit) the `Read` tool share lies between **44 % and 54 %** of tool calls. Deviations >60 % indicate full-text reads of unchecked files; <30 % indicate too little context loading.
+> **Rule**: in typical command sessions (P3-architecture, P4-backlog, P5-implement, P5-review, P6-audit) the `Read` tool share lies between **44 % and 54 %** of tool calls. Deviations >60 % indicate full-text reads of unchecked files; <30 % indicate too little context loading.
 >
-> **Why**: empirical pattern across 6+ skill families. Read is the dominant tool for context build-up — deviations are diagnostic.
+> **Why**: empirical pattern across 6+ command families. Read is the dominant tool for context build-up — deviations are diagnostic.
 >
 > **How to apply**:
 > - At session end: check `session-summary.json`, compute `by_tool.Read` / `total_tool_calls`
@@ -186,15 +186,15 @@ Pick whichever layout fits your workflow:
 > - **Never**: multi-line perl in a for-loop
 > - **Verification required**: `grep -rln 'OLD_PATTERN' <dirs>` to confirm coverage
 
-### G-049: Volatile skill outputs need an immediate gitignore entry
-**Confidence: 0.4** | Type: Skill design
+### G-049: Volatile command outputs need an immediate gitignore entry
+**Confidence: 0.4** | Type: Command design
 
-> **Rule**: when a skill writes generator output to `docs/.<name>-report.md`, `docs/.<name>-preflight-*.md`, or similar dotfiles, simultaneously produce a `.gitignore` pattern suggestion — either in the skill output or as a warning to the user.
+> **Rule**: when a command writes generator output to `docs/.<name>-report.md`, `docs/.<name>-preflight-*.md`, or similar dotfiles, simultaneously produce a `.gitignore` pattern suggestion — either in the command output or as a warning to the user.
 >
-> **Why**: pre-commit hooks in the project may accidentally stage volatile dotfiles. Retroactive `.gitignore` extension costs an extra commit. Known skills with volatile output: `gate-preflight`, `cross-check`, `anchor`, `quality-scan`, `bootstrap` (`docs/.session-context.md`).
+> **Why**: pre-commit hooks in the project may accidentally stage volatile dotfiles. Retroactive `.gitignore` extension costs an extra commit. Known commands with volatile output: `gate-preflight`, `cross-check`, `anchor`, `quality-scan`, `bootstrap` (`docs/.session-context.md`).
 >
 > **How to apply**:
-> - **During skill design**: if the skill produces output under `docs/.<...>` → potentially volatile → `.gitignore` recommendation in the skill's "result" block
+> - **During command design**: if the command produces output under `docs/.<...>` → potentially volatile → `.gitignore` recommendation in the command's "result" block
 > - **When migrating to existing projects**: actively check whether the project has a pre-commit hook; adjust `.gitignore` pro-actively
 > - **Standard block** for `.gitignore` in CCPR projects:
 >   ```
@@ -227,7 +227,7 @@ Pick whichever layout fits your workflow:
 Some global instincts are deliberately kept out of the CCPR snapshot, for three reasons:
 
 **Personal-context (per-user memory / project-specific anti-patterns):**
-- **G-005** (skill commits) — sub-rule "no Anthropic co-author trailer" rooted in a user-specific commit-message memory
+- **G-005** (command commits) — sub-rule "no Anthropic co-author trailer" rooted in a user-specific commit-message memory
 - **G-046** (project memory pre-default-action) — examples cite personal memory files
 - **G-047** (PII in HTTP calls) — generic in concept, but the trigger example is a personal email in the User-Agent
 - **G-054** (HANDOVER read-overflow pre-check), **G-055** (Bash CWD persistence) — project-shape-dependent evidence

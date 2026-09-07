@@ -74,7 +74,7 @@ DEFAULT_CAP_LINES = 150
 HOOK_TIMEOUT_S = 10
 
 # Measured in this repo on 18.08.2026 and recorded in the hook's own comment above
-# HANDOVER_WARN_PCT: one skill run grew docs/HANDOVER.md by this many bytes. The warn
+# HANDOVER_WARN_PCT: one command run grew docs/HANDOVER.md by this many bytes. The warn
 # threshold is derived from it — see ThresholdDerivationTest.
 SINGLE_RUN_GROWTH_BYTES = 1021
 
@@ -715,7 +715,7 @@ class ThresholdDerivationTest(HandoverSizeHookTestCase):
 
     The behavioural tests above bracket the threshold loosely (85 % warns, 70 % is silent),
     which leaves every value from 71 to 85 green. That is not a pin: the number came from a
-    measurement — one skill run grows the file by SINGLE_RUN_GROWTH_BYTES — and the whole
+    measurement — one command run grows the file by SINGLE_RUN_GROWTH_BYTES — and the whole
     point is that the warning fires at the last moment at which it is still preventive. A
     threshold any higher means the next run breaches the cap unannounced.
 

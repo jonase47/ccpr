@@ -44,7 +44,7 @@ Orchestrator reads beforehand and provides inline:
 > | [Item from SECURITY.md] | OK / FINDING / N/A |
 >
 > **Constraints**:
-> - Only check security – NO code quality (separate sub-skill)
+> - Only check security – NO code quality (separate sub-command)
 > - For minimal scope (no user input, no backend): brief confirmation is sufficient
 > - Focus on actual risks, not theoretical scenarios
 

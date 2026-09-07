@@ -1215,7 +1215,7 @@ class ExternalToolExitStatusTest(unittest.TestCase):
         by_disposition = {}
         for inv in invocations:
             by_disposition[inv.disposition] = by_disposition.get(inv.disposition, 0) + 1
-        self.assertEqual(170, len(invocations))
+        self.assertEqual(173, len(invocations))
         self.assertEqual(
             {
                 # 28.08.2026, open-findings wave 1a: one invocation moved
@@ -1269,9 +1269,32 @@ class ExternalToolExitStatusTest(unittest.TestCase):
                 # `bare-needs-exemption` +1). Net for scripts/push-gate.sh:
                 # `checked-condition` +2 (169 total), `bare-needs-exemption`
                 # unchanged.
+                # 06.09.2026 (CCP-1151 stage 4 cut 4): +3 total for
+                # scripts/manual-lint.sh's new check (g), all three verified
+                # by running THIS scanner directly rather than re-derived by
+                # eye (its forward-window search can extend past what looks
+                # like the statement boundary once a heredoc or a brace-
+                # carrying inline `awk` program sits between the invocation
+                # and the next depth-0 terminator -- the same "not a full
+                # parser" limitation the module docstring already names, not
+                # a new one this bump introduces). The config reader's
+                # python3 heredoc invocation (marked `exit-status: exempt
+                # propagates-as-function-return`, the same marker
+                # conformance-run.sh's own equivalent reader already
+                # carries) lands `checked-captured` (+1: its caller's `rc=$?`
+                # falls inside the window); the per-file loop's file-level
+                # pre-filter, `grep -qiF -- "$term" "$gfile" 2>/dev/null ||
+                # continue`, lands `checked-chain` (+1, its own `||`); and
+                # the malformed-config message extraction -- artifact-
+                # gate.sh's own `awk -F'\t' '$1 == "ERROR" { print $2; exit
+                # }'` shape, marked `exit-status: exempt internal-record-
+                # parsing` to match -- also lands `checked-chain` (+1, a
+                # real chain operator inside the window). Net:
+                # `checked-captured` +1 (6 total), `checked-chain` +2
+                # (17 total).
                 "checked-condition": 34,
-                "checked-captured": 5,
-                "checked-chain": 15,
+                "checked-captured": 6,
+                "checked-chain": 17,
                 "discard-needs-exemption": 41,
                 "bare-needs-exemption": 75,
             },

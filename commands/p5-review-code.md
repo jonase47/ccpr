@@ -41,7 +41,7 @@ Orchestrator reads beforehand and provides inline:
 > Overall rating: MERGE-READY | MERGE-AFTER-FIXES | REWORK
 >
 > **Constraints**:
-> - Only check code quality, logic, tests – NO security analysis (separate sub-skill)
+> - Only check code quality, logic, tests – NO security analysis (separate sub-command)
 > - Severity levels: CRITICAL (merge blocker), HIGH (should be fixed), NOTE (optional)
 > - No style nitpicks if code conventions are followed
 

@@ -57,7 +57,7 @@ Update `docs/concept/CONCEPT.md` (create from index template if missing — see 
 - Set `**Last Updated:** <DD.MM.YYYY>`.
 - In **Detail Files** table: ensure a row for `[USER_JOURNEYS.md](USER_JOURNEYS.md)` with status `complete`.
 - Lift the critical-path persona/journey into **Key Decisions** (e.g. `- Critical journey: <persona> tracking <flow> → see USER_JOURNEYS.md`).
-- Add any open question that blocks subsequent subskills under **Open Risks / Open Questions**.
+- Add any open question that blocks subsequent subcommands under **Open Risks / Open Questions**.
 
 ## Result
 

@@ -139,7 +139,7 @@ def measured_command_count():
 def measured_phase_command_breakdown():
     """Per-phase command counts, P0..P8. Every phase command file is named
     `p{N}-....md` -- no phase ever ships a bare `p{N}.md`, so this glob
-    cannot double-count a lead command against its own sub-skills."""
+    cannot double-count a lead command against its own sub-commands."""
     return [len(list(COMMANDS_DIR.glob(f"p{i}-*.md"))) for i in range(PHASE_COUNT)]
 
 

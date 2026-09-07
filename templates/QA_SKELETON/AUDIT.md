@@ -8,7 +8,7 @@ parent_index: QA.md
 
 # Audit (P6 Sub-Index) — Index
 
-**Status:** Skeleton — populated by `/p6-audit` and its sub-skills.
+**Status:** Skeleton — populated by `/p6-audit` and its sub-commands.
 
 ## Findings
 
@@ -16,6 +16,7 @@ parent_index: QA.md
 
 ## Detail Files
 
+<!-- "Sub-Skill" is the frozen subskill: frontmatter field key, not a missed rename. -->
 | Sub-Skill | File | Status |
 |---|---|---|
 | Static Code Analysis | SAST.md | pending |

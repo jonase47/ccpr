@@ -10,7 +10,7 @@ labels:
 
 ## What happened
 
-<!-- What you ran (the skill/command, e.g. /p3-architecture) and what went wrong. -->
+<!-- What you ran (the command, e.g. /p3-architecture) and what went wrong. -->
 
 ## What you expected
 

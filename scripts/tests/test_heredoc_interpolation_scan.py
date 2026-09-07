@@ -400,10 +400,16 @@ class ClassificationCountsTest(unittest.TestCase):
         scripts/install-push-gate-hook.sh's own `<<'HOOK'` block -- see
         ScannedFilesCoverTheShippedScopeTest's own trajectory entry for why
         it is quoted. Findings unchanged at 2 (the quoted delimiter is not
-        a finding)."""
+        a finding).
+
+        Bumped 42 -> 43, 06.09.2026 (CCP-1151 stage 4 cut 4): +1 opener from
+        scripts/manual-lint.sh's new check (g) config reader,
+        `python3 - "$(_lint_config_path)" <<'PY'`. Findings unchanged at 2
+        (the delimiter is single-quoted, the same shape the 03.09.2026 bump
+        above already established as safe)."""
         sites = scan_tree()
         findings = [s for s in sites if s.is_finding]
-        self.assertEqual(42, len(sites))
+        self.assertEqual(43, len(sites))
         self.assertEqual(2, len(findings))
 
 

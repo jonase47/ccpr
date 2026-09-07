@@ -78,7 +78,7 @@ The Lean-Track uses **Tier-1 memory only** (cross-cutting). No agent silos.
 
 Memory is rarely needed on the Lean-Track — when insights emerge, they belong in FRAME or LEARNINGS, not in memory files.
 
-## Lean-Track Skills
+## Lean-Track Commands
 
 - `/track-decision` — re-assessment if conditions change
 - `/lean-frame` — revise FRAME.md
@@ -92,7 +92,7 @@ Memory is rarely needed on the Lean-Track — when insights emerge, they belong 
 - No BACKLOG/SPRINT
 - No dedicated P0–P8 phase model
 - No phase-doc splitting convention
-- No `/p*-*` skills
+- No `/p*-*` commands
 
 If any of this machinery is needed, the promotion trigger has fired → `/lean-learn` → `/lean-promote`.
 

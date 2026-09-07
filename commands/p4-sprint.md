@@ -53,7 +53,7 @@ Before planning the new sprint, archive the previous sprint's polish artefact so
 - If flat `docs/planning/POLISH.md` exists with `status: living` → move it to `docs/planning/.handover-archive/sprint-<prev>/POLISH.md` and set `status: active`.
 - If `status: empty` → archive identically (record that no polish was needed).
 - Update `PROJECT_PLAN.md`: remove or update the POLISH row in the Detail Files table to reflect archival.
-- If no polish file exists (skill was not run): proceed silently, no error.
+- If no polish file exists (command was not run): proceed silently, no error.
 
 Create `.handover-archive/sprint-<prev>/` if it does not yet exist.
 
@@ -126,7 +126,7 @@ Delegate technical planning review to the **senior-developer** agent:
 > 4. Where do you see the greatest risk in this sprint?
 
 ### 4. Write Detail Files
-This subskill writes **two** living file groups in `docs/planning/`. Both stay alive across sprints — `SPRINT.md` reflects the current sprint, `RISKS.md` is the cumulative register. Each group can be **flat** or **sub-index**, depending on size.
+This subcommand writes **two** living file groups in `docs/planning/`. Both stay alive across sprints — `SPRINT.md` reflects the current sprint, `RISKS.md` is the cumulative register. Each group can be **flat** or **sub-index**, depending on size.
 
 #### 4a. Choose Layout — Sprint
 

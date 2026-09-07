@@ -121,7 +121,7 @@ Wait for confirmation. Only update after explicit OK:
   **not exhaustive**:
   - `agents.md` — subagent orchestration, briefing, wingman, parallel/sequential shapes
   - `files.md` — Read/Edit discipline, large-file handling, path verification before Read
-  - `workflow.md` — skill pipelines, gates, plan-mode, sprint mechanics, PO decisions, push policy, memory override
+  - `workflow.md` — command pipelines, gates, plan-mode, sprint mechanics, PO decisions, push policy, memory override
   - `shell-git.md` — Bash CWD, mass-substitution tooling, commit-hook conventions, tranche-based mass-edits, destructive-action verification
   - `external.md` — WebFetch fallbacks, MCP-server registration, OS-specific filename quirks, PII protection in external HTTP
 

@@ -14,7 +14,7 @@ related:
 {{Context, rationale, background. What triggered this? Which incident, discussion, or constraint?}}
 
 **How to apply:**
-- {{When does this rule apply? In which skill contexts?}}
+- {{When does this rule apply? In which command contexts?}}
 - {{Edge cases, limits, exceptions}}
 - {{On conflict with other rules: which takes precedence?}}
 

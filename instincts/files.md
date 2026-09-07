@@ -24,9 +24,9 @@ Behavioural rules for reading and editing files safely: avoid token-overflow on 
 > - At >15 KB, work pre-emptively with `offset` / `limit`
 > - **Intra-session sub-rule**: if a file has already failed a read in the session, every subsequent read of the same file must use offset/limit (no repeating the error — the loop-detector logs the repeat)
 >
-> **HANDOVER.md special case**: `docs/HANDOVER.md` is the project handover snapshot that grows across skill changes. Read it pre-emptively with `head -20` or `Read offset:1 limit:30` instead of full-text, especially at session start.
+> **HANDOVER.md special case**: `docs/HANDOVER.md` is the project handover snapshot that grows across command changes. Read it pre-emptively with `head -20` or `Read offset:1 limit:30` instead of full-text, especially at session start.
 >
-> **Phase-3 detail-files sub-rule**: `docs/architecture/DATA_MODEL.md`, `COMPONENTS.md`, `ARCHITECTURE.md` and similar files grow with every skill. Before reading them in P5+: first `grep -n '^## '` for a section map, then targeted section reads.
+> **Phase-3 detail-files sub-rule**: `docs/architecture/DATA_MODEL.md`, `COMPONENTS.md`, `ARCHITECTURE.md` and similar files grow with every command. Before reading them in P5+: first `grep -n '^## '` for a section map, then targeted section reads.
 >
 > **Subagent-briefing sub-rule**: When briefing a subagent to read a known-growing file (HANDOVER, ACCEPTANCE_*, sprint reports), pass an offset/limit hint or a concrete section anchor in the brief — subagents do not internalise G-017 automatically and attempt full reads by default.
 
@@ -53,11 +53,11 @@ Behavioural rules for reading and editing files safely: avoid token-overflow on 
 ### G-030: Orchestrator reads with a verified filename via `ls` / `Glob`
 **Confidence: 0.5** | Last confirmed: starter set
 
-> **Rule**: Before the orchestrator (not an agent) reads a file whose name does NOT come from an explicit source (user message, recent Bash output, a known CLAUDE.md entry, or a just-read index file with a path link), first run `ls <dir>` or `Glob <pattern>` to get the exact filename. Logically "constructing" a filename from skill context reproducibly leads to read-fails + a re-read loop.
+> **Rule**: Before the orchestrator (not an agent) reads a file whose name does NOT come from an explicit source (user message, recent Bash output, a known CLAUDE.md entry, or a just-read index file with a path link), first run `ls <dir>` or `Glob <pattern>` to get the exact filename. Logically "constructing" a filename from command context reproducibly leads to read-fails + a re-read loop.
 >
-> **Anti-pattern**: You take a logical anchor from a subagent verdict ("RECHECK", "TRANCHE-B", "ACCEPTANCE") and construct a path like `docs/reviews/SPRINT-01-RECHECK.md`, without checking that the actual skill convention is `docs/reviews/SPRINT-01-tranche-b-code-recheck.md`. The constructed path is plausible but wrong.
+> **Anti-pattern**: You take a logical anchor from a subagent verdict ("RECHECK", "TRANCHE-B", "ACCEPTANCE") and construct a path like `docs/reviews/SPRINT-01-RECHECK.md`, without checking that the actual command convention is `docs/reviews/SPRINT-01-tranche-b-code-recheck.md`. The constructed path is plausible but wrong.
 >
-> **Mitigation**: For reads into directories with skill naming conventions (`docs/reviews/SPRINT-*`, `docs/quality/acceptance/ACCEPTANCE_*`, generated doc files): first `Glob "docs/reviews/SPRINT-01*"` or `ls docs/reviews/ | head`, then Read the found filename. Saves a read-fail + correction read.
+> **Mitigation**: For reads into directories with command naming conventions (`docs/reviews/SPRINT-*`, `docs/quality/acceptance/ACCEPTANCE_*`, generated doc files): first `Glob "docs/reviews/SPRINT-01*"` or `ls docs/reviews/ | head`, then Read the found filename. Saves a read-fail + correction read.
 >
 > **Distinction from G-009** (agent-briefing paths): G-009 covers paths the orchestrator puts INTO an agent brief — mitigation = exact paths in the brief. G-030 covers paths the orchestrator uses to read itself — mitigation = `ls`/`Glob` before Read. Complementary.
 >

@@ -13,11 +13,11 @@ related:
 
 # Quality Assurance (P6) — Phase Index
 
-**Status:** Skeleton — populated by `/p6-*` skills. Sub-indexes already exist as skeletons.
+**Status:** Skeleton — populated by `/p6-*` commands. Sub-indexes already exist as skeletons.
 
 ## Key Decisions
 
-<!-- One-liners lifted by /p6-*-Sub-Skills, with link to sub-index. -->
+<!-- One-liners lifted by /p6-*-Sub-Commands, with link to sub-index. -->
 
 ## Open Risks / Open Questions
 
@@ -28,7 +28,7 @@ related:
 
 ## Sub-Indexes
 
-| Sub-Index | File | Lead-Skill | Status |
+| Sub-Index | File | Lead-Command | Status |
 |---|---|---|---|
 | Accessibility | [A11Y.md](A11Y.md) | `/p6-a11y` | skeleton |
 | Audit (SAST/Deps/DSGVO/Config/Auth) | [AUDIT.md](AUDIT.md) | `/p6-audit` | skeleton |
@@ -38,7 +38,7 @@ related:
 
 ## Gate Notes
 
-<!-- Filled by /gate-p6 once all sub-skills complete. -->
+<!-- Filled by /gate-p6 once all sub-commands complete. -->
 
 **Sequence (per `~/.claude/docs/NEXT_STEPS_REFERENCE.md`):**
 1. `/p6-functional` (Integration/E2E/Regression — Baseline-Tests)

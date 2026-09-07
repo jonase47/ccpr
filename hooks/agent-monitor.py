@@ -79,7 +79,7 @@ HANDOVER_STALENESS_TOLERANCE_S = 60  # docs/HANDOVER.md may lag this much behind
 HANDOVER_DEFAULT_CAP_BYTES = 5 * 1024   # templates/HANDOVER_TEMPLATE.md default (KB = 1024 B)
 HANDOVER_DEFAULT_CAP_LINES = 150        # ...and its line dimension
 HANDOVER_CAP_HEADER_LINES = 20          # only the header may declare a per-file cap
-# Warn at 80 % of the cap, not at 100 %. Measured in this repo on 18.08.2026: one skill run
+# Warn at 80 % of the cap, not at 100 %. Measured in this repo on 18.08.2026: one command run
 # grew docs/HANDOVER.md by 1021 B, i.e. ~20 % of the 5 KB cap. A threshold one run's growth
 # below the cap is therefore the last moment at which a warning is still preventive — at any
 # higher value the very next run breaches the cap without ever having been announced.
@@ -1783,7 +1783,7 @@ def handle_post_tool_use(data: dict, session_id: str):
         })
 
     # Size cap right after a HANDOVER write: this is the moment the file grows, and a full
-    # skill run can cross the cap between two SessionStarts. The gate keeps the cost of the
+    # command run can cross the cap between two SessionStarts. The gate keeps the cost of the
     # check off every other tool call — a set lookup plus one basename comparison.
     if is_handover_write(tool_name, data.get("tool_input", {})):
         check_handover_size(session_id, "PostToolUse")
