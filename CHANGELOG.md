@@ -8,6 +8,39 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Added
 
+- **`scripts/check-all.sh`'s terminal `**Summary:**` line now names the deny-list state
+  (CCP-1148 / E4).** A missing `gate.denyNames` config used to be invisible at the level a
+  reader actually reads: `artifact-gate` still counted as `matched` in all three
+  `GATE_DENY_STATE` cases (`configured` / `none` / `error`), so "9 catalogued, 9 matched, 0
+  divergent, 0 could-not-run" looked identical whether or not the deny-list ran — exactly the
+  "looks checked, is not checked" shape a fork PR without the (not-yet-existing) Actions secret
+  reproduces on every run, silently. The per-check `RESULTS_TEXT` note already named the state
+  one screen up, but a reader who only reads the last line — the CI status text, a terminal
+  tail — never saw it. The Summary line now carries a new trailing field, `GATE_DENY_SUMMARY`:
+  `deny-list: NOT configured`, `deny-list: detection FAILED`, or `deny-list: N name(s) checked`
+  with the actual count read back out of `artifact-gate.sh`'s own stdout (the `deny-list: N
+  name(s) checked` line it already prints) rather than re-derived a second time.
+  **Deliberately not the fix the item proposed:** folding the unconfigured/error states into the
+  existing `could-not-run` bucket was considered and rejected — measured against
+  `scripts/artifact-gate.sh`'s own header (lines 62–71), an unconfigured deny-list does not mean
+  the run "could not be performed"; `artifact-gate.sh`'s exit code stays fully meaningful for its
+  secrets/PII/network-literal checks regardless of deny-list configuration, only the deny-list
+  DIMENSION of the scan is reduced. Every other `could-not-run` trigger in `check-all.sh` exists
+  for checks whose exit code tells you NOTHING about whether they ran (`conformance-run`,
+  `memory-lint`, `shellcheck`, `install-verify`); `artifact-gate`'s exit code does not have that
+  problem, so routing it through `could-not-run` would have discarded a genuine match/divergent
+  verdict on every run without a configured deny-list — exactly the class of local-machine and
+  fresh-checkout run `artifact-gate.sh`'s own header protects as a supported, non-failing
+  configuration ("Failing by default would mean this gate's first act on every new machine is to
+  refuse"). No change to `scripts/artifact-gate.sh` itself, its exit codes, or its flags — purely
+  additive reporting in `check-all.sh`, so this is **not** an Inviolable #5 breaking
+  command-interface change; a caller matching the Summary line by exact string will need to widen
+  that match, which is why it is recorded here regardless.
+  `scripts/tests/test_check_all.py`'s new `ArtifactGateDenylistSummaryVisibilityTest` pins the
+  three wordings and the read-back count; `ArtifactGateDenylistSummaryRedProofTest` is the
+  mutation-based red proof (G-107/G-109): a TRANSPOSITION of the configured/not-configured
+  wording, not a deletion, shows the Summary line actually discriminates between the two states.
+
 - **`docs/CONSTITUTION.md` v1.3 — the file's own deferred `skill` → `command` exception is closed,
   and the second `Manual/` echo CCP-1150 held back is repointed.** CCP-1151's four-stage sweep
   excluded this one file by name (K1, "ratified text is out of bounds",
