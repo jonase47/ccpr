@@ -104,8 +104,8 @@ python3 -m unittest discover -s scripts/tests -t .
 
 - **`-t .` is not optional**, and the failure mode is worth knowing because it is
   partly silent. It sets the top-level directory imports resolve against. Measured
-  on the current tree (08.09.2026): **with** it, discovery collects **2779 tests, 0
-  import errors**, exit 0; **without** it, **2062 tests and 17 modules that fail to
+  on the current tree (08.09.2026): **with** it, discovery collects **2781 tests, 0
+  import errors**, exit 0; **without** it, **2064 tests and 17 modules that fail to
   import**, exit 1 — the eight that use a relative import
   (`from .test_phase_docs_lint import …` in four modules,
   `from .test_artifact_gate import …` in two,
@@ -158,15 +158,20 @@ python3 -m unittest discover -s scripts/tests -t .
   `scripts/tests/test_ci_workflow.py`'s DenylistEnvMutationTest) import cleanly
   with or without the flag, so the addition lands on both sides of the
   subtraction and cancels, same as every round since 05.09.2026 — and now
-  2775 / 2058 / 17 / 717 against a tree at 2779 / 2062 / 17 / 717, the
-  thirteenth round running in which it did not move: CCP-1145's four new
+  2775 / 2058 / 17 / 717 against a tree at 2781 / 2064 / 17 / 717, the
+  thirteenth round running in which it did not move: CCP-1145's six new
   `scripts/tests/test_check_all.py` methods (ConcurrentRunIsRejectedTest,
   LockDoesNotBlockSequentialRunsTest, StaleLockFromACrashedRunDoesNotBlockTest,
-  ConcurrentLockRedProofTest) import cleanly with or without the flag too,
-  same reason, same cancellation. These runs, back to back, take about eleven
-  minutes — not independently re-measured this round (four more tests,
-  counted without running the suite; the wall-clock figure needs an actual
-  run, which is out of scope here).
+  ConcurrentLockRedProofTest, GitDirKeyedLockTest — the last two added in a
+  code-review follow-up, closing a gap where every OTHER new test here ran
+  only against a non-git fixture and never exercised the git-directory-keyed
+  lock path this repository's own real usage always takes — and
+  CaseAliasedPathsShareTheSameGitDirLockTest, skipped on a case-sensitive
+  filesystem) import cleanly with or without the flag too, same reason, same
+  cancellation. These runs, back to back, take about eleven minutes — not
+  independently re-measured this round (six more tests, counted without
+  running the suite; the wall-clock figure needs an actual run, which is out
+  of scope here).
 - The full run takes **a couple of minutes**. If you drive it from an agent whose
   tool calls time out, start it in the background and wait for it once rather than
   polling.

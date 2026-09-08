@@ -1531,10 +1531,19 @@ class StaleLockFromACrashedRunDoesNotBlockTest(CheckAllTestBase):
         self.write_blocking_stub("phase-docs-lint.sh", ready_marker, sleep_seconds=30)
 
         crashed = self.popen_check_all()
-        self.wait_for_marker(ready_marker)
-
-        os.killpg(crashed.pid, signal.SIGKILL)
-        crashed.communicate(timeout=10)
+        try:
+            self.wait_for_marker(ready_marker)
+        finally:
+            # If the marker never appears, wait_for_marker's own assertion
+            # already failed the test -- but `crashed` (30-second blocking
+            # stub) would otherwise be left running and holding the lock for
+            # the rest of that sleep, unreachable by self.tmp's own
+            # addCleanup (the lock dir lives under the project's .git or
+            # TMPDIR, never nested inside self.tmp) until it exits on its
+            # own (code-review finding, CCP-1145). Always reap it here,
+            # success or failure.
+            os.killpg(crashed.pid, signal.SIGKILL)
+            crashed.communicate(timeout=10)
         self.assertEqual(
             -signal.SIGKILL, crashed.returncode,
             "the setup for this test must actually kill the run, not let it "
@@ -1595,13 +1604,140 @@ class ConcurrentLockRedProofTest(CheckAllTestBase):
 
             second = self.run_check_all(script_path=scratch)
             # This is the exact assertion ConcurrentRunIsRejectedTest makes
-            # on the UNMUTATED script; against the mutant it must fail --
-            # `mkdir -p` "succeeds" even though the directory already
-            # existed, so the second run is never refused.
-            self.assertNotEqual(
-                2, second.returncode,
-                "the mutant defeated the lock, so a rejection here would "
-                "mean the mutation did not land as intended: " + self.output(second),
+            # on the UNMUTATED script; against the mutant it must fail.
+            # Asserted as an EXACT expected value (0, the ordinary "every
+            # check matched" outcome this fixture's all-zero baseline and
+            # all-clean stubs guarantee), not merely "not 2" (code-review
+            # finding, CCP-1145) -- "not 2" would also pass if the mutant
+            # broke something else entirely (e.g. a genuine divergence, exit
+            # 1), which would be a false reading of "the lock-defeat proof
+            # still works" for an unrelated, unintended failure mode.
+            self.assertEqual(
+                0, second.returncode,
+                "the mutant should let the second run through cleanly (exit "
+                "0, the ordinary outcome for this fixture's clean stubs and "
+                "all-zero baseline) -- anything else means the mutation did "
+                "not land as intended: " + self.output(second),
             )
+        finally:
+            first.communicate(timeout=30)
+
+
+# ---------------------------------------------------------------------------
+# The git-dir-keyed lock path -- untested above (code-review finding,
+# CCP-1145): CheckAllTestBase.setUp never `git init`s self.project_dir, so
+# every test above exercises ONLY check-all.sh's TMPDIR fallback. This
+# repository's OWN real invocations of check-all.sh always run inside a git
+# checkout, so the fallback is exactly the path real usage never takes, and
+# the git-dir-keyed path -- the one the PO decision (CCP-1145) actually
+# argues for -- had no coverage at all.
+# ---------------------------------------------------------------------------
+class GitDirKeyedLockTest(CheckAllTestBase):
+    """Re-runs ConcurrentRunIsRejectedTest's own proof against a REAL git
+    checkout fixture, and additionally proves the lock materialises where
+    check-all.sh's own header claims it does (<project-dir>/.git/), not
+    merely that a rejection happens for some unspecified reason."""
+
+    def setUp(self):
+        super().setUp()
+        subprocess.run(
+            ["git", "init", "-q", str(self.project_dir)],
+            check=True, capture_output=True, text=True,
+        )
+
+    def test_a_concurrent_run_against_a_real_git_checkout_is_rejected_via_the_git_dir_lock(self):
+        ready_marker = self.tmp / "gitdir-first-run-ready"
+        self.write_blocking_stub("phase-docs-lint.sh", ready_marker, sleep_seconds=3)
+
+        first = self.popen_check_all()
+        try:
+            self.wait_for_marker(ready_marker)
+
+            self.assertTrue(
+                (self.project_dir / ".git" / "ccpr-check-all.lock").is_dir(),
+                "the lock directory did not materialise under <project-dir>/"
+                ".git while the first run was in flight -- git-dir-keyed "
+                "locking is not actually happening",
+            )
+
+            second = self.run_check_all()
+            self.assertEqual(2, second.returncode, self.output(second))
+            self.assertIn("already in progress", second.stderr, self.output(second))
+        finally:
+            first_stdout, first_stderr = first.communicate(timeout=30)
+
+        self.assertEqual(
+            0, first.returncode,
+            "returncode=%s stdout=%s stderr=%s" % (first.returncode, first_stdout, first_stderr),
+        )
+
+
+def _tmp_root_is_case_insensitive():
+    """Probes whether tempfile.gettempdir() resolves an upper/lower-cased
+    sibling path to the SAME physical file -- measured directly rather than
+    assumed from sys.platform, because a case-insensitive filesystem is a
+    mount property, not strictly an OS one. CI's own python-tests job runs
+    on ubuntu-latest / ext4 (case-SENSITIVE); the CASE-ALIAS test below is
+    only meaningful, and only reproducible, on a case-insensitive one (this
+    repository's own real CCP-1145 incident was observed on macOS/APFS)."""
+    probe_dir = Path(tempfile.gettempdir())
+    probe = probe_dir / "ccpr-check-all-case-probe.tmp"
+    probe.write_text("x", encoding="utf-8")
+    try:
+        alt = probe_dir / "CCPR-CHECK-ALL-CASE-PROBE.tmp"
+        return alt.exists() and alt.samefile(probe)
+    finally:
+        probe.unlink()
+
+
+_CASE_INSENSITIVE_TMP = _tmp_root_is_case_insensitive()
+
+
+@unittest.skipUnless(
+    _CASE_INSENSITIVE_TMP,
+    "requires a case-insensitive filesystem (this machine's TMPDIR is case-sensitive)",
+)
+class CaseAliasedPathsShareTheSameGitDirLockTest(CheckAllTestBase):
+    """The SECOND real incident CCP-1145's own work item records, reproduced
+    directly: two differently-CASED spellings of the identical working tree
+    are the SAME physical directory on a case-insensitive filesystem, but a
+    lock keyed on the <project-dir> path STRING would compute two different
+    lock names for them and let both runs through. check-all.sh's own
+    git-dir-keyed lock must not -- the filesystem's own case-insensitive
+    path resolution collapses the alias before either run's `git
+    rev-parse --git-dir` / `mkdir` ever see two different strings."""
+
+    def setUp(self):
+        super().setUp()
+        subprocess.run(
+            ["git", "init", "-q", str(self.project_dir)],
+            check=True, capture_output=True, text=True,
+        )
+
+    def test_a_differently_cased_path_to_the_same_checkout_is_rejected_too(self):
+        alt_project_dir = self.tmp / "PROJECT"
+        self.assertTrue(
+            alt_project_dir.is_dir(),
+            "the alt-cased path must resolve to the SAME directory on this "
+            "filesystem for the test to mean anything -- if this fails, the "
+            "module-level case-insensitivity probe disagreed with this "
+            "fixture's own directory",
+        )
+
+        ready_marker = self.tmp / "case-alias-first-run-ready"
+        self.write_blocking_stub("phase-docs-lint.sh", ready_marker, sleep_seconds=3)
+
+        first = self.popen_check_all()
+        try:
+            self.wait_for_marker(ready_marker)
+
+            second = self.run_check_all(project_dir=alt_project_dir)
+            self.assertEqual(
+                2, second.returncode,
+                "a differently-cased path to the SAME working tree must be "
+                "rejected exactly like an identically-spelled second run: "
+                + self.output(second),
+            )
+            self.assertIn("already in progress", second.stderr, self.output(second))
         finally:
             first.communicate(timeout=30)

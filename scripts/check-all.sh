@@ -87,7 +87,21 @@
 # canonicalised-path lock under TMPDIR — `pwd -P` already resolves
 # symlinks and this filesystem's own case-preservation, so it still closes
 # the SAME-machine collision every incident above actually was, just not
-# the wider aliasing classes the git-dir lock closes for free.
+# the wider aliasing classes the git-dir lock closes for free. Two DIFFERENT
+# non-git project directories can, in principle, collide on the same TMPDIR
+# lock name (the fallback's `/` → `_` transliteration is not injective —
+# "/tmp/foo_bar" and "/tmp/foo/bar" both become "_tmp_foo_bar") — accepted:
+# the consequence is over-cautious serialisation between two unrelated
+# directories, never a missed collision between two runs of the SAME one,
+# which is the property this lock exists to guarantee.
+#
+# Locking the git directory also means two `check-all.sh` runs against two
+# DIFFERENT subdirectories of the SAME outer git checkout serialise each
+# other, even when they share no test fixtures at all — an accepted, wider-
+# than-strictly-necessary consequence of keying on git identity rather than
+# on the exact `<project-dir>` argument. This repository's own use always
+# passes the checkout root, so it never observes this; documented here in
+# case an adopter passes a subdirectory.
 #
 # A lock directory left behind by a run that was killed outright (SIGKILL,
 # an OOM kill — anything that bypasses the `trap ... EXIT` cleanup that
@@ -290,8 +304,33 @@ while :; do
   # STALE lock — left behind by a run that was killed outright (SIGKILL,
   # OOM), which bypasses the `trap ... EXIT` release above by construction.
   # This script must not block on it forever: remove it and retry once.
+  #
+  # `mkdir` and the `printf` that writes the pid file just below it are TWO
+  # separate syscalls, not one atomic operation — a losing racer landing in
+  # the narrow window between a legitimate winner's `mkdir` and that same
+  # winner's own `printf` would otherwise read "no pid file" and misclassify
+  # a live, freshly-acquired lock as stale (code-review finding, CCP-1145):
+  # removing it out from under the winner and re-acquiring would let TWO
+  # runs believe they hold the lock, exactly the collision this lock exists
+  # to prevent. A missing pid file is therefore given one short grace period
+  # to appear before being treated as stale — this does not eliminate the
+  # window in theory (nothing short of a single atomic mkdir-with-payload
+  # syscall would), but shrinks it from "any scheduler preemption" to "the
+  # winner is preempted for a quarter of a second between two adjacent
+  # lines", which is the same order of residual risk this script already
+  # accepts for `kill -0`'s own EPERM case below.
   _holder_pid=""
-  [ -f "$LOCK_PID_FILE" ] && _holder_pid="$(cat "$LOCK_PID_FILE" 2>/dev/null)"
+  if [ -f "$LOCK_PID_FILE" ]; then
+    _holder_pid="$(cat "$LOCK_PID_FILE" 2>/dev/null)"
+  else
+    sleep 0.25
+    [ -f "$LOCK_PID_FILE" ] && _holder_pid="$(cat "$LOCK_PID_FILE" 2>/dev/null)"
+  fi
+  # `kill -0` cannot distinguish "no such process" (ESRCH, genuinely stale)
+  # from "process exists but a different user owns it" (EPERM) — both read
+  # as "not alive" here. Accepted: this script's own supported use is a
+  # single developer's local machine or a single-user CI runner, never two
+  # different UIDs racing the same working tree.
   if [ -n "$_holder_pid" ] && kill -0 "$_holder_pid" 2>/dev/null; then
     die "another check-all.sh run is already in progress in this working tree (pid $_holder_pid) — refusing to run concurrently. Wait for it to finish, or verify it is no longer alive (kill -0 $_holder_pid) before retrying."
   fi
