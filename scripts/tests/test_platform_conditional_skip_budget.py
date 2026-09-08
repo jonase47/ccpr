@@ -5,7 +5,7 @@ test suite produces, so the skip set cannot silently grow.
 Why this exists: a skip is a check that did NOT run. `check-all.sh`'s own
 could-not-run idiom already treats "verified nothing" as distinct from "a
 pass" (KA-G-017) at the CHECK level; nothing did the equivalent at the
-individual-TEST level until now. Five sources today carry a
+individual-TEST level until now. Six sources today carry a
 `@unittest.skipUnless`/`skipIf` whose condition depends on the machine
 running it rather than on anything the test itself controls:
 
@@ -51,7 +51,7 @@ macOS runner, and on the Ubuntu runner alike.
 
 This module does NOT run `scripts.tests.discover()` -- CLAUDE.md's own
 constraint forbids running the full suite from inside a probe, and it would
-also be slow for no reason: importing the four modules above is enough,
+also be slow for no reason: importing the six modules above is enough,
 since Python's `unittest.skipUnless`/`skipIf` evaluate their condition and
 stamp `__unittest_skip__`/`__unittest_skip_why__` directly onto the
 function or class AT DECORATION TIME (import time), not at run time. Asking
@@ -76,8 +76,8 @@ from . import test_shellcheck_run
 TESTS_DIR = Path(__file__).resolve().parent
 
 # `expected_skip_count()` below only knows how to derive a count from these
-# four sources -- a brand new `@unittest.skipUnless`/`skipIf` added to some
-# FIFTH file would silently sit outside that arithmetic, contributing 0 by
+# six sources -- a brand new `@unittest.skipUnless`/`skipIf` added to some
+# SEVENTH file would silently sit outside that arithmetic, contributing 0 by
 # construction rather than failing loudly. This registers which FILENAMES
 # are allowed to carry one at all, closing that gap independently of the
 # per-source counting above.
@@ -97,7 +97,7 @@ def files_with_skip_decorators():
     """A plain textual scan (no `ast`, no `subprocess`) across every
     `scripts/tests/**/*.py` file for a `@unittest.skipUnless`/`skipIf`
     occurrence -- deliberately coarser than counting methods (that is
-    `expected_skip_count()`'s job for the four registered sources); this
+    `expected_skip_count()`'s job for the six registered sources); this
     only answers "which FILES carry one at all", so a new site anywhere in
     the corpus is caught even before anyone teaches this module how to
     count it."""
