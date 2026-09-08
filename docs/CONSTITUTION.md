@@ -1,7 +1,7 @@
 ---
 kind: constitution
 status: active
-version: 1.3
+version: 1.4
 last_updated: 08.09.2026
 related:
   - README.md
@@ -25,7 +25,7 @@ related:
 ## Inviolable (non-negotiable)
 
 - **No external services for distribution:** CCPR must be installable and runnable on a clean machine without API keys, cloud accounts, or paid services. Ollama and any third-party tooling are strictly optional. *Reasoning:* distribution must remain self-contained so any user can install CCPR offline and inspect every shipped artifact. *Reference:* README install procedure.
-- **No personal or tenant data in shipped artifacts:** `templates/`, `agents/`, `commands/`, `scripts/`, `docs/`, and `instincts.md` must contain no real user names, client identifiers, personal email addresses, real domains, or sensitive numbers. *Reasoning:* CCPR is a worker template; any leakage propagates to every clone and breaches the privacy expectations of its testers. *Reference:* GDPR Art. 5 (1)(a).
+- **No personal or tenant data in shipped artifacts:** `templates/`, `agents/`, `commands/`, `scripts/`, `docs/`, and `instincts.md` must contain no real user names, client identifiers, personal email addresses, real domains, or sensitive numbers. *Reasoning:* CCPR is a worker template; any leakage propagates to every clone and breaches the privacy expectations of its testers. *Reference:* GDPR Art. 5 (1)(a); `docs/adr/ADR-0015-bare-first-names-are-not-personal-data.md` for the scope reading that a bare first name used in an authorship/attribution role (e.g. an ADR's `Decision-makers` line) does not fall under "real user names".
 - **GDPR as default assumption:** every project template, gate check, and security command assumes GDPR applies until explicitly opted out with documented justification at project level. *Reasoning:* the primary deployment context is Germany; defaulting to GDPR protects downstream projects from forgetting it. *Reference:* GDPR Art. 25.
 - **English in code and shipped content:** command names, agent names, file paths, comments, identifiers, frontmatter keys, and the body of shipped doc content are written in English. User-facing conversation language is separately configurable in CLAUDE.md. *Reasoning:* CCPR is shared with non-German testers; mixed-language artifacts produce friction and reduce reusability.
 - **No breaking command-interface changes without ADR + migration:** any change to a command prompt, agent contract, or template schema that invalidates existing project artifacts requires an Architecture Decision Record and a documented migration path before the change is merged. *Reasoning:* CCPR is used live by testers; surprise breakage erodes trust and forces them to throw away work. *Reference:* `commands/p3-arch-adr.md` ADR convention.
@@ -49,6 +49,13 @@ related:
 
 ## Changelog
 
+- **v1.4** (08.09.2026): added a `*Reference:*` pointer from Inviolable #2 ("No personal or tenant
+  data in shipped artifacts") to `docs/adr/ADR-0015-bare-first-names-are-not-personal-data.md`
+  (CCP-1157). ADR-0015 records the repo-owner's reading that a bare first name used in an
+  authorship/attribution role — an ADR's `Decision-makers` line, chief among them — does not fall
+  under "real user names"; the fourteen ADRs preceding it are not rewritten under that reading.
+  **No Inviolable changed in substance.** Inviolable #2's prohibited-category list is byte-for-byte
+  unchanged; a previously unspoken reading of it is written down and pointed to, not a new rule.
 - **v1.3** (08.09.2026): CCP-1151's four-stage `skill` → `command` terminology sweep excluded this file, deferring it to this bump (PO decision 05.09.2026); this cycle closes the gap. Inviolable #5 is renamed from "No breaking skill-interface changes…" to "No breaking command-interface changes…" and ten of the file's twelve prose occurrences of "skill" are renamed to "command" — no Inviolable changed in substance, only Inviolable #5's name. The two occurrences inside the v1.0 Changelog entry below ("no breaking skill changes", "skill consolidation") stay untouched: that entry records what was ratified on 15.05.2026, and a protocol is not rewritten retroactively (PO correction 08.09.2026, reversing this bump's initial rename of that entry). The Aspirational "Skill-footprint consolidation" goal is renamed "Command-footprint consolidation" and its stale "114-skill surface" figure is corrected to the measured 116 (`commands/*.md` file count), now cross-checked as an eighth doc location by `scripts/tests/test_doc_counts_agree.py`'s `CommandCountAgreementTest`, alongside README.md, handbook/README.md, handbook/SYSTEM_OVERVIEW.md and handbook/SECTIONS_COMMANDS.md. The two `Manual/LEAN_TRACK.md` references (frontmatter `related:` and the Lean-Track-sunset measurement) are repointed to `handbook/LEAN_TRACK.md`, the second of two renames CCP-1150 deferred for this file.
 - **v1.2** (03.09.2026): added a Default rule for branch convention — new work begins on its own branch, `main` receives merges — with no technical enforcement (direct pushes to `main` remain permitted, a PO decision). No Inviolable changed.
 - **v1.1** (05.06.2026): re-scoped the "v1.0 release" Aspirational goal — its review cadence now gates on declaring CCPR **stable** (stable interfaces + upgrade path) rather than "before any public release", to allow an earlier `0.x` public beta. No Inviolable or Default changed.

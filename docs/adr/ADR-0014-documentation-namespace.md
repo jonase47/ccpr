@@ -3,9 +3,10 @@ kind: adr
 adr_id: ADR-0014
 adr_status: accepted
 status: active
-last_updated: 05.09.2026
+last_updated: 08.09.2026
 related:
   - ADR-0012-derived-values-are-not-stored.md
+  - ADR-0015-bare-first-names-are-not-personal-data.md
   - ../CONSTITUTION.md
   - ../../templates/PHASE_DOC_SCHEMA.md
 verified: 05.09.2026
@@ -416,14 +417,15 @@ should be left alone; the rest are live references.
   `hooks/`. Scoped in the deferred review items below, not settled here.
 - **Anything about `.DS_Store`, `assets/`, or the allowlist's filesystem-vs-index behaviour.**
   Noted in the follow-ups because the measurement passed over it, not decided.
-- **Whether first names belong in a shipped ADR corpus at all.** This ADR's Status and
-  Decision-makers lines name people, as every ADR here does — measured 05.09.2026: 16
-  occurrences of one first name and 9 of another across `docs/adr/*.md`, with
-  `artifact-gate.sh` reporting zero findings over that tree. The tension with
-  `../CONSTITUTION.md`'s "no personal data in shipped artifacts" is therefore a standing
-  property of the whole corpus, not something this document introduces, and anonymising this
-  one ADR would make it the only inconsistent member of fourteen. Open, corpus-wide, and not
-  this ADR's to settle.
+- ~~**Whether first names belong in a shipped ADR corpus at all.**~~ **Resolved in ADR-0015
+  (08.09.2026): a bare first name used in an authorship/attribution role — this ADR's own Status
+  and Decision-makers lines included — is not a "real user name" under Inviolable #2. Repo-owner
+  decision; the corpus is not rewritten.** This ADR's Status and Decision-makers lines name
+  people, as every ADR here does — measured 05.09.2026: 16 occurrences of one first name and 9
+  of another across `docs/adr/*.md`, with `artifact-gate.sh` reporting zero findings over that
+  tree. The tension with `../CONSTITUTION.md`'s "no personal data in shipped artifacts" was
+  therefore a standing property of the whole corpus, not something this document introduced, and
+  anonymising this one ADR would have made it the only inconsistent member of fourteen.
 
 ## Consequences
 
