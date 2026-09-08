@@ -246,7 +246,7 @@ Every new project starts with `/track-decision` (entry-point command). The comma
 
 **Constitution mandatory in Full-Track:** `/project-init` calls `/constitution`, creates `docs/CONSTITUTION.md` with Inviolable/Default/Aspirational. All gates read the Inviolable section (via the `gate-preflight.py` extension) as a mandatory input. A violation = "Inviolable breach" in the gate verdict.
 
-**CCPR is bound by its own constitution.** The worker repo ratified `docs/CONSTITUTION.md` (v1.3, 08.09.2026) to apply the same Inviolable discipline to itself. Changes to commands, agents, templates and shipped scripts must respect CCPR's own Inviolables — see the file for the binding rules.
+**CCPR is bound by its own constitution.** The worker repo ratified `docs/CONSTITUTION.md` (v1.4, 08.09.2026) to apply the same Inviolable discipline to itself. Changes to commands, agents, templates and shipped scripts must respect CCPR's own Inviolables — see the file for the binding rules.
 
 **Domain bootstraps:** `~/.claude/templates/constitution-bootstraps/` provides starter seeds for common project types (`b2b-tool`, `b2c-marketplace`, `mobile-b2c`, `on-device-privacy`, `saas-b2c`). `/constitution` selects one when bootstrapping greenfield projects.
 
