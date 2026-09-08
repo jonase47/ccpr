@@ -8,6 +8,39 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Added
 
+- **`.github/workflows/ci.yml`'s `check-all-macos` job now forwards a deny-list into CI via a
+  GitHub Actions secret (CCP-1148 / F2).** Before this, the only path enforcing the deny-list
+  (tenant/project names that must never land in the public CCPR repo on GitHub — PO precision
+  04.09.2026) was the local pre-push hook (CCP-1137/17b), installed only where a contributor's
+  machine has one and entirely absent on any machine that has not run it yet. The new
+  step-level `env: CCPR_GATE_DENY_NAMES: ${{ secrets.CCPR_GATE_DENY_NAMES }}` on the "Run
+  check-all.sh" step reads the same environment variable `scripts/artifact-gate.sh`'s own
+  header already documents (lines 13–15) as the non-personal, non-distributed alternative to
+  `~/.claude/memory-sync.json`'s `gate.denyNames`. GitHub does not expose repository secrets to
+  a `pull_request` run triggered from a fork — the expression resolves to an **empty string**
+  there, not an error — which `scripts/lib/discipline_gate.sh`'s own `[ -n
+  "${CCPR_GATE_DENY_NAMES:-}" ]` check already treats the same as unset, falling through to the
+  ordinary "not configured" state the E4 change above now names visibly rather than passing
+  silently. **Measured before implementing** (see this item's work-item comment, 08.09.2026):
+  GitHub Push Protection with custom patterns — the server-side alternative that would have
+  replaced this AND the local pre-push hook — is not available on this repository
+  (`GET /repos/{owner}/{repo}/secret-scanning/custom-patterns` → HTTP 404, and every
+  `security_and_analysis` switch reports disabled), so this remains an audit layer that runs
+  AFTER a push, not a preventive one. `scripts/tests/test_ci_workflow.py` gains
+  `check_denylist_env`, wired into `lint_ci_workflow`, pinning the step's `env:` mapping as a
+  SET of keys, not a count — the identical fix CCP-1149 already applied to
+  `on.push.branches` (`check_push_branches`), because a length-only check cannot tell a
+  removed key from a renamed one (same count, wrong key — the more dangerous regression, since
+  it still LOOKS configured). `DenylistEnvMutationTest` is the mutation-based red proof: removal
+  of the whole `env:` mapping, and a same-count key rename, are both shown to be caught.
+  **The GitHub Actions secret itself does not exist yet and must be created by the repository
+  owner**, under the reference name `ci.yml` already carries (`CCPR_GATE_DENY_NAMES` — a
+  configuration KEY, not a tenant name, and GitHub Actions requires the reference name literally
+  in the workflow YAML the same way any other `${{ secrets.X }}` usage does). What must NOT go
+  into this repository, not even as an example, is the secret's CONTENT — the actual
+  tenant/project names — which is exactly what the deny-list mechanism exists to keep out; that
+  content is named in this item's own report instead, never here.
+
 - **`scripts/check-all.sh`'s terminal `**Summary:**` line now names the deny-list state
   (CCP-1148 / E4).** A missing `gate.denyNames` config used to be invisible at the level a
   reader actually reads: `artifact-gate` still counted as `matched` in all three

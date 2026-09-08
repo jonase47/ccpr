@@ -92,6 +92,19 @@ FAILING_EXIT_RE = re.compile(r"\bexit\s+1\b")
 BASH_VERSION_TOKEN = "BASH_VERSION"
 FLOOR_PREFIX_TOKEN = "3.2"
 JUSTIFICATION_ANCHOR = "test_agent_frontmatter.py"
+ENV_KEY_RE = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_]*):")
+# CCP-1148 / F2: the ONLY key this step's env: mapping is required to carry.
+# scripts/artifact-gate.sh's own header (lines 13-15) documents
+# CCPR_GATE_DENY_NAMES as the non-personal, non-distributed alternative to
+# ~/.claude/memory-sync.json's gate.denyNames -- the shape a CI runner
+# (which has neither a personal config nor a home directory carrying one)
+# needs. Unavailable on a fork PR run by GitHub's own secrets model
+# (`${{ secrets.X }}` resolves to an empty string there, not an error) --
+# scripts/lib/discipline_gate.sh's own `[ -n "${CCPR_GATE_DENY_NAMES:-}" ]`
+# check already treats an empty value the same as unset, so that case falls
+# through to the ordinary "not configured" state CCP-1148's check-all.sh
+# change (GATE_DENY_SUMMARY) now reports visibly, rather than a crash.
+REQUIRED_DENYLIST_ENV_KEYS = frozenset({"CCPR_GATE_DENY_NAMES"})
 BRANCHES_LIST_RE = re.compile(r"^\s*branches:\s*\[(.*)\]\s*$")
 REQUIRED_PUSH_BRANCHES = frozenset({"main", "ticket/**"})
 CONCURRENCY_GROUP_RE = re.compile(r"^\s*group:\s*(.+?)\s*$")
@@ -431,6 +444,97 @@ def check_python_version_pinned(lines, jobs):
     return violations
 
 
+def check_denylist_env(lines, jobs):
+    """CCP-1148 / F2: the macOS job's step invoking scripts/check-all.sh
+    must forward the deny-list via an env: mapping carrying
+    CCPR_GATE_DENY_NAMES -- otherwise a non-fork push never has a
+    deny-list to enforce, and GATE_DENY_STATE stays "none" on every run
+    regardless of what the repo owner configures as a GitHub Actions
+    secret.
+
+    Pinned as a SET of env: KEYS, not a count -- the identical fix
+    check_push_branches above already applies to on.push.branches
+    (CCP-1149): a length-only check cannot tell a removal from a
+    substitution (same key count, different or renamed key)."""
+    macos_job = None
+    for job_name, (jstart, jend) in jobs.items():
+        if re.search(r"runs-on:\s*macos-latest", "\n".join(lines[jstart:jend])):
+            macos_job = (job_name, jstart, jend)
+            break
+    if macos_job is None:
+        return ["no job runs on macos-latest -- cannot verify the deny-list env: mapping"]
+
+    job_name, jstart, jend = macos_job
+    steps = _find_steps(lines, jstart, jend)
+    check_all_step = None
+    for (s, e) in steps:
+        if "scripts/check-all.sh" in "\n".join(lines[s:e]):
+            check_all_step = (s, e)
+            break
+    if check_all_step is None:
+        return [
+            f"job '{job_name}': no step invokes scripts/check-all.sh -- "
+            "cannot verify its env: mapping"
+        ]
+
+    s, e = check_all_step
+    key_indent = None
+    for i in range(s + 1, e):
+        if _is_blank_or_comment(lines[i]):
+            continue
+        key_indent = _indent(lines[i])
+        break
+    if key_indent is None:
+        return [
+            f"job '{job_name}': the step invoking scripts/check-all.sh has "
+            "no body -- cannot verify its env: mapping"
+        ]
+
+    env_line = None
+    for i in range(s + 1, e):
+        if (
+            not _is_blank_or_comment(lines[i])
+            and _indent(lines[i]) == key_indent
+            and lines[i].strip() == "env:"
+        ):
+            env_line = i
+            break
+    if env_line is None:
+        return [
+            f"job '{job_name}': the step invoking scripts/check-all.sh has "
+            "no env: mapping -- CCPR_GATE_DENY_NAMES is never forwarded, so "
+            "a non-fork push never has a deny-list to enforce"
+        ]
+
+    found_keys = []
+    for i in range(env_line + 1, e):
+        if _is_blank_or_comment(lines[i]):
+            continue
+        indent = _indent(lines[i])
+        if indent <= key_indent:
+            break
+        m = ENV_KEY_RE.match(lines[i])
+        if m:
+            found_keys.append(m.group(1))
+    found = frozenset(found_keys)
+    if found != REQUIRED_DENYLIST_ENV_KEYS:
+        missing = sorted(REQUIRED_DENYLIST_ENV_KEYS - found)
+        extra = sorted(found - REQUIRED_DENYLIST_ENV_KEYS)
+        detail = []
+        if missing:
+            detail.append(f"missing: {missing}")
+        if extra:
+            detail.append(f"unexpected: {extra}")
+        return [
+            f"job '{job_name}': check-all.sh step's env: keys are "
+            f"{sorted(found)}, required exactly "
+            f"{sorted(REQUIRED_DENYLIST_ENV_KEYS)} ({'; '.join(detail)}) -- "
+            "a length-only check cannot distinguish a removal from a "
+            "substitution (same key count, different key)"
+        ]
+    return []
+
+
 def lint_ci_workflow(path):
     """Returns a list of violation strings for `path` -- empty means every
     checked property holds. Never raises on a compliant OR a merely
@@ -448,6 +552,7 @@ def lint_ci_workflow(path):
     violations += check_python_version_pinned(lines, jobs)
     violations += check_push_branches(lines)
     violations += check_concurrency(lines)
+    violations += check_denylist_env(lines, jobs)
     return violations
 
 
@@ -820,3 +925,52 @@ class ConcurrencyMutationTest(unittest.TestCase):
         # cannot make one mask the other.
         lines = self.text.split("\n")
         self.assertEqual([], check_no_swallowed_failures(lines))
+
+
+class DenylistEnvMutationTest(unittest.TestCase):
+    """CCP-1148 / F2: the check-all.sh step's env: mapping must forward
+    CCPR_GATE_DENY_NAMES. Same shape as PushBranchesMutationTest above
+    (CCP-1149) -- removal AND same-count substitution, because a
+    length-only check ("does this step have exactly one env: key?") cannot
+    distinguish a removal (0 keys) from a renamed key (still 1 key, the
+    WRONG one), and the second is the more dangerous regression: it still
+    LOOKS configured."""
+
+    def setUp(self):
+        self.text = CI_YML.read_text(encoding="utf-8")
+
+    def test_env_mapping_removed_entirely_is_flagged(self):
+        mutated = _mutate_once(
+            self.text,
+            r"        env:\n(?:          #.*\n)*"
+            r"          CCPR_GATE_DENY_NAMES: \$\{\{ secrets\.CCPR_GATE_DENY_NAMES \}\}\n",
+            "",
+        )
+        scratch = _write_scratch(self, mutated)
+        violations = lint_ci_workflow(scratch)
+        self.assertTrue(
+            any("no env: mapping" in v for v in violations),
+            f"removing the whole env: mapping was not flagged: {violations}",
+        )
+
+    def test_env_key_renamed_same_count_is_flagged(self):
+        # Same key COUNT as the compliant file (exactly one), different key
+        # -- exactly the case a count-only check would miss. Anchored to
+        # the FULL "key: value" line, not the bare identifier: the
+        # explanatory comment above it also names CCPR_GATE_DENY_NAMES
+        # several times in prose, and an unanchored pattern would either
+        # match zero times (nothing to mutate) or the wrong occurrence.
+        mutated = _mutate_once(
+            self.text,
+            r"CCPR_GATE_DENY_NAMES: \$\{\{ secrets\.CCPR_GATE_DENY_NAMES \}\}",
+            "CCPR_GATE_DENY_LIST: ${{ secrets.CCPR_GATE_DENY_NAMES }}",
+        )
+        scratch = _write_scratch(self, mutated)
+        violations = lint_ci_workflow(scratch)
+        self.assertTrue(
+            any(
+                "check-all.sh step's env: keys are" in v and "missing" in v and "unexpected" in v
+                for v in violations
+            ),
+            f"renaming the env: key (same count) was not flagged: {violations}",
+        )
