@@ -1,18 +1,18 @@
 ---
 kind: constitution
 status: active
-version: 1.2
-last_updated: 03.09.2026
+version: 1.3
+last_updated: 08.09.2026
 related:
   - README.md
   - CLAUDE.md
-  - Manual/LEAN_TRACK.md
+  - handbook/LEAN_TRACK.md
 ---
 
 # Constitution – CCPR (Claude Code Project Runner)
 
 > **Scope.** This constitution binds CCPR itself — the worker repository that
-> ships skills, agents, scripts, templates and docs to `~/.claude/`. It is
+> ships commands, agents, scripts, templates and docs to `~/.claude/`. It is
 > deliberately separate from any project-level constitution that CCPR-driven
 > projects generate via `/constitution`.
 >
@@ -26,16 +26,16 @@ related:
 
 - **No external services for distribution:** CCPR must be installable and runnable on a clean machine without API keys, cloud accounts, or paid services. Ollama and any third-party tooling are strictly optional. *Reasoning:* distribution must remain self-contained so any user can install CCPR offline and inspect every shipped artifact. *Reference:* README install procedure.
 - **No personal or tenant data in shipped artifacts:** `templates/`, `agents/`, `commands/`, `scripts/`, `docs/`, and `instincts.md` must contain no real user names, client identifiers, personal email addresses, real domains, or sensitive numbers. *Reasoning:* CCPR is a worker template; any leakage propagates to every clone and breaches the privacy expectations of its testers. *Reference:* GDPR Art. 5 (1)(a).
-- **GDPR as default assumption:** every project template, gate check, and security skill assumes GDPR applies until explicitly opted out with documented justification at project level. *Reasoning:* the primary deployment context is Germany; defaulting to GDPR protects downstream projects from forgetting it. *Reference:* GDPR Art. 25.
-- **English in code and shipped content:** skill names, agent names, file paths, comments, identifiers, frontmatter keys, and the body of shipped doc content are written in English. User-facing conversation language is separately configurable in CLAUDE.md. *Reasoning:* CCPR is shared with non-German testers; mixed-language artifacts produce friction and reduce reusability.
-- **No breaking skill-interface changes without ADR + migration:** any change to a skill prompt, agent contract, or template schema that invalidates existing project artifacts requires an Architecture Decision Record and a documented migration path before the change is merged. *Reasoning:* CCPR is used live by testers; surprise breakage erodes trust and forces them to throw away work. *Reference:* `commands/p3-arch-adr.md` ADR convention.
+- **GDPR as default assumption:** every project template, gate check, and security command assumes GDPR applies until explicitly opted out with documented justification at project level. *Reasoning:* the primary deployment context is Germany; defaulting to GDPR protects downstream projects from forgetting it. *Reference:* GDPR Art. 25.
+- **English in code and shipped content:** command names, agent names, file paths, comments, identifiers, frontmatter keys, and the body of shipped doc content are written in English. User-facing conversation language is separately configurable in CLAUDE.md. *Reasoning:* CCPR is shared with non-German testers; mixed-language artifacts produce friction and reduce reusability.
+- **No breaking command-interface changes without ADR + migration:** any change to a command prompt, agent contract, or template schema that invalidates existing project artifacts requires an Architecture Decision Record and a documented migration path before the change is merged. *Reasoning:* CCPR is used live by testers; surprise breakage erodes trust and forces them to throw away work. *Reference:* `commands/p3-arch-adr.md` ADR convention.
 - **No vendor lock-in:** infrastructure choices, model selections, and tooling must be replaceable. Every component that integrates with an external vendor (Ollama, Hetzner, Coolify, Traefik, …) requires either a self-hosted alternative or a documented migration path to a comparable replacement. *Reasoning:* the distribution must survive the failure, pricing change, or terms-of-service change of any single vendor. *Reference:* Inviolable "No external services for distribution".
 
 ## Default (deviate with justification)
 
-- **TDD discipline:** Red → Green → Refactor, with 1 TDD cycle = 1 commit using Conventional Commits. *Deviation:* exploratory spikes that are squashed before merge. *Decided by:* skill author / committer.
+- **TDD discipline:** Red → Green → Refactor, with 1 TDD cycle = 1 commit using Conventional Commits. *Deviation:* exploratory spikes that are squashed before merge. *Decided by:* command author / committer.
 - **Self-hosted before managed:** prefer Hetzner Cloud + Coolify + Traefik + Gitea over managed cloud services. *Deviation:* when operational overhead of self-hosting clearly outweighs the benefits for the specific component. *Decided by:* DevOps lead / project owner.
-- **Markdown-first documentation:** all docs, ADRs, memory pages, and skill outputs are written in Markdown. *Deviation:* downstream exports (PDF, slides, dashboards) generated from Markdown sources. *Decided by:* tech-writer / PO.
+- **Markdown-first documentation:** all docs, ADRs, memory pages, and command outputs are written in Markdown. *Deviation:* downstream exports (PDF, slides, dashboards) generated from Markdown sources. *Decided by:* tech-writer / PO.
 - **Conventional Commits:** all commit subjects follow `type(scope): subject` (`feat`, `fix`, `refactor`, `docs`, `chore`, `test`, `perf`, `style`, `ci`, `build`, `revert`). *Deviation:* emergency hotfixes that get rebased into conforming commits later. *Decided by:* committer + reviewer.
 - **Branch convention:** new work begins on its own branch; `main` receives merges. *Deviation:* direct pushes to `main` remain permitted — this is a Product-Owner decision, not a technical restriction. *Decided by:* PO / committer.
 - **Accessibility WCAG 2.2 AA + Dark Mode:** every project with a user interface ships a dark mode and meets WCAG 2.2 AA. Status colours always pair with icon and text — never colour alone. *Deviation:* CLI-only tools without graphical UI. *Decided by:* ux-designer during P3.
@@ -43,12 +43,13 @@ related:
 ## Aspirational
 
 - **Multi-tenant readiness:** CCPR usable in parallel by multiple persons on multiple projects for multiple clients without modification. *Measurement:* at least one real client project running on CCPR without local patches. *Review cadence:* quarterly during the v1.0 stabilisation period.
-- **Skill-footprint consolidation:** reduce the current 114-skill surface where sub-skills always run sequentially (e.g. P3 sub-trees). *Measurement:* skill-invocation frequency from session logs; merge candidates after 30 days of consistent co-occurrence. *Review cadence:* every `/postmortem`.
+- **Command-footprint consolidation:** reduce the current 116-command surface where sub-commands always run sequentially (e.g. P3 sub-trees). *Measurement:* command-invocation frequency from session logs; merge candidates after 30 days of consistent co-occurrence. *Review cadence:* every `/postmortem`.
 - **v1.0 release with versioning and changelog:** SemVer tags (`v1.0.0`, `v1.1.0`, …), `CHANGELOG.md` in the repo root, and a defined update procedure for users. *Measurement:* tag `v1.0.0` exists, CHANGELOG complete, update path documented. *Review cadence:* target = before declaring CCPR **stable** (v1.0). A public **beta** ships earlier under `0.x` with rough edges flagged (see `BETA.md`); stable status — stable interfaces and a defined upgrade path — is what this goal gates.
-- **Lean-Track sunset:** the Lean-Track is removed after CCPR v1.0 stabilises. *Measurement:* `commands/lean-*.md`, `commands/track-decision.md`, `Manual/LEAN_TRACK.md` removed (or repurposed), references purged from README/CLAUDE.md. *Review cadence:* immediately post-v1.0.
+- **Lean-Track sunset:** the Lean-Track is removed after CCPR v1.0 stabilises. *Measurement:* `commands/lean-*.md`, `commands/track-decision.md`, `handbook/LEAN_TRACK.md` removed (or repurposed), references purged from README/CLAUDE.md. *Review cadence:* immediately post-v1.0.
 
 ## Changelog
 
+- **v1.3** (08.09.2026): CCP-1151's four-stage `skill` → `command` terminology sweep excluded this file, deferring it to this bump (PO decision 05.09.2026); this cycle closes the gap. Inviolable #5 is renamed from "No breaking skill-interface changes…" to "No breaking command-interface changes…" and ten of the file's twelve prose occurrences of "skill" are renamed to "command" — no Inviolable changed in substance, only Inviolable #5's name. The two occurrences inside the v1.0 Changelog entry below ("no breaking skill changes", "skill consolidation") stay untouched: that entry records what was ratified on 15.05.2026, and a protocol is not rewritten retroactively (PO correction 08.09.2026, reversing this bump's initial rename of that entry). The Aspirational "Skill-footprint consolidation" goal is renamed "Command-footprint consolidation" and its stale "114-skill surface" figure is corrected to the measured 116 (`commands/*.md` file count), now cross-checked as an eighth doc location by `scripts/tests/test_doc_counts_agree.py`'s `CommandCountAgreementTest`, alongside README.md, handbook/README.md, handbook/SYSTEM_OVERVIEW.md and handbook/SECTIONS_COMMANDS.md. The two `Manual/LEAN_TRACK.md` references (frontmatter `related:` and the Lean-Track-sunset measurement) are repointed to `handbook/LEAN_TRACK.md`, the second of two renames CCP-1150 deferred for this file.
 - **v1.2** (03.09.2026): added a Default rule for branch convention — new work begins on its own branch, `main` receives merges — with no technical enforcement (direct pushes to `main` remain permitted, a PO decision). No Inviolable changed.
 - **v1.1** (05.06.2026): re-scoped the "v1.0 release" Aspirational goal — its review cadence now gates on declaring CCPR **stable** (stable interfaces + upgrade path) rather than "before any public release", to allow an earlier `0.x` public beta. No Inviolable or Default changed.
 - **v1.0** (15.05.2026): initial ratification. Six Inviolables (distribution self-containment, no PII/tenant data, GDPR default, English in code, no breaking skill changes, no vendor lock-in), five Defaults (TDD, self-hosted, Markdown-first, Conventional Commits, WCAG 2.2 AA + Dark Mode), four Aspirational goals (multi-tenant, skill consolidation, v1.0 release, Lean sunset).

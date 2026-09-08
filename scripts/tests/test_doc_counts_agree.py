@@ -40,9 +40,15 @@ the CCP-1152 session report) but are not pinned here: the `-t .` figure
 alone is what every OTHER doc's "N-test suite" claim also states and can be
 cross-checked against, while the without-flag figures describe a second,
 narrower scenario this module was not briefed to build a structural guard
-for. `docs/CONSTITUTION.md`'s own "114-skill surface" (true value 116) is
-excluded on purpose too -- explicitly named as a later, separate cleanup in
-CCP-1152's own briefing.
+for. `docs/CONSTITUTION.md`'s own command-surface figure is no longer an
+exception here: it was excluded while stale (a "114-skill surface" prose
+sentence, true value 116) and the file was outside this round's write
+boundary, both named as a later, separate cleanup in CCP-1152's own
+briefing; the CONSTITUTION v1.3 bump (08.09.2026) closed that cleanup, and
+`CommandCountAgreementTest`/`parse_command_count_claims`'s
+`constitution_surface` key now cross-checks it as an eighth doc location
+alongside README.md, handbook/README.md, handbook/SYSTEM_OVERVIEW.md and
+handbook/SECTIONS_COMMANDS.md.
 
 ## Red-proof (structural, not deletion -- G-107/G-109), run once during
 ## authoring against the TRACKED `README.md`, then restored
@@ -95,6 +101,7 @@ CONTRIBUTING_PATH = REPO_ROOT / "CONTRIBUTING.md"
 CLAUDE_PATH = REPO_ROOT / "CLAUDE.md"
 SYSTEM_OVERVIEW_PATH = REPO_ROOT / "handbook" / "SYSTEM_OVERVIEW.md"
 SECTIONS_COMMANDS_PATH = REPO_ROOT / "handbook" / "SECTIONS_COMMANDS.md"
+CONSTITUTION_PATH = REPO_ROOT / "docs" / "CONSTITUTION.md"
 AGENTS_DIR = REPO_ROOT / "agents"
 COMMANDS_DIR = REPO_ROOT / "commands"
 TESTS_DIR = REPO_ROOT / "scripts" / "tests"
@@ -237,10 +244,22 @@ def parse_agent_count_claims(readme_text, system_overview_text):
 
 def parse_command_count_claims(
     readme_text, manual_readme_text, system_overview_text, sections_commands_text,
+    constitution_text,
 ):
     """Keys prefixed `command_*` -- see `parse_test_count_claims`'s
     docstring for why (both "readme_structure" and "manual_readme" here
-    would otherwise collide with a sibling `parse_*` function's own keys)."""
+    would otherwise collide with a sibling `parse_*` function's own keys).
+
+    `constitution_surface` (added CCP-1152 follow-up, CONSTITUTION v1.3
+    bump, 08.09.2026): docs/CONSTITUTION.md's Aspirational "Command-footprint
+    consolidation" goal states the same total commands/*.md count the other
+    seven doc locations below state, as the base of its "reduce the current
+    N-command surface" sentence. This module previously excluded that claim
+    on purpose (see the module docstring's former "What this module
+    intentionally does NOT guard" section) while the figure was stale
+    (114) and the file itself was out of this module's write boundary; the
+    PO decision that ratified the v1.3 bump also brought this file under
+    the pin, as the eighth cross-checked location."""
     claims = {}
     m = re.search(
         r"commands/\s*# (\d+) slash commands \(P0-P8 \+ Lean-Track \+ cross-cutting\)",
@@ -261,6 +280,8 @@ def parse_command_count_claims(
     claims["sections_commands_summary_heading"] = int(m.group(1)) if m else None
     m = re.search(r"\*\*Total\*\* \| \*\*(\d+)\*\*", flat_sections)
     claims["sections_commands_summary_table"] = int(m.group(1)) if m else None
+    m = re.search(r"reduce the current (\d+)-command surface", constitution_text)
+    claims["constitution_surface"] = int(m.group(1)) if m else None
     return claims
 
 
@@ -427,6 +448,7 @@ class CommandCountAgreementTest(unittest.TestCase):
         claims = parse_command_count_claims(
             _read(README_PATH), _read(MANUAL_README_PATH),
             _read(SYSTEM_OVERVIEW_PATH), _read(SECTIONS_COMMANDS_PATH),
+            _read(CONSTITUTION_PATH),
         )
         expected = {
             "command_readme_structure": count,
@@ -436,6 +458,7 @@ class CommandCountAgreementTest(unittest.TestCase):
             "sections_commands_top": count,
             "sections_commands_summary_heading": count,
             "sections_commands_summary_table": count,
+            "constitution_surface": count,
         }
         self.assertEqual(
             expected, claims,
@@ -602,6 +625,7 @@ class ClaimExtractionShapeTest(unittest.TestCase):
         all_claims.update(parse_command_count_claims(
             _read(README_PATH), _read(MANUAL_README_PATH),
             _read(SYSTEM_OVERVIEW_PATH), _read(SECTIONS_COMMANDS_PATH),
+            _read(CONSTITUTION_PATH),
         ))
         all_claims.update(parse_command_breakdown_claims(
             _read(SYSTEM_OVERVIEW_PATH), _read(SECTIONS_COMMANDS_PATH),
@@ -686,7 +710,15 @@ class ParserDiscriminatesFromUnrelatedNumbersTest(unittest.TestCase):
             "|---|---|\n"
             "| **Total** | **116** |\n"
         )
-        claims = parse_command_count_claims(readme, manual_readme, overview, sections)
+        constitution = (
+            "- **Multi-tenant readiness:** at least one real client project, page 42.\n"
+            "- **Command-footprint consolidation:** reduce the current 116-command "
+            "surface where sub-commands always run sequentially (e.g. P3 sub-trees, "
+            "issue 42).\n"
+        )
+        claims = parse_command_count_claims(
+            readme, manual_readme, overview, sections, constitution,
+        )
         self.assertEqual(116, claims["command_readme_structure"])
         self.assertEqual(116, claims["readme_table"])
         self.assertEqual(116, claims["command_manual_readme"])
@@ -694,6 +726,7 @@ class ParserDiscriminatesFromUnrelatedNumbersTest(unittest.TestCase):
         self.assertEqual(116, claims["sections_commands_top"])
         self.assertEqual(116, claims["sections_commands_summary_heading"])
         self.assertEqual(116, claims["sections_commands_summary_table"])
+        self.assertEqual(116, claims["constitution_surface"])
 
     def test_command_breakdown_extractor_ignores_adjacent_unrelated_numbers(self):
         """The riskiest extractor: ten integers anchored in one sentence

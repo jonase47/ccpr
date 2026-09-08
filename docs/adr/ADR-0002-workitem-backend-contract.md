@@ -118,7 +118,7 @@ out-of-band events (a commit on a `ticket/<id>` branch, session end). Status sta
 - **Solo-dev unchanged in spirit:** `local` is the default; no server, no token; still all-local
   Markdown. The file *format* formalises (structured items instead of prose), which existing projects
   adopt with a single `lift` run.
-- **Breaking skill-interface change.** Per Constitution Inviolable #5, this needs an ADR + migration
+- **Breaking command-interface change.** Per Constitution Inviolable #5, this needs an ADR + migration
   path; this ADR plus ADR-0004 (`lift` / `migrate`) provide it. The 50+ commands migrate to the
   contract **incrementally** — the old and new models coexist during the transition.
 - **Backend symmetry.** Because `local` is a structured store like the remote backends, the contract

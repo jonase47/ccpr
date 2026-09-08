@@ -26,7 +26,7 @@ projects can actually adopt it:
 2. **Solo→team.** A project that grows from one developer to a team needs to move its items from the
    `local` backend to a remote one.
 
-This is also the migration path ADR-0002 requires (a breaking skill-interface change needs an ADR +
+This is also the migration path ADR-0002 requires (a breaking command-interface change needs an ADR +
 migration path per Constitution Inviolable #5).
 
 The hard, non-obvious lesson — from a real migration of a mature codebase into a tracker — is that
