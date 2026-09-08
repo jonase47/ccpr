@@ -891,7 +891,7 @@ class NoStaleKnownFindingsTest(unittest.TestCase):
 
 class ClassificationCountsTest(unittest.TestCase):
     def test_classification_counts(self):
-        """Regression pin on the measured baseline: 1365 `test_*` methods
+        """Regression pin on the measured baseline: 1371 `test_*` methods
         across the corpus call something shaped like a subprocess invocation
         and are therefore in scope for this check; 0 of those are currently
         absence-only-needs-exemption -- `KNOWN_FINDINGS` above is empty for
@@ -905,6 +905,37 @@ class ClassificationCountsTest(unittest.TestCase):
         growing paragraph:
 
           in-scope / flagged   when
+          1371 / 0             08.09.2026 (CCP-1145, check-all.sh concurrency
+                               lock): +6, exactly the 6 new test methods
+                               added in test_check_all.py
+                               (ConcurrentRunIsRejectedTest,
+                               LockDoesNotBlockSequentialRunsTest,
+                               StaleLockFromACrashedRunDoesNotBlockTest,
+                               ConcurrentLockRedProofTest,
+                               GitDirKeyedLockTest,
+                               CaseAliasedPathsShareTheSameGitDirLockTest --
+                               one method each; the last two added in a
+                               code-review follow-up round to close a gap
+                               where every other new test here ran only
+                               against a non-git fixture). Three of the six
+                               (StaleLockFromACrashedRunDoesNotBlockTest,
+                               ConcurrentLockRedProofTest,
+                               GitDirKeyedLockTest) also call the new
+                               `self.popen_check_all(...)` helper, whose
+                               name does NOT match RUN_HELPER_RE (it starts
+                               "popen", not "run") -- the same naming-shape
+                               blind spot recorded below for `self.push(...)`
+                               -- but every one of the 6 ALSO calls
+                               `self.run_check_all(...)` at least once, which
+                               DOES match, so all 6 are in scope regardless.
+                               None flagged: each asserts a positive
+                               `returncode` equality (`assertEqual`), a
+                               positive `assertTrue` (the two git-fixture
+                               tests' own lock-directory/case-alias-resolves
+                               checks), and/or a positive `assertIn` on
+                               stdout/stderr; the `assertNotIn`/
+                               `assertNotEqual` calls some of them also carry
+                               are never the sole assertion.
           1365 / 0             08.09.2026 (CCP-1148, artifact-gate deny-list
                                summary visibility): +4, not +6 -- test_check_
                                all.py gained 6 new test methods total
@@ -1832,7 +1863,7 @@ class ClassificationCountsTest(unittest.TestCase):
         count."""
         recs = scan_tree()
         flagged = [r for r in recs if r.disposition in NEEDS_EXEMPTION]
-        self.assertEqual(1365, len(recs))
+        self.assertEqual(1371, len(recs))
         self.assertEqual(0, len(flagged))
 
 

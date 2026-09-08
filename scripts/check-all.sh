@@ -26,7 +26,7 @@
 # divergence, a catalogue/baseline mismatch, or nothing was actually
 # verified (every check could-not-run or was unmatched) · 2 the run could not
 # be performed as asked (bad usage, missing/unreadable project dir or
-# baseline, or a malformed baseline line).
+# baseline, a malformed baseline line, or another run already in progress).
 #
 #   0  every check that was actually run agreed with its baseline entry, and
 #      at least one check WAS actually run.
@@ -38,15 +38,79 @@
 #      the same "a run that verified nothing is not a pass" rule KA-G-017
 #      already states for conformance-run.sh, one level further in).
 #   2  bad usage/flag, <project-dir> does not exist or is not readable, the
-#      baseline file does not exist or is not readable, or a baseline line
-#      could not be parsed (name or exit code missing/invalid). The baseline
-#      SHAPE is unknown in this case — refused, not guessed at.
+#      baseline file does not exist or is not readable, a baseline line
+#      could not be parsed (name or exit code missing/invalid), or a SECOND
+#      check-all.sh run is already in progress against the same working
+#      tree (CCP-1145 — see "the concurrency lock" below). All of these
+#      share the same reading: the run never got far enough to compare
+#      anything against the baseline, so reporting one of the other two
+#      exit codes would claim a verdict this run never reached. The
+#      baseline SHAPE, in the malformed-line case, is unknown too — refused,
+#      not guessed at.
 #
 # A check "could-not-run" is neither a pass nor a failure and is counted in
 # neither the match nor the divergence bucket (see "could-not-run" below) —
 # reported under its own heading instead, exactly the class conformance-run.sh
 # already carves out for the same reason (a check that cannot run must never
 # look like a check that ran and found nothing).
+#
+# --- the concurrency lock ----------------------------------------------
+#
+# Two check-all.sh runs against the SAME working tree share its files —
+# test fixtures a python-tests run creates and removes mid-run collided
+# across two independently, directly observed real incidents (CCP-1145):
+# once between two check-all.sh invocations, once between check-all.sh's
+# own python-tests check and a directly invoked `python3 -m unittest
+# discover` in the same checkout. A THIRD confirmed that a collision does
+# not always look like a collision — it can look like a plausible, wrong
+# test-count regression instead, which is more expensive because it reads
+# as a finding.
+#
+# The lock is a `mkdir`-based directory lock — this repository's floor is
+# bash 3.2 / macOS, where there is no `flock`, and `mkdir` is atomic
+# (fails with EEXIST if the directory is already there) on every
+# filesystem this script runs on, without an external dependency — keyed
+# on the project's OWN git directory, not on the path string used to
+# reach it. A path-STRING-keyed lock — a lock file
+# named after <project-dir> — would miss the aliasing that caused incident
+# two: two differently-CASED spellings of the identical macOS working tree
+# are the same physical directory but hash to two different lock names.
+# Locking the git directory itself sidesteps that: it is a real filesystem
+# object every spelling of the same working tree resolves to, so the OS's
+# own path resolution collapses the aliasing — case-insensitivity,
+# symlinks and bind-mounts alike — instead of this script having to
+# reconstruct canonical identity itself (PO decision, CCP-1145: preferred
+# over a canonicalised-path lock precisely because it closes the whole
+# aliasing CLASS, not only the case-insensitivity instance that was
+# observed). A <project-dir> that is not a git checkout at all (an adopter
+# without git, or this script's own test fixtures) falls back to a
+# canonicalised-path lock under TMPDIR — `pwd -P` already resolves
+# symlinks and this filesystem's own case-preservation, so it still closes
+# the SAME-machine collision every incident above actually was, just not
+# the wider aliasing classes the git-dir lock closes for free. Two DIFFERENT
+# non-git project directories can, in principle, collide on the same TMPDIR
+# lock name (the fallback's `/` → `_` transliteration is not injective —
+# "/tmp/foo_bar" and "/tmp/foo/bar" both become "_tmp_foo_bar") — accepted:
+# the consequence is over-cautious serialisation between two unrelated
+# directories, never a missed collision between two runs of the SAME one,
+# which is the property this lock exists to guarantee.
+#
+# Locking the git directory also means two `check-all.sh` runs against two
+# DIFFERENT subdirectories of the SAME outer git checkout serialise each
+# other, even when they share no test fixtures at all — an accepted, wider-
+# than-strictly-necessary consequence of keying on git identity rather than
+# on the exact `<project-dir>` argument. This repository's own use always
+# passes the checkout root, so it never observes this; documented here in
+# case an adopter passes a subdirectory.
+#
+# A lock directory left behind by a run that was killed outright (SIGKILL,
+# an OOM kill — anything that bypasses the `trap ... EXIT` cleanup that
+# releases the lock on every ORDINARY exit) must not block every run after
+# it forever: the holder's pid is written inside the lock directory, and a
+# second run that finds the lock already held checks whether that pid is
+# still alive (`kill -0`) before refusing — a dead holder's lock is
+# removed and acquisition retried once, rather than treated as a live
+# collision.
 #
 # --- the check catalogue, and which ones apply outside this repository ----
 #
@@ -200,6 +264,94 @@ done
 PROJECT_DIR_ARG="${PROJECT_DIR_ARG:-.}"
 [ -d "$PROJECT_DIR_ARG" ] || die "project directory does not exist: $PROJECT_DIR_ARG"
 PROJECT_DIR="$(cd "$PROJECT_DIR_ARG" && pwd -P)"
+
+# --- concurrency lock (CCP-1145) --------------------------------------------
+# See the header's "the concurrency lock" section for the reasoning. Acquired
+# as early as possible once PROJECT_DIR is known, so it also covers the
+# baseline validation just below — a run refused here never got far enough
+# to compare anything, which is exactly what exit 2 already means for this
+# script (see the header's Exit-status paragraph).
+# `VAR="$(cmd)" || VAR=""` rather than `if VAR="$(cmd)"; then` -- not a
+# style preference, a scanner-precedent fix (CCP-1145 code-review follow-up).
+# The earlier `if`-headed form left `git`'s own exit status genuinely
+# unrecognised as checked by scripts/tests/test_external_tool_exit_status.py:
+# `set -e` is suspended for the tested command of an `if`, so
+# `set-e-sufficient` (the exemption category this shape would otherwise
+# need) is not actually true of it, and SetESufficientNestingTest correctly
+# refused the marker -- confirmed directly, not assumed, the same
+# `if !`-then-reshape install-push-gate-hook.sh's own `GIT_DIR="$(git
+# rev-parse --git-dir 2>/dev/null)" || GIT_DIR=""` already went through
+# (see that file's own comment). The real `||` in the SAME statement as the
+# invocation is a genuine chain, landing this in the scanner's own
+# recognised `checked-chain` bucket -- no exemption marker needed for
+# something that is genuinely checked.
+_git_dir="$(cd "$PROJECT_DIR" && git rev-parse --git-dir 2>/dev/null)" || _git_dir=""
+if [ -n "$_git_dir" ]; then
+  case "$_git_dir" in
+    /*) : ;;
+    *) _git_dir="$(cd "$PROJECT_DIR" && cd "$_git_dir" && pwd -P)" ;;
+  esac
+  LOCK_DIR="$_git_dir/ccpr-check-all.lock"
+else
+  # Fallback for a <project-dir> that is not a git checkout at all — see
+  # the header. PROJECT_DIR is already `pwd -P`-canonicalised above.
+  _lock_name="$(printf '%s' "$PROJECT_DIR" | tr '/' '_')"
+  LOCK_DIR="${TMPDIR:-/tmp}/ccpr-check-all-lock${_lock_name}"
+fi
+LOCK_PID_FILE="$LOCK_DIR/pid"
+
+_lock_release() {
+  rm -rf "$LOCK_DIR" 2>/dev/null || true
+}
+
+_lock_attempt=0
+while :; do
+  if mkdir "$LOCK_DIR" 2>/dev/null; then
+    printf '%s\n' "$$" > "$LOCK_PID_FILE"
+    trap _lock_release EXIT
+    break
+  fi
+  # mkdir failed: the lock directory already exists. A holder pid file that
+  # is missing, empty, or names a process that is no longer alive is a
+  # STALE lock — left behind by a run that was killed outright (SIGKILL,
+  # OOM), which bypasses the `trap ... EXIT` release above by construction.
+  # This script must not block on it forever: remove it and retry once.
+  #
+  # `mkdir` and the `printf` that writes the pid file just below it are TWO
+  # separate syscalls, not one atomic operation — a losing racer landing in
+  # the narrow window between a legitimate winner's `mkdir` and that same
+  # winner's own `printf` would otherwise read "no pid file" and misclassify
+  # a live, freshly-acquired lock as stale (code-review finding, CCP-1145):
+  # removing it out from under the winner and re-acquiring would let TWO
+  # runs believe they hold the lock, exactly the collision this lock exists
+  # to prevent. A missing pid file is therefore given one short grace period
+  # to appear before being treated as stale — this does not eliminate the
+  # window in theory (nothing short of a single atomic mkdir-with-payload
+  # syscall would), but shrinks it from "any scheduler preemption" to "the
+  # winner is preempted for a quarter of a second between two adjacent
+  # lines", which is the same order of residual risk this script already
+  # accepts for `kill -0`'s own EPERM case below.
+  _holder_pid=""
+  if [ -f "$LOCK_PID_FILE" ]; then
+    _holder_pid="$(cat "$LOCK_PID_FILE" 2>/dev/null)"
+  else
+    sleep 0.25
+    [ -f "$LOCK_PID_FILE" ] && _holder_pid="$(cat "$LOCK_PID_FILE" 2>/dev/null)"
+  fi
+  # `kill -0` cannot distinguish "no such process" (ESRCH, genuinely stale)
+  # from "process exists but a different user owns it" (EPERM) — both read
+  # as "not alive" here. Accepted: this script's own supported use is a
+  # single developer's local machine or a single-user CI runner, never two
+  # different UIDs racing the same working tree.
+  if [ -n "$_holder_pid" ] && kill -0 "$_holder_pid" 2>/dev/null; then
+    die "another check-all.sh run is already in progress in this working tree (pid $_holder_pid) — refusing to run concurrently. Wait for it to finish, or verify it is no longer alive (kill -0 $_holder_pid) before retrying."
+  fi
+  _lock_attempt=$((_lock_attempt + 1))
+  if [ "$_lock_attempt" -ge 2 ]; then
+    die "could not acquire the check-all.sh lock: $LOCK_DIR"
+  fi
+  rm -rf "$LOCK_DIR" 2>/dev/null || true
+done
 
 [ -n "$BASELINE_PATH" ] || BASELINE_PATH="$CHECK_SCRIPT_DIR/check-all.baseline.tsv"
 [ -f "$BASELINE_PATH" ] || die "baseline file not found: $BASELINE_PATH"

@@ -1680,6 +1680,65 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Fixed
 
+- **`check-all.sh` had no lock, so two simultaneous runs against the same working tree collided
+  over shared files instead of refusing each other (CCP-1145).** `check-all.sh` runs the Python
+  test suite as one of its own catalogued checks; a second, independently invoked `python3 -m
+  unittest discover` (or a second `check-all.sh`) against the same checkout ran a full suite at
+  the same time — observed directly, twice, in the same session: once between two `check-all.sh`
+  invocations, once between a `check-all.sh` run and a directly invoked suite run. Test fixtures
+  the suite creates and removes mid-run collided across the two concurrent runs, which reads as a
+  flaky test failure, not as a concurrency bug — the more expensive misdiagnosis, because it looks
+  like a finding. A third incident showed the same root cause producing a **plausible wrong
+  number**: an agent's own concurrently-run suite reported false pre-existing failures that traced
+  back to a missing `-t .` flag, not to the tree.
+
+  `check-all.sh` now takes an `mkdir`-based lock (this repository's floor is bash 3.2 / macOS,
+  which has no `flock`) before running anything, and refuses a second concurrent run against the
+  same working tree with **exit 2** — the same "the run could not be performed as asked" bucket a
+  bad `--baseline` or a missing project directory already use, distinct from a genuine check
+  divergence (exit 1). The lock is keyed on the project's own `.git` directory rather than on the
+  `<project-dir>` path string: a path-STRING-keyed lock would have missed a second real incident
+  in the same session, where two differently-CASED spellings of the identical macOS working tree
+  (case-insensitive filesystem) resolved to the same physical checkout but would have hashed to
+  two different lock names. A project directory that is not a git checkout at all falls back to a
+  canonicalised-path lock under `TMPDIR`. A run that is killed outright (SIGKILL, an OOM kill) does
+  not leave a lock that blocks the run after it: the lock directory carries the holder's pid, and a
+  second run that finds the lock held checks whether that pid is still alive before refusing.
+
+  Covered by a real, non-simulated concurrency test (a self-signalling stub check proves the lock
+  actually held while a genuinely concurrent second run was rejected, and that the first run still
+  completed normally), a real-SIGKILL crash-recovery test (proves a killed run's lock does not
+  block the next one), a sequential-runs regression test (the lock must not outlive its own normal
+  run), and a structural mutation test (`mkdir` → `mkdir -p` in a scratch copy only) proving the
+  lock's own rejection is what the concurrency test actually measures, not an artefact of the test
+  setup. `CONTRIBUTING.md` now names the overlap explicitly and states measured per-module test
+  timings, after the same session's diagnosis that a default ~120-second agent tool-call timeout
+  silently moves an overrunning single-module test run to the background — a second, cheaper
+  contributor to the same class of "looked like disobedience, was actually a timeout" confusion.
+
+  **Follow-up round, same day.** Code review found the lock's own tests never exercised the
+  git-directory-keyed path at all (every fixture was a plain, non-git tempdir, so this
+  repository's own real invocations — always inside a git checkout — took the one branch nothing
+  tested); added `GitDirKeyedLockTest` (asserts the lock file materialises under
+  `<project-dir>/.git/`) and `CaseAliasedPathsShareTheSameGitDirLockTest` (reproduces the
+  case-alias incident directly, skipped on a case-sensitive filesystem via a runtime probe).
+  Also closed: a narrow TOCTOU window where a losing racer could misread a winning run's
+  not-yet-written pid file as stale and remove its live lock (a short grace period before
+  treating a missing pid file as stale, plus a documented residual — `kill -0` cannot distinguish
+  "no such process" from "a different user's process" either, accepted for this script's
+  single-developer/single-UID use); a resource leak in the crash-recovery test if its own
+  readiness check failed before the kill; and a mutation-proof assertion tightened from "not
+  rejected" to the exact expected outcome. A full run of the shipped Python suite (not scoped to
+  this file) then surfaced two more self-check registers this round's own governance sweep had
+  missed: `test_external_tool_exit_status.py`'s pinned invocation count and the `git rev-parse
+  --git-dir` call's own exemption, and `test_platform_conditional_skip_budget.py`'s registered
+  skip-decorator sources. The `if _git_dir="$(...)"; then` shape the lock originally used was not
+  merely unrecognised by the exit-status scanner but genuinely UNCHECKED by its own
+  `set-e-sufficient` reasoning (`set -e` is suspended for the tested command of an `if`) — reshaped
+  into the same `VAR="$(cmd)" || VAR=""` form `install-push-gate-hook.sh`'s own identical
+  `git rev-parse --git-dir` call already uses, landing it in the scanner's `checked-chain` bucket
+  with no exemption marker needed, rather than marking a claim that would not have been true.
+
 - **The discipline gate could not recognise a materialised copy of itself, so every push carrying
   `lib/discipline_gate.sh` was refused.** `gate_scan_file`'s line-scoped self-exemption — the one
   that blanks lines carrying the `gate-pattern-source` marker, because a gate that scans its own
