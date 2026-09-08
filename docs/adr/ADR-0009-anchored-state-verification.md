@@ -236,7 +236,7 @@ release commit hash to it remains a sensible small fix on its own merits, and is
 this decision.
 
 **One anchor per document.** Rejected on measured cost: 226 documents in the larger reference project
-plus every command template that authors a phase block, which is a skill-interface change requiring its
+plus every command template that authors a phase block, which is a command-interface change requiring its
 own migration — for a resolution gain that only matters on a handful of documents.
 
 **Blocking on drift.** Rejected: no command consumes an exit code, so it is either cosmetic or the most
