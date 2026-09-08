@@ -118,8 +118,10 @@ longer holds.
 import os
 import re
 import shutil
+import signal
 import subprocess
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -387,6 +389,35 @@ class CheckAllTestBase(unittest.TestCase):
         )
         path.chmod(0o755)
 
+    def write_blocking_stub(self, script_filename, ready_marker, sleep_seconds, exit_code=0):
+        """A stub that signals its OWN readiness (touches `ready_marker`)
+        BEFORE it blocks -- the same self-signalling shape
+        signal-race-tests.md documents (docs/memory/senior-developer/
+        signal-race-tests.md): check-all.sh only ever invokes this stub
+        AFTER it has already acquired the concurrency lock, by program
+        order, so a test that waits for `ready_marker` to appear is
+        waiting on a precondition that cannot exist before the lock is
+        held -- no external poll-and-guess race against check-all.sh's
+        own instruction pointer."""
+        path = self.stub_dir / script_filename
+        path.write_text(
+            "#!/usr/bin/env bash\n"
+            "touch '%s'\n"
+            "sleep %s\n"
+            "exit %d\n" % (ready_marker, sleep_seconds, exit_code),
+            encoding="utf-8",
+        )
+        path.chmod(0o755)
+
+    def wait_for_marker(self, marker_path, timeout=10):
+        deadline = time.monotonic() + timeout
+        while not marker_path.exists():
+            self.assertLess(
+                time.monotonic(), deadline,
+                "marker file never appeared: %s" % marker_path,
+            )
+            time.sleep(0.05)
+
     def write_fake_discipline_gate_lib(self, deny_source):
         """Installs a minimal scratch lib/discipline_gate.sh under
         self.stub_dir -- the same seam CCPR_CHECK_ALL_SCRIPT_DIR already
@@ -454,6 +485,27 @@ class CheckAllTestBase(unittest.TestCase):
     @staticmethod
     def output(r):
         return "returncode: %s\nstdout:\n%s\nstderr:\n%s" % (r.returncode, r.stdout, r.stderr)
+
+    def popen_check_all(self, *args, script_path=None, baseline_path=None, project_dir=None):
+        """Like run_check_all, but returns a live subprocess.Popen instead of
+        blocking for completion -- used by the concurrency-lock tests, which
+        need a FIRST run still in flight while a SECOND is started.
+        start_new_session=True puts the run in its own process group, so a
+        crash test can SIGKILL the whole group (check-all.sh's own bash
+        process plus whatever check stub it is running) rather than only the
+        immediate child."""
+        env = dict(os.environ)
+        env["CCPR_CHECK_ALL_SCRIPT_DIR"] = str(self.stub_dir)
+        argv = [
+            "bash", str(script_path or SCRIPT_PATH),
+            "--baseline", str(baseline_path or self.baseline_path),
+            *[str(a) for a in args],
+            str(project_dir if project_dir is not None else self.project_dir),
+        ]
+        return subprocess.Popen(
+            argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env,
+            start_new_session=True,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -1403,3 +1455,153 @@ class InstallVerifyCouldNotRunRedProofTest(CheckAllTestBase):
             "install-verify: exit 3 (expected 0) — DIVERGENT", r.stdout, self.output(r)
         )
         self.assertNotIn("install-verify: could-not-run", r.stdout, self.output(r))
+
+
+# ---------------------------------------------------------------------------
+# Concurrency lock (CCP-1145): two simultaneous check-all.sh runs against the
+# same working tree share test fixtures and must not collide silently.
+# ---------------------------------------------------------------------------
+class ConcurrentRunIsRejectedTest(CheckAllTestBase):
+    """The real incident this item exists for: a second `check-all.sh` run
+    against the SAME working tree while a first one is still in flight. The
+    first run is driven into a real, observable in-flight state via a
+    self-signalling stub (write_blocking_stub) rather than a fixed sleep
+    guessed from outside -- see write_blocking_stub's own docstring. The
+    second run must be REFUSED (exit 2 -- check-all.sh's own established
+    "the run could not be performed as asked" bucket, the same one `die()`
+    already uses for a bad --baseline or a missing project dir; see its
+    header's Exit-status paragraph) rather than silently proceeding to read
+    and write the same project directory the first run is still using."""
+
+    def test_a_second_concurrent_run_in_the_same_working_tree_is_rejected(self):
+        ready_marker = self.tmp / "first-run-ready"
+        self.write_blocking_stub("phase-docs-lint.sh", ready_marker, sleep_seconds=3)
+
+        first = self.popen_check_all()
+        try:
+            self.wait_for_marker(ready_marker)
+
+            second = self.run_check_all()
+            self.assertEqual(
+                2, second.returncode,
+                "a concurrent run must be refused with exit 2, not silently "
+                "allowed through: " + self.output(second),
+            )
+            self.assertIn(
+                "already in progress", second.stderr,
+                "the rejection must say why: " + self.output(second),
+            )
+        finally:
+            first_stdout, first_stderr = first.communicate(timeout=30)
+
+        self.assertEqual(
+            0, first.returncode,
+            "the FIRST run must finish normally, unaffected by the rejected "
+            "second one: returncode=%s stdout=%s stderr=%s"
+            % (first.returncode, first_stdout, first_stderr),
+        )
+        self.assertIn("**Exit:** 0", first_stdout)
+
+
+class LockDoesNotBlockSequentialRunsTest(CheckAllTestBase):
+    """The lock's own release must not outlive a NORMAL run -- otherwise
+    every run after the first would be refused, which is a worse defect
+    than the one this item fixes. Two ordinary, non-overlapping runs in a
+    row, back-to-back, must both succeed."""
+
+    def test_two_sequential_runs_both_succeed(self):
+        first = self.run_check_all()
+        self.assertEqual(0, first.returncode, self.output(first))
+        second = self.run_check_all()
+        self.assertEqual(0, second.returncode, self.output(second))
+
+
+class StaleLockFromACrashedRunDoesNotBlockTest(CheckAllTestBase):
+    """The other half of the item's acceptance criteria: a run that crashes
+    hard (SIGKILL -- the shape a killed background job or an OOM-killed
+    process actually takes, which bypasses any `trap ... EXIT` cleanup by
+    construction) must not leave a lock that blocks every run after it
+    forever. The killed run is driven into its own process group
+    (start_new_session=True in popen_check_all) so os.killpg reaches
+    check-all.sh's own bash process AND the check stub it is running, not
+    only the immediate child."""
+
+    def test_a_lock_left_by_a_killed_run_does_not_block_the_next_run(self):
+        ready_marker = self.tmp / "crash-run-ready"
+        self.write_blocking_stub("phase-docs-lint.sh", ready_marker, sleep_seconds=30)
+
+        crashed = self.popen_check_all()
+        self.wait_for_marker(ready_marker)
+
+        os.killpg(crashed.pid, signal.SIGKILL)
+        crashed.communicate(timeout=10)
+        self.assertEqual(
+            -signal.SIGKILL, crashed.returncode,
+            "the setup for this test must actually kill the run, not let it "
+            "exit on its own",
+        )
+
+        after = self.run_check_all()
+        self.assertEqual(
+            0, after.returncode,
+            "a lock orphaned by a killed run must not block the next one: "
+            + self.output(after),
+        )
+        self.assertNotIn("already in progress", after.stdout + after.stderr, self.output(after))
+
+
+class ConcurrentLockRedProofTest(CheckAllTestBase):
+    """G-107/G-109: a lock is not accepted until it has been seen doing its
+    job by NOT doing it. Mutates the one line that makes a held lock
+    actually refuse a second run (`mkdir "$LOCK_DIR"` -> `mkdir -p
+    "$LOCK_DIR"`) in a SCRATCH copy only. `mkdir -p` never fails on an
+    already-existing directory, so this is a STRUCTURAL change (the
+    mkdir call is still there, still runs) rather than deleting the lock
+    outright -- a removed lock would turn every test in this file red for
+    an uninteresting reason and prove nothing about THIS mutation's
+    specificity (G-109). With it applied, ConcurrentRunIsRejectedTest's own
+    assertion -- the second run's exit code -- must go red."""
+
+    NEEDLE = 'if mkdir "$LOCK_DIR" 2>/dev/null; then'
+
+    def setUp(self):
+        super().setUp()
+        self.scratch_dir = Path(tempfile.mkdtemp(prefix="ccpr-check-all-redproof-lock-"))
+        self.addCleanup(shutil.rmtree, self.scratch_dir, ignore_errors=True)
+
+    def test_defeating_the_lock_lets_the_second_run_through(self):
+        original = SCRIPT_PATH.read_text(encoding="utf-8")
+        # G-141: prove the mutation can land before measuring anything.
+        self.assertEqual(
+            1, original.count(self.NEEDLE),
+            "check-all.sh's lock-acquisition mkdir call changed -- update this test",
+        )
+        replacement = 'if mkdir -p "$LOCK_DIR" 2>/dev/null; then'
+
+        def _mutate(text):
+            return text.replace(self.NEEDLE, replacement, 1)
+
+        scratch = _write_mutated_script(self.scratch_dir, _mutate)
+        mutated_text = scratch.read_text(encoding="utf-8")
+        self.assertEqual(0, mutated_text.count(self.NEEDLE))
+        self.assertEqual(1, mutated_text.count(replacement))
+
+        ready_marker = self.tmp / "mutant-first-run-ready"
+        self.write_blocking_stub("phase-docs-lint.sh", ready_marker, sleep_seconds=3)
+
+        first = self.popen_check_all(script_path=scratch)
+        try:
+            self.wait_for_marker(ready_marker)
+
+            second = self.run_check_all(script_path=scratch)
+            # This is the exact assertion ConcurrentRunIsRejectedTest makes
+            # on the UNMUTATED script; against the mutant it must fail --
+            # `mkdir -p` "succeeds" even though the directory already
+            # existed, so the second run is never refused.
+            self.assertNotEqual(
+                2, second.returncode,
+                "the mutant defeated the lock, so a rejection here would "
+                "mean the mutation did not land as intended: " + self.output(second),
+            )
+        finally:
+            first.communicate(timeout=30)

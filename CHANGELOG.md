@@ -1680,6 +1680,42 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Fixed
 
+- **`check-all.sh` had no lock, so two simultaneous runs against the same working tree collided
+  over shared files instead of refusing each other (CCP-1145).** `check-all.sh` runs the Python
+  test suite as one of its own catalogued checks; a second, independently invoked `python3 -m
+  unittest discover` (or a second `check-all.sh`) against the same checkout ran a full suite at
+  the same time — observed directly, twice, in the same session: once between two `check-all.sh`
+  invocations, once between a `check-all.sh` run and a directly invoked suite run. Test fixtures
+  the suite creates and removes mid-run collided across the two concurrent runs, which reads as a
+  flaky test failure, not as a concurrency bug — the more expensive misdiagnosis, because it looks
+  like a finding. A third incident showed the same root cause producing a **plausible wrong
+  number**: an agent's own concurrently-run suite reported false pre-existing failures that traced
+  back to a missing `-t .` flag, not to the tree.
+
+  `check-all.sh` now takes an `mkdir`-based lock (this repository's floor is bash 3.2 / macOS,
+  which has no `flock`) before running anything, and refuses a second concurrent run against the
+  same working tree with **exit 2** — the same "the run could not be performed as asked" bucket a
+  bad `--baseline` or a missing project directory already use, distinct from a genuine check
+  divergence (exit 1). The lock is keyed on the project's own `.git` directory rather than on the
+  `<project-dir>` path string: a path-STRING-keyed lock would have missed a second real incident
+  in the same session, where two differently-CASED spellings of the identical macOS working tree
+  (case-insensitive filesystem) resolved to the same physical checkout but would have hashed to
+  two different lock names. A project directory that is not a git checkout at all falls back to a
+  canonicalised-path lock under `TMPDIR`. A run that is killed outright (SIGKILL, an OOM kill) does
+  not leave a lock that blocks the run after it: the lock directory carries the holder's pid, and a
+  second run that finds the lock held checks whether that pid is still alive before refusing.
+
+  Covered by a real, non-simulated concurrency test (a self-signalling stub check proves the lock
+  actually held while a genuinely concurrent second run was rejected, and that the first run still
+  completed normally), a real-SIGKILL crash-recovery test (proves a killed run's lock does not
+  block the next one), a sequential-runs regression test (the lock must not outlive its own normal
+  run), and a structural mutation test (`mkdir` → `mkdir -p` in a scratch copy only) proving the
+  lock's own rejection is what the concurrency test actually measures, not an artefact of the test
+  setup. `CONTRIBUTING.md` now names the overlap explicitly and states measured per-module test
+  timings, after the same session's diagnosis that a default ~120-second agent tool-call timeout
+  silently moves an overrunning single-module test run to the background — a second, cheaper
+  contributor to the same class of "looked like disobedience, was actually a timeout" confusion.
+
 - **The discipline gate could not recognise a materialised copy of itself, so every push carrying
   `lib/discipline_gate.sh` was refused.** `gate_scan_file`'s line-scoped self-exemption — the one
   that blanks lines carrying the `gate-pattern-source` marker, because a gate that scans its own

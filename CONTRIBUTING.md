@@ -50,6 +50,26 @@ Runs the checks catalogued below and compares each against
 checks are *supposed* to return. Takes about five minutes, most of it the test
 suite.
 
+**One of the checks it runs IS the test suite below (`python3 -m unittest
+discover -s scripts/tests -t .`) — do not run that command in a second
+terminal, or a second agent session, while `check-all.sh` is running in the
+first.** Two runs against the same working tree share it: `python3 -m
+unittest discover` creates and removes real test fixtures on disk mid-run,
+and two suites doing that at once can steal a fixture out from under each
+other — a collision that looks exactly like a test failure, not like a
+concurrency bug, so whoever hits it debugs the wrong thing (CCP-1145,
+two independently observed real incidents). `check-all.sh` refuses a second
+concurrent run against the same working tree outright instead: it exits **2**
+("the run could not be performed as asked" — the same exit code a bad
+`--baseline` or a missing project directory already use) and says a run is
+already in progress, rather than silently racing it. The lock is keyed on
+the working tree's own `.git` directory, so it catches the collision even
+across two differently-spelled paths to the identical checkout (macOS's
+case-insensitive filesystem, a symlink, a second clone bind-mounted over the
+first) — a lock file named after the literal path string you typed would
+have missed exactly that case. A run that crashes outright (killed, not
+exited normally) does not leave a lock behind that blocks the next one.
+
 **It does not compare against exit zero, and neither should you.** One of them
 is non-zero on a correct tree — `memory-lint.sh` exits 1 on long-standing
 warnings — so a collector that failed on any non-zero result would be
@@ -84,8 +104,8 @@ python3 -m unittest discover -s scripts/tests -t .
 
 - **`-t .` is not optional**, and the failure mode is worth knowing because it is
   partly silent. It sets the top-level directory imports resolve against. Measured
-  on the current tree (08.09.2026): **with** it, discovery collects **2775 tests, 0
-  import errors**, exit 0; **without** it, **2058 tests and 17 modules that fail to
+  on the current tree (08.09.2026): **with** it, discovery collects **2779 tests, 0
+  import errors**, exit 0; **without** it, **2062 tests and 17 modules that fail to
   import**, exit 1 — the eight that use a relative import
   (`from .test_phase_docs_lint import …` in four modules,
   `from .test_artifact_gate import …` in two,
@@ -130,18 +150,39 @@ python3 -m unittest discover -s scripts/tests -t .
   2747 / 2030 / 17 / 717, then 2747 / 2030 / 17 / 717 against a tree at
   2756 / 2039 / 17 / 717, then 2756 / 2039 / 17 / 717 against a tree at
   2760 / 2043 / 17 / 717, then 2760 / 2043 / 17 / 717 against a tree at
-  2769 / 2052 / 17 / 717, and now 2769 / 2052 / 17 / 717 against a tree at
+  2769 / 2052 / 17 / 717, then 2769 / 2052 / 17 / 717 against a tree at
   2775 / 2058 / 17 / 717 — the twelfth round running in which the skipped figure
   did NOT move with the others, because CCP-1148's six new tests
   (`scripts/tests/test_check_all.py`'s ArtifactGateDenylistSummaryVisibilityTest
   and ArtifactGateDenylistSummaryRedProofTest, plus
   `scripts/tests/test_ci_workflow.py`'s DenylistEnvMutationTest) import cleanly
   with or without the flag, so the addition lands on both sides of the
-  subtraction and cancels, same as every round since 05.09.2026. These runs,
-  back to back, take about eleven minutes.
+  subtraction and cancels, same as every round since 05.09.2026 — and now
+  2775 / 2058 / 17 / 717 against a tree at 2779 / 2062 / 17 / 717, the
+  thirteenth round running in which it did not move: CCP-1145's four new
+  `scripts/tests/test_check_all.py` methods (ConcurrentRunIsRejectedTest,
+  LockDoesNotBlockSequentialRunsTest, StaleLockFromACrashedRunDoesNotBlockTest,
+  ConcurrentLockRedProofTest) import cleanly with or without the flag too,
+  same reason, same cancellation. These runs, back to back, take about eleven
+  minutes — not independently re-measured this round (four more tests,
+  counted without running the suite; the wall-clock figure needs an actual
+  run, which is out of scope here).
 - The full run takes **a couple of minutes**. If you drive it from an agent whose
   tool calls time out, start it in the background and wait for it once rather than
   polling.
+- **A single, scoped module can already exceed a short default tool timeout.**
+  Many agent tool-call defaults sit around 120 seconds; a tool that is not told
+  otherwise moves an overrunning call to the background automatically, which
+  is easy to mistake for the agent choosing to run in the background against
+  an explicit instruction not to (CCP-1145 — observed twice in one session).
+  `scripts/tests/test_manual_lint_check_g.py` alone, run the scoped way this
+  section recommends
+  (`python3 -m unittest discover -s scripts/tests -t . -p
+  'test_manual_lint_check_g.py'`), measured **173.7 seconds** on this machine
+  (08.09.2026); `check-all.sh` itself, which runs the whole suite as one of
+  its checks, takes the whole-suite time above on top of every other check.
+  Set an explicit timeout comfortably above the module you are running,
+  rather than the tool's own default.
 - `scripts/run-tests.sh` is **not** the entry point for this repository. It is a
   framework script shipped for downstream *projects* and detects their test runner
   from `package.json` / `pyproject.toml` / `Cargo.toml` / `go.mod`. CCPR itself has
