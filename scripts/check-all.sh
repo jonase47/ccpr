@@ -271,14 +271,26 @@ PROJECT_DIR="$(cd "$PROJECT_DIR_ARG" && pwd -P)"
 # baseline validation just below — a run refused here never got far enough
 # to compare anything, which is exactly what exit 2 already means for this
 # script (see the header's Exit-status paragraph).
-_git_dir=""
-if _git_dir="$(cd "$PROJECT_DIR" && git rev-parse --git-dir 2>/dev/null)"; then
+# `VAR="$(cmd)" || VAR=""` rather than `if VAR="$(cmd)"; then` -- not a
+# style preference, a scanner-precedent fix (CCP-1145 code-review follow-up).
+# The earlier `if`-headed form left `git`'s own exit status genuinely
+# unrecognised as checked by scripts/tests/test_external_tool_exit_status.py:
+# `set -e` is suspended for the tested command of an `if`, so
+# `set-e-sufficient` (the exemption category this shape would otherwise
+# need) is not actually true of it, and SetESufficientNestingTest correctly
+# refused the marker -- confirmed directly, not assumed, the same
+# `if !`-then-reshape install-push-gate-hook.sh's own `GIT_DIR="$(git
+# rev-parse --git-dir 2>/dev/null)" || GIT_DIR=""` already went through
+# (see that file's own comment). The real `||` in the SAME statement as the
+# invocation is a genuine chain, landing this in the scanner's own
+# recognised `checked-chain` bucket -- no exemption marker needed for
+# something that is genuinely checked.
+_git_dir="$(cd "$PROJECT_DIR" && git rev-parse --git-dir 2>/dev/null)" || _git_dir=""
+if [ -n "$_git_dir" ]; then
   case "$_git_dir" in
     /*) : ;;
     *) _git_dir="$(cd "$PROJECT_DIR" && cd "$_git_dir" && pwd -P)" ;;
   esac
-fi
-if [ -n "$_git_dir" ]; then
   LOCK_DIR="$_git_dir/ccpr-check-all.lock"
 else
   # Fallback for a <project-dir> that is not a git checkout at all — see

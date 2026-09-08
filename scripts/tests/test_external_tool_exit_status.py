@@ -1210,12 +1210,44 @@ class ExternalToolExitStatusTest(unittest.TestCase):
         `checked-chain` instead, with no exemption marker needed, and
         without losing the custom exit-2/message contract the `if !`
         form would have if left as `bare-needs-exemption`-and-marked
-        instead. `checked-chain` +1."""
+        instead. `checked-chain` +1.
+        08.09.2026 (CCP-1145, check-all.sh concurrency lock): +1 total.
+        First written as `if _git_dir="$(cd "$PROJECT_DIR" && git
+        rev-parse --git-dir 2>/dev/null)"; then` -- classified
+        `bare-needs-exemption` (the backward walk stops at the
+        substitution's own opening `(` before it ever reaches the
+        enclosing `if`, same shape the two entries above already name).
+        Marking it `set-e-sufficient` was tried first and is WRONG, not
+        merely unrecognised: `set -e` is genuinely suspended for the
+        tested command of an `if`, so the category's own precondition
+        (the substitution must be a BARE, STANDALONE assignment
+        statement, the shape `set -e` actually aborts on) does not hold
+        here -- confirmed directly, not assumed:
+        SetESufficientNestingTest correctly refused the marker
+        (`scripts/check-all.sh:275: git`), because
+        `_is_bare_or_standalone_substitution` requires the text back to
+        the statement boundary to be nothing but `VAR=`, and `if ` is
+        extraneous content before it. Re-reading the two entries above
+        against the ACTUAL shipped code (not just their own prose)
+        confirms this: `push-gate.sh`'s `target_type=`/`size=` sites are
+        genuinely bare, standalone statements on their own line, never
+        `if`-headed -- there is no existing site in this corpus where an
+        `if VAR="$(...)"; then` shape is validly marked
+        `set-e-sufficient`. Reshaped instead, exactly as
+        `install-push-gate-hook.sh`'s own `GIT_DIR="$(git rev-parse
+        --git-dir 2>/dev/null)" || GIT_DIR=""` already did for the
+        identical call: `_git_dir="$(cd "$PROJECT_DIR" && git rev-parse
+        --git-dir 2>/dev/null)" || _git_dir=""`, followed by `if [ -n
+        "$_git_dir" ]; then ... fi` testing the RESULT rather than the
+        assignment itself. The real `||` in the SAME statement as the
+        invocation lands it in `checked-chain`, no exemption marker
+        needed for something that is genuinely checked. `checked-chain`
+        +1 (18 total)."""
         invocations = scan_tree()
         by_disposition = {}
         for inv in invocations:
             by_disposition[inv.disposition] = by_disposition.get(inv.disposition, 0) + 1
-        self.assertEqual(173, len(invocations))
+        self.assertEqual(174, len(invocations))
         self.assertEqual(
             {
                 # 28.08.2026, open-findings wave 1a: one invocation moved
@@ -1294,7 +1326,7 @@ class ExternalToolExitStatusTest(unittest.TestCase):
                 # (17 total).
                 "checked-condition": 34,
                 "checked-captured": 6,
-                "checked-chain": 17,
+                "checked-chain": 18,
                 "discard-needs-exemption": 41,
                 "bare-needs-exemption": 75,
             },

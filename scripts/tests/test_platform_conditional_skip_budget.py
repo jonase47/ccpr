@@ -5,7 +5,7 @@ test suite produces, so the skip set cannot silently grow.
 Why this exists: a skip is a check that did NOT run. `check-all.sh`'s own
 could-not-run idiom already treats "verified nothing" as distinct from "a
 pass" (KA-G-017) at the CHECK level; nothing did the equivalent at the
-individual-TEST level until now. Four sources today carry a
+individual-TEST level until now. Five sources today carry a
 `@unittest.skipUnless`/`skipIf` whose condition depends on the machine
 running it rather than on anything the test itself controls:
 
@@ -26,6 +26,13 @@ running it rather than on anything the test itself controls:
     identical shape and identical `SYSTEM_BASH`/`_bash_major_minor` check
     UsageHintOnBash32Test already uses, gated on the resolved `/bin/bash`
     being 3.x.
+  * test_check_all.py (CCP-1145) -- CaseAliasedPathsShareTheSameGitDirLockTest's
+    one class-level skip, gated on a RUNTIME probe of whether
+    `tempfile.gettempdir()` resolves an upper/lower-cased sibling path to
+    the SAME physical file. True on this repository's own macOS/APFS
+    development machine and the `check-all-macos` CI runner; false on the
+    `python-tests` job's `ubuntu-latest`/ext4 runner, where the case-alias
+    collision this test reproduces cannot occur at all.
 
 NOT a flat "N skips per platform" pin. A first version of this module tried
 that (Darwin: 8, Linux: 3) and it is WRONG for any contributor whose local
@@ -59,6 +66,7 @@ import re
 import unittest
 from pathlib import Path
 
+from . import test_check_all
 from . import test_handover_size_hook
 from . import test_memory_sync_promote
 from . import test_push_gate
@@ -74,6 +82,7 @@ TESTS_DIR = Path(__file__).resolve().parent
 # are allowed to carry one at all, closing that gap independently of the
 # per-source counting above.
 _REGISTERED_SKIP_DECORATOR_FILES = {
+    "test_check_all.py",
     "test_handover_size_hook.py",
     "test_memory_sync_promote.py",
     "test_push_gate.py",
@@ -108,6 +117,7 @@ def files_with_skip_decorators():
 # binding a TestCase subclass into THIS module's namespace would make
 # unittest's own discovery pick it up a second time here.
 _SKIP_SOURCE_MODULES = (
+    test_check_all,
     test_handover_size_hook,
     test_memory_sync_promote,
     test_push_gate,
@@ -182,6 +192,13 @@ def skipped_test_ids():
 #                     SYSTEM_BASH global, not a shared one.
 #   fifo / 1         Pre-existing: test_handover_size_hook.py's one
 #                     FIFO-gated method.
+#   check_all / 1    CCP-1145 (08.09.2026): CaseAliasedPathsShareTheSame
+#                     GitDirLockTest's one class-level skip, gated on a
+#                     runtime case-insensitivity probe of
+#                     tempfile.gettempdir() -- true (0 contributed) on this
+#                     machine and check-all-macos's runner, false (1
+#                     contributed) on python-tests' ubuntu-latest/ext4
+#                     runner.
 def expected_skip_count():
     count = 0
     if test_shellcheck_run.REAL_SHELLCHECK_DIR is None:
@@ -199,6 +216,8 @@ def expected_skip_count():
     if (push_gate_bash_version or (99, 0))[0] >= 4:
         count += 1
     if not hasattr(os, "mkfifo"):
+        count += 1
+    if not test_check_all._CASE_INSENSITIVE_TMP:
         count += 1
     return count
 

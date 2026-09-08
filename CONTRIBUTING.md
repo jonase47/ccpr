@@ -47,8 +47,14 @@ bash scripts/check-all.sh .
 
 Runs the checks catalogued below and compares each against
 `scripts/check-all.baseline.tsv`, the versioned record of what this repository's
-checks are *supposed* to return. Takes about five minutes, most of it the test
-suite.
+checks are *supposed* to return. Takes **about 11 minutes** (measured
+08.09.2026, `/usr/bin/time -p`: real 662.26s) — the test suite is a large
+share of that, but not most of it on its own (see "a couple of minutes"
+below); the remaining time is the other eight checks, `conformance-run.sh`
+in particular scaling with however many consumer projects are configured
+locally. Set a tool-call timeout well above this if you drive it from an
+agent — see the note on single-module timeouts further down for the same
+reasoning applied to one test module.
 
 **One of the checks it runs IS the test suite below (`python3 -m unittest
 discover -s scripts/tests -t .`) — do not run that command in a second

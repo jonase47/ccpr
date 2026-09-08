@@ -1716,6 +1716,29 @@ All notable changes to this project are documented in this file. The format is b
   silently moves an overrunning single-module test run to the background — a second, cheaper
   contributor to the same class of "looked like disobedience, was actually a timeout" confusion.
 
+  **Follow-up round, same day.** Code review found the lock's own tests never exercised the
+  git-directory-keyed path at all (every fixture was a plain, non-git tempdir, so this
+  repository's own real invocations — always inside a git checkout — took the one branch nothing
+  tested); added `GitDirKeyedLockTest` (asserts the lock file materialises under
+  `<project-dir>/.git/`) and `CaseAliasedPathsShareTheSameGitDirLockTest` (reproduces the
+  case-alias incident directly, skipped on a case-sensitive filesystem via a runtime probe).
+  Also closed: a narrow TOCTOU window where a losing racer could misread a winning run's
+  not-yet-written pid file as stale and remove its live lock (a short grace period before
+  treating a missing pid file as stale, plus a documented residual — `kill -0` cannot distinguish
+  "no such process" from "a different user's process" either, accepted for this script's
+  single-developer/single-UID use); a resource leak in the crash-recovery test if its own
+  readiness check failed before the kill; and a mutation-proof assertion tightened from "not
+  rejected" to the exact expected outcome. A full run of the shipped Python suite (not scoped to
+  this file) then surfaced two more self-check registers this round's own governance sweep had
+  missed: `test_external_tool_exit_status.py`'s pinned invocation count and the `git rev-parse
+  --git-dir` call's own exemption, and `test_platform_conditional_skip_budget.py`'s registered
+  skip-decorator sources. The `if _git_dir="$(...)"; then` shape the lock originally used was not
+  merely unrecognised by the exit-status scanner but genuinely UNCHECKED by its own
+  `set-e-sufficient` reasoning (`set -e` is suspended for the tested command of an `if`) — reshaped
+  into the same `VAR="$(cmd)" || VAR=""` form `install-push-gate-hook.sh`'s own identical
+  `git rev-parse --git-dir` call already uses, landing it in the scanner's `checked-chain` bucket
+  with no exemption marker needed, rather than marking a claim that would not have been true.
+
 - **The discipline gate could not recognise a materialised copy of itself, so every push carrying
   `lib/discipline_gate.sh` was refused.** `gate_scan_file`'s line-scoped self-exemption — the one
   that blanks lines carrying the `gate-pattern-source` marker, because a gate that scans its own
