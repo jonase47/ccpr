@@ -8,6 +8,41 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Added
 
+- **`docs/CONSTITUTION.md` v1.3 — the file's own deferred `skill` → `command` exception is closed,
+  and the second `Manual/` echo CCP-1150 held back is repointed.** CCP-1151's four-stage sweep
+  excluded this one file by name (K1, "ratified text is out of bounds",
+  `docs/decisions/2026-09-05_skill-terminology-classification.md` §14) and deferred it to this
+  bump; two PO decisions today (08.09.2026) close it. Twelve prose occurrences of "skill" are
+  renamed to "command", classified individually rather than swept — among them the Aspirational
+  goal `Skill-footprint consolidation` → `Command-footprint consolidation`, whose stale
+  "114-skill surface" figure is also corrected to the measured 116. Inviolable #5 — cited by name
+  from six places (this file plus five ADR sites) — is renamed `skill-interface` →
+  `command-interface` everywhere it is cited. `CHANGELOG.md`'s own three `skill-interface`
+  occurrences and the archived `WI-0006.md` stay untouched: they record what was true on their
+  date, and a protocol is not rewritten retroactively. **No Inviolable changed in substance — only
+  Inviolable #5's name.** The frontmatter `related:` entry and the Lean-Track-sunset measurement
+  both still pointed at `Manual/LEAN_TRACK.md`, a path CCP-1150 retired; both now read
+  `handbook/LEAN_TRACK.md`, the "2 deferred" that entry named. `scripts/tests/
+  test_doc_counts_agree.py`'s `CommandCountAgreementTest` gains `docs/CONSTITUTION.md` as an
+  eighth cross-checked location for the shared command-count claim, alongside README.md,
+  handbook/README.md, handbook/SYSTEM_OVERVIEW.md and handbook/SECTIONS_COMMANDS.md — seen red
+  first (the natural consequence of building the pin against the file's THEN-stale 114 before
+  correcting it, rather than coupling the rename and the correction into one commit) and confirmed
+  by a further mutation-restore proof (116 → 117) in the module's own house style.
+
+  **Unresolved, reported rather than fixed (out of this work's write boundary):** the v1.3 rename
+  concentrates every surviving "skill" token in this file onto the one line that also quotes the
+  historical name "skill-interface", which `scripts/manual-lint.sh` check (g)'s own
+  `lint.forbiddenProse` config already excuses via a `lineContains` entry independent of this
+  file's `pathContains` exemption. `scripts/tests/test_manual_lint_check_g.py`'s
+  `RealCorpusRegressionTest.test_out_of_scope_entries_become_load_bearing_once_their_path_is_scanned`
+  — which snapshots `git archive HEAD`, not the working tree, so this surfaced only once the
+  rename commit landed — now reports the `("skill", "pathContains", "docs/CONSTITUTION.md")`
+  exemption as no longer load-bearing (0 vs. 0), i.e. possibly genuinely redundant rather than
+  merely out-of-scope. Left as-is per this work's own write boundary (`scripts/manual-lint.sh`
+  and its test module are out of scope); a PO decision on moving the entry to
+  `KNOWN_SPENT_CONTEXT_ENTRIES` is a follow-up.
+
 - **CCP-1151 stage 4: `command` is the only prose word, and a guard now keeps it that way.**
   The last cut of a four-stage sweep. 345 occurrences renamed across six commits; what remains is
   held by a named reason with a named releasing event, and nothing is left over.
