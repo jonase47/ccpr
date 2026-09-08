@@ -84,8 +84,8 @@ python3 -m unittest discover -s scripts/tests -t .
 
 - **`-t .` is not optional**, and the failure mode is worth knowing because it is
   partly silent. It sets the top-level directory imports resolve against. Measured
-  on the current tree (07.09.2026): **with** it, discovery collects **2769 tests, 0
-  import errors**, exit 0; **without** it, **2052 tests and 17 modules that fail to
+  on the current tree (08.09.2026): **with** it, discovery collects **2775 tests, 0
+  import errors**, exit 0; **without** it, **2058 tests and 17 modules that fail to
   import**, exit 1 — the eight that use a relative import
   (`from .test_phase_docs_lint import …` in four modules,
   `from .test_artifact_gate import …` in two,
@@ -129,13 +129,16 @@ python3 -m unittest discover -s scripts/tests -t .
   2745 / 2028 / 17 / 717, then 2745 / 2028 / 17 / 717 against a tree at
   2747 / 2030 / 17 / 717, then 2747 / 2030 / 17 / 717 against a tree at
   2756 / 2039 / 17 / 717, then 2756 / 2039 / 17 / 717 against a tree at
-  2760 / 2043 / 17 / 717, and now 2760 / 2043 / 17 / 717 against a tree at
-  2769 / 2052 / 17 / 717 — the eleventh round running in which the skipped figure
-  did NOT move with the others, because CCP-1149's nine new tests
-  (`scripts/tests/test_ci_workflow.py`'s push-branches and concurrency-block
-  mutation classes) import cleanly with or without the flag, so the addition
-  lands on both sides of the subtraction and cancels, same as every round since
-  05.09.2026. These runs, back to back, take about eleven minutes.
+  2760 / 2043 / 17 / 717, then 2760 / 2043 / 17 / 717 against a tree at
+  2769 / 2052 / 17 / 717, and now 2769 / 2052 / 17 / 717 against a tree at
+  2775 / 2058 / 17 / 717 — the twelfth round running in which the skipped figure
+  did NOT move with the others, because CCP-1148's six new tests
+  (`scripts/tests/test_check_all.py`'s ArtifactGateDenylistSummaryVisibilityTest
+  and ArtifactGateDenylistSummaryRedProofTest, plus
+  `scripts/tests/test_ci_workflow.py`'s DenylistEnvMutationTest) import cleanly
+  with or without the flag, so the addition lands on both sides of the
+  subtraction and cancels, same as every round since 05.09.2026. These runs,
+  back to back, take about eleven minutes.
 - The full run takes **a couple of minutes**. If you drive it from an agent whose
   tool calls time out, start it in the background and wait for it once rather than
   polling.

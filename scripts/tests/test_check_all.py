@@ -853,6 +853,136 @@ class ArtifactGateDenylistDetectionCrashTest(CheckAllTestBase):
 
 
 # ---------------------------------------------------------------------------
+# CCP-1148 / E4: a missing deny-list must be its own VISIBLE state in the
+# check RESULT, not a notice a reader can only find by reading every one of
+# nine per-check lines. Before this, all three GATE_DENY_STATE values
+# (configured / none / error) counted as plain "match" in the aggregate
+# Summary line -- "9 catalogued, 9 matched, 0 divergent, 0 could-not-run"
+# looks identical whether or not the deny-list ran at all, which is exactly
+# the "looks checked, is not checked" defect a fork PR without the Actions
+# secret reproduces on every single run. GATE_DENY_SUMMARY carries the SAME
+# per-check finding the RESULTS_TEXT note above it already states into the
+# terminal Summary line, so a reader who reads only that one line still
+# sees it.
+#
+# Deliberately NOT reusing the "could-not-run" bucket for the unconfigured
+# case (measured against scripts/artifact-gate.sh's own header, lines
+# 62-71, before choosing this shape): artifact-gate.sh's exit code stays
+# fully meaningful for its secrets/PII/network-literal checks whether or
+# not a deny-list is configured -- only the deny-list DIMENSION of the scan
+# is reduced, not the run's ability to compare against a baseline exit
+# code. Every other could-not-run trigger in this script (conformance-run,
+# memory-lint, shellcheck, install-verify) exists for checks whose exit
+# code tells you NOTHING about whether they ran; artifact-gate's does not
+# have that problem. Folding "deny-list not configured" into could-not-run
+# would have DISCARDED a genuine match/divergent verdict on every run
+# without a configured deny-list -- exactly the class of local machine and
+# fresh-checkout run scripts/artifact-gate.sh's own header protects as a
+# supported, non-failing configuration.
+# ---------------------------------------------------------------------------
+class ArtifactGateDenylistSummaryVisibilityTest(CheckAllTestBase):
+    def test_summary_names_deny_list_not_configured_by_default(self):
+        # No lib/discipline_gate.sh stub at all -- CheckAllTestBase's own
+        # default, and the shape a fork PR without the Actions secret has.
+        r = self.run_check_all()
+
+        self.assertIn(
+            summary_line(CATALOGUE_COUNT) + " — deny-list: NOT configured",
+            r.stdout, self.output(r),
+        )
+
+    def test_summary_names_the_actual_count_when_deny_list_is_configured(self):
+        self.write_fake_discipline_gate_lib(deny_source="config")
+        # Mirrors the exact wording artifact-gate.sh's own report line emits
+        # (scripts/artifact-gate.sh:561-562, 582) -- check-all.sh reads the
+        # count back OUT of this, it does not recompute it.
+        self.write_stub(
+            "artifact-gate.sh", 0,
+            stdout_text="artifact-gate: scanned 42 files, 0 findings in 0 files; deny-list: 7 name(s) checked",
+        )
+
+        r = self.run_check_all()
+
+        self.assertIn(
+            summary_line(CATALOGUE_COUNT) + " — deny-list: 7 name(s) checked",
+            r.stdout, self.output(r),
+        )
+
+    def test_summary_names_detection_failed_distinctly_from_not_configured(self):
+        self.write_crashing_discipline_gate_lib()
+
+        r = self.run_check_all()
+
+        self.assertIn(
+            summary_line(CATALOGUE_COUNT) + " — deny-list: detection FAILED",
+            r.stdout, self.output(r),
+        )
+        self.assertNotIn("— deny-list: NOT configured", r.stdout, self.output(r))
+
+
+# ---------------------------------------------------------------------------
+# RED proof (G-107/G-109): a TRANSPOSITION of the configured/not-configured
+# GATE_DENY_SUMMARY wording, not a deletion -- a deleted assignment would
+# leave GATE_DENY_SUMMARY at its could-not-run default and turn every test
+# above red for an unrelated reason. Swapping the two wordings instead shows
+# the Summary line actually DISCRIMINATES between the two states, not just
+# that some literal string is present somewhere in the script.
+# ---------------------------------------------------------------------------
+class ArtifactGateDenylistSummaryRedProofTest(CheckAllTestBase):
+    NEEDLE = (
+        '          GATE_DENY_SUMMARY="deny-list: ${_gate_deny_count} name(s) checked"\n'
+        "        else\n"
+        '          GATE_DENY_SUMMARY="deny-list: configured (count unavailable)"\n'
+    )
+
+    def setUp(self):
+        super().setUp()
+        self.scratch_dir = Path(tempfile.mkdtemp(prefix="ccpr-check-all-redproof-denysummary-"))
+        self.addCleanup(shutil.rmtree, self.scratch_dir, ignore_errors=True)
+
+    def test_transposed_wording_reports_configured_state_as_not_configured(self):
+        original = SCRIPT_PATH.read_text(encoding="utf-8")
+        self.assertEqual(
+            1, original.count(self.NEEDLE),
+            "check-all.sh's GATE_DENY_SUMMARY configured-branch wording changed -- "
+            "re-pin this mutation against its current shape",
+        )
+
+        def _mutate(text):
+            return text.replace(
+                self.NEEDLE,
+                '          GATE_DENY_SUMMARY="deny-list: NOT configured"\n'
+                "        else\n"
+                '          GATE_DENY_SUMMARY="deny-list: configured (count unavailable)"\n',
+            )
+
+        scratch = _write_mutated_script(self.scratch_dir, _mutate)
+        self.assertEqual(0, scratch.read_text(encoding="utf-8").count(self.NEEDLE))
+
+        self.write_fake_discipline_gate_lib(deny_source="config")
+        self.write_stub(
+            "artifact-gate.sh", 0,
+            stdout_text="artifact-gate: scanned 42 files, 0 findings in 0 files; deny-list: 7 name(s) checked",
+        )
+
+        r = self.run_check_all(script_path=scratch)
+
+        # The exact assertion from the positive test above now fails against
+        # the mutated copy -- the count is gone, replaced by the wording that
+        # belongs to the OTHER state.
+        self.assertNotIn(
+            summary_line(CATALOGUE_COUNT) + " — deny-list: 7 name(s) checked",
+            r.stdout, self.output(r),
+        )
+        self.assertIn(
+            summary_line(CATALOGUE_COUNT) + " — deny-list: NOT configured",
+            r.stdout, self.output(r),
+        )
+
+        self.assertEqual(original, SCRIPT_PATH.read_text(encoding="utf-8"), "shipped file content changed")
+
+
+# ---------------------------------------------------------------------------
 # Catalogue <-> baseline mismatch: both directions must be loud
 # ---------------------------------------------------------------------------
 class CatalogueBaselineMismatchTest(CheckAllTestBase):

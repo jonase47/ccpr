@@ -150,6 +150,30 @@ jobs:
           python-version: "3.11"
 
       - name: Run check-all.sh
+        env:
+          # CCP-1148 / F2: forwards the deny-list into CI via a GitHub
+          # Actions secret. scripts/artifact-gate.sh's own header (lines
+          # 13-15) documents CCPR_GATE_DENY_NAMES as the non-personal,
+          # non-distributed alternative to ~/.claude/memory-sync.json's
+          # gate.denyNames -- the shape gate_load_config already reads, and
+          # the only shape a CI runner (no personal config, no matching
+          # $HOME) can have. GitHub does not expose repository secrets to a
+          # pull_request run triggered from a fork: this resolves to an
+          # EMPTY string there, not an error -- scripts/lib/discipline_gate.
+          # sh's own `[ -n "${CCPR_GATE_DENY_NAMES:-}" ]` check already
+          # treats empty the same as unset, so that case falls through to
+          # the ordinary "not configured" state, which check-all.sh's
+          # GATE_DENY_SUMMARY (CCP-1148 / E4) now names visibly in the
+          # Summary line rather than passing silently. The secret's
+          # reference NAME is this key itself (a configuration identifier,
+          # not a tenant name -- GitHub Actions requires it literally, the
+          # same way any ${{ secrets.X }} usage does); its CONTENT does not
+          # exist yet and must be created once, by the repo owner, in this
+          # repository's Settings -> Secrets and variables -> Actions --
+          # see CCP-1148's own report for what it must contain. The actual
+          # tenant/project names never belong in this file, or anywhere
+          # else in this repository.
+          CCPR_GATE_DENY_NAMES: ${{ secrets.CCPR_GATE_DENY_NAMES }}
         run: |
           # Runs every catalogued check, INCLUDING the python suite
           # (see scripts/check-all.sh's own header) -- its exit code IS

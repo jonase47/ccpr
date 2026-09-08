@@ -365,6 +365,20 @@ if [ -r "$_gate_lib" ]; then
   fi
 fi
 
+# The Summary line at the very end of this report is the one line most
+# likely to be read alone -- a CI status check, a glance at the terminal
+# tail. "9 catalogued, 9 matched, 0 divergent, 0 could-not-run" reads as
+# "everything was checked" even when the deny-list DIMENSION of
+# artifact-gate was not -- a missing deny-list still exits 0 and still
+# counts as "match" (see GATE_DENY_STATE above; omitting --require-denylist
+# is deliberate, not a bug). GATE_DENY_SUMMARY (CCP-1148 / E4) carries that
+# one dimension into the Summary line itself, not only into the per-check
+# note further down in the report -- a reader who reads only the last line
+# still sees it. Default text covers artifact-gate itself could-not-run
+# (script missing): the per-check block below only overwrites this once
+# artifact-gate actually ran.
+GATE_DENY_SUMMARY="deny-list: check did not run"
+
 # --- run every catalogued check that has a baseline entry -------------------
 
 RESULTS_TEXT=""
@@ -658,19 +672,42 @@ while [ "$ci" -lt "$CHECK_COUNT" ]; do
   # up); "detection FAILED" is deliberately worded differently from both —
   # it is not the same finding as "NOT configured" and must not read like
   # it, even though the resulting invoke_args are identical (see above).
+  #
+  # GATE_DENY_SUMMARY (CCP-1148 / E4) carries the SAME finding into the
+  # Summary line at the end of this report. When configured, the actual
+  # name COUNT is read back out of artifact-gate.sh's OWN stdout (the
+  # "deny-list: N name(s) checked" line it already prints -- see its own
+  # header, lines 527-532: "Counted off the LOADED list ... that is the
+  # value every check in the loop above ran against") rather than
+  # re-derived here a second time, the same "single source of truth"
+  # reasoning GATE_DENY_STATE itself already applies to $GATE_DENY_SOURCE.
   if [ "$name" = "artifact-gate" ] && [ "$state" != "could-not-run" ]; then
     case "$GATE_DENY_STATE" in
       configured)
         RESULTS_TEXT="${RESULTS_TEXT}  artifact-gate: deny-list configured — --require-denylist enforced
 "
+        _gate_deny_count=""
+        case "$stdout_text" in
+          *"deny-list: "*" name(s) checked"*)
+            _gate_deny_rest="${stdout_text#*deny-list: }"
+            _gate_deny_count="${_gate_deny_rest%% *}"
+            ;;
+        esac
+        if [ -n "$_gate_deny_count" ]; then
+          GATE_DENY_SUMMARY="deny-list: ${_gate_deny_count} name(s) checked"
+        else
+          GATE_DENY_SUMMARY="deny-list: configured (count unavailable)"
+        fi
         ;;
       error)
         RESULTS_TEXT="${RESULTS_TEXT}  artifact-gate: deny-list detection FAILED (broken config, not merely absent — see lib/discipline_gate.sh's gate_load_config) — running WITHOUT --require-denylist
 "
+        GATE_DENY_SUMMARY="deny-list: detection FAILED"
         ;;
       *)
         RESULTS_TEXT="${RESULTS_TEXT}  artifact-gate: deny-list NOT configured — running WITHOUT --require-denylist
 "
+        GATE_DENY_SUMMARY="deny-list: NOT configured"
         ;;
     esac
   fi
@@ -731,7 +768,7 @@ if [ "$RAN_COUNT" -eq 0 ]; then
 fi
 
 FINDINGS=$((DIVERGENT_COUNT + MISMATCH_COUNT))
-echo "**Summary:** $CHECK_COUNT catalogued, $MATCHED_COUNT matched, $DIVERGENT_COUNT divergent, $COULD_NOT_RUN_COUNT could-not-run, $MISMATCH_COUNT mismatched"
+echo "**Summary:** $CHECK_COUNT catalogued, $MATCHED_COUNT matched, $DIVERGENT_COUNT divergent, $COULD_NOT_RUN_COUNT could-not-run, $MISMATCH_COUNT mismatched — $GATE_DENY_SUMMARY"
 
 if [ "$RAN_COUNT" -eq 0 ] || [ "$FINDINGS" -gt 0 ]; then
   echo "**Exit:** 1"
