@@ -1571,6 +1571,24 @@ All notable changes to this project are documented in this file. The format is b
   plain VERIFIED; a code review caught this collapsing into the wrong wording during this
   same round. `--help`'s `--verify` section now names all three origin states.
 
+- **`docs/adr/ADR-0015-bare-first-names-are-not-personal-data.md` (CCP-1157).** Settles a question
+  ADR-0014 raised and deliberately left open: does Constitution Inviolable #2's "no real user
+  names" cover a bare first name, given that every ADR in this repository's corpus names its
+  decision-maker(s) by role and, in several cases, first name? Repo-owner decision, 08.09.2026: a
+  bare first name used in an authorship/attribution role — the `Decision-makers` line chief among
+  them — is not a "real user name" under the Inviolable; the fourteen ADRs preceding this one are
+  not rewritten (ADRs are protocols, not living documents — the same line CCP-1152 already
+  settled for `CONSTITUTION.md`'s own changelog). `docs/CONSTITUTION.md` is bumped to v1.4 with a
+  `*Reference:*` pointer from Inviolable #2 to the new ADR; **the Inviolable's text does not
+  change** — a previously unspoken reading is written down, not a new rule. The item's second
+  finding — whether `scripts/artifact-gate.sh`'s deny-list can detect a first name at all — was
+  corrected before this ADR was written (an isolated `CCPR_GATE_DENY_NAMES` probe found 87
+  findings in 54 files for a name present in the tree against 0 for a control absent from it, both
+  over the same 353-file scope): the gate can match names, and `docs/adr/` reports zero findings
+  because a bare first name is not on the personal, non-distributed `gate.denyNames` list, not
+  because the mechanism is blind to the class. `scripts/artifact-gate.sh` gains a comment recording
+  that scope decision, with no change to its matching logic.
+
 ### Changed
 
 - **CCP-1151 stage 2: the three shared building blocks of the `skill` → `command` sweep are

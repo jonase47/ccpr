@@ -16,6 +16,20 @@
 # would put the names into the artifacts the Inviolable protects. When no list
 # is configured the run says so out loud instead of passing silently.
 #
+# A bare first name of a real person, used in an authorship/attribution role (the
+# `Decision-makers` line of an ADR under docs/adr/, chief among them), is
+# DELIBERATELY not a target of this deny-list check -- see
+# docs/adr/ADR-0015-bare-first-names-are-not-personal-data.md, the reading that
+# such a name is not a "real user name" under Inviolable #2. This is a scope
+# decision, not a limitation of the mechanism: gate.denyNames CAN match a bare
+# first name if one is configured into it (measured CCP-1157: an isolated
+# CCPR_GATE_DENY_NAMES probe found 87 findings across 54 files for a name
+# present in the tree, 0 for a control absent from it, both over the same
+# 353-file scope). docs/adr/ is fully in the scope of this gate -- it is a
+# docs-framework-allowlist.txt entry -- and reports zero findings today because
+# the configured deny-list does not carry a bare first name, not because
+# docs/adr/ is excluded from the sweep.
+#
 # Usage:
 #   artifact-gate.sh [--repo <dir>] [--require-denylist] [--logical-map <file>] [<file> ...]
 #

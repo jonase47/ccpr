@@ -25,7 +25,7 @@ with three sections that gates load as binding input:
 
 **Gate integration**: `gate-preflight.py` extracts the Inviolable section into `docs/.gate-preflight-pX.md`. All 8 gate commands (P0-P7) load it as mandatory pre-gate input. Inviolable violations are flagged as **"Inviolable breach"** = No-Go signal in the verdict.
 
-**CCPR itself** is bound by its own constitution at `docs/CONSTITUTION.md` (v1.3, 08.09.2026) — same discipline applied to the worker repo.
+**CCPR itself** is bound by its own constitution at `docs/CONSTITUTION.md` (v1.4, 08.09.2026) — same discipline applied to the worker repo.
 
 ## Cross-Check (`/cross-check`)
 
