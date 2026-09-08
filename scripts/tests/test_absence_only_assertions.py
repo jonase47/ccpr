@@ -891,7 +891,7 @@ class NoStaleKnownFindingsTest(unittest.TestCase):
 
 class ClassificationCountsTest(unittest.TestCase):
     def test_classification_counts(self):
-        """Regression pin on the measured baseline: 1361 `test_*` methods
+        """Regression pin on the measured baseline: 1365 `test_*` methods
         across the corpus call something shaped like a subprocess invocation
         and are therefore in scope for this check; 0 of those are currently
         absence-only-needs-exemption -- `KNOWN_FINDINGS` above is empty for
@@ -905,6 +905,37 @@ class ClassificationCountsTest(unittest.TestCase):
         growing paragraph:
 
           in-scope / flagged   when
+          1365 / 0             08.09.2026 (CCP-1148, artifact-gate deny-list
+                               summary visibility): +4, not +6 -- test_check_
+                               all.py gained 6 new test methods total
+                               (ArtifactGateDenylistSummaryVisibilityTest x3,
+                               ArtifactGateDenylistSummaryRedProofTest x1,
+                               DenylistEnvMutationTest's 2 siblings live in
+                               test_ci_workflow.py instead), and test_ci_
+                               workflow.py gained 2 more
+                               (DenylistEnvMutationTest). Only the 4 in
+                               test_check_all.py are in scope: each calls
+                               `self.run_check_all(...)`, matching
+                               RUN_HELPER_RE. The 2 in test_ci_workflow.py
+                               call `lint_ci_workflow(scratch)` -- a
+                               module-level `ast.Call(func=ast.Name)`, not
+                               `self.<name>(...)`, so `_calls_a_subprocess`
+                               (which only matches `ast.Call(func=
+                               ast.Attribute)`) never sees them -- the same
+                               documented blind spot this method's own
+                               docstring already names further down for
+                               `_run_main_against(files)`. Confirmed via
+                               scan_tree() directly, not from the delta's
+                               arithmetic (measured 1365, matching the +4).
+                               None of the 4 flagged: each asserts
+                               `self.assertIn`/`assertNotIn` against
+                               `r.stdout` directly, a recognised
+                               `_is_stdout_like` positive/negative pair --
+                               the RedProofTest method carries BOTH an
+                               assertIn (positive) and an assertNotIn on the
+                               same stdout, so it is `not-flagged` even
+                               though it also contains a negative-shaped
+                               assertion.
           1361 / 0             07.09.2026 (CCP-1163, second cut:
                                manual-lint.sh gains single-FILE root
                                support): +9, exactly the 9 new test methods
@@ -1801,7 +1832,7 @@ class ClassificationCountsTest(unittest.TestCase):
         count."""
         recs = scan_tree()
         flagged = [r for r in recs if r.disposition in NEEDS_EXEMPTION]
-        self.assertEqual(1361, len(recs))
+        self.assertEqual(1365, len(recs))
         self.assertEqual(0, len(flagged))
 
 
