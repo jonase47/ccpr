@@ -17,12 +17,12 @@ related:
 
 ## Context
 
-CCPR is the worker repository that ships skills, agents, scripts, templates, and docs to `~/.claude/`. It is published on GitHub (a fresh public baseline; earlier development lived in a private repository) and may reach a wider audience after v1.0.
+CCPR is the worker repository that ships commands, agents, scripts, templates, and docs to `~/.claude/`. It is published on GitHub (a fresh public baseline; earlier development lived in a private repository) and may reach a wider audience after v1.0.
 
 Today the repo has no version tags, no `CHANGELOG.md`, and no published update procedure. The install procedure documented in `README.md` is `cp -r ccpr/* ~/.claude/`, which silently overwrites local customisations. The Constitution (v1.0, 15.05.2026) lists three Aspirational goals that depend on a proper versioning model:
 
 - *Multi-tenant readiness* — users on different machines must know which CCPR state they run.
-- *Command-footprint consolidation* — removing skills is a breaking change that needs a migration path.
+- *Command-footprint consolidation* — removing commands is a breaking change that needs a migration path.
 - *v1.0 release with versioning + CHANGELOG.md in repo root, defined update procedure.*
 
 Also relevant: **Inviolable #5** of the Constitution requires an ADR + migration path for every breaking command-interface change. That rule is unworkable without a versioning scheme and changelog to attach migrations to.
@@ -40,8 +40,8 @@ Tags follow the format `vMAJOR.MINOR.PATCH` (e.g. `v0.1.0`, `v1.0.0`).
 | Bump | Triggered by | Examples |
 |---|---|---|
 | **MAJOR** | Constitution Inviolable change; breaking command-interface change; schema-breaking change in memory or phase-docs; agent removal | Removing `researcher` agent (would be MAJOR if we were post-1.0); changing `memory-lint.sh` to reject previously-valid frontmatter; renaming a slash command users depend on |
-| **MINOR** | New skill, new agent, new script, new template, new convention that is backwards-compatible | Adding global Tier-2 memory slot; adding `local-llm/` stub wrappers; adding new gate sub-skill |
-| **PATCH** | Typo, clarification, bug fix in scripts, doc-only correction that does not change any rule | Fixing a wrong count in README; correcting a typo in a skill prompt; bug fix in `memory-lint.sh` that does not change validation rules |
+| **MINOR** | New command, new agent, new script, new template, new convention that is backwards-compatible | Adding global Tier-2 memory slot; adding `local-llm/` stub wrappers; adding new gate sub-command |
+| **PATCH** | Typo, clarification, bug fix in scripts, doc-only correction that does not change any rule | Fixing a wrong count in README; correcting a typo in a command prompt; bug fix in `memory-lint.sh` that does not change validation rules |
 
 **Pre-1.0 caveat (semver §4):** while CCPR is below v1.0, MAJOR-bumps may occur on MINOR (`0.x.0`) to signal a meaningful surface change without committing to long-term API stability. Users are expected to read the changelog before upgrading.
 
@@ -52,7 +52,7 @@ Tags follow the format `vMAJOR.MINOR.PATCH` (e.g. `v0.1.0`, `v1.0.0`).
 - `## [Unreleased]` section at the top, grouped by `Added` / `Changed` / `Deprecated` / `Removed` / `Fixed` / `Security`.
 - Each released version gets its own `## [vX.Y.Z] – DD.MM.YYYY` heading and groups the same way.
 - Constitution changes call out the Inviolable involved.
-- Skill removals link to their final commit SHA so removed code remains reachable.
+- Command removals link to their final commit SHA so removed code remains reachable.
 - The bottom of the file holds a `[unreleased]: ...` link reference block to GitHub compare URLs once meaningful.
 
 ### Tag procedure
