@@ -79,7 +79,30 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 INSTALL = REPO_ROOT / "install.sh"
 
+# The four directories the FIXTURES below actually build. Deliberately NOT
+# the same thing as install.sh's own VERIFY_SCOPE (read from the shipped
+# source by shipped_array() instead of retyped): the base fixture ships
+# these four, and EmptyScopeIsNotAPassTest drives `git rm --cached` over
+# exactly them, which would fail on a pathspec the fixture never created.
 SCOPE_DIRS = ("agents", "commands", "hooks", "templates")
+
+# The single source of truth for the docs/ framework boundary -- the SAME
+# file install.sh's install_docs() and scripts/artifact-gate.sh read. Copied
+# into the fixtures rather than retyped, exactly as test_install_docs_
+# boundary.py and test_artifact_gate.py already do.
+ALLOWLIST_FILE = REPO_ROOT / "scripts" / "lib" / "docs-framework-allowlist.txt"
+
+
+def shipped_array(name):
+    """The literal words of a top-level bash array assignment in install.sh
+    (`NAME=( a b c )`), read out of the shipped source rather than kept as a
+    second copy here -- the same discipline shipped_marker_name() applies to
+    PROVENANCE_FILE. Returns None when the array is not declared, so a test
+    can say "install.sh no longer declares this" instead of failing on an
+    empty list that looks like a legitimate value."""
+    text = INSTALL.read_text(encoding="utf-8")
+    m = re.search(r"^%s=\(([^)]*)\)" % re.escape(name), text, re.MULTILINE)
+    return m.group(1).split() if m else None
 
 
 def shipped_marker_name():
@@ -901,7 +924,17 @@ class VerifyReadsTheMarkerNotOnlyItsPresenceTest(VerifyBase):
         HEAD) finds no file-level divergence, exit 0, no DIVERGENT verdict.
         A HEAD-based implementation would compute the identical expected
         tree here too and also pass -- that half of the mutation is caught
-        by the FIRST test in this class, not this one."""
+        by the FIRST test in this class, not this one.
+
+        The three finding classes are asserted through report_block(), not
+        as bare substrings of the whole report. Same correction the
+        assertCouldNotRun() helper above already carries and for the same
+        reason: these words are the report's own vocabulary, so it uses
+        them to EXPLAIN itself as well as to head a findings block. The
+        substring form went red on CCP-1166 against a report that had no
+        findings at all -- the USER-OWNED paragraph says a MISSING there
+        would be a false alarm -- i.e. it rejected correct output for
+        containing the word it was watching for."""
         self.assertEqual(0, self.run_install("--yes").returncode)
         (self.src / "commands" / "guide.md").write_text("# guide v2\n", encoding="utf-8")
         self.git("add", "-A")
@@ -911,9 +944,9 @@ class VerifyReadsTheMarkerNotOnlyItsPresenceTest(VerifyBase):
         r = self.verify()
         self.assertEqual(0, r.returncode, r.stdout + r.stderr)
         self.assertNotIn("Result: DIVERGENT", r.stdout)
-        self.assertNotIn("MISSING", r.stdout)
-        self.assertNotIn("CHANGED", r.stdout)
-        self.assertNotIn("UNEXPECTED", r.stdout)
+        self.assertEqual([], report_block(r.stdout, "MISSING"))
+        self.assertEqual([], report_block(r.stdout, "CHANGED"))
+        self.assertEqual([], report_block(r.stdout, "UNEXPECTED"))
 
 
 # ---------------------------------------------------------------------------
@@ -1258,6 +1291,468 @@ class VerifyIsAReadOnlyModeTest(InstallProvenanceBase):
         r = self.run_install("--help")
         self.assertEqual(0, r.returncode, r.stdout + r.stderr)
         self.assertIn("--verify", r.stdout)
+
+
+# ---------------------------------------------------------------------------
+# The widened scope -- scripts/ and docs/, the two framework directories the
+# comparison did not reach (CCP-1166)
+# ---------------------------------------------------------------------------
+
+
+class WidenedScopeBase(VerifyBase):
+    """A fixture carrying the two FRAMEWORK directories the original
+    four-way scope never compared, each with the property that kept it out.
+
+    Measured on 09.09.2026 against a fresh install off 8bdb1d7: the scope
+    covered 162 of 409 installed files. `scripts/` (222) and `docs/` (23)
+    were excluded wholesale, so a tampered `artifact-gate.sh`,
+    `check-all.sh`, `manual-lint.sh` or `CONSTITUTION.md` reported VERIFIED
+    -- probed by appending one line to each in a throwaway target: exit 0
+    both times, against exit 1 for the same edit under `agents/`.
+
+    Neither directory is copied verbatim, which is why excluding them was
+    the cheap answer in the first place:
+
+      * `scripts/` carries user-owned PROTECTED sub-paths (install.sh:54).
+        The fixture ships one tracked file inside `scripts/local-llm` --
+        the shipped starter, which a fresh install DOES place -- so the
+        carve-out has to work on a path that is in the commit AND in the
+        installation, not merely on a path nobody ships.
+      * `docs/` is filtered through the allowlist, so the commit carries
+        paths install.sh deliberately never installs. `docs/HANDOVER.md` is
+        force-added here for exactly that: the shipped .gitignore keeps it
+        untracked in THIS repository today, but `git log --all --name-only
+        -- docs` shows `docs/memory` and `docs/workitems` were tracked in
+        this history, and a marker can point at one of those commits.
+
+    The shipped .gitignore comes along too, so the locally-generated
+    exemption is live in the widened directories the same way
+    LocallyGeneratedArtefactsAreNotDivergenceTest holds it in the original
+    four."""
+
+    #: What the fixture's commit carries under the six framework dirs.
+    #: 11 blobs, of which 2 are carve-outs, so 9 are installable. Spelled
+    #: out because the difference between these two numbers IS the subject:
+    #: a comparison that dropped either carve-out would report 10 or 11.
+    FIXTURE_BLOBS = 11
+    FIXTURE_INSTALLABLE = 9
+
+    def setUp(self):
+        super().setUp()
+        lib = self.src / "scripts" / "lib"
+        lib.mkdir(parents=True)
+        shutil.copy(ALLOWLIST_FILE, lib / "docs-framework-allowlist.txt")
+        (self.src / "scripts" / "check-all.sh").write_text(
+            "#!/bin/sh\necho check-all\n", encoding="utf-8")
+        (lib / "helper.sh").write_text("#!/bin/sh\n: helper\n", encoding="utf-8")
+
+        # PROTECTED (install.sh:54): shipped on a fresh install, yours from
+        # then on. Tracked, so it is in the commit as well as in the target.
+        (self.src / "scripts" / "local-llm").mkdir()
+        (self.src / "scripts" / "local-llm" / "summarize.sh").write_text(
+            "#!/bin/sh\n# shipped starter\n", encoding="utf-8")
+
+        docs = self.src / "docs"
+        (docs / "adr").mkdir(parents=True)
+        (docs / "adr" / "ADR-0001-fixture.md").write_text("# adr\n", encoding="utf-8")
+        (docs / "CONSTITUTION.md").write_text("# constitution\n", encoding="utf-8")
+        (docs / "HANDOVER.md").write_text("# working state\n", encoding="utf-8")
+
+        shutil.copy(REPO_ROOT / ".gitignore", self.src / ".gitignore")
+        self.git("add", "-A")
+        # -f: the shipped .gitignore names docs/HANDOVER.md, and this
+        # fixture needs it IN the commit and OUT of the installation --
+        # which is the whole shape acceptance point 5 is about.
+        self.git("add", "-f", "docs/HANDOVER.md")
+        self.commit("scripts/ and docs/, with both carve-outs represented")
+        self.assertEqual(0, self.run_install("--yes").returncode)
+
+    def plant(self, rel, body="x\n"):
+        p = self.dest / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(body, encoding="utf-8")
+        return p
+
+    def commit_blobs(self):
+        """The fixture commit's own blob list under install.sh's declared
+        scope, read from git rather than typed -- so FIXTURE_BLOBS is
+        checkable against the tree it claims to describe."""
+        scope = shipped_array("VERIFY_SCOPE")
+        self.assertIsNotNone(scope, "install.sh no longer declares VERIFY_SCOPE")
+        out = self.git("ls-tree", "-r", "--name-only", "HEAD", "--", *scope).stdout
+        return sorted(p for p in out.splitlines() if p)
+
+
+class VerifyReachesTheScriptsAndDocsItInstallsTest(WidenedScopeBase):
+    """Acceptance 1 and 3: the mutation probe that reported VERIFIED must
+    invert, and the run must keep saying how much it looked at."""
+
+    def test_a_tampered_shipped_script_is_reported_as_changed(self):
+        self.plant("scripts/check-all.sh", "#!/bin/sh\necho tampered\n")
+        r = self.verify()
+        self.assertEqual(1, r.returncode, r.stdout + r.stderr)
+        self.assertEqual(["scripts/check-all.sh"], report_block(r.stdout, "CHANGED"))
+
+    def test_a_tampered_shipped_doc_is_reported_as_changed(self):
+        self.plant("docs/CONSTITUTION.md", "# tampered\n")
+        r = self.verify()
+        self.assertEqual(1, r.returncode, r.stdout + r.stderr)
+        self.assertEqual(["docs/CONSTITUTION.md"], report_block(r.stdout, "CHANGED"))
+
+    def test_a_deleted_shipped_script_is_reported_as_missing(self):
+        (self.dest / "scripts" / "lib" / "helper.sh").unlink()
+        r = self.verify()
+        self.assertEqual(1, r.returncode, r.stdout + r.stderr)
+        self.assertEqual(["scripts/lib/helper.sh"], report_block(r.stdout, "MISSING"))
+
+    def test_a_foreign_file_under_scripts_is_reported_as_unexpected(self):
+        self.plant("scripts/rogue.sh", "#!/bin/sh\n# not from any commit\n")
+        r = self.verify()
+        self.assertEqual(1, r.returncode, r.stdout + r.stderr)
+        self.assertEqual(["scripts/rogue.sh"], report_block(r.stdout, "UNEXPECTED"))
+
+    def test_a_foreign_file_under_a_framework_docs_directory_is_unexpected(self):
+        self.plant("docs/adr/ADR-9999-mine.md", "# mine\n")
+        r = self.verify()
+        self.assertEqual(1, r.returncode, r.stdout + r.stderr)
+        self.assertEqual(["docs/adr/ADR-9999-mine.md"],
+                         report_block(r.stdout, "UNEXPECTED"))
+
+    def test_the_scope_line_names_every_framework_directory_install_sh_copies(self):
+        """Acceptance 3, first half. The report's declared scope is read
+        back against install.sh's OWN two arrays -- FRAMEWORK (what the
+        installer copies) and VERIFY_SCOPE (what the comparison covers).
+        Excluding a directory the installer ships is the defect this item
+        closes, so the two lists have to agree, and neither is retyped
+        here."""
+        framework = shipped_array("FRAMEWORK")
+        scope = shipped_array("VERIFY_SCOPE")
+        self.assertIsNotNone(framework, "install.sh no longer declares FRAMEWORK")
+        self.assertEqual(
+            sorted(framework), sorted(scope or []),
+            "--verify's scope no longer covers every directory install.sh "
+            "installs -- a directory the installer writes and the check "
+            "never reads is exactly the gap CCP-1166 closed",
+        )
+        r = self.verify()
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        scope_line = [ln for ln in r.stdout.splitlines() if ln.startswith("  scope:")]
+        self.assertEqual(1, len(scope_line), r.stdout)
+        for name in scope:
+            self.assertIn(name, scope_line[0])
+
+    def test_the_compared_count_is_the_installable_set_not_the_whole_commit(self):
+        """Acceptance 3, second half, and the discriminator for both
+        carve-outs at once. The fixture's commit carries 11 blobs under the
+        declared scope; 2 of them are paths install.sh never installs into a
+        comparable state (one user-owned, one not framework docs), so 9 is
+        the number a correct run compares. A comparison that dropped either
+        carve-out would report 10 or 11 here, and one that widened a
+        carve-out would report fewer."""
+        blobs = self.commit_blobs()
+        self.assertEqual(self.FIXTURE_BLOBS, len(blobs), blobs)
+        self.assertIn("scripts/local-llm/summarize.sh", blobs)
+        self.assertIn("docs/HANDOVER.md", blobs)
+        r = self.verify()
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertRegex(
+            r.stdout,
+            r"compared\s+%d\s+file\(s\), of %d in scope"
+            % (self.FIXTURE_INSTALLABLE, self.FIXTURE_INSTALLABLE),
+        )
+
+    def test_an_untouched_widened_installation_verifies_clean(self):
+        """The silent counter-proof for this class: every assertion above
+        is worthless if the widened scope reports something on a correct
+        installation."""
+        r = self.verify()
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertIn("Result: VERIFIED", r.stdout)
+        self.assertEqual([], report_block(r.stdout, "MISSING"))
+        self.assertEqual([], report_block(r.stdout, "CHANGED"))
+        self.assertEqual([], report_block(r.stdout, "UNEXPECTED"))
+
+
+class AWidenedScopeStillVerifiesACorrectInstallationTest(WidenedScopeBase):
+    """Acceptance 2. The widened directories are where locally generated
+    files actually accumulate -- 97 of the 98 extras a fresh install grows
+    under `scripts/` on this machine are `__pycache__` entries, measured
+    09.09.2026 -- so the exemption that made the original four usable has
+    to hold across the new two as well, or the check is red on every
+    correct installation from the first run."""
+
+    def test_a_bytecode_cache_under_scripts_is_not_a_divergence(self):
+        self.plant("scripts/__pycache__/check_all.cpython-314.pyc")
+        self.plant("scripts/lib/__pycache__/helper.cpython-314.pyc")
+        r = self.verify()
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertIn("Result: VERIFIED", r.stdout)
+        self.assertEqual([], report_block(r.stdout, "UNEXPECTED"))
+
+    def test_a_finder_metadata_file_under_docs_is_not_a_divergence(self):
+        self.plant("docs/.DS_Store")
+        self.plant("docs/adr/.DS_Store")
+        r = self.verify()
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertIn("Result: VERIFIED", r.stdout)
+        self.assertEqual([], report_block(r.stdout, "UNEXPECTED"))
+
+    def test_the_macos_shape_a_real_installation_grows_verifies_clean(self):
+        """The measured combination, not an invented one: a fresh install
+        on this machine carries `__pycache__` under scripts/ and hooks/ and
+        a `.DS_Store` under docs/logo/ and templates/."""
+        for rel in ("scripts/__pycache__/check_all.cpython-314.pyc",
+                    "hooks/__pycache__/agent-monitor.cpython-314.pyc",
+                    "docs/.DS_Store",
+                    "templates/.DS_Store"):
+            self.plant(rel)
+        r = self.verify()
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertIn("Result: VERIFIED", r.stdout)
+        self.assertRegex(
+            r.stdout,
+            r"compared\s+%d\s+file\(s\)" % self.FIXTURE_INSTALLABLE,
+            "the exempted files must not be counted into the compared scope",
+        )
+
+    def test_a_foreign_script_beside_an_exempted_one_is_still_reported(self):
+        """The pattern, not the directory: an exclusion widened to "scripts/
+        produced an excused file, excuse the rest" walks somebody's own
+        script straight through."""
+        self.plant("scripts/__pycache__/check_all.cpython-314.pyc")
+        self.plant("scripts/mine.sh", "#!/bin/sh\n# mine\n")
+        r = self.verify()
+        self.assertEqual(1, r.returncode, r.stdout + r.stderr)
+        self.assertEqual(["scripts/mine.sh"], report_block(r.stdout, "UNEXPECTED"))
+
+
+class UserOwnedSubPathsAreComparedInNeitherDirectionTest(WidenedScopeBase):
+    """Acceptance 4. `scripts/local-llm` and the two harness-managed data
+    directories are PROTECTED: install.sh stashes and restores them across
+    a wholesale replace precisely so YOUR copy wins over anything shipped
+    (install.sh:49-54). A comparison that subtracted them from the expected
+    set only -- and not from the walk of the installation -- would report
+    every one of them as UNEXPECTED, and a comparison that subtracted
+    neither would report an edited one as CHANGED. Both directions are
+    asserted here, because the shipped starter file is in the commit AND in
+    the installation."""
+
+    def test_an_edited_user_owned_script_is_not_a_divergence(self):
+        self.plant("scripts/local-llm/summarize.sh",
+                   "#!/bin/sh\n# my own model choice\n")
+        r = self.verify()
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertIn("Result: VERIFIED", r.stdout)
+        self.assertEqual([], report_block(r.stdout, "CHANGED"))
+        self.assertEqual([], report_block(r.stdout, "UNEXPECTED"))
+
+    def test_a_user_file_that_was_never_shipped_is_not_unexpected(self):
+        self.plant("scripts/local-llm/my-own-wrapper.sh", "#!/bin/sh\n# mine\n")
+        r = self.verify()
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertIn("Result: VERIFIED", r.stdout)
+        self.assertEqual([], report_block(r.stdout, "UNEXPECTED"))
+
+    def test_a_deleted_user_owned_script_is_not_missing(self):
+        (self.dest / "scripts" / "local-llm" / "summarize.sh").unlink()
+        r = self.verify()
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertEqual([], report_block(r.stdout, "MISSING"))
+
+    def test_the_carve_out_is_the_prefix_not_the_directory_above_it(self):
+        """The discriminator against the cheap fix. An exclusion widened to
+        `scripts/` excuses the tampered check-all.sh too; this run carries
+        both edits and must report exactly one of them."""
+        self.plant("scripts/local-llm/summarize.sh", "#!/bin/sh\n# mine\n")
+        self.plant("scripts/check-all.sh", "#!/bin/sh\necho tampered\n")
+        r = self.verify()
+        self.assertEqual(1, r.returncode, r.stdout + r.stderr)
+        self.assertEqual(["scripts/check-all.sh"], report_block(r.stdout, "CHANGED"))
+
+    def test_the_report_names_every_protected_prefix_install_sh_declares(self):
+        """An exemption nobody can see is the next drifting skip list --
+        the same carve-out the IGNORED block already makes. Read back
+        against install.sh's own PROTECTED array, so a prefix added there
+        and forgotten here goes red."""
+        protected = shipped_array("PROTECTED")
+        self.assertIsNotNone(protected, "install.sh no longer declares PROTECTED")
+        r = self.verify()
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertEqual(sorted(protected),
+                         sorted(report_block(r.stdout, "USER-OWNED")))
+
+
+class NonFrameworkDocsAreNotExpectedInTheInstallationTest(WidenedScopeBase):
+    """Acceptance 5. `install_docs()` copies only the top-level docs/
+    entries listed in scripts/lib/docs-framework-allowlist.txt. A
+    comparison that expected the commit's WHOLE docs/ tree in the target
+    would report every working-state path as MISSING -- on this repository's
+    history, `docs/workitems/` alone was 89 files.
+
+    The filter belongs on the EXPECTED side only. A path install.sh never
+    ships that is sitting in the installation anyway is still drift, and
+    still has to be named."""
+
+    def test_a_docs_path_the_installer_never_ships_is_not_missing(self):
+        r = self.verify()
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertIn("docs/HANDOVER.md", self.commit_blobs())
+        self.assertFalse((self.dest / "docs" / "HANDOVER.md").exists())
+        self.assertEqual([], report_block(r.stdout, "MISSING"))
+
+    def test_a_framework_docs_path_that_is_absent_is_still_missing(self):
+        """The counter-proof for a filter widened to "skip docs/". The
+        allowlisted entries are shipped, so their absence is drift."""
+        (self.dest / "docs" / "CONSTITUTION.md").unlink()
+        (self.dest / "docs" / "adr" / "ADR-0001-fixture.md").unlink()
+        r = self.verify()
+        self.assertEqual(1, r.returncode, r.stdout + r.stderr)
+        self.assertEqual(["docs/CONSTITUTION.md", "docs/adr/ADR-0001-fixture.md"],
+                         sorted(report_block(r.stdout, "MISSING")))
+
+    def test_such_a_path_present_in_the_installation_anyway_is_still_unexpected(self):
+        """Subtracted from the expected set, NOT from the walk: a file that
+        should not be installed and is there regardless stays reportable.
+
+        This is the TRACKED branch. The fixture force-adds docs/HANDOVER.md
+        (see WidenedScopeBase.setUp), so `git check-ignore` -- which is
+        index-aware -- reports it as NOT ignored and the walk calls it a
+        finding. Its untracked twin below is the branch that actually
+        matches this repository today, and it lands elsewhere; the two
+        together are what the install.sh comment describes."""
+        self.plant("docs/HANDOVER.md", "# should not be here\n")
+        r = self.verify()
+        self.assertEqual(1, r.returncode, r.stdout + r.stderr)
+        self.assertEqual(["docs/HANDOVER.md"], report_block(r.stdout, "UNEXPECTED"))
+
+    def test_the_untracked_twin_is_excused_by_the_ignore_rule_not_dropped(self):
+        """The production shape, and the branch a code review caught this
+        module asserting only in prose (CCP-1166).
+
+        In THIS repository docs/HANDOVER.md is untracked and named by the
+        shipped .gitignore. So the two rules overlap: the allowlist keeps it
+        out of the expected set, and then path_is_source_ignored() excuses
+        it on the walk -- IGNORED, exit 0, not UNEXPECTED. Measured against
+        the real tree before this test was written; the fixture reaches the
+        same state by dropping the path from the INDEX only, leaving the
+        recorded commit (which still carries it) untouched, because the
+        index is exactly what decides between the two branches.
+
+        What is pinned here is not which block wins -- that is a policy
+        question install.sh's comment leaves open -- but the invariant that
+        holds across both: the path is NAMED, and it is never MISSING."""
+        self.assertIn("docs/HANDOVER.md", self.commit_blobs(),
+                      "the recorded commit must still carry it, or this "
+                      "tests a different scenario than it claims")
+        self.git("rm", "--cached", "-q", "docs/HANDOVER.md")
+        self.assertEqual(
+            "", self.git("ls-files", "--", "docs/HANDOVER.md").stdout.strip(),
+            "the path must be out of the INDEX for this test to say anything",
+        )
+        self.plant("docs/HANDOVER.md", "# should not be here\n")
+        r = self.verify()
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertEqual(["docs/HANDOVER.md"], report_block(r.stdout, "IGNORED"))
+        self.assertEqual([], report_block(r.stdout, "UNEXPECTED"))
+        self.assertEqual([], report_block(r.stdout, "MISSING"))
+        self.assertEqual(["docs/HANDOVER.md"],
+                         report_block(r.stdout, "NOT FRAMEWORK"))
+
+    def test_the_split_follows_the_allowlist_file_and_not_a_list_in_install_sh(self):
+        """The derivation, held to its source from both sides in one run --
+        the same shape TheExemptionIsDerivedFromTheSourceCheckoutTest uses
+        for `git check-ignore`. Adding HANDOVER.md to the allowlist makes
+        the very same installed tree report it MISSING; removing
+        CONSTITUTION.md makes the very same file report UNEXPECTED. A
+        hardcoded list inside install.sh survives both edits unchanged.
+
+        Note which register is read: the allowlist in $SRC AS IT STANDS,
+        not the copy inside the recorded commit -- the same working-tree
+        door path_is_source_ignored() already declares, for the same
+        reason (the rule is a property of the tooling, not of the commit).
+        The edit here is deliberately left uncommitted to say so."""
+        allowlist = self.src / "scripts" / "lib" / "docs-framework-allowlist.txt"
+        before = allowlist.read_text(encoding="utf-8")
+        self.assertIn("CONSTITUTION.md", before)
+        self.assertNotIn("HANDOVER.md", before)
+
+        allowlist.write_text(
+            before.replace("CONSTITUTION.md\n", "HANDOVER.md\n"), encoding="utf-8")
+        after = allowlist.read_text(encoding="utf-8")
+        self.assertIn("HANDOVER.md", after)
+        self.assertNotIn("CONSTITUTION.md", after)
+        self.assertIn(" M scripts/lib/docs-framework-allowlist.txt",
+                      self.git("status", "--porcelain").stdout,
+                      "the edit must be UNCOMMITTED for this test to say "
+                      "which register --verify actually reads")
+
+        r = self.verify()
+        self.assertEqual(1, r.returncode, r.stdout + r.stderr)
+        self.assertEqual(["docs/HANDOVER.md"], report_block(r.stdout, "MISSING"))
+        self.assertEqual(["docs/CONSTITUTION.md"], report_block(r.stdout, "UNEXPECTED"))
+
+    def test_the_skipped_docs_entries_are_reported_rather_than_dropped(self):
+        r = self.verify()
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertEqual(["docs/HANDOVER.md"],
+                         report_block(r.stdout, "NOT FRAMEWORK"))
+        self.assertIn("docs-framework-allowlist.txt", r.stdout)
+        # The COUNT in the prose, not only the list of top-level names: the
+        # block aggregates per entry, so a directory holding 89 files shows
+        # as one line and the count is the only thing that says how much was
+        # set aside. One file here, and the number has to come from the
+        # commit rather than from the entry list.
+        self.assertRegex(
+            r.stdout, r"\(1 file\(s\) in the recorded commit sit under those")
+
+    def test_docs_in_the_commit_without_a_readable_allowlist_is_could_not_run(self):
+        """The allowlist is the only thing that can classify a docs/ path.
+        Without it the comparison cannot state its own scope, and "0 docs
+        findings" would mean "docs was silently dropped" -- KA-G-017, the
+        shape this whole check exists against. Refusing is the only honest
+        answer, and it must not be reachable by simply treating every docs/
+        entry as working state."""
+        (self.src / "scripts" / "lib" / "docs-framework-allowlist.txt").unlink()
+        r = self.verify()
+        self.assertCouldNotRun(r)
+        self.assertIn("docs-framework-allowlist.txt", r.stdout)
+
+
+class TheWidenedScopeIsNotWiderThanTheInstallerTest(WidenedScopeBase):
+    """The other direction of acceptance 3: the report must say what is
+    still OUT, and the artifacts that are supposed to mature on your
+    machine must stay out. `instincts*`, `CLAUDE.md` and `settings.json`
+    are installed once and then edited by you and by /postmortem -- pulling
+    them into the comparison would make DIVERGENT the normal state."""
+
+    def test_the_maturing_artifacts_are_still_excluded(self):
+        instincts = shipped_array("INSTINCTS")
+        personal = shipped_array("PERSONAL")
+        self.assertIsNotNone(instincts)
+        self.assertIsNotNone(personal)
+        scope = shipped_array("VERIFY_SCOPE")
+        for name in list(instincts) + list(personal):
+            self.assertNotIn(
+                name, scope,
+                f"{name} matures on the adopter's machine -- comparing it "
+                "would report DIVERGENT on every correct installation",
+            )
+
+    def test_an_edited_claude_md_is_not_a_divergence(self):
+        (self.dest / "CLAUDE.md").write_text("# personalised\n", encoding="utf-8")
+        r = self.verify()
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertIn("Result: VERIFIED", r.stdout)
+
+    def test_the_report_says_what_it_still_does_not_cover(self):
+        r = self.verify()
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        head = r.stdout.split("Origin (recorded")[0]
+        for token in ("instincts", "CLAUDE.md", "settings.json"):
+            self.assertIn(token, head,
+                          "the scope paragraph must name what stays out, or "
+                          "the exclusion is invisible to whoever reads the run")
+
 
 
 if __name__ == "__main__":

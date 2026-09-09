@@ -192,15 +192,138 @@ install_docs() {
 #     always describes the current state and never accumulates history.
 PROVENANCE_FILE=".ccpr-install-provenance"
 
-# VERIFY_SCOPE -- which artifacts --verify compares. The four FRAMEWORK
-# directories that are copied VERBATIM: no allowlist filter (docs), no
-# user-owned PROTECTED sub-paths and no generated files (scripts carries
-# local-llm/, lib/scan_rules/, lib/test_parsers/ and __pycache__), and not
-# the artifacts that are SUPPOSED to diverge because they mature on your
+# VERIFY_SCOPE -- which artifacts --verify compares. EVERY FRAMEWORK
+# directory, i.e. everything install.sh writes into $DEST except the
+# artifacts that are SUPPOSED to diverge because they mature on your
 # machine (instincts*, CLAUDE.md, settings.json). --verify reports this
 # scope in its own output: a comparison whose extent is not stated is not a
 # result.
-VERIFY_SCOPE=( agents commands hooks templates )
+#
+# It used to be the four directories copied VERBATIM -- agents, commands,
+# hooks, templates -- with docs/ and scripts/ excluded wholesale because
+# neither is copied verbatim. Measured 09.09.2026 against a fresh install:
+# that scope reached 162 of 409 installed files, and the 247 it did not
+# reach were the shipped SCRIPTS (222) and DOCS (23). A tampered
+# artifact-gate.sh, check-all.sh, manual-lint.sh, memory-sync.sh or
+# CONSTITUTION.md reported VERIFIED. Probed rather than reasoned: one
+# appended line in scripts/artifact-gate.sh and one in docs/CONSTITUTION.md
+# each exited 0/VERIFIED, against exit 1/DIVERGENT for the same edit under
+# agents/. A check whose reach stops short of its subject's reach is not a
+# check of that subject (CCP-1166).
+#
+# The two reasons for the old exclusion are real and did not go away, so
+# each became a NAMED carve-out INSIDE the scope rather than a directory
+# left outside it. Both are derived from the register install.sh already
+# uses on the copy side, never a second list typed in here:
+#   * PROTECTED sub-paths     -> path_is_user_owned()        (BOTH sides)
+#   * docs/ allowlist filter  -> path_is_docs_working_state() (EXPECTED only)
+# Locally generated files (__pycache__, .DS_Store) already had their answer
+# in path_is_source_ignored() and needed no change; measured, they are 97
+# of the 98 extras a fresh install grows under scripts/ on macOS.
+#
+# Both carve-outs are printed in their own report block. An exclusion
+# nobody can see is the next drifting skip list -- the same argument the
+# IGNORED block and install_docs()'s skip paragraph already make.
+VERIFY_SCOPE=( agents commands docs hooks scripts templates )
+
+# path_is_user_owned <relpath> -- does this path lie inside a PROTECTED
+# sub-path, i.e. one install.sh declares yours rather than the framework's?
+#
+# The one carve-out applied in BOTH directions, and the reason is ownership
+# rather than noise. A wholesale directory replace stashes these sub-paths
+# and restores them afterwards, YOUR copy winning over anything shipped
+# (see PROTECTED above). Three consequences, each of which is a false
+# finding if this predicate is applied to only one side:
+#   * scripts/local-llm ships five starter wrappers, so the paths ARE in
+#     the commit and ARE in the installation. Subtracting them from the
+#     EXPECTED set alone would move every one of them into UNEXPECTED;
+#     subtracting neither would report your own model choice as CHANGED.
+#   * a wrapper you added there was in no commit and never will be.
+#   * scripts/lib/scan_rules and scripts/lib/test_parsers are tracked by
+#     nothing in this checkout at all -- on a machine where the harness has
+#     written them, every file under them is UNEXPECTED by construction.
+#
+# This is exactly where the rule parts company with path_is_source_ignored(),
+# which is one-directional on purpose: an ignored path is excused only for
+# paths the commit does not carry, so MISSING and CHANGED are out of its
+# reach. Here the commit CAN carry the path and the carve-out still holds,
+# because the installer's own contract says the user's copy is the correct
+# content. That is a stronger exemption and it is why it is spelled out in
+# the report by prefix rather than merely counted.
+path_is_user_owned() {
+  local rel="$1" prefix
+  for prefix in "${PROTECTED[@]}"; do
+    if [[ "$rel" == "$prefix" || "$rel" == "$prefix/"* ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+# path_is_docs_working_state <relpath> -- would install_docs() refuse to
+# ship this docs/ path?
+#
+# EXPECTED side only, and that asymmetry is the whole point. docs/ is the
+# one FRAMEWORK directory install.sh does not copy wholesale: install_docs()
+# ships exactly the top-level entries listed in DOCS_ALLOWLIST_FILE and
+# reports the rest as working state. A comparison that expected the commit's
+# WHOLE docs/ tree in the target would report every one of those as MISSING
+# on a correct installation -- 89 files for docs/workitems/ alone in this
+# repository's own history (`git log --all --name-only -- docs` still shows
+# docs/memory and docs/workitems as tracked back then, and a marker can
+# point at such a commit).
+#
+# NOT applied to the walk of the installation. A path install.sh never
+# ships that is sitting in $DEST anyway did not come from the recorded
+# commit, so it must stay REPORTABLE rather than be subtracted a second
+# time -- subtracting it from both sides would make the installer's own
+# docs/ boundary unenforceable from the one check that could enforce it.
+#
+# "Reportable" is the honest word, and it is NOT the same as "UNEXPECTED".
+# An earlier draft of this comment said UNEXPECTED and was wrong; measured
+# 09.09.2026, on this repository, with docs/HANDOVER.md planted in $DEST:
+# it lands in **IGNORED**, exit 0. The walk still consults
+# path_is_source_ignored() afterwards, and this repository's own .gitignore
+# names exactly these paths (docs/HANDOVER.md, docs/workitems/,
+# docs/memory/, docs/decisions/, docs/.*). Which block it lands in is
+# decided by the INDEX, because check-ignore is index-aware:
+#
+#   tracked in $SRC   -> not ignored -> UNEXPECTED, a finding, exit 1
+#   untracked in $SRC -> ignored     -> IGNORED, excused, exit 0
+#
+# The second row is the normal state of this repository and therefore the
+# production shape; the first is what a commit predating the .gitignore
+# rule looks like. Both are pinned by tests. What matters for this check is
+# the invariant that holds across both: such a path is NAMED in a block,
+# never silently dropped, and never reported as MISSING. Whether the
+# excusing row should instead be a finding is a POLICY question about the
+# two rules overlapping -- both say "not part of the delivered tree" -- and
+# it is deliberately not decided here.
+#
+# The rule is READ FROM the file install_docs() reads, through the same
+# evaluator (docs_entry_is_allowlisted above); scripts/artifact-gate.sh
+# enforces that same file from the other side. Two hand-kept copies of one
+# boundary is the defect shape WI-0059 already produced once.
+#
+# Same working-tree door as path_is_source_ignored(), declared rather than
+# discovered: the allowlist is read from $SRC AS IT STANDS, not from a
+# checkout of $p_commit, so an uncommitted edit to it already changes the
+# classification. Same reasoning too -- "what does the installer ship" is a
+# property of the TOOLING, and the program answering the question is
+# $SRC/install.sh.
+path_is_docs_working_state() {
+  local rel="$1" name
+  case "$rel" in
+    docs/*) ;;
+    *) return 1 ;;
+  esac
+  name="${rel#docs/}"
+  name="${name%%/*}"
+  if docs_entry_is_allowlisted "$name"; then
+    return 1
+  fi
+  return 0
+}
 
 # path_is_source_ignored <relpath> -- would the SOURCE repository refuse to
 # track this path?
@@ -361,16 +484,26 @@ verify_installation() {
   local expected_count=0 compared=0
   local missing="" differing="" extra="" ignored=""
   local missing_n=0 differing_n=0 extra_n=0 ignored_n=0
-  local exp_paths d f rel total toplevel scan_out
+  local exp_paths d f rel total toplevel scan_out prefix dname
   local enum_incomplete=0
+  local allowlist_ok=0 docs_unclassifiable=0
+  local docs_skipped="" docs_skipped_n=0 user_owned_n=0
   local src_head="" origin_state="unknown" behind_n=""
 
   echo "CCPR install verification"
   echo "  target:        $DEST"
   echo "  this checkout: $SRC"
   echo "  scope:         ${VERIFY_SCOPE[*]}"
-  echo "                 (docs/, scripts/, instincts*, CLAUDE.md and settings.json"
-  echo "                  are excluded -- filtered, user-owned or expected to mature)"
+  echo "                 (every directory install.sh copies. Two carve-outs sit"
+  echo "                  INSIDE it, because two of those directories are not"
+  echo "                  copied verbatim: the user-owned PROTECTED sub-paths are"
+  echo "                  compared in NEITHER direction, and docs/ is filtered"
+  echo "                  through scripts/lib/docs-framework-allowlist.txt, so a"
+  echo "                  docs/ entry the installer does not ship is not expected"
+  echo "                  here. Each carve-out names its own paths in its own"
+  echo "                  block below, so neither is invisible from the report."
+  echo "                  Still out entirely: instincts*, CLAUDE.md and"
+  echo "                  settings.json -- those mature on your machine.)"
 
   if [[ ! -d "$DEST" ]]; then
     verify_cannot_run "the target directory does not exist: $DEST"
@@ -472,6 +605,18 @@ verify_installation() {
     fi
   fi
 
+  # Decided once, before the loop, so every docs/ path in the commit is
+  # classified by the same answer -- and so an unreadable allowlist becomes
+  # a refusal rather than a silently narrower scope (see below).
+  # `if`, not `[[ ... ]] && ...`: the latter's own status is 1 when the file
+  # is unreadable, and this function only survives that because errexit is
+  # suspended for it (it runs as an `||` operand). Not a contract to lean
+  # on -- the review of d85c2bd already found one bare call in here that
+  # depended on it.
+  if [[ -r "$DOCS_ALLOWLIST_FILE" ]]; then
+    allowlist_ok=1
+  fi
+
   expected_raw="$(git -C "$SRC" ls-tree -r "$p_commit" -- "${VERIFY_SCOPE[@]}")"
   exp_paths=$'\n'
   while IFS=$'\t' read -r meta path; do
@@ -481,6 +626,26 @@ verify_installation() {
       *) continue ;;
     esac
     sha="${meta##* }"
+    # Carve-out 1: yours in both directions, so it is not an expectation.
+    if path_is_user_owned "$path"; then
+      continue
+    fi
+    # Carve-out 2: the commit carries docs/ paths install.sh deliberately
+    # never installs. Expecting them in $DEST would report the installer
+    # doing its job as drift.
+    if [[ "$path" == docs/* ]]; then
+      if [[ "$allowlist_ok" -eq 0 ]]; then
+        docs_unclassifiable=$((docs_unclassifiable + 1))
+        continue
+      fi
+      if path_is_docs_working_state "$path"; then
+        dname="${path#docs/}"
+        dname="${dname%%/*}"
+        docs_skipped="${docs_skipped}docs/${dname}"$'\n'
+        docs_skipped_n=$((docs_skipped_n + 1))
+        continue
+      fi
+    fi
     expected_count=$((expected_count + 1))
     exp_paths="${exp_paths}${path}"$'\n'
     if [[ ! -f "$DEST/$path" ]]; then
@@ -502,6 +667,18 @@ verify_installation() {
     fi
   done <<< "$expected_raw"
 
+  # An unreadable allowlist means the docs/ half of the scope cannot be
+  # classified at all: every docs/ path in the commit is neither provably
+  # framework nor provably working state. Reporting the other directories
+  # and staying quiet about this one would be a run whose stated scope is
+  # not the scope it covered (KA-G-017), so it refuses instead. Note this
+  # is NOT reachable by simply treating docs/ as working state -- that
+  # would exit 0 with a silently smaller comparison, which is the shape
+  # this whole check exists against.
+  if [[ "$docs_unclassifiable" -gt 0 ]]; then
+    verify_cannot_run "commit $p_commit carries $docs_unclassifiable path(s) under docs/, and scripts/lib/docs-framework-allowlist.txt -- the file that says which of them install.sh actually ships -- is not readable at $DOCS_ALLOWLIST_FILE, so the docs/ half of the scope cannot be classified"
+    return 3
+  fi
   if [[ "$expected_count" -eq 0 ]]; then
     verify_cannot_run "commit $p_commit carries no file under the compared scope (${VERIFY_SCOPE[*]}) -- 0 files compared is not a pass"
     return 3
@@ -522,6 +699,14 @@ verify_installation() {
     while IFS= read -r f; do
       [[ -n "$f" ]] || continue
       rel="${f#"$DEST"/}"
+      # Carve-out 1, the other direction. Checked BEFORE the expected-set
+      # lookup because these paths were removed from that set above, so
+      # every one of them would otherwise fall through to UNEXPECTED --
+      # including the five starter wrappers a fresh install itself places.
+      if path_is_user_owned "$rel"; then
+        user_owned_n=$((user_owned_n + 1))
+        continue
+      fi
       case "$exp_paths" in
         *$'\n'"$rel"$'\n'*) ;;
         *)
@@ -559,6 +744,34 @@ verify_installation() {
     echo "     track is in no commit, so having it here is not drift from one --"
     echo "     it is locally generated. Not counted as a finding.)"
   fi
+
+  if [[ "$docs_skipped_n" -gt 0 ]]; then
+    echo "  NOT FRAMEWORK -- under docs/ in the recorded commit, never installed:"
+    printf '%s' "$docs_skipped" | LC_ALL=C sort -u | sed 's/^/    - /'
+    echo "    ($docs_skipped_n file(s) in the recorded commit sit under those"
+    echo "     entries. install_docs() ships only the top-level docs/ entries"
+    echo "     listed in scripts/lib/docs-framework-allowlist.txt -- the same"
+    echo "     file scripts/artifact-gate.sh enforces from the other side -- so"
+    echo "     their absence here is the installer working, not drift. That"
+    echo "     allowlist is read from this checkout as it stands, not from the"
+    echo "     recorded commit: same door the IGNORED rule declares above.)"
+  fi
+  # Printed UNCONDITIONALLY, unlike the IGNORED and NOT FRAMEWORK blocks
+  # which are gated on having something to say. Deliberate, and the reason
+  # is the asymmetry in what the three exclusions cost: those two are
+  # derived per run and an empty one means "nothing was excused this time",
+  # which is worth nothing to print. This one is a FIXED list that is in
+  # force on every run, applies in BOTH directions, and can hide a MISSING
+  # -- the only exclusion here that can. A reader must be able to see it
+  # without first having to trigger it.
+  echo "  USER-OWNED -- inside the scope but yours: compared in NEITHER direction:"
+  for prefix in "${PROTECTED[@]}"; do
+    echo "    - $prefix"
+  done
+  echo "    (install.sh's PROTECTED list. A wholesale directory replace stashes and"
+  echo "     restores these, so your copy is the correct content by design: a"
+  echo "     difference here is not drift, and a MISSING here would be a false alarm."
+  echo "     $user_owned_n file(s) present in the installation under them, none compared.)"
 
   echo
   echo "Origin freshness ($p_commit vs. this checkout's current HEAD):"
