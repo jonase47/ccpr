@@ -905,6 +905,29 @@ class ClassificationCountsTest(unittest.TestCase):
         growing paragraph:
 
           in-scope / flagged   when
+          1412 / 0             09.09.2026 (CCP-1173 second cut, --dry-run
+                               previews the refusal): +11, all 11 in scope.
+                               With the row below it: 25/25 then 11/11 from the
+                               same ticket, so the scanner reads this module's
+                               whole idiom rather than a few helper names --
+                               which is what makes 0/27 and 5/23 in the two
+                               rows further down a property of the OTHER
+                               modules' naming, not of those tickets.
+          1401 / 0             09.09.2026 (CCP-1173, install.sh fresh-target
+                               guard): +25, and this time ALL 25 new methods
+                               entered scope -- they drive install.sh through
+                               `run_install`, which RUN_HELPER_RE matches.
+                               Contrast the two rounds below it: CCP-1166 added
+                               27 subprocess-shaped methods calling
+                               `self.verify(...)` and NONE entered; CCP-1171
+                               added 23 and 5 entered. Same scanner, same kind
+                               of test, three coverages -- 0/27, 5/23, 25/25 --
+                               decided by what the author named the helper, not
+                               by what the test does. Filed as CCP-1167.
+          1376 / 0             09.09.2026 (CCP-1171, work-item link lint): +5
+                               of that ticket's 23 new methods; the other 18
+                               reach a subprocess under a name RUN_HELPER_RE
+                               does not match.
           1371 / 0             08.09.2026 (CCP-1145, check-all.sh concurrency
                                lock): +6, exactly the 6 new test methods
                                added in test_check_all.py
@@ -1863,7 +1886,7 @@ class ClassificationCountsTest(unittest.TestCase):
         count."""
         recs = scan_tree()
         flagged = [r for r in recs if r.disposition in NEEDS_EXEMPTION]
-        self.assertEqual(1376, len(recs))
+        self.assertEqual(1412, len(recs))
         self.assertEqual(0, len(flagged))
 
 

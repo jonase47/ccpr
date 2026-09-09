@@ -110,8 +110,8 @@ python3 -m unittest discover -s scripts/tests -t .
 
 - **`-t .` is not optional**, and the failure mode is worth knowing because it is
   partly silent. It sets the top-level directory imports resolve against. Measured
-  on the current tree (09.09.2026): **with** it, discovery collects **2831 tests, 0
-  import errors**, exit 0; **without** it, **2092 tests and 18 modules that fail to
+  on the current tree (09.09.2026): **with** it, discovery collects **2867 tests, 0
+  import errors**, exit 0; **without** it, **2128 tests and 18 modules that fail to
   import**, exit 1 — the eight that use a relative import
   (`from .test_phase_docs_lint import …` in four modules,
   `from .test_artifact_gate import …` in two,

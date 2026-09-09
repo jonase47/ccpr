@@ -1754,6 +1754,465 @@ class TheWidenedScopeIsNotWiderThanTheInstallerTest(WidenedScopeBase):
                           "the exclusion is invisible to whoever reads the run")
 
 
+# ---------------------------------------------------------------------------
+# CCP-1173 -- a fresh install must not silently replace an installation
+#
+# On 09.09.2026 a delegated agent ran install.sh from a throwaway probe clone
+# and it landed on the operator's REAL ~/.claude: 18 instinct files deleted,
+# instincts.md replaced (37488 -> 9242 bytes), CLAUDE.md and settings.json
+# overwritten. It was recovered from the backup install.sh had just taken, so
+# this is about the friction, not about data loss.
+#
+# The cause was not a typo. install.sh reads
+# `DEST="${CCPR_DEST:-$HOME/.claude}"` -- the dangerous target is what you get
+# when the variable is ABSENT, so every safe invocation depends on a prefix
+# that is lost by rewording or copying a command, and losing it leaves a
+# command that is syntactically perfect and reports nothing unusual. `--yes`
+# then skips the only confirmation. The briefing for that agent DID say
+# "never point a probe at ~/.claude"; prose in a briefing is a request, not a
+# barrier. This section is the barrier.
+#
+# The tests come in pairs on purpose: a refusal that fires on everything is
+# not a guard. Each refusal has a silent counter-proof beside it -- an empty
+# target, a missing target, --update and --verify all still work.
+# ---------------------------------------------------------------------------
+
+
+class FreshInstallOverAnExistingInstallationBase(InstallProvenanceBase):
+    def install_once(self):
+        """A completed installation at self.dest, marker and all -- the state
+        the guard exists to protect."""
+        r = self.run_install("--yes")
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertTrue(self.marker_path().is_file())
+        return r
+
+    def plant_unmarked_installation(self):
+        """A target that holds something but carries NO marker -- every
+        installation predating the marker looks like this, and those are the
+        oldest ones, whose loss costs most. The marker check alone cannot see
+        them; only "exists and is not empty" can."""
+        self.dest.mkdir(parents=True)
+        (self.dest / "agents").mkdir()
+        (self.dest / "agents" / "konzeptor.md").write_text("# mine\n", encoding="utf-8")
+        (self.dest / "CLAUDE.md").write_text("# my own CLAUDE.md\n", encoding="utf-8")
+        self.assertFalse(self.marker_path().exists())
+
+    def backups(self):
+        """Any timestamped backup install.sh took. A refusal must not reach
+        even this far -- backing up is the first thing the write path does."""
+        return sorted(self.dest.parent.glob(self.dest.name + ".backup-*"))
+
+    def assertRefused(self, r):
+        out = r.stdout + r.stderr
+        self.assertNotEqual(
+            0, r.returncode,
+            "a fresh install onto an existing installation exited 0 -- the "
+            "wholesale replace went through:\n" + out,
+        )
+        self.assertIn("REFUSED", out)
+        self.assertEqual(
+            4, r.returncode,
+            "the refusal must keep an exit code of its own, distinct from a "
+            "generic error (1), an unknown option (2) and --verify's "
+            "could-not-run (3). --help promises exit 4; a promise nothing "
+            "measures is not a contract:\n" + out,
+        )
+
+
+class AFreshInstallOntoAMarkedTargetIsRefusedTest(FreshInstallOverAnExistingInstallationBase):
+    """Acceptance 1: the marker is proof that a real installation lives here."""
+
+    def test_a_yes_fresh_install_onto_a_marked_target_is_refused(self):
+        self.install_once()
+        r = self.run_install("--yes")
+        self.assertRefused(r)
+
+    def test_the_refusal_names_update_as_the_intended_path(self):
+        self.install_once()
+        r = self.run_install("--yes")
+        self.assertIn(
+            "--update", r.stdout + r.stderr,
+            "the refusal must name the intended path, or it only tells the "
+            "operator what not to do",
+        )
+
+    def test_the_refusal_is_not_a_prompt_that_yes_could_skip(self):
+        # The load-bearing property. A prompt is exactly what --yes exists to
+        # skip, and the incident this item records ran WITH --yes -- so the
+        # refusal must be hard. Driving it WITHOUT --yes but with "y" on
+        # stdin proves the exit is not a declined confirmation: "y" is the
+        # answer that would have proceeded.
+        self.install_once()
+        r = self.run_install(stdin="y\n")
+        self.assertRefused(r)
+
+    def test_the_refusal_writes_nothing_at_all(self):
+        self.install_once()
+        before = self.marker_path().read_bytes()
+        r = self.run_install("--yes")
+        self.assertRefused(r)
+        self.assertEqual(before, self.marker_path().read_bytes(),
+                         "the refused run still rewrote the provenance marker")
+        self.assertEqual([], self.backups(),
+                         "the refused run took a backup -- it reached the write "
+                         "path it exists to stop short of")
+
+    def test_a_fresh_install_onto_a_missing_target_still_works(self):
+        # Silent counter-proof: a guard that refuses everything is not a
+        # guard. This is the normal first install and must stay silent.
+        r = self.run_install("--yes")
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertNotIn("REFUSED", r.stdout + r.stderr)
+        self.assertTrue(self.marker_path().is_file())
+
+
+class AFreshInstallOntoANonEmptyUnmarkedTargetIsRefusedTest(
+        FreshInstallOverAnExistingInstallationBase):
+    """Acceptance 2 (PO decision 09.09.2026): catch BOTH shapes. A throwaway
+    probe target is fresh or empty by construction and a real installation is
+    never empty, so "empty vs not" is exactly the line -- and it covers the
+    installations predating the marker, which the marker check cannot see."""
+
+    def test_a_non_empty_target_without_a_marker_is_refused(self):
+        self.plant_unmarked_installation()
+        r = self.run_install("--yes")
+        self.assertRefused(r)
+
+    def test_that_refusal_also_names_update(self):
+        self.plant_unmarked_installation()
+        r = self.run_install("--yes")
+        self.assertIn("--update", r.stdout + r.stderr)
+
+    def test_the_unmarked_installation_is_left_untouched(self):
+        self.plant_unmarked_installation()
+        r = self.run_install("--yes")
+        self.assertRefused(r)
+        self.assertEqual(
+            "# my own CLAUDE.md\n",
+            (self.dest / "CLAUDE.md").read_text(encoding="utf-8"),
+        )
+        self.assertEqual([], self.backups())
+
+    def test_a_target_whose_only_content_is_a_dotfile_is_not_empty(self):
+        # `ls` would report this directory as empty. An installation whose
+        # visible files were removed by hand is still not an empty directory,
+        # and the guard must not read "empty" the way `ls` does.
+        self.dest.mkdir(parents=True)
+        (self.dest / ".ccpr-leftover").write_text("x\n", encoding="utf-8")
+        r = self.run_install("--yes")
+        self.assertRefused(r)
+
+    def test_a_target_that_cannot_be_read_is_refused_not_assumed_empty(self):
+        # Found in review. Both globs in target_is_occupied() need read+search
+        # on the directory; without them each comes back as its own unmatched
+        # literal and the loop concludes "empty" for a directory that may hold
+        # a full installation. A check that COULD NOT LOOK must not answer
+        # "nothing there" -- the same distinction --verify already draws
+        # between could-not-run and no-divergence.
+        if os.geteuid() == 0:
+            self.skipTest("running as root: permission bits do not apply")
+        self.install_once()
+        os.chmod(self.dest, 0o000)
+        # LIFO: registered after setUp's rmtree, so it runs BEFORE it.
+        self.addCleanup(os.chmod, self.dest, 0o755)
+        r = self.run_install("--yes")
+        self.assertRefused(r)
+        self.assertIn("cannot be read", r.stdout + r.stderr)
+        self.assertEqual([], self.backups(),
+                         "the run reached the backup step and left an empty "
+                         "backup directory behind")
+
+    def test_an_existing_but_empty_target_still_installs_silently(self):
+        # Silent counter-proof for the whole "non-empty" trigger: the
+        # directory exists, so a guard keyed on mere existence would refuse
+        # here. It must not -- "empty vs not" is the line, not "exists".
+        self.dest.mkdir(parents=True)
+        r = self.run_install("--yes")
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertNotIn("REFUSED", r.stdout + r.stderr)
+        self.assertTrue(self.marker_path().is_file())
+
+
+class TheGuardDoesNotReachTheNonReplacingModesTest(
+        FreshInstallOverAnExistingInstallationBase):
+    """Silent counter-proofs, acceptance 4. --update and --verify do not
+    replace the target wholesale, so neither may be touched by this guard."""
+
+    def test_update_onto_a_marked_target_still_works(self):
+        self.install_once()
+        r = self.run_install("--update", "--yes")
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertNotIn("REFUSED", r.stdout + r.stderr)
+        self.assertEqual("update", self.marker().get("install_mode"))
+
+    def test_update_onto_a_non_empty_unmarked_target_still_works(self):
+        self.plant_unmarked_installation()
+        r = self.run_install("--update", "--yes")
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertNotIn("REFUSED", r.stdout + r.stderr)
+
+    def test_update_with_force_fresh_is_inert_not_an_error(self):
+        # Noted in review as unpinned. --update alone already bypasses the
+        # guard, so adding --force-fresh must be a no-op rather than a
+        # contradiction the parser or the guard trips over. A regression pin,
+        # not a mutation-proven assertion: no single-line mutation of the
+        # current gate turns this red on its own.
+        self.install_once()
+        r = self.run_install("--update", "--force-fresh", "--yes")
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertEqual("update", self.marker().get("install_mode"))
+
+    def test_verify_onto_a_marked_target_still_works(self):
+        self.install_once()
+        r = self.run_install("--verify")
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertIn("Result: VERIFIED", r.stdout)
+        self.assertNotIn("REFUSED", r.stdout + r.stderr)
+
+
+class ForceFreshIsTheOnlyWayPastTest(FreshInstallOverAnExistingInstallationBase):
+    """Acceptance 3: a bypass nobody has run is unproven, and this one is the
+    only way past a hard refusal. So it is exercised here, not described.
+
+    `--force-fresh` rather than a bare `--force` (PO decision 09.09.2026): a
+    generic force flag reads as "switch off the checks", which is how a force
+    flag becomes a reflex. This one names the single mode it unlocks, and that
+    word is the one install.sh itself writes into the marker
+    (`install_mode=fresh`) -- so its meaning is looked up, not invented."""
+
+    def test_force_fresh_gets_past_a_marked_target(self):
+        self.install_once()
+        r = self.run_install("--force-fresh", "--yes")
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertNotIn("REFUSED", r.stdout + r.stderr)
+
+    def test_force_fresh_gets_past_a_non_empty_unmarked_target(self):
+        self.plant_unmarked_installation()
+        r = self.run_install("--force-fresh", "--yes")
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertNotIn("REFUSED", r.stdout + r.stderr)
+
+    def test_the_bypassed_run_really_installs_it_does_not_merely_exit_zero(self):
+        # A "bypass" that exits 0 without installing would pass the two tests
+        # above. The marker is rewritten with a NEW timestamp-bearing record
+        # and the mode the flag is named after, and the shipped files land.
+        self.install_once()
+        first = self.marker_path().read_bytes()
+        (self.src / "commands" / "guide.md").write_text("# guide v2\n", encoding="utf-8")
+        self.git("add", "-A")
+        second = self.commit("second")
+
+        r = self.run_install("--force-fresh", "--yes")
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertNotEqual(first, self.marker_path().read_bytes())
+        self.assertEqual("fresh", self.marker().get("install_mode"))
+        self.assertEqual(second, self.marker().get("source_commit"))
+        self.assertEqual(
+            "# guide v2\n",
+            (self.dest / "commands" / "guide.md").read_text(encoding="utf-8"),
+        )
+
+    def test_the_bypassed_run_still_takes_a_backup(self):
+        # --force-fresh unlocks the replace; it does not switch off the safety
+        # net that made the 09.09.2026 incident recoverable.
+        self.install_once()
+        self.assertEqual([], self.backups())
+        r = self.run_install("--force-fresh", "--yes")
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertEqual(1, len(self.backups()),
+                         "the forced replace took no backup")
+
+    def test_force_fresh_alone_still_asks_for_confirmation(self):
+        # The independence, direction one: --force-fresh unlocks the mode, it
+        # does not answer the question. Declining must leave everything as it
+        # was -- which also proves the prompt was actually reached, i.e. that
+        # the guard let this run through rather than the run dying earlier.
+        self.install_once()
+        before = self.marker_path().read_bytes()
+        r = self.run_install("--force-fresh", stdin="n\n")
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertIn("Aborted. Nothing changed.", r.stdout)
+        self.assertEqual(before, self.marker_path().read_bytes())
+        self.assertEqual([], self.backups())
+
+    def test_force_fresh_alone_proceeds_once_the_confirmation_is_given(self):
+        # Counter-proof to the test above: it must be the ANSWER that decides,
+        # not --force-fresh being unable to install at all.
+        #
+        # The evidence is the backup, not the marker. The marker was the first
+        # thing tried here and it does not work: `installed_at` has
+        # second resolution, so a re-install inside the same second rewrites
+        # the file with byte-identical content. That comparison would have
+        # reported "nothing happened" for a run that did everything -- a
+        # scalar proxy blind to the thing it stands for. The backup directory
+        # is created per run and carries no such collision.
+        self.install_once()
+        self.assertEqual([], self.backups())
+        r = self.run_install("--force-fresh", stdin="y\n")
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertNotIn("Aborted", r.stdout)
+        self.assertEqual(1, len(self.backups()),
+                         "the confirmed run did not reach the write path")
+
+    def test_yes_alone_still_refuses(self):
+        # The independence, direction two -- stated here beside its twin so
+        # the pair is one readable claim: neither flag satisfies the other.
+        self.install_once()
+        self.assertRefused(self.run_install("--yes"))
+
+    def test_force_fresh_on_a_missing_target_changes_nothing_about_a_normal_install(self):
+        # The flag must be inert where there is nothing to force.
+        r = self.run_install("--force-fresh", "--yes")
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertEqual("fresh", self.marker().get("install_mode"))
+
+    def test_a_typo_of_the_flag_is_still_an_unknown_option(self):
+        # Acceptance 6. The parser knows only valueless flags and rejects
+        # anything else with exit 2; the new flag must not soften that into a
+        # prefix match, which would make `--force-fresh-please` a silent
+        # synonym for the real thing.
+        self.install_once()
+        r = self.run_install("--force-fresh-please", "--yes")
+        self.assertEqual(2, r.returncode, r.stdout + r.stderr)
+        self.assertIn("Unknown option", r.stderr)
+
+    def test_the_flag_is_documented_in_the_help(self):
+        # An escape hatch nobody can find is a hatch that gets replaced by
+        # `rm -rf` on the target.
+        r = self.run_install("--help")
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertIn("--force-fresh", r.stdout)
+
+
+class TheDryRunPreviewsTheRefusalRatherThanContradictingItTest(
+        FreshInstallOverAnExistingInstallationBase):
+    """CCP-1173 round 2. The guard made `--dry-run` disagree with the run it
+    previews: onto an occupied target the preview promised a full install
+    while the real run refused outright. install.sh carries the WI-0064 rule
+    against exactly that twice in its own comments -- the rule that split
+    install_docs() into a decision and a copy in the first place.
+
+    PO decision 09.09.2026, route 2: the preview ANNOUNCES the refusal and
+    still exits 0. Route 1 (the preview refuses too) was rejected because a
+    preview that aborts defeats its own purpose -- one runs it precisely to
+    learn what would happen, so it has to answer. Route 3 (leave it) was
+    rejected because the code would then contradict a rule written in its own
+    comments.
+
+    So the decision and the acting on it are two things here, and the tests
+    below check them apart: the same reason produces exit 4 on a real run and
+    exit 0 with a description on a preview."""
+
+    PREVIEW_BLOCK = "Would back up"
+    OVERWRITE_BLOCK = "WILL be overwritten"
+
+    def test_the_dry_run_says_the_real_run_would_refuse(self):
+        self.install_once()
+        r = self.run_install("--dry-run")
+        out = r.stdout + r.stderr
+        self.assertIn("REFUSE", out)
+        self.assertIn("exit 4", out,
+                      "the preview must name the exit code the real run would "
+                      "produce, or the reader cannot script against it")
+
+    def test_the_dry_run_names_both_ways_forward(self):
+        self.install_once()
+        r = self.run_install("--dry-run")
+        out = r.stdout + r.stderr
+        self.assertIn("--update", out)
+        self.assertIn("--force-fresh", out)
+
+    def test_the_dry_run_does_not_promise_the_install_it_would_not_perform(self):
+        # The half that makes this a fix rather than an extra paragraph: the
+        # "would copy everything" block must be GONE, not merely preceded by a
+        # correction. A preview that says both things has not stopped
+        # disagreeing with the run.
+        self.install_once()
+        r = self.run_install("--dry-run")
+        out = r.stdout + r.stderr
+        self.assertNotIn(self.PREVIEW_BLOCK, out)
+        self.assertNotIn(
+            self.OVERWRITE_BLOCK, out,
+            "the overwrite warning promises a replace that would not happen "
+            "either -- it is the same false promise one paragraph earlier",
+        )
+
+    def test_the_dry_run_still_exits_zero(self):
+        # Acceptance 2, pinned on its own. This is the half of route 2 that
+        # separates it from route 1, and it is what a later refactor is most
+        # likely to lose by reusing the refusal path wholesale.
+        self.install_once()
+        r = self.run_install("--dry-run")
+        self.assertEqual(
+            0, r.returncode,
+            "a preview that aborts defeats its own purpose -- exit 0 is what "
+            "makes this an announcement rather than a refusal:\n" + r.stdout + r.stderr,
+        )
+
+    def test_the_announced_dry_run_still_changes_nothing(self):
+        self.install_once()
+        before = self.marker_path().read_bytes()
+        r = self.run_install("--dry-run")
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertEqual(before, self.marker_path().read_bytes())
+        self.assertEqual([], self.backups())
+
+    def test_the_same_holds_for_a_non_empty_unmarked_target(self):
+        # The decision has three reasons; the preview must follow all of them,
+        # not only the marker one.
+        self.plant_unmarked_installation()
+        r = self.run_install("--dry-run")
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertIn("REFUSE", r.stdout + r.stderr)
+        self.assertNotIn(self.PREVIEW_BLOCK, r.stdout + r.stderr)
+
+    # -- silent counter-proofs -------------------------------------------
+
+    def test_a_dry_run_onto_a_missing_target_still_previews_the_install(self):
+        # Acceptance 3. Without this, a preview that ALWAYS announced a
+        # refusal would pass every test above.
+        r = self.run_install("--dry-run")
+        out = r.stdout + r.stderr
+        self.assertEqual(0, r.returncode, out)
+        self.assertIn(self.PREVIEW_BLOCK, out)
+        self.assertIn(shipped_marker_name(), out)
+        self.assertNotIn("REFUSE", out)
+
+    def test_a_dry_run_onto_an_empty_target_still_previews_the_install(self):
+        self.dest.mkdir(parents=True)
+        r = self.run_install("--dry-run")
+        out = r.stdout + r.stderr
+        self.assertEqual(0, r.returncode, out)
+        self.assertIn(self.PREVIEW_BLOCK, out)
+        self.assertNotIn("REFUSE", out)
+
+    def test_dry_run_with_force_fresh_previews_the_replace_not_the_refusal(self):
+        # Acceptance 4: the preview follows the run it previews. With
+        # --force-fresh the real run REPLACES, so the preview must describe
+        # the replace -- including the overwrite warning, which is true again.
+        self.install_once()
+        r = self.run_install("--dry-run", "--force-fresh")
+        out = r.stdout + r.stderr
+        self.assertEqual(0, r.returncode, out)
+        self.assertIn(self.PREVIEW_BLOCK, out)
+        self.assertIn(self.OVERWRITE_BLOCK, out)
+        self.assertNotIn("REFUSE", out)
+
+    def test_dry_run_with_update_is_unaffected(self):
+        self.install_once()
+        r = self.run_install("--dry-run", "--update")
+        out = r.stdout + r.stderr
+        self.assertEqual(0, r.returncode, out)
+        self.assertIn(self.PREVIEW_BLOCK, out)
+        self.assertNotIn("REFUSE", out)
+
+    def test_the_real_run_still_refuses_the_same_target(self):
+        # The decision is shared; only the acting differs. If a refactor ever
+        # routed the real run through the preview's branch, this is what dies.
+        self.install_once()
+        self.assertRefused(self.run_install("--yes"))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -186,10 +186,20 @@ git checkout v0.3.0-beta   # latest tag; run `git tag -l` to see all available t
 ### 2. Run the installer
 
 ```bash
-./install.sh            # backs up ~/.claude, shows what gets overwritten, asks to confirm
+./install.sh            # first install: backs up ~/.claude, shows what gets
+                        #   overwritten, asks to confirm
 ./install.sh --dry-run  # preview only — change nothing
 ./install.sh --verify   # read-only: which commit was installed, and does it still match?
 ```
+
+**A fresh install refuses a target that is already in use.** If `~/.claude` carries this
+installer's provenance marker, or simply exists and is not empty, `./install.sh` stops with
+exit 4 and changes nothing. Use [`--update`](#updating) to move an existing installation to
+a newer version — that is the intended path, and it keeps your files. `--force-fresh` is the
+only way past the refusal, for when replacing the installation wholesale is really what you
+mean. The refusal is not a prompt, so `--yes` does not skip it: replacing an existing
+installation non-interactively takes both flags. Only a missing or empty target installs
+silently.
 
 `--verify` reads the provenance marker `install.sh` leaves at
 `~/.claude/.ccpr-install-provenance` and answers two separate questions: **origin**
