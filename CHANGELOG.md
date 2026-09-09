@@ -1698,6 +1698,42 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Fixed
 
+- **`install.sh --verify` now compares every directory the installer writes, not four of
+  six (CCP-1166 / F10).** `VERIFY_SCOPE` was `( agents commands hooks templates )`, which
+  reached **162 of the 409 files** that sit under those six directories in a working
+  installation — the **245** it could not reach at all were the shipped `scripts/` (222)
+  and `docs/` (23), the gates included; the two remaining were locally generated files
+  inside its own scope, already excused as `IGNORED`. Probed
+  rather than reasoned, into a throwaway `CCPR_DEST` off a clean checkout whose baseline run
+  reported `VERIFIED` / 162 compared: one appended line in `<dest>/scripts/artifact-gate.sh`
+  → exit 0, `VERIFIED`; one in `<dest>/docs/CONSTITUTION.md` → exit 0, `VERIFIED`; the same
+  edit under `<dest>/agents/` → exit 1, `DIVERGENT`. So the instrument worked and its reach
+  was the defect: a tampered `artifact-gate.sh`, `check-all.sh`, `manual-lint.sh`,
+  `memory-sync.sh` or `gate-preflight.py` reported `VERIFIED` — the check that answers
+  "is this installation intact" could not see the scripts that enforce everything else.
+  The scope is now all six `FRAMEWORK` directories, compared 304 files against `8bdb1d7`
+  on the maintainer's own installation.
+
+  **The two reasons for the old exclusion are real and did not go away**; each became a
+  named carve-out INSIDE the scope rather than a directory left outside it, and both are
+  derived from the register `install.sh` already uses on the copy side rather than a second
+  list typed into the verify path (the drift shape `WI-0059` produced once already):
+  `path_is_user_owned()` reads the `PROTECTED` array and excuses those prefixes in **both**
+  directions (the installer's contract says your copy wins, so a difference there is not
+  drift and a `MISSING` there would be a false alarm); `path_is_docs_working_state()` reads
+  `scripts/lib/docs-framework-allowlist.txt` — the same file `scripts/artifact-gate.sh`
+  enforces from the other side — and excuses non-allowlisted `docs/` entries on the
+  **EXPECTED side only**, because a path the installer never ships that is sitting in the
+  target anyway did not come from the recorded commit and must stay reportable. Each
+  carve-out prints its own block: an exemption nobody can see is the next drifting skip
+  list. An unreadable allowlist is a `could not run`, not a silently smaller comparison.
+
+  `scripts/tests/test_install_provenance.py` gains **27 tests** (65 → 92), each with its red
+  proof and its silent counter-proof, covering both directions of each carve-out and the
+  negatives: a foreign script beside an exempted one is still reported, a framework `docs/`
+  path that is absent is still `MISSING`, an edited user-owned wrapper is not, and a
+  bytecode cache is not a divergence.
+
 - **`check-all.sh` had no lock, so two simultaneous runs against the same working tree collided
   over shared files instead of refusing each other (CCP-1145).** `check-all.sh` runs the Python
   test suite as one of its own catalogued checks; a second, independently invoked `python3 -m
