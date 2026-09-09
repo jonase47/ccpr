@@ -110,15 +110,15 @@ python3 -m unittest discover -s scripts/tests -t .
 
 - **`-t .` is not optional**, and the failure mode is worth knowing because it is
   partly silent. It sets the top-level directory imports resolve against. Measured
-  on the current tree (09.09.2026): **with** it, discovery collects **2808 tests, 0
-  import errors**, exit 0; **without** it, **2091 tests and 17 modules that fail to
+  on the current tree (09.09.2026): **with** it, discovery collects **2831 tests, 0
+  import errors**, exit 0; **without** it, **2092 tests and 18 modules that fail to
   import**, exit 1 — the eight that use a relative import
   (`from .test_phase_docs_lint import …` in four modules,
   `from .test_artifact_gate import …` in two,
   `from .test_gitattributes_crlf_guard import …` in one, and
-  `from . import …` of five sibling modules in the skip budget), plus the nine
+  `from . import …` of five sibling modules in the skip budget), plus the ten
   modules of the `scripts/tests/workitems/` subpackage. The run does go red on those
-  17, so you will notice something — but **717 tests simply never execute**, and
+  18, so you will notice something — but **739 tests simply never execute**, and
   nothing in the output says so.
 
   That skipped count moves whenever a module gains a relative import:
