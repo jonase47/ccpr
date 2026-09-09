@@ -52,6 +52,11 @@ The helper (`scripts/workitems.py`) reads `workitems.provider` from the project'
 the provider implementation under `scripts/lib/workitems/<provider>.py`. `list` and `get` print JSON so
 commands can consume them without parsing prose.
 
+Four further subcommands are **not** part of that per-backend contract — they are CLI-level
+operations built *on* it, implemented once and running against whichever provider is configured:
+`migrate` and `lift` (ADR-0004), `sweep` (ADR-0005, §6) and `lint` (§11). A backend does not
+implement them, so they are deliberately absent from the table above.
+
 ## 2. Core model
 
 Every backend maps exactly these fields — the CCPR core relies on **nothing** beyond them (a backend
@@ -359,6 +364,39 @@ silently diverge. A new backend passes iff it satisfies the fixture.
 | `SPRINT.md` (prose sprint plan) | planning **view** (the items in the current iteration) |
 | `HANDOVER.md` (session snapshot with the work list) | **narrative** + item references |
 | commands parsing those files | commands calling `workitems …` |
+
+## 11. Link lint
+
+`workitems lint` resolves every item's **own text** against its **typed links** (ADR-0008): a link
+is the machine-readable form of "this relates to that", and nothing else checks it against what an
+item's description already claims. It reads the configured provider — offline Markdown under
+`local`, over the network for a remote backend — and writes a JSON report to stdout.
+
+| Command | Meaning |
+|---|---|
+| `workitems lint` | report ids named in an item's title/description with no typed link to them, links whose target no listed item carries, and links outside the project's own id namespace |
+
+Three verdicts, and the third is the point: `pass` (read, nothing found), `findings` (read, something
+found) and **`could-not-run`** (the backend could not be reached, so *nothing was compared*). A
+remote provider with no resolvable credentials — CI, for instance — lands in the third, never in the
+first. So does a provider name with no matching module, and so does a backend that cannot be
+constructed at all: **every** way of not comparing anything is exit 3, so **exit 1 means findings
+and nothing else**. Exit codes: **0** pass · **1** findings · **3** could not run — the same code,
+and the same three-part wording, `install.sh`'s own `verify_cannot_run()` established (the third
+clause names the check, so it reads "the work-item link lint DID NOT RUN" here).
+
+**What the check does not reach**, stated in every report as well as here:
+
+- a reference whose id names no item the backend listed. It is counted per id namespace
+  (`scope.unresolved_references.by_namespace`) and compared against nothing. Legacy `WI-NNNN` ids
+  from before a migration fall here — resolvable only through `docs/workitems-idmap.yml` — as do
+  ids belonging to another project and ids of deleted items.
+- prose that names an item without using its id. There is nothing to match on.
+- a reference living only in a comment or a `result-link`: only `title` and `description` are read.
+
+The link graph is read **undirected**. `local` stores an edge on one side only (`add-link A relates-to B`
+touches A's file and nothing on B's) while a remote backend derives both sides from a single record —
+reading it directionally would make the verdict depend on which side happened to run `add-link`.
 
 ---
 

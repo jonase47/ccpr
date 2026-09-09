@@ -1863,7 +1863,7 @@ class ClassificationCountsTest(unittest.TestCase):
         count."""
         recs = scan_tree()
         flagged = [r for r in recs if r.disposition in NEEDS_EXEMPTION]
-        self.assertEqual(1371, len(recs))
+        self.assertEqual(1376, len(recs))
         self.assertEqual(0, len(flagged))
 
 
@@ -2103,9 +2103,9 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
         # floor; it is why the set pin below stands beside it. Keeping both is
         # the decision (WI-0133 T1), not redundancy left in by accident.
         self.assertGreaterEqual(  # pin: floor tests-corpus-files
-            len(names), 70,
-            "the scripts/tests corpus glob reached {} file(s); it reached 70 "
-            "when this floor was measured (07.09.2026). A SHRINKING scope is "
+            len(names), 73,
+            "the scripts/tests corpus glob reached {} file(s); it reached 73 "
+            "when this floor was measured (09.09.2026). A SHRINKING scope is "
             "a blind scanner, not a clean tree.".format(len(names)),
         )
         # The set pin, replacing a bare count (WI-0133 T1). A count cannot
@@ -2196,15 +2196,22 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
             "workitems/test_status_vocabulary.py",
             "workitems/test_sweep.py",
             "workitems/test_validation.py",
+            "workitems/test_workitem_lint.py",
             "workitems/test_youtrack.py",
             ],
             names,
-            "the scripts/tests corpus (69 -> 70, 07.09.2026, CCP-1163 "
-            "second cut: test_manual_lint_single_file_root.py added; "
-            "proven an addition rather than a swap by `git status "
-            "--porcelain scripts/tests` -- one `??` line (this new module) "
-            "plus this module's own ` M` line; nothing deleted, nothing "
-            "renamed)",
+            "the scripts/tests corpus (72 -> 73, 09.09.2026, CCP-1171: "
+            "workitems/test_workitem_lint.py added; proven an addition "
+            "rather than a swap by `git status --porcelain scripts/tests` "
+            "-- one `??` line (this new module) plus this module\'s own "
+            "` M` line; nothing deleted, nothing renamed. NOTE: the "
+            "previous prose here said 69 -> 70 and the floor below said "
+            "70, both measured against `test_*.py` rather than this "
+            "test\'s own `*.py` glob; the corpus at the parent commit was "
+            "72, verified by `git ls-tree -r --name-only HEAD`. The set "
+            "assertion itself was never wrong -- only the numbers written "
+            "beside it, which is why a set pin stands here and a count "
+            "does not)",
         )
 
 

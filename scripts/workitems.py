@@ -32,6 +32,7 @@ Usage:
   workitems.py migrate --to <provider> [--project DIR]
   workitems.py lift <source-file...> [--apply] [--exclude PATTERN=REASON ...] [--project DIR]
   workitems.py sweep [--project DIR]
+  workitems.py lint [--project DIR]
 
 Output: JSON on stdout for every operation (a list for `list`, an object otherwise).
 
@@ -70,6 +71,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "lib"))
 
 from workitems import WorkItemError, parse_duration_seconds  # noqa: E402
 from workitems import lift as lift_module  # noqa: E402
+from workitems import lint as lint_module  # noqa: E402
 from workitems import migrate as migrate_module  # noqa: E402
 from workitems import sweep as sweep_module  # noqa: E402
 
@@ -328,6 +330,13 @@ def build_parser():
         parents=[project_arg],
     )
 
+    sub.add_parser(
+        "lint",
+        help="Resolve each item's own text against its typed links; exit 0 clean, "
+             "1 findings, 3 could-not-run (CCP-1171)",
+        parents=[project_arg],
+    )
+
     return parser
 
 
@@ -482,6 +491,52 @@ def _run_lift(settings, args):
     )
 
 
+def _run_lint(settings, args):
+    """`lint` (CCP-1171): like migrate/sweep/lift this spans every item rather than
+    one id, so it lives here and not in dispatch(). Unlike them it also OWNS ITS
+    EXIT CODE, and returns it -- its verdict is three-way, and the whole point of
+    the third value is that "could not run" must not be reachable through the same
+    exit code as "ran and found nothing".
+
+    Exit: 0 read, nothing found · 1 read, findings · 3 COULD NOT RUN (nothing
+    compared). The 3 mirrors install.sh's verify_installation(), whose could-not-run
+    path uses the same code and the same three-part wording (verify_cannot_run()).
+
+    Backend RESOLUTION and CONSTRUCTION are inside the same guard as the read, and
+    that includes `UnknownProviderError`, which is NOT a `WorkItemError`: a provider
+    name with no matching module fails before `list()` is ever reached, so nothing
+    was compared there either. Letting it escape to main()'s own handler returned
+    exit 1 -- the same code as "read the backend, found problems" -- and printed no
+    JSON at all, so a caller could neither tell the two apart nor parse the output.
+    A typo in `.claude/settings.json` is a likelier event than an unreachable host;
+    it must not be able to masquerade as a finding.
+    """
+    # The provider NAME is read directly rather than via resolve_provider(), which
+    # returns name and config together: the name has to survive a failure of the
+    # config resolution below, so the refusal can still say which provider it was
+    # that could not be reached.
+    provider = settings.get("workitems", {}).get("provider", DEFAULT_PROVIDER)
+    try:
+        config = resolve_provider_config(settings, args.project_dir, provider)
+        backend = load_backend(provider, config)
+        report = lint_module.lint(backend, provider=provider)
+    except UnknownProviderError as exc:
+        report = lint_module.refusal(
+            f"unknown work-item provider: {exc} -- no scripts/lib/workitems/{exc}.py",
+            provider=provider,
+        )
+    except WorkItemError as exc:
+        report = lint_module.refusal(str(exc), provider=provider)
+
+    print(json.dumps(report, indent=2, ensure_ascii=False))
+    if report["verdict"] == "could-not-run":
+        # On stderr as well as in the report: a caller reading only the human
+        # channel must not see an empty findings list and take it for a pass.
+        print(report["message"], file=sys.stderr)
+        return 3
+    return 1 if report["findings"] else 0
+
+
 def main(argv=None):
     args = build_parser().parse_args(argv)
     # The single place the --project default is resolved (see build_parser()'s
@@ -494,6 +549,9 @@ def main(argv=None):
         settings = load_settings(args.project_dir)
         if args.operation == "lift":
             result = _run_lift(settings, args)
+        elif args.operation == "lint":
+            # Returns its own exit code and does its own printing (see _run_lint).
+            return _run_lint(settings, args)
         else:
             provider, config = resolve_provider(settings, args.project_dir)
             backend = load_backend(provider, config)
