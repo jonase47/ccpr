@@ -1698,6 +1698,61 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Fixed
 
+- **A fresh `install.sh` no longer silently replaces an installation that is already there
+  (CCP-1173).** It now refuses a target that carries the provenance marker **or** that
+  merely exists and is not empty: exit **4**, nothing written, and a message naming
+  `--update` as the intended path. `--force-fresh` is the only way past.
+
+  **The cause was the DEFAULT, not a typo.** `DEST="${CCPR_DEST:-$HOME/.claude}"` puts the
+  dangerous target behind an **absent** variable, so safety lived in a prefix — and a prefix
+  is lost by rewording a command or copying it out of one's own scrollback, leaving a command
+  that is syntactically perfect and reports nothing unusual. On 09.09.2026 a delegated agent
+  ran the installer from a throwaway probe clone with no `CCPR_DEST` and it landed on the
+  operator's real `~/.claude`: **18** instinct files deleted, `instincts.md` **37488 → 9242**
+  bytes, `CLAUDE.md` and `settings.json` replaced. All seven affected paths were recovered
+  byte-identical from the timestamped backup the installer had just taken, so this is about
+  the friction, not about data loss. `--yes` had skipped the only confirmation — which is why
+  the refusal is **hard rather than a prompt**, and why `--force-fresh` neither satisfies nor
+  is satisfied by `--yes`: replacing an existing installation non-interactively takes **both**
+  flags. A bare `--force` was rejected for reading as "switch off the checks"; `--force-fresh`
+  names the single mode it unlocks, and that word is the one the installer itself writes into
+  the marker (`install_mode=fresh`).
+
+  **Why the tool and not a permission rule** — measured, not assumed: a deny rule matches
+  *through* an environment-variable assignment, so `CCPR_DEST=… ./install.sh` and
+  `./install.sh` are the same command to it. A rule cannot separate the dangerous invocation
+  from the safe one, and a deny on `install.sh` would take `--verify` and `--update` with it.
+
+  **Two triggers, because the marker alone is structurally blind.** An installation made
+  before the marker existed cannot be recognised by it, and those are the oldest ones. The
+  second trigger covers them, and it costs nothing: a throwaway probe target is fresh or
+  empty *by construction* while a real installation is never empty, so the two populations
+  map exactly onto "empty vs not". Dotfiles count — `ls` calls a directory holding only
+  `.ccpr-install-provenance` empty, and an installation whose visible files were removed by
+  hand is still not an empty directory.
+
+  **A fail-open found in review and fixed in the same change**: an unreadable `$DEST` made
+  both globs in the occupancy check come back as their own unmatched literals, so the guard
+  concluded "empty" for a directory that may hold a full installation. Measured before
+  fixing — the run walked past the guard, announced `Backing up …`, created an **empty**
+  backup directory and died in `cp` with `Permission denied`, exit 1: no data was lost, but
+  by accident rather than by design. A check that could not look now refuses with a reason of
+  its own, the same distinction `--verify` already draws between *could not run* and *no
+  divergence*.
+
+  **What this does not reach.** `--update` and `--verify` are untouched — neither replaces the
+  target wholesale, and `--update` is the path the refusal points at. A missing or empty
+  target still installs silently, which is the whole first-install experience. And
+  `--dry-run` is deliberately unchanged, so a preview onto an occupied target still describes
+  the full fresh install the real run would now refuse; that disagreement is recorded, not
+  fixed here. Pinned by **25** new tests (92 → 117 in `test_install_provenance.py`) and
+  **7** mutation probes, of which the one that mattered attacked the guard for *over*-firing:
+  collapsing "empty" into "exists" is caught by exactly one test, and without that silent
+  counter-proof the suite stays green for a guard that refuses every install including the
+  first. `test_install_docs_boundary.py`'s allowlist-parity fixture reused one destination
+  across every entry and now takes a fresh target per entry — the accumulation was incidental
+  to what it measures, so the fixture changed rather than the invocation.
+
 - **`install.sh --verify` now compares every directory the installer writes, not four of
   six (CCP-1166 / F10).** `VERIFY_SCOPE` was `( agents commands hooks templates )`, which
   reached **162 of the 409 files** that sit under those six directories in a working

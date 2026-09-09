@@ -321,6 +321,23 @@ class AllowlistAgreementTest(unittest.TestCase):
             (src_entry / "x.md").write_text("x\n", encoding="utf-8")
         else:
             src_entry.write_text("x\n", encoding="utf-8")
+        # CCP-1173: a FRESH install now refuses a target that already holds
+        # an installation, so the single destination this helper used to
+        # reuse across every allowlist entry is refused from the second
+        # entry onward (exit 4). The accumulation was incidental to the
+        # subject, not part of it: every assertion here is a PER-ENTRY
+        # verdict and nothing reads an earlier entry's leftovers out of the
+        # target. So the fixture drops the accumulation and keeps the
+        # invocation -- a fresh target per entry, still the default fresh
+        # install. Switching this call to --update would have been shorter,
+        # but it moves BOTH halves of the parity claim off the invocation an
+        # adopter runs first, and makes the test quietly depend on "docs"
+        # being a FRAMEWORK artifact (true today, and not what this class is
+        # about). The SOURCE tree still accumulates entries across
+        # iterations, exactly as before.
+        self.install_dest = Path(tempfile.mkdtemp(prefix="ccpr-agreement-install-dest-"))
+        self.addCleanup(_rmtree, self.install_dest)
+        shutil.rmtree(self.install_dest)
         r = subprocess.run(
             ["bash", str(self.install_src / "install.sh"), "--yes"],
             cwd=self.install_src, capture_output=True, text=True,
