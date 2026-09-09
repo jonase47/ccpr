@@ -905,6 +905,14 @@ class ClassificationCountsTest(unittest.TestCase):
         growing paragraph:
 
           in-scope / flagged   when
+          1412 / 0             09.09.2026 (CCP-1173 second cut, --dry-run
+                               previews the refusal): +11, all 11 in scope.
+                               With the row below it: 25/25 then 11/11 from the
+                               same ticket, so the scanner reads this module's
+                               whole idiom rather than a few helper names --
+                               which is what makes 0/27 and 5/23 in the two
+                               rows further down a property of the OTHER
+                               modules' naming, not of those tickets.
           1401 / 0             09.09.2026 (CCP-1173, install.sh fresh-target
                                guard): +25, and this time ALL 25 new methods
                                entered scope -- they drive install.sh through
@@ -1878,7 +1886,7 @@ class ClassificationCountsTest(unittest.TestCase):
         count."""
         recs = scan_tree()
         flagged = [r for r in recs if r.disposition in NEEDS_EXEMPTION]
-        self.assertEqual(1401, len(recs))
+        self.assertEqual(1412, len(recs))
         self.assertEqual(0, len(flagged))
 
 

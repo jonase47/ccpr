@@ -913,6 +913,31 @@ target_is_occupied() {
 }
 
 
+# fresh_install_refusal_reason -- the DECISION half of the CCP-1173 guard,
+# separated from acting on it so the preview can ask without triggering it.
+# Echoes the reason a fresh install must be refused, or nothing at all when
+# there is none; never exits, never writes. Same decide/act split WI-0064
+# introduced for install_docs(), and for the same reason: the two callers
+# below must agree by construction rather than by both being maintained.
+#
+# Returns 0 unconditionally -- an empty answer IS the answer "no reason", and
+# a non-zero return here would abort the caller's command substitution under
+# `set -e`.
+fresh_install_refusal_reason() {
+  [[ "$UPDATE" -eq 0 && "$FORCE_FRESH" -eq 0 ]] || return 0
+  if [[ -f "$DEST/$PROVENANCE_FILE" ]]; then
+    printf '%s' "it carries a provenance marker ($PROVENANCE_FILE) from an earlier install"
+  elif [[ -d "$DEST" && ( ! -r "$DEST" || ! -x "$DEST" ) ]]; then
+    # A check that COULD NOT LOOK must not answer "nothing there" -- the same
+    # distinction --verify draws between could-not-run and no-divergence.
+    printf '%s' "it exists but cannot be read, so whether it holds an installation cannot be established"
+  elif target_is_occupied; then
+    printf '%s' "it already exists and is not empty"
+  fi
+  return 0
+}
+
+
 ASSUME_YES=0
 DRY_RUN=0
 UPDATE=0
@@ -1031,6 +1056,73 @@ else
 fi
 echo
 
+# CCP-1173: a fresh install onto a target that is already in use is a
+# wholesale replace, and --yes waves it through without a word. That is how a
+# throwaway probe run landed on a real ~/.claude on 09.09.2026 (18 instinct
+# files deleted, instincts.md 37488 -> 9242 bytes, CLAUDE.md and settings.json
+# overwritten; recovered from the backup this script had just taken).
+#
+# The cause was the DEFAULT, not a typo: DEST falls back to $HOME/.claude when
+# CCPR_DEST is ABSENT, so a safe invocation loses its safety by being reworded
+# or copied, and what is left is syntactically perfect and reports nothing
+# unusual. A briefing that says "never point this at ~/.claude" is a request;
+# this is the barrier.
+#
+# The refusal is HARD, not a prompt. A prompt is exactly what --yes exists to
+# skip, and the incident ran with --yes -- so --force-fresh is the only way
+# past, and the two flags are independent: replacing an existing installation
+# non-interactively needs BOTH.
+#
+# Two triggers, not one (PO decision 09.09.2026). The marker proves an
+# installation lives here, but an installation predating the marker cannot be
+# seen that way -- and those are the oldest ones, whose loss costs most. So a
+# target that merely exists and is not empty is refused as well. Nothing
+# legitimate is caught by that: a throwaway probe target is fresh or empty by
+# construction and a real installation is never empty, which makes "empty vs
+# not" exactly the line.
+#
+# --update and --verify are deliberately out of reach: neither replaces the
+# target wholesale, and --update is the path this refusal points at.
+#
+# Decided here, BEFORE the "already exist ... WILL be overwritten" listing
+# below, and acted on in two ways. The position is not cosmetic: that listing
+# describes a replace, which is false for a run that is about to refuse -- a
+# refusal must not disagree with the paragraph above it any more than a
+# preview may disagree with the run it previews.
+refuse_reason="$(fresh_install_refusal_reason)"
+if [[ -n "$refuse_reason" ]]; then
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    # PO decision 09.09.2026, route 2: the preview ANNOUNCES the refusal and
+    # still exits 0. A preview that aborts (route 1) defeats its own purpose
+    # -- one runs it precisely to learn what would happen, so it has to
+    # answer; and leaving it to promise an install that would not happen
+    # (route 3) contradicts the WI-0064 rule this file states twice.
+    echo "[dry-run] The real run would REFUSE this target and change nothing:"
+    echo "[dry-run]   $refuse_reason."
+    echo "[dry-run] It would exit 4 -- no backup, no copy, nothing written."
+    echo "[dry-run] Two ways forward:"
+    echo "[dry-run]   --update       upgrade this installation in place; keeps CLAUDE.md,"
+    echo "[dry-run]                  settings.json and the instincts matured on this machine"
+    echo "[dry-run]   --force-fresh  replace it wholesale (--yes does not imply it, and it"
+    echo "[dry-run]                  does not imply --yes)"
+    echo "[dry-run] No changes made."
+    exit 0
+  fi
+  echo "REFUSED: a fresh install would replace everything in" >&2
+  echo "  $DEST" >&2
+  echo "  -- $refuse_reason." >&2
+  echo >&2
+  echo "  Use --update instead. It is the intended path for a target already in" >&2
+  echo "  use: it copies the framework only and keeps CLAUDE.md, settings.json and" >&2
+  echo "  the instincts that matured on this machine." >&2
+  echo >&2
+  echo "  If replacing it wholesale is what you mean, say so with --force-fresh." >&2
+  echo "  --yes does not imply it, and it does not imply --yes." >&2
+  echo >&2
+  echo "  (\`--dry-run\` describes this without running it.)" >&2
+  exit 4
+fi
+
 # In update mode, reassure which files are deliberately left as-is.
 if [[ ${#SKIPPED[@]} -gt 0 ]]; then
   echo "Keeping your local files (NOT touched):"
@@ -1091,63 +1183,6 @@ if [[ "$DRY_RUN" -eq 1 ]]; then
   echo "  $DEST/$PROVENANCE_FILE (provenance marker, would be written last)"
   echo "[dry-run] No changes made."
   exit 0
-fi
-
-# CCP-1173: a fresh install onto a target that is already in use is a
-# wholesale replace, and --yes waves it through without a word. That is how a
-# throwaway probe run landed on a real ~/.claude on 09.09.2026 (18 instinct
-# files deleted, instincts.md 37488 -> 9242 bytes, CLAUDE.md and settings.json
-# overwritten; recovered from the backup this script had just taken).
-#
-# The cause was the DEFAULT, not a typo: DEST falls back to $HOME/.claude when
-# CCPR_DEST is ABSENT, so a safe invocation loses its safety by being reworded
-# or copied, and what is left is syntactically perfect and reports nothing
-# unusual. A briefing that says "never point this at ~/.claude" is a request;
-# this is the barrier.
-#
-# The refusal is HARD, not a prompt. A prompt is exactly what --yes exists to
-# skip, and the incident ran with --yes -- so --force-fresh is the only way
-# past, and the two flags are independent: replacing an existing installation
-# non-interactively needs BOTH.
-#
-# Two triggers, not one (PO decision 09.09.2026). The marker proves an
-# installation lives here, but an installation predating the marker cannot be
-# seen that way -- and those are the oldest ones, whose loss costs most. So a
-# target that merely exists and is not empty is refused as well. Nothing
-# legitimate is caught by that: a throwaway probe target is fresh or empty by
-# construction and a real installation is never empty, which makes "empty vs
-# not" exactly the line.
-#
-# --update and --verify are deliberately out of reach: neither replaces the
-# target wholesale, and --update is the path this refusal points at.
-
-if [[ "$UPDATE" -eq 0 && "$FORCE_FRESH" -eq 0 ]]; then
-  refuse_reason=""
-  if [[ -f "$DEST/$PROVENANCE_FILE" ]]; then
-    refuse_reason="it carries a provenance marker ($PROVENANCE_FILE) from an earlier install"
-  elif [[ -d "$DEST" && ( ! -r "$DEST" || ! -x "$DEST" ) ]]; then
-    # Found in review. A check that COULD NOT LOOK must not answer "nothing
-    # there" -- the same distinction --verify draws between could-not-run and
-    # no-divergence. Before this, such a run walked past the guard, announced
-    # a backup, created an empty backup directory and died in `cp` with a
-    # permission error: no data lost, but the refusal never spoke.
-    refuse_reason="it exists but cannot be read, so whether it holds an installation cannot be established"
-  elif target_is_occupied; then
-    refuse_reason="it already exists and is not empty"
-  fi
-  if [[ -n "$refuse_reason" ]]; then
-    echo "REFUSED: a fresh install would replace everything in" >&2
-    echo "  $DEST" >&2
-    echo "  -- $refuse_reason." >&2
-    echo >&2
-    echo "  Use --update instead. It is the intended path for a target already in" >&2
-    echo "  use: it copies the framework only and keeps CLAUDE.md, settings.json and" >&2
-    echo "  the instincts that matured on this machine." >&2
-    echo >&2
-    echo "  If replacing it wholesale is what you mean, say so with --force-fresh." >&2
-    echo "  --yes does not imply it, and it does not imply --yes." >&2
-    exit 4
-  fi
 fi
 
 if [[ "$ASSUME_YES" -ne 1 ]]; then

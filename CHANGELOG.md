@@ -1742,14 +1742,25 @@ All notable changes to this project are documented in this file. The format is b
 
   **What this does not reach.** `--update` and `--verify` are untouched — neither replaces the
   target wholesale, and `--update` is the path the refusal points at. A missing or empty
-  target still installs silently, which is the whole first-install experience. And
-  `--dry-run` is deliberately unchanged, so a preview onto an occupied target still describes
-  the full fresh install the real run would now refuse; that disagreement is recorded, not
-  fixed here. Pinned by **25** new tests (92 → 117 in `test_install_provenance.py`) and
-  **7** mutation probes, of which the one that mattered attacked the guard for *over*-firing:
-  collapsing "empty" into "exists" is caught by exactly one test, and without that silent
-  counter-proof the suite stays green for a guard that refuses every install including the
-  first. `test_install_docs_boundary.py`'s allowlist-parity fixture reused one destination
+  target still installs silently, which is the whole first-install experience.
+
+  **`--dry-run` previews the refusal instead of contradicting it.** The first cut left the
+  preview unchanged, so it promised a full install (54 lines) onto a target the real run
+  refuses — and `install.sh` twice carries the WI-0064 rule that a preview must not disagree
+  with the run it previews. PO decision: the preview *announces* the refusal, names the exit
+  code and both ways forward, and still exits **0** — a preview that aborts defeats its own
+  purpose, since one runs it precisely to learn what would happen. The guard was therefore
+  split into a decision (`fresh_install_refusal_reason()`, which never exits and never writes)
+  and two callers, the same decide/act split WI-0064 introduced. Placing that decision above
+  the `!! WARNING: … WILL be overwritten` listing fixed a second false promise nobody had
+  reported: the **real** run printed that warning and then refused. Pinned by **36** new tests
+  (92 → 128 in `test_install_provenance.py`, both figures counted with `grep -c 'def test_'`
+  against `02930a9` and the working tree) and **12** distinct mutation probes. Seven were re-run
+  after the split, because a refactor can leave an assertion green that no longer reaches
+  anything. The one that mattered attacked the guard for *over*-firing: collapsing "empty"
+  into "exists" is caught by exactly one test, and without that silent counter-proof the
+  suite stays green for a guard that refuses every install including the first.
+  `test_install_docs_boundary.py`'s allowlist-parity fixture reused one destination
   across every entry and now takes a fresh target per entry — the accumulation was incidental
   to what it measures, so the fixture changed rather than the invocation.
 

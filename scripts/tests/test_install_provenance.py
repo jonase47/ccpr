@@ -2085,5 +2085,134 @@ class ForceFreshIsTheOnlyWayPastTest(FreshInstallOverAnExistingInstallationBase)
         self.assertIn("--force-fresh", r.stdout)
 
 
+class TheDryRunPreviewsTheRefusalRatherThanContradictingItTest(
+        FreshInstallOverAnExistingInstallationBase):
+    """CCP-1173 round 2. The guard made `--dry-run` disagree with the run it
+    previews: onto an occupied target the preview promised a full install
+    while the real run refused outright. install.sh carries the WI-0064 rule
+    against exactly that twice in its own comments -- the rule that split
+    install_docs() into a decision and a copy in the first place.
+
+    PO decision 09.09.2026, route 2: the preview ANNOUNCES the refusal and
+    still exits 0. Route 1 (the preview refuses too) was rejected because a
+    preview that aborts defeats its own purpose -- one runs it precisely to
+    learn what would happen, so it has to answer. Route 3 (leave it) was
+    rejected because the code would then contradict a rule written in its own
+    comments.
+
+    So the decision and the acting on it are two things here, and the tests
+    below check them apart: the same reason produces exit 4 on a real run and
+    exit 0 with a description on a preview."""
+
+    PREVIEW_BLOCK = "Would back up"
+    OVERWRITE_BLOCK = "WILL be overwritten"
+
+    def test_the_dry_run_says_the_real_run_would_refuse(self):
+        self.install_once()
+        r = self.run_install("--dry-run")
+        out = r.stdout + r.stderr
+        self.assertIn("REFUSE", out)
+        self.assertIn("exit 4", out,
+                      "the preview must name the exit code the real run would "
+                      "produce, or the reader cannot script against it")
+
+    def test_the_dry_run_names_both_ways_forward(self):
+        self.install_once()
+        r = self.run_install("--dry-run")
+        out = r.stdout + r.stderr
+        self.assertIn("--update", out)
+        self.assertIn("--force-fresh", out)
+
+    def test_the_dry_run_does_not_promise_the_install_it_would_not_perform(self):
+        # The half that makes this a fix rather than an extra paragraph: the
+        # "would copy everything" block must be GONE, not merely preceded by a
+        # correction. A preview that says both things has not stopped
+        # disagreeing with the run.
+        self.install_once()
+        r = self.run_install("--dry-run")
+        out = r.stdout + r.stderr
+        self.assertNotIn(self.PREVIEW_BLOCK, out)
+        self.assertNotIn(
+            self.OVERWRITE_BLOCK, out,
+            "the overwrite warning promises a replace that would not happen "
+            "either -- it is the same false promise one paragraph earlier",
+        )
+
+    def test_the_dry_run_still_exits_zero(self):
+        # Acceptance 2, pinned on its own. This is the half of route 2 that
+        # separates it from route 1, and it is what a later refactor is most
+        # likely to lose by reusing the refusal path wholesale.
+        self.install_once()
+        r = self.run_install("--dry-run")
+        self.assertEqual(
+            0, r.returncode,
+            "a preview that aborts defeats its own purpose -- exit 0 is what "
+            "makes this an announcement rather than a refusal:\n" + r.stdout + r.stderr,
+        )
+
+    def test_the_announced_dry_run_still_changes_nothing(self):
+        self.install_once()
+        before = self.marker_path().read_bytes()
+        r = self.run_install("--dry-run")
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertEqual(before, self.marker_path().read_bytes())
+        self.assertEqual([], self.backups())
+
+    def test_the_same_holds_for_a_non_empty_unmarked_target(self):
+        # The decision has three reasons; the preview must follow all of them,
+        # not only the marker one.
+        self.plant_unmarked_installation()
+        r = self.run_install("--dry-run")
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertIn("REFUSE", r.stdout + r.stderr)
+        self.assertNotIn(self.PREVIEW_BLOCK, r.stdout + r.stderr)
+
+    # -- silent counter-proofs -------------------------------------------
+
+    def test_a_dry_run_onto_a_missing_target_still_previews_the_install(self):
+        # Acceptance 3. Without this, a preview that ALWAYS announced a
+        # refusal would pass every test above.
+        r = self.run_install("--dry-run")
+        out = r.stdout + r.stderr
+        self.assertEqual(0, r.returncode, out)
+        self.assertIn(self.PREVIEW_BLOCK, out)
+        self.assertIn(shipped_marker_name(), out)
+        self.assertNotIn("REFUSE", out)
+
+    def test_a_dry_run_onto_an_empty_target_still_previews_the_install(self):
+        self.dest.mkdir(parents=True)
+        r = self.run_install("--dry-run")
+        out = r.stdout + r.stderr
+        self.assertEqual(0, r.returncode, out)
+        self.assertIn(self.PREVIEW_BLOCK, out)
+        self.assertNotIn("REFUSE", out)
+
+    def test_dry_run_with_force_fresh_previews_the_replace_not_the_refusal(self):
+        # Acceptance 4: the preview follows the run it previews. With
+        # --force-fresh the real run REPLACES, so the preview must describe
+        # the replace -- including the overwrite warning, which is true again.
+        self.install_once()
+        r = self.run_install("--dry-run", "--force-fresh")
+        out = r.stdout + r.stderr
+        self.assertEqual(0, r.returncode, out)
+        self.assertIn(self.PREVIEW_BLOCK, out)
+        self.assertIn(self.OVERWRITE_BLOCK, out)
+        self.assertNotIn("REFUSE", out)
+
+    def test_dry_run_with_update_is_unaffected(self):
+        self.install_once()
+        r = self.run_install("--dry-run", "--update")
+        out = r.stdout + r.stderr
+        self.assertEqual(0, r.returncode, out)
+        self.assertIn(self.PREVIEW_BLOCK, out)
+        self.assertNotIn("REFUSE", out)
+
+    def test_the_real_run_still_refuses_the_same_target(self):
+        # The decision is shared; only the acting differs. If a refactor ever
+        # routed the real run through the preview's branch, this is what dies.
+        self.install_once()
+        self.assertRefused(self.run_install("--yes"))
+
+
 if __name__ == "__main__":
     unittest.main()
