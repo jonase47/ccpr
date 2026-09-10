@@ -759,30 +759,33 @@ verify_installation() {
     echo "  UNEXPECTED -- in the installation, not in the recorded commit:"
     printf '%s' "$extra" | LC_ALL=C sort | sed 's/^/    - /'
   fi
-  if [[ "$ignored_n" -gt 0 ]]; then
-    echo "  IGNORED -- in the installation, ignored by the SOURCE CHECKOUT (excused, not skipped):"
-    # Grouped by the .gitignore RULE `git check-ignore -v` named for each
-    # path (CCP-1170), not listed one path per line -- a correct installation
-    # can grow dozens of __pycache__ entries under one rule, and a per-path
-    # listing buried the report under them. bash 3.2 has no associative
-    # arrays, so the grouping runs as a cut/sort/uniq pipeline over the
-    # "<rule>\t<rel>" lines collected during the walk, sorted by count
-    # descending (most-excused rule first), rule string breaking ties.
-    ignored_groups="$(printf '%s' "$ignored" | cut -f1 | LC_ALL=C sort \
-      | uniq -c | LC_ALL=C sort -k1,1nr -k2)"
-    while IFS= read -r gline; do
-      [[ -n "$gline" ]] || continue
-      ignored_rules_n=$((ignored_rules_n + 1))
-      read -r gcount grule <<< "$gline"
-      printf '%8d file(s)  %s\n' "$gcount" "$grule"
-    done <<< "$ignored_groups"
-    echo "    ($ignored_n file(s) excused by $ignored_rules_n rule(s), named by"
-    echo "     \`git check-ignore -v\` against $SRC as it stands now -- the same call"
-    echo "     that made the decision, and the one place here NOT resolved from"
-    echo "     commit $p_commit: check-ignore is a working-tree operation, so a path"
-    echo "     this repository will not track is in no commit, and having it here is"
-    echo "     not drift from one -- it is locally generated. Not counted as a finding.)"
-  fi
+  # Printed UNCONDITIONALLY (CCP-1170), unlike the NOT FRAMEWORK block below
+  # -- see the comment ahead of USER-OWNED for why. The rule set is derived
+  # per run and CAN be empty on a correct installation, but "nothing was
+  # excused this run" is exactly the number a reader needs without having
+  # to cause an excused file first.
+  echo "  IGNORED -- in the installation, ignored by the SOURCE CHECKOUT (excused, not skipped):"
+  # Grouped by the .gitignore RULE `git check-ignore -v` named for each
+  # path (CCP-1170), not listed one path per line -- a correct installation
+  # can grow dozens of __pycache__ entries under one rule, and a per-path
+  # listing buried the report under them. bash 3.2 has no associative
+  # arrays, so the grouping runs as a cut/sort/uniq pipeline over the
+  # "<rule>\t<rel>" lines collected during the walk, sorted by count
+  # descending (most-excused rule first), rule string breaking ties.
+  ignored_groups="$(printf '%s' "$ignored" | cut -f1 | LC_ALL=C sort \
+    | uniq -c | LC_ALL=C sort -k1,1nr -k2)"
+  while IFS= read -r gline; do
+    [[ -n "$gline" ]] || continue
+    ignored_rules_n=$((ignored_rules_n + 1))
+    read -r gcount grule <<< "$gline"
+    printf '%8d file(s)  %s\n' "$gcount" "$grule"
+  done <<< "$ignored_groups"
+  echo "    ($ignored_n file(s) excused by $ignored_rules_n rule(s), named by"
+  echo "     \`git check-ignore -v\` against $SRC as it stands now -- the same call"
+  echo "     that made the decision, and the one place here NOT resolved from"
+  echo "     commit $p_commit: check-ignore is a working-tree operation, so a path"
+  echo "     this repository will not track is in no commit, and having it here is"
+  echo "     not drift from one -- it is locally generated. Not counted as a finding.)"
 
   if [[ "$docs_skipped_n" -gt 0 ]]; then
     echo "  NOT FRAMEWORK -- under docs/ in the recorded commit, never installed:"
@@ -795,13 +798,16 @@ verify_installation() {
     echo "     allowlist is read from this checkout as it stands, not from the"
     echo "     recorded commit: same door the IGNORED rule declares above.)"
   fi
-  # Printed UNCONDITIONALLY, unlike the IGNORED and NOT FRAMEWORK blocks
-  # which are gated on having something to say. Deliberate, and the reason
-  # is the asymmetry in what the three exclusions cost: those two are
-  # derived per run and an empty one means "nothing was excused this time",
-  # which is worth nothing to print. This one is a FIXED list that is in
-  # force on every run, applies in BOTH directions, and can hide a MISSING
-  # -- the only exclusion here that can. A reader must be able to see it
+  # Printed UNCONDITIONALLY, unlike the NOT FRAMEWORK block above, which
+  # stays gated on having something to say. IGNORED used to be gated the
+  # same way and moved to this side of the line (CCP-1170) -- its own
+  # comment above states why. NOT FRAMEWORK is left where it was: its
+  # empty case genuinely means "nothing under docs/ was skipped this
+  # run", worth nothing to print, and it cannot hide a MISSING (an
+  # allowlisted docs/ path was never in the expected set to begin with).
+  # USER-OWNED is different from both: it is a FIXED list that is in force
+  # on every run, applies in BOTH directions, and can hide a MISSING --
+  # the only exclusion here that can. A reader must be able to see it
   # without first having to trigger it.
   echo "  USER-OWNED -- inside the scope but yours: compared in NEITHER direction:"
   for prefix in "${PROTECTED[@]}"; do

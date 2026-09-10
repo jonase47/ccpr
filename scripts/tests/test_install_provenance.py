@@ -448,6 +448,23 @@ class VerifyAgreesWithAnUntouchedInstallationTest(VerifyBase):
         self.assertEqual(0, r.returncode, r.stdout + r.stderr)
         self.assertRegex(r.stdout, r"compared\s+4\s+file")
 
+    def test_the_ignored_footer_prints_even_when_nothing_was_excused(self):
+        """CCP-1170, PO decision: the total and rule count print
+        UNCONDITIONALLY, for the same reason the USER-OWNED block already
+        prints unconditionally -- a reader must see how much was set aside
+        without first having to trigger it. A run that excused nothing
+        still says so, rather than omitting the IGNORED heading entirely."""
+        self.run_install("--yes")
+        r = self.verify()
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertIn(
+            "  IGNORED -- in the installation, ignored by the SOURCE CHECKOUT "
+            "(excused, not skipped):",
+            r.stdout,
+        )
+        self.assertEqual({}, ignored_groups(r.stdout))
+        self.assertEqual((0, 0), ignored_footer(r.stdout))
+
     def test_the_verify_names_the_commit_it_compared_against(self):
         head = self.git("rev-parse", "HEAD").stdout.strip()
         self.run_install("--yes")
