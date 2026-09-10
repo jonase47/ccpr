@@ -1,0 +1,171 @@
+"""test_workitem_similar.py -- Tests for `workitems.py similar` (CCP-1172): a
+read-only ranked TEXT search over every item's title+description, built so a
+`create` cannot be filed without a cheap way to check the corpus first (ADR-0004
+settled dedup for `lift`; this is the same principle for `create`/a human operator).
+
+Every test here runs against a fixture, never against a live tracker: the real
+`local` backend rooted at a fresh temp directory. No network, no token, no
+`.claude/settings.json` of this repo.
+
+The KNOWN-NEIGHBOUR case (CCP-1172 acceptance criterion 2) uses the real, frozen
+text of CCP-1167/CCP-1136/CCP-1124 from `similar_fixture_texts.py` -- a search that
+cannot reproduce a confirmed hit is not a search, and synthetic stand-in text would
+not prove that.
+"""
+
+import json
+import shutil
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+SCRIPT_PATH = Path(__file__).resolve().parents[2] / "workitems.py"
+sys.path.insert(0, str(SCRIPT_PATH.parent / "lib"))
+
+from workitems import WorkItemError  # noqa: E402
+from workitems import local  # noqa: E402
+from workitems import similar as similar_module  # noqa: E402
+
+from . import similar_fixture_texts as fixtures  # noqa: E402
+
+# Distractor items: distinct vocabulary from the absence-only-scanner class the three
+# fixture items share, so a test asserting CCP-1136/CCP-1124 rank highly is not
+# trivially true of "the only other items in a 3-item corpus".
+DISTRACTOR_ITEMS = [
+    {
+        "title": "Dark mode toggle does not persist across browser sessions",
+        "description": (
+            "The theme preference resets to light mode on every page reload. "
+            "Store the choice in localStorage and read it back on mount."
+        ),
+    },
+    {
+        "title": "Add a retry queue for failed Stripe webhook deliveries",
+        "description": (
+            "A webhook delivery that times out is currently dropped. Persist "
+            "failed deliveries and retry with exponential backoff."
+        ),
+    },
+    {
+        "title": "GDPR data export endpoint should stream instead of buffering",
+        "description": (
+            "Large accounts time out the export request because the full "
+            "JSON payload is built in memory before it is sent."
+        ),
+    },
+]
+
+
+class LocalFixtureTestCase(unittest.TestCase):
+    def setUp(self):
+        self.workitems_dir = tempfile.mkdtemp(prefix="ccpr-similar-")
+        self.addCleanup(shutil.rmtree, self.workitems_dir, ignore_errors=True)
+        self.backend = local.create({"workitems_dir": self.workitems_dir})
+
+    def plant(self, title, description):
+        return self.backend.create(title=title, description=description)["id"]
+
+
+class _UnreachableBackend:
+    """Stands in for any backend that cannot be reached -- same shape as
+    test_workitem_lint.py's own fixture of the same name (CCP-1171)."""
+
+    def list(self):
+        raise WorkItemError("YouTrack request failed for GET /api/issues: connection refused")
+
+
+class KnownNeighbourTest(LocalFixtureTestCase):
+    """CCP-1172 acceptance 2: the CCP-1167 text must surface CCP-1136 and
+    CCP-1124, its human-confirmed true neighbours."""
+
+    def setUp(self):
+        super().setUp()
+        self.ccp_1136_id = self.plant(fixtures.CCP_1136_TITLE, fixtures.CCP_1136_DESCRIPTION)
+        self.ccp_1124_id = self.plant(fixtures.CCP_1124_TITLE, fixtures.CCP_1124_DESCRIPTION)
+        for distractor in DISTRACTOR_ITEMS:
+            self.plant(distractor["title"], distractor["description"])
+
+    def test_a_known_neighbourhood_is_reproduced_and_ranked_above_distractors(self):
+        query_text = f"{fixtures.CCP_1167_TITLE}\n\n{fixtures.CCP_1167_DESCRIPTION}"
+
+        report = similar_module.similar(self.backend, query_text)
+
+        result_ids = [r["id"] for r in report["results"]]
+        self.assertIn(
+            self.ccp_1136_id, result_ids,
+            f"expected the CCP-1136 stand-in ({self.ccp_1136_id}) among the "
+            f"results, got {result_ids}",
+        )
+        self.assertIn(
+            self.ccp_1124_id, result_ids,
+            f"expected the CCP-1124 stand-in ({self.ccp_1124_id}) among the "
+            f"results, got {result_ids}",
+        )
+
+        # Not just present -- ranked ABOVE every distractor, since those share
+        # none of the absence-only-scanner vocabulary with the query.
+        distractor_ids = {r["id"] for r in report["results"]} - {
+            self.ccp_1136_id, self.ccp_1124_id,
+        }
+        rank_of = {r["id"]: i for i, r in enumerate(report["results"])}
+        for distractor_id in distractor_ids:
+            self.assertLess(
+                rank_of[self.ccp_1136_id], rank_of[distractor_id],
+                "CCP-1136 stand-in must outrank an unrelated distractor",
+            )
+            self.assertLess(
+                rank_of[self.ccp_1124_id], rank_of[distractor_id],
+                "CCP-1124 stand-in must outrank an unrelated distractor",
+            )
+
+
+class SimilarCliTest(unittest.TestCase):
+    """End-to-end through the real entry point, so provider resolution, JSON-on-
+    stdout and the EXIT CODE are covered -- the exit code is the part a caller
+    acts on and a report field alone cannot prove (mirrors LintCliTest, CCP-1171)."""
+
+    def setUp(self):
+        self.project_dir = Path(tempfile.mkdtemp(prefix="ccpr-similar-cli-"))
+        self.addCleanup(shutil.rmtree, self.project_dir, ignore_errors=True)
+        self.workitems_dir = self.project_dir / "docs" / "workitems"
+        self.workitems_dir.mkdir(parents=True)
+        self.write_settings({"workitems": {"provider": "local"}})
+        self.backend = local.create({"workitems_dir": str(self.workitems_dir)})
+
+    def write_settings(self, data):
+        claude_dir = self.project_dir / ".claude"
+        claude_dir.mkdir(parents=True, exist_ok=True)
+        (claude_dir / "settings.json").write_text(json.dumps(data), encoding="utf-8")
+
+    def run_similar(self, *extra_args):
+        return subprocess.run(
+            [
+                sys.executable, str(SCRIPT_PATH), "similar", *extra_args,
+                "--project", str(self.project_dir),
+            ],
+            capture_output=True, text=True,
+        )
+
+    def test_a_matching_corpus_exits_zero_and_names_the_provider_it_read(self):
+        self.backend.create(title="Dark mode toggle resets on reload")
+
+        result = self.run_similar("Dark mode toggle does not persist")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["verdict"], "results")
+        self.assertEqual(report["provider"], "local")
+
+    def test_an_empty_corpus_is_no_results_not_a_refusal(self):
+        result = self.run_similar("Nothing has been filed yet")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["verdict"], "no-results")
+        self.assertEqual(report["results"], [])
+
+
+if __name__ == "__main__":
+    unittest.main()

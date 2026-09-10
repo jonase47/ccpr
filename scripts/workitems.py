@@ -33,6 +33,7 @@ Usage:
   workitems.py lift <source-file...> [--apply] [--exclude PATTERN=REASON ...] [--project DIR]
   workitems.py sweep [--project DIR]
   workitems.py lint [--project DIR]
+  workitems.py similar TEXT [--limit N] [--project DIR]
 
 Output: JSON on stdout for every operation (a list for `list`, an object otherwise).
 
@@ -73,6 +74,7 @@ from workitems import WorkItemError, parse_duration_seconds  # noqa: E402
 from workitems import lift as lift_module  # noqa: E402
 from workitems import lint as lint_module  # noqa: E402
 from workitems import migrate as migrate_module  # noqa: E402
+from workitems import similar as similar_module  # noqa: E402
 from workitems import sweep as sweep_module  # noqa: E402
 
 
@@ -337,6 +339,18 @@ def build_parser():
         parents=[project_arg],
     )
 
+    p_similar = sub.add_parser(
+        "similar",
+        help="Ranked text search over every item's title+description; exit 0 ran, "
+             "3 could-not-run (CCP-1172)",
+        parents=[project_arg],
+    )
+    p_similar.add_argument("text", help="Title or free text to search the corpus for")
+    p_similar.add_argument(
+        "--limit", type=int, default=similar_module.DEFAULT_LIMIT,
+        help=f"Max results to return (default: {similar_module.DEFAULT_LIMIT})",
+    )
+
     return parser
 
 
@@ -537,6 +551,41 @@ def _run_lint(settings, args):
     return 1 if report["findings"] else 0
 
 
+def _run_similar(settings, args):
+    """`similar` (CCP-1172): like lint, this spans every item rather than one id,
+    so it lives here and not in dispatch(). It also owns its exit code the same
+    way lint does, for the same reason -- 'could not run' must not be reachable
+    through the same exit code as 'ran and found nothing similar'.
+
+    Exit: 0 ran (results or no-results) · 3 COULD NOT RUN (nothing compared).
+    Unlike lint there is no exit-1-for-findings: `similar` is an advisory search
+    a caller runs before filing an item, not a gate a pipeline fails on, so a
+    non-empty result list is not itself a problem to signal via exit code.
+
+    Backend RESOLUTION and CONSTRUCTION are inside the same guard as the read
+    (see lint's `_run_lint` for why `UnknownProviderError` needs its own arm here
+    rather than escaping to main()'s generic handler).
+    """
+    provider = settings.get("workitems", {}).get("provider", DEFAULT_PROVIDER)
+    try:
+        config = resolve_provider_config(settings, args.project_dir, provider)
+        backend = load_backend(provider, config)
+        report = similar_module.similar(backend, args.text, limit=args.limit, provider=provider)
+    except UnknownProviderError as exc:
+        report = similar_module.refusal(
+            f"unknown work-item provider: {exc} -- no scripts/lib/workitems/{exc}.py",
+            provider=provider,
+        )
+    except WorkItemError as exc:
+        report = similar_module.refusal(str(exc), provider=provider)
+
+    print(json.dumps(report, indent=2, ensure_ascii=False))
+    if report["verdict"] == "could-not-run":
+        print(report["message"], file=sys.stderr)
+        return 3
+    return 0
+
+
 def main(argv=None):
     args = build_parser().parse_args(argv)
     # The single place the --project default is resolved (see build_parser()'s
@@ -552,6 +601,9 @@ def main(argv=None):
         elif args.operation == "lint":
             # Returns its own exit code and does its own printing (see _run_lint).
             return _run_lint(settings, args)
+        elif args.operation == "similar":
+            # Returns its own exit code and does its own printing (see _run_similar).
+            return _run_similar(settings, args)
         else:
             provider, config = resolve_provider(settings, args.project_dir)
             backend = load_backend(provider, config)
