@@ -509,7 +509,7 @@ write_provenance() {
   } > "$DEST/$PROVENANCE_FILE"
   echo "  wrote $PROVENANCE_FILE (source: $SRC_KIND${SRC_COMMIT:+ $SRC_COMMIT}, $SRC_STATE)"
   if [[ "$SRC_KIND" == "non-git" && -e "$SRC/.git" ]]; then
-    echo "  !! WARNING: $SRC contains a .git directory, but its provenance could" >&2
+    echo "  !! WARNING: $SRC contains a .git entry, but its provenance could" >&2
     echo "     not be resolved -- the installed provenance check will not be able" >&2
     echo "     to compare this installation against a commit ('--verify' will" >&2
     echo "     report it as could-not-run). If this is unexpected, check that" >&2

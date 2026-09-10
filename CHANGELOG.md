@@ -1769,7 +1769,10 @@ All notable changes to this project are documented in this file. The format is b
   defect class in `scripts/lib/discipline_gate.sh`, fixed by *avoiding* the git query and
   deriving identity from the file's own resolved path instead): that avoidance does not apply
   here, because the git query is not incidental — resolving `$SRC`'s toplevel through git IS
-  the question this function answers.
+  the question this function answers. (CCP-1037 itself covers two distinct failure forms of
+  the same exemption — its own `discipline_gate.sh` code comment documents the OTHER one, a
+  server-side hook running outside any git repository at all; the work item's own description
+  names the case-mismatch form this change addresses, with the identical example paths.)
 
   **The guard the comparison exists for still holds** (`MarkerOnANonGitSourceInventsNothingTest
   .test_a_source_inside_an_unrelated_git_repository_is_not_claimed_as_its_own`, pre-existing
@@ -1790,12 +1793,26 @@ All notable changes to this project are documented in this file. The format is b
   commit, both spellings agree, a genuine non-git source still prints no warning, and a
   source with its own unresolvable `.git` (an empty repository, no commits yet) does warn
   without inventing a commit. Skipped, with a stated reason, on a case-sensitive filesystem,
-  where the non-canonical spelling used in the case tests does not exist at all. **Not
-  covered by these tests:** two *distinct* directories differing only in case, genuinely two
-  directories on a case-sensitive volume, being wrongly merged by a naive case-folding fix —
-  this sandbox's filesystem is case-insensitive, so that specific failure mode cannot be
-  constructed here; using `-ef` sidesteps it by construction (it never inspects case at all),
-  but no automated regression proves that claim on this machine.
+  where the non-canonical spelling used in the case tests does not exist at all.
+
+  **Code review follow-up: the case-folding regression this fix guards against turned out to
+  be unreachable end-to-end through `install.sh` on *any* filesystem** — `git rev-parse
+  --show-toplevel`'s own contract guarantees its result is always `$SRC` itself or a strict
+  ancestor of it, never a same-depth sibling, so the only way it can differ from `$SRC`'s own
+  resolved path while naming the *same* real directory is exactly the case-insensitive-aliasing
+  bug this change fixes, and the only way it can differ while naming a *different* real
+  directory (the pre-existing nested-foreign-checkout guard) differs in path depth, not case —
+  a fact any correctly-shaped comparison, case-folding included, already keeps apart. Measured,
+  not assumed: replacing `-ef` with a bash-3.2-compatible case fold (`${var,,}` needs bash 4+
+  and is not valid syntax under macOS's shipped bash — confirmed separately, `bad
+  substitution`) left the entire `test_install_provenance.py` suite green. Because no
+  behavioural test through `install.sh` can catch this, `TheEfComparisonIsNotACaseFolding
+  StringCompareTest` pins the property directly and unconditionally instead: a case-folding
+  compare is pure text and treats two case-variant spellings as equal regardless of whether
+  either path exists, while `-ef` is a `stat()`-based device+inode comparison. A supplementary
+  `@skipUnless`-gated class (`OnACaseSensitiveFilesystemEfKeepsCaseVariantsApartTest`, skipped
+  here with a stated reason, meaningful on CI's `ubuntu-latest`/ext4 `python-tests` job) proves
+  the other half where a case-sensitive filesystem actually makes it reproducible.
 
 - **`install.sh --verify`'s IGNORED block is grouped by `.gitignore` rule instead of listing
   every excused path (CCP-1170).** A correct installation excused 100 locally generated paths
