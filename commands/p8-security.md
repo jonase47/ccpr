@@ -96,10 +96,13 @@ Update `docs/operations/OPS.md`:
 
 Cross-file update, using the guard result from step 0:
 - Structured store: `workitems create --title "<finding>" --type fix --tag security --description
-  "<finding + CVE/CVSS + remediation>"` per Critical finding (check the full, unfiltered `workitems
-  list` for a matching title first — trim + casefold — so a re-run never duplicates an
-  already-created finding; record the assigned `**Work-Item:** WI-NNNN` id in this file's `## Open
-  Items`). `--tag` marks the finding as `security` as a real, queryable field (`list --tag
+  "<finding + CVE/CVSS + remediation>" --checked-against "<ids searched, or reasoning>"` per
+  Critical finding (check the full, unfiltered `workitems list` for a matching title first — trim +
+  casefold — so a re-run never duplicates an already-created finding, and run `workitems similar
+  "<finding>"` too, to catch a near-duplicate an exact title match misses and to fill in
+  `--checked-against`; record the assigned `**Work-Item:** WI-NNNN` id in this file's
+  `## Open Items`). `--tag` marks the finding as
+  `security` as a real, queryable field (`list --tag
   security`) — no more description prefix.
 - Prose fallback: append Critical findings as new items to `docs/planning/BACKLOG.md` (for
   `/p8-iteration`) and bump its `last_updated`.

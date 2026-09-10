@@ -101,10 +101,12 @@ If an item with a matching title is already present in the returned array, skip 
 reuse its `id`. Match case- and whitespace-insensitively (trim, then compare case-folded) so a
 trivial formatting difference doesn't cause a false duplicate or a false miss — this does not catch
 a genuinely *renamed* story (it recreates rather than updates in that case, which is an acceptable
-edge case for this minimal guard). Otherwise create it:
+edge case for this minimal guard). Run `workitems similar "<story title>"` too, per story, before
+creating it — it catches a near-duplicate the exact-title check above misses, and is the cheap way
+to fill in `--checked-against` below honestly. Otherwise create it:
 
 ```
-python3 ~/.claude/scripts/workitems.py create --title "<story title>" --type feat --description "<story text + acceptance criteria>"
+python3 ~/.claude/scripts/workitems.py create --title "<story title>" --type feat --description "<story text + acceptance criteria>" --checked-against "<ids searched, or reasoning>"
 ```
 
 The backend assigns the `id` (`WI-NNNN` on the `local` provider) — never invent one. This is the

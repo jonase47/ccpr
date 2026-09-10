@@ -93,12 +93,15 @@ step — it stays "not verified" from Stage 1, which is neither a pass nor a fin
 
 For every "Yes" finding at `active` or `frozen` severity, open exactly **one** work item —
 one per confirmed invalidation, not one per changed path and not one per document that merely
-shows drift with no invalidated claim:
+shows drift with no invalidated claim. Run `workitems similar "Anchor drift: <document> vs
+<path(s)>"` first, per finding — the cheap way to fill in `--checked-against` below honestly and
+to catch a near-duplicate finding from an earlier anchor run:
 
 ```
 python3 ~/.claude/scripts/workitems.py create --title "Anchor drift: <document> vs <path(s)>" \
   --type chore --tag anchor-drift \
-  --description "<what changed, which claim it invalidates, the anchor delta (old..new SHA)>"
+  --description "<what changed, which claim it invalidates, the anchor delta (old..new SHA)>" \
+  --checked-against "<ids searched, or reasoning>"
 ```
 
 This is `workitems create` exactly as specified in `handbook/WORKITEMS.md` §1/§4 — no contract

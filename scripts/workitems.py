@@ -9,8 +9,8 @@ not a repo-root settings.json -- see load_settings()'s docstring for the exact
 precedence, including the `.claude/settings.local.json` dev override.
 
 Usage:
-  workitems.py create --title T [--type X] [--owner O] [--description D]
-                       [--tag T ...] [--project DIR]
+  workitems.py create --title T --checked-against C [--type X] [--owner O]
+                       [--description D] [--tag T ...] [--project DIR]
   workitems.py list [--status STATUS] [--owner OWNER] [--tag T ...] [--type X]
                      [--sprint N] [--priority P] [--query Q] [--project DIR]
   workitems.py get <id> [--project DIR]
@@ -33,8 +33,17 @@ Usage:
   workitems.py lift <source-file...> [--apply] [--exclude PATTERN=REASON ...] [--project DIR]
   workitems.py sweep [--project DIR]
   workitems.py lint [--project DIR]
+  workitems.py similar TEXT [--limit N] [--project DIR]
 
 Output: JSON on stdout for every operation (a list for `list`, an object otherwise).
+
+Dedup check (CCP-1172): `create` requires --checked-against, a free-text value
+recorded into the stored description ("Checked against: <value>"), never validated
+beyond non-empty -- "none" is a permitted answer, but it is then a permanent,
+auditable fact in the item rather than a claim in a session. Run `similar TEXT`
+first to produce an honest value cheaply; it ranks every item's title+description
+by text similarity and states in its own output what it cannot reach (a paraphrase
+of the same behaviour, not the same words).
 
 Tags (ADR-0002 2nd addendum): --tag is repeatable everywhere it appears; on `list` it
 is AND semantics (an item must carry every named tag to match). --query is a
@@ -73,6 +82,7 @@ from workitems import WorkItemError, parse_duration_seconds  # noqa: E402
 from workitems import lift as lift_module  # noqa: E402
 from workitems import lint as lint_module  # noqa: E402
 from workitems import migrate as migrate_module  # noqa: E402
+from workitems import similar as similar_module  # noqa: E402
 from workitems import sweep as sweep_module  # noqa: E402
 
 
@@ -194,6 +204,14 @@ def build_parser():
     p_create.add_argument("--type", dest="type")
     p_create.add_argument("--owner")
     p_create.add_argument("--description")
+    p_create.add_argument(
+        "--checked-against", required=True,
+        help="Ids the corpus was searched against before filing, or the reasoning "
+             "for skipping the search (CCP-1172); 'none' is a permitted value, but "
+             "it is recorded in the item's description permanently, so it is "
+             "auditable after the fact -- run `workitems.py similar` first to "
+             "produce an honest answer cheaply",
+    )
     p_create.add_argument(
         "--tag", dest="tags", action="append", default=[],
         help="Attach a tag (repeatable)",
@@ -337,6 +355,18 @@ def build_parser():
         parents=[project_arg],
     )
 
+    p_similar = sub.add_parser(
+        "similar",
+        help="Ranked text search over every item's title+description; exit 0 ran, "
+             "3 could-not-run (CCP-1172)",
+        parents=[project_arg],
+    )
+    p_similar.add_argument("text", help="Title or free text to search the corpus for")
+    p_similar.add_argument(
+        "--limit", type=int, default=similar_module.DEFAULT_LIMIT,
+        help=f"Max results to return (default: {similar_module.DEFAULT_LIMIT})",
+    )
+
     return parser
 
 
@@ -352,11 +382,42 @@ def _parse_estimate_arg(raw):
         raise WorkItemError(f"Invalid estimate {raw!r}: must be an integer") from None
 
 
+def _compose_create_description(description, checked_against):
+    """Prepends the recorded dedup-check evidence (CCP-1172, PO decision) to
+    `create`'s description, rather than dropping it in a side channel: the whole
+    point of a REQUIRED --checked-against is that the value survives inside the
+    item itself, permanently and auditable, not only in whatever session filed it.
+    Kept at the CLI layer, not in backend.create()'s own signature (~40 existing
+    callers construct items directly against that signature across both backends
+    and `lift`; none of them need to change for a CLI-only requirement).
+
+    `checked_against` is trimmed and REJECTED if empty after trimming (code-review
+    finding, Critical): argparse's `required=True` on the flag only enforces the
+    flag's PRESENCE, not a non-empty VALUE -- `--checked-against ""` used to
+    compose the meaningless line `Checked against:` and create the item anyway,
+    exactly the bypass class the PO decision excluded (a required field that
+    accepts an empty string is the rejected no-consequence warning under a
+    stricter name). handbook/WORKITEMS.md already documented "unvalidated beyond
+    non-empty" -- this is the code catching up to that claim, not a new promise."""
+    checked_against = (checked_against or "").strip()
+    if not checked_against:
+        raise WorkItemError(
+            "--checked-against must not be empty (or whitespace-only) -- \"none\" "
+            "is a permitted answer, an empty string is not. Run `workitems.py "
+            "similar TEXT` first to produce an honest value cheaply."
+        )
+    header = f"Checked against: {checked_against}"
+    if description:
+        return f"{header}\n\n{description}"
+    return header
+
+
 def dispatch(backend, args):
     if args.operation == "create":
         return backend.create(
             title=args.title, item_type=args.type, owner=args.owner,
-            description=args.description, tags=args.tags,
+            description=_compose_create_description(args.description, args.checked_against),
+            tags=args.tags,
         )
     if args.operation == "list":
         return backend.list(
@@ -537,6 +598,41 @@ def _run_lint(settings, args):
     return 1 if report["findings"] else 0
 
 
+def _run_similar(settings, args):
+    """`similar` (CCP-1172): like lint, this spans every item rather than one id,
+    so it lives here and not in dispatch(). It also owns its exit code the same
+    way lint does, for the same reason -- 'could not run' must not be reachable
+    through the same exit code as 'ran and found nothing similar'.
+
+    Exit: 0 ran (results or no-results) · 3 COULD NOT RUN (nothing compared).
+    Unlike lint there is no exit-1-for-findings: `similar` is an advisory search
+    a caller runs before filing an item, not a gate a pipeline fails on, so a
+    non-empty result list is not itself a problem to signal via exit code.
+
+    Backend RESOLUTION and CONSTRUCTION are inside the same guard as the read
+    (see lint's `_run_lint` for why `UnknownProviderError` needs its own arm here
+    rather than escaping to main()'s generic handler).
+    """
+    provider = settings.get("workitems", {}).get("provider", DEFAULT_PROVIDER)
+    try:
+        config = resolve_provider_config(settings, args.project_dir, provider)
+        backend = load_backend(provider, config)
+        report = similar_module.similar(backend, args.text, limit=args.limit, provider=provider)
+    except UnknownProviderError as exc:
+        report = similar_module.refusal(
+            f"unknown work-item provider: {exc} -- no scripts/lib/workitems/{exc}.py",
+            provider=provider,
+        )
+    except WorkItemError as exc:
+        report = similar_module.refusal(str(exc), provider=provider)
+
+    print(json.dumps(report, indent=2, ensure_ascii=False))
+    if report["verdict"] == "could-not-run":
+        print(report["message"], file=sys.stderr)
+        return 3
+    return 0
+
+
 def main(argv=None):
     args = build_parser().parse_args(argv)
     # The single place the --project default is resolved (see build_parser()'s
@@ -552,6 +648,9 @@ def main(argv=None):
         elif args.operation == "lint":
             # Returns its own exit code and does its own printing (see _run_lint).
             return _run_lint(settings, args)
+        elif args.operation == "similar":
+            # Returns its own exit code and does its own printing (see _run_similar).
+            return _run_similar(settings, args)
         else:
             provider, config = resolve_provider(settings, args.project_dir)
             backend = load_backend(provider, config)

@@ -110,15 +110,17 @@ python3 -m unittest discover -s scripts/tests -t .
 
 - **`-t .` is not optional**, and the failure mode is worth knowing because it is
   partly silent. It sets the top-level directory imports resolve against. Measured
-  on the current tree (10.09.2026): **with** it, discovery collects **2869 tests, 0
-  import errors**, exit 0; **without** it, **2130 tests and 18 modules that fail to
+  on the current tree (10.09.2026, CCP-1172 merged with main/CCP-1170): **with**
+  it, discovery collects **2891 tests, 0 import errors**, exit 0; **without** it,
+  **2135 tests and 19 modules that fail to
   import**, exit 1 — the eight that use a relative import
   (`from .test_phase_docs_lint import …` in four modules,
   `from .test_artifact_gate import …` in two,
   `from .test_gitattributes_crlf_guard import …` in one, and
-  `from . import …` of five sibling modules in the skip budget), plus the ten
-  modules of the `scripts/tests/workitems/` subpackage. The run does go red on those
-  18, so you will notice something — but **739 tests simply never execute**, and
+  `from . import …` of five sibling modules in the skip budget), plus the eleven
+  modules of the `scripts/tests/workitems/` subpackage (CCP-1172 added
+  `test_workitem_similar.py` as the eleventh). The run does go red on those
+  19, so you will notice something — but **756 tests simply never execute**, and
   nothing in the output says so.
 
   That skipped count moves whenever a module gains a relative import:
@@ -178,6 +180,53 @@ python3 -m unittest discover -s scripts/tests -t .
   independently re-measured this round (six more tests, counted without
   running the suite; the wall-clock figure needs an actual run, which is out
   of scope here).
+
+  10.09.2026 (CCP-1172): a full re-run rather than an uncounted delta — the
+  headline pair above moved (2867 → 2879, 2128 → 2130), so both sides needed
+  re-measuring together, not adjusted one at a time. **A pre-existing drift,
+  found rather than caused here:** this trajectory's own last entry said
+  `2781 / 2064 / 17 / 717`, while the headline sentence above it already said
+  `2867 / 2128 / 18 / 739` — the modules-fail and skip columns disagreed with
+  the headline before this round touched anything, and this round cannot
+  say which of the two was measured correctly at `2781`, only what it
+  measured itself. Fresh figures, each independently re-derived twice (a full
+  `-t .`/no-`-t .` `unittest discover` run and, separately, cheap
+  `TestLoader().discover(...).countTestCases()` calls) rather than carried
+  from either register: **2879 / 2130 / 19 / 749** — modules-fail moved 18 →
+  19 because `workitems/test_workitem_similar.py` (CCP-1172) joined the
+  `scripts/tests/workitems/` subpackage's relative-import set; the skipped
+  count's own delta (+10) is the new module's 11 test methods minus the 1
+  that reclassifies from "skipped" to "counted as the module's own failed-
+  import placeholder" the moment the module itself starts existing.
+
+  10.09.2026, same day, code-review round: **2879 / 2130 / 19 / 749** against a
+  tree at **2889 / 2133 / 19 / 756** — +10 test methods total (a full `-t .`/
+  no-`-t .` `unittest discover` run and a separate cheap
+  `TestLoader().discover(...).countTestCases()` cross-check agree). Modules-fail
+  did NOT move (still 19): every new method landed inside an existing file, none
+  in a new module. +3 count without `-t .` are `test_workitems_cli.py`'s three
+  new `--checked-against` validation methods (no relative import, so they count
+  either way); the other +7 are all inside
+  `workitems/test_workitem_similar.py`, already one of the 19 failed-import
+  modules, so they only ever show up in the `-t .` count -- the skipped
+  column's own delta (+7) is exactly those seven.
+
+  10.09.2026, merge round: `ticket/CCP-1172` (**2889 / 2133 / 19 / 756**) integrated
+  `main`/CCP-1170 (**2869 / 2130 / 18 / 739**, itself base `2867 / 2128 / 18 / 739`
+  plus two `test_install_provenance.py` methods that import cleanly either way) via
+  `git merge`, not `git rebase`: both branches forked from the same base and touched
+  disjoint files everywhere except this pin file and `CONTRIBUTING.md` itself, so a
+  merge resolves the conflict once instead of a rebase re-running into it at every
+  one of CCP-1172's thirteen commits. Re-measured directly against the integrated
+  tree (a full `-t .`/no-`-t .` `unittest discover` run and a separate cheap
+  `TestLoader().discover(...).countTestCases()` cross-check agree) rather than added
+  from the two branches' deltas, because addition is arithmetic, not a measurement,
+  and the two branches could in principle have landed overlapping or interacting
+  test methods: **2891 / 2135 / 19 / 756** — with-flag and without-flag both moved by
+  exactly main's own +2/+2 delta on top of CCP-1172's code-review-round figures;
+  modules-fail stayed at 19 (main's two new methods land inside an existing module,
+  none new); skipped stayed at 756 for the same reason it always does when an
+  addition imports cleanly on both sides of the flag — main's own +2 cancels.
 - The full run takes **a couple of minutes**. If you drive it from an agent whose
   tool calls time out, start it in the background and wait for it once rather than
   polling.

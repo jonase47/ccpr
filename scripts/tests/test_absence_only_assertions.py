@@ -891,7 +891,7 @@ class NoStaleKnownFindingsTest(unittest.TestCase):
 
 class ClassificationCountsTest(unittest.TestCase):
     def test_classification_counts(self):
-        """Regression pin on the measured baseline: 1413 `test_*` methods
+        """Regression pin on the measured baseline: 1423 `test_*` methods
         across the corpus call something shaped like a subprocess invocation
         and are therefore in scope for this check; 0 of those are currently
         absence-only-needs-exemption -- `KNOWN_FINDINGS` above is empty for
@@ -905,6 +905,57 @@ class ClassificationCountsTest(unittest.TestCase):
         growing paragraph:
 
           in-scope / flagged   when
+          1423 / 0             10.09.2026 (CCP-1172 merged
+                               with CCP-1170, ticket/CCP-1172 integrated
+                               `main`): both branches forked from the same
+                               1412/0 tree and touched disjoint files --
+                               CCP-1172's own two rows below plus CCP-1170's
+                               one row, no file in common besides this pin
+                               itself. Re-measured directly against the
+                               integrated tree via `scan_tree()` rather than
+                               added from the two deltas (1412 + 10 + 1),
+                               because addition is arithmetic, not a
+                               measurement, and the two branches could in
+                               principle have landed overlapping or
+                               interacting test methods; they did not, and
+                               this row's own value is now the ground truth,
+                               not a derivation of the two below it.
+          1422 / 0             10.09.2026 (CCP-1172, code-review fixes: empty
+                               --checked-against rejected, similar's verdict
+                               no longer reads the --limit-sliced list,
+                               Unicode tokenization, empty/stopword-only-query
+                               limit named): +4. 3 are
+                               test_workitems_cli.py's new checked-against
+                               validation methods (empty, whitespace-only, a
+                               trim counter-proof), all via the pre-existing
+                               `self.run_cli(...)` helper. The 4th is
+                               workitems/test_workitem_similar.py's new
+                               SimilarCliTest.test_the_limit_flag_reaches_
+                               the_lib_function, via `self.run_similar(...)`.
+                               The other 6 new methods this round (LimitTest's
+                               3, UnicodeTokenizationTest's 2,
+                               ScopeStatementTest's 1) call the lib function
+                               or `_tokenize` directly, in-process -- out of
+                               scope, same shape as the previous round's
+                               lib-level additions. All 4 in-scope carry a
+                               positive assertion (an exact non-zero
+                               returncode, a specific stderr substring, or a
+                               JSON field read back) -- flagged unchanged.
+          1418 / 0             10.09.2026 (CCP-1172, similar-text search +
+                               required --checked-against on create): +6.
+                               5 of them are workitems/test_workitem_similar.py's
+                               SimilarCliTest methods, all driving the CLI
+                               through `self.run_similar(...)` (matches
+                               RUN_HELPER_RE); the file's other 6 methods call
+                               the lib function or `refusal()` directly, in-
+                               process, out of scope. The 6th is
+                               test_workitems_cli.py's new red-proof method
+                               (`test_create_without_checked_against_is_refused`),
+                               via the pre-existing `self.run_cli(...)`
+                               helper. All 6 carry a positive assertion on
+                               the subprocess result (an exact non-zero
+                               returncode, a specific stderr substring, or a
+                               JSON field read back) -- flagged unchanged.
           1413 / 0             10.09.2026 (CCP-1170, IGNORED block grouped
                                by .gitignore rule): +2 new test methods
                                (VerifyAgreesWithAnUntouchedInstallationTest.
@@ -1902,7 +1953,7 @@ class ClassificationCountsTest(unittest.TestCase):
         count."""
         recs = scan_tree()
         flagged = [r for r in recs if r.disposition in NEEDS_EXEMPTION]
-        self.assertEqual(1413, len(recs))
+        self.assertEqual(1423, len(recs))
         self.assertEqual(0, len(flagged))
 
 
@@ -2130,7 +2181,16 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
         test_manual_lint_check_g.py's WIRED_ROOTS).
         Proven an addition rather than a swap: `git status --porcelain
         scripts/tests` shows one `??` line for the new file plus this
-        module's own ` M`, nothing deleted, nothing renamed."""
+        module's own ` M`, nothing deleted, nothing renamed.
+
+        Bumped 73 -> 75, 10.09.2026 (CCP-1172): added
+        workitems/test_workitem_similar.py (`similar`'s TDD suite) and
+        workitems/similar_fixture_texts.py -- the latter carries no test
+        class, only frozen fixture text, but this glob is filename-based
+        (`*.py`), not content-based, so it enters the corpus the same as
+        any other module. Proven an addition, not a swap: `git status
+        --porcelain scripts/tests` at write time showed two `??` lines (the
+        two new files) plus this module's own ` M`, nothing deleted."""
         files = sorted(TESTS_DIR.glob("*.py")) + sorted((TESTS_DIR / "workitems").glob("*.py"))
         names = sorted(f.relative_to(TESTS_DIR).as_posix() for f in files if f.name != "__init__.py")
         # The floor first, and it does exactly one job: it catches this glob
@@ -2142,9 +2202,9 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
         # floor; it is why the set pin below stands beside it. Keeping both is
         # the decision (WI-0133 T1), not redundancy left in by accident.
         self.assertGreaterEqual(  # pin: floor tests-corpus-files
-            len(names), 73,
-            "the scripts/tests corpus glob reached {} file(s); it reached 73 "
-            "when this floor was measured (09.09.2026). A SHRINKING scope is "
+            len(names), 75,
+            "the scripts/tests corpus glob reached {} file(s); it reached 75 "
+            "when this floor was measured (10.09.2026). A SHRINKING scope is "
             "a blind scanner, not a clean tree.".format(len(names)),
         )
         # The set pin, replacing a bare count (WI-0133 T1). A count cannot
@@ -2227,6 +2287,7 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
             "test_workitems_cli.py",
             "workitems/contract.py",
             "workitems/fake_youtrack_transport.py",
+            "workitems/similar_fixture_texts.py",
             "workitems/test_duration.py",
             "workitems/test_frontmatter.py",
             "workitems/test_lift.py",
@@ -2236,21 +2297,18 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
             "workitems/test_sweep.py",
             "workitems/test_validation.py",
             "workitems/test_workitem_lint.py",
+            "workitems/test_workitem_similar.py",
             "workitems/test_youtrack.py",
             ],
             names,
-            "the scripts/tests corpus (72 -> 73, 09.09.2026, CCP-1171: "
-            "workitems/test_workitem_lint.py added; proven an addition "
+            "the scripts/tests corpus (73 -> 75, 10.09.2026, CCP-1172: "
+            "workitems/test_workitem_similar.py and "
+            "workitems/similar_fixture_texts.py added; proven an addition "
             "rather than a swap by `git status --porcelain scripts/tests` "
-            "-- one `??` line (this new module) plus this module\'s own "
-            "` M` line; nothing deleted, nothing renamed. NOTE: the "
-            "previous prose here said 69 -> 70 and the floor below said "
-            "70, both measured against `test_*.py` rather than this "
-            "test\'s own `*.py` glob; the corpus at the parent commit was "
-            "72, verified by `git ls-tree -r --name-only HEAD`. The set "
-            "assertion itself was never wrong -- only the numbers written "
-            "beside it, which is why a set pin stands here and a count "
-            "does not)",
+            "-- two `??` lines (both new files) plus this module\'s own "
+            "` M` line; nothing deleted, nothing renamed. Earlier "
+            "trajectory: 72 -> 73, 09.09.2026, CCP-1171, "
+            "workitems/test_workitem_lint.py)",
         )
 
 
