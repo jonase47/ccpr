@@ -76,6 +76,42 @@ class _UnreachableBackend:
         raise WorkItemError("YouTrack request failed for GET /api/issues: connection refused")
 
 
+class ScopeStatementTest(unittest.TestCase):
+    """CCP-1172 acceptance 3: `similar` matches TEXT, so it must say -- in its own
+    output, not only in the item that commissioned it -- that a paraphrase of the
+    same behaviour stays invisible. ADR-0004's 'deduplicate by behaviour
+    described' is the goal; a text search only approximates it."""
+
+    def setUp(self):
+        self.workitems_dir = tempfile.mkdtemp(prefix="ccpr-similar-scope-")
+        self.addCleanup(shutil.rmtree, self.workitems_dir, ignore_errors=True)
+        self.backend = local.create({"workitems_dir": self.workitems_dir})
+
+    def test_the_report_states_the_text_versus_behaviour_limit(self):
+        self.backend.create(title="Some existing item")
+
+        report = similar_module.similar(self.backend, "a query")
+
+        limit_statements = " ".join(report["scope"]["not_reached"])
+        self.assertIn("different words", limit_statements)
+        self.assertIn("VOCABULARY", limit_statements)
+        self.assertIn("MEANING", limit_statements)
+        self.assertIn("ADR-0004", limit_statements)
+
+    def test_the_report_names_the_fields_it_scored(self):
+        report = similar_module.similar(self.backend, "a query")
+
+        self.assertEqual(report["scope"]["fields_scanned"], ["title", "description"])
+
+    def test_a_could_not_run_refusal_carries_no_scope_statement_to_hide_behind(self):
+        """A refusal is not a place the text/behaviour limit could quietly stand
+        in for the real one -- 'could not run' has NO scope key at all, so a
+        caller cannot mistake it for a completed, merely-limited search."""
+        report = similar_module.refusal("unreachable")
+
+        self.assertNotIn("scope", report)
+
+
 class VerdictTest(unittest.TestCase):
     """An unreachable backend must refuse, never report 'ran, found nothing
     similar' -- 'could not run' and 'no-results' are different observations
