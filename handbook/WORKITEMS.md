@@ -1,7 +1,7 @@
 # Work Items — the backend-neutral work-state contract
 
 **Status:** Proposed (draft) — see [`docs/adr/ADR-0002-workitem-backend-contract.md`](../docs/adr/ADR-0002-workitem-backend-contract.md)
-**Date:** 10.07.2026 (updated 02.09.2026)
+**Date:** 10.07.2026 (updated 10.09.2026)
 
 > CCPR works **with or without a ticket system.** The default is local Markdown files in the repo —
 > no server, no token, no setup. A team can point the same commands at a remote tracker by changing
@@ -17,7 +17,7 @@ operations plus four item-maintenance operations (added 09.07.2026 — see below
 
 | Operation | CLI | Meaning |
 |---|---|---|
-| create | `workitems create --title T [--type X] [--owner O] [--description D] [--tag T ...]` | create a new item; the backend assigns a stable `id` (JSON) |
+| create | `workitems create --title T --checked-against C [--type X] [--owner O] [--description D] [--tag T ...]` | create a new item; the backend assigns a stable `id` (JSON) |
 | list | `workitems list [--status S] [--owner O] [--tag T ...] [--type X] [--sprint N] [--priority P] [--query Q]` | enumerate items (JSON array) |
 | get | `workitems get <id>` | fetch one item (JSON) |
 | claim | `workitems claim <id> [--owner O] [--runner R]` | take ownership / mark active |
@@ -37,6 +37,15 @@ operations plus four item-maintenance operations (added 09.07.2026 — see below
 monotonic `WI-NNNN`; a remote backend returns the tracker's id). `lift` (ADR-0004) is bulk creation;
 `create` is the single-item path a planning command uses.
 
+`--checked-against` (CCP-1172) is **required**, free-text, and unvalidated beyond non-empty —
+`"none"` is a permitted answer. The value is prepended into the stored description
+(`"Checked against: <value>"\n\n<description>`), so it is a permanent, auditable fact in the item
+rather than a claim in a session that nothing else can check afterward. ADR-0004 already settled
+this for `lift` ("deduplicate by behaviour described, not by id"); `--checked-against` extends the
+same principle to `create`, the path a planning command and a human operator actually use. Run
+`similar` (§12) first to produce an honest value cheaply — a required argument with no cheap way to
+answer it honestly would be a tax on filing, not a device that catches anything.
+
 The four maintenance operations (`comment`, `set-description`, `set-title`, `set-type`) are **ad-hoc
 corrections**, not part of the status-transition write-loop (§7/§8) — they exist for fixing an item
 already in flight (a stale description block, a plain note, a corrected type), not for driving the
@@ -52,10 +61,10 @@ The helper (`scripts/workitems.py`) reads `workitems.provider` from the project'
 the provider implementation under `scripts/lib/workitems/<provider>.py`. `list` and `get` print JSON so
 commands can consume them without parsing prose.
 
-Four further subcommands are **not** part of that per-backend contract — they are CLI-level
+Five further subcommands are **not** part of that per-backend contract — they are CLI-level
 operations built *on* it, implemented once and running against whichever provider is configured:
-`migrate` and `lift` (ADR-0004), `sweep` (ADR-0005, §6) and `lint` (§11). A backend does not
-implement them, so they are deliberately absent from the table above.
+`migrate` and `lift` (ADR-0004), `sweep` (ADR-0005, §6), `lint` (§11) and `similar` (§12, CCP-1172).
+A backend does not implement them, so they are deliberately absent from the table above.
 
 ## 2. Core model
 
@@ -398,7 +407,48 @@ The link graph is read **undirected**. `local` stores an edge on one side only (
 touches A's file and nothing on B's) while a remote backend derives both sides from a single record —
 reading it directionally would make the verdict depend on which side happened to run `add-link`.
 
+## 12. Similar-text search and the recorded dedup check
+
+ADR-0004 settled deduplication for the `lift` path ("deduplicate by behaviour described, not by
+id") but never reached `create` — the single-item path a planning command and a human operator
+actually use. CCP-1172 closes that gap with two pieces: a read-only ranked search (`similar`) and a
+required, recorded argument on `create` (`--checked-against`, §1).
+
+| Command | Meaning |
+|---|---|
+| `workitems similar TEXT [--limit N]` | rank every item's `title`+`description` against `TEXT` by text similarity; default `--limit 10` |
+
+`similar` ranks by **TF-IDF-weighted cosine similarity** over a stopword-filtered token set — the
+inverse-document-frequency term is computed from the corpus the backend actually lists, not a fixed
+table, so a word common across *this* project's items (in a testing-tooling repo: "test", "check",
+"run") counts for less than one that appears in only a handful. Two verdicts on the success path —
+`results` (at least one item shares vocabulary with the query) and `no-results` (nothing does) —
+plus **`could-not-run`**, the same three-part distinction `lint` (§11) established: a search that
+could not read the corpus must never look like one that read it and found nothing similar. Exit
+codes: **0** ran (results or no-results) · **3** could not run. Unlike `lint`, there is no exit-1;
+`similar` is an advisory search run before filing an item, not a gate a pipeline fails on.
+
+**What the search does not reach**, stated in every report as well as here:
+
+- a description of the same behaviour in different words. `similar` ranks shared **vocabulary**,
+  not shared **meaning** — a paraphrase or a synonym-heavy rewrite stays invisible. ADR-0004's
+  "deduplicate by behaviour described" is the goal; a text search only approximates it.
+- a reference living only in a comment, a `result-link`, or a tag: only `title` and `description`
+  are scored, the same fields `lint` reads.
+- an item with no vocabulary at all in common with the query — it scores `0.0` and is dropped from
+  the ranking rather than listed with a zero.
+
+**`--checked-against`** (§1) is the other half: `create` requires it, unvalidated beyond
+non-empty — `"none"` is a permitted answer, but it is then a permanent fact in the item's stored
+description, not a claim in a session. The PO decision explicitly rejected the two cheaper
+alternatives: a warning (no consequence, overlooked within weeks) and a hard block above a
+similarity threshold (the threshold is arbitrary, false positives tax every filing, and `--force`
+becomes a habit — a gate people learn to bypass measures nothing). Run `similar` first to produce
+an honest value cheaply; a required argument with no cheap way to answer it honestly would be a tax
+on filing, not a device.
+
 ---
 
 *Design decisions and rationale: ADR-0002. Remote backend: ADR-0003. `lift`/`migrate`: ADR-0004.
-Claiming/runner protocol: ADR-0005. Typed links: ADR-0008.*
+Claiming/runner protocol: ADR-0005. Typed links: ADR-0008. Similar-text search and the recorded
+dedup check: CCP-1172.*

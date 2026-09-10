@@ -110,15 +110,16 @@ python3 -m unittest discover -s scripts/tests -t .
 
 - **`-t .` is not optional**, and the failure mode is worth knowing because it is
   partly silent. It sets the top-level directory imports resolve against. Measured
-  on the current tree (09.09.2026): **with** it, discovery collects **2867 tests, 0
-  import errors**, exit 0; **without** it, **2128 tests and 18 modules that fail to
+  on the current tree (10.09.2026): **with** it, discovery collects **2879 tests, 0
+  import errors**, exit 0; **without** it, **2130 tests and 19 modules that fail to
   import**, exit 1 — the eight that use a relative import
   (`from .test_phase_docs_lint import …` in four modules,
   `from .test_artifact_gate import …` in two,
   `from .test_gitattributes_crlf_guard import …` in one, and
-  `from . import …` of five sibling modules in the skip budget), plus the ten
-  modules of the `scripts/tests/workitems/` subpackage. The run does go red on those
-  18, so you will notice something — but **739 tests simply never execute**, and
+  `from . import …` of five sibling modules in the skip budget), plus the eleven
+  modules of the `scripts/tests/workitems/` subpackage (CCP-1172 added
+  `test_workitem_similar.py` as the eleventh). The run does go red on those
+  19, so you will notice something — but **749 tests simply never execute**, and
   nothing in the output says so.
 
   That skipped count moves whenever a module gains a relative import:
@@ -178,6 +179,24 @@ python3 -m unittest discover -s scripts/tests -t .
   independently re-measured this round (six more tests, counted without
   running the suite; the wall-clock figure needs an actual run, which is out
   of scope here).
+
+  10.09.2026 (CCP-1172): a full re-run rather than an uncounted delta — the
+  headline pair above moved (2867 → 2879, 2128 → 2130), so both sides needed
+  re-measuring together, not adjusted one at a time. **A pre-existing drift,
+  found rather than caused here:** this trajectory's own last entry said
+  `2781 / 2064 / 17 / 717`, while the headline sentence above it already said
+  `2867 / 2128 / 18 / 739` — the modules-fail and skip columns disagreed with
+  the headline before this round touched anything, and this round cannot
+  say which of the two was measured correctly at `2781`, only what it
+  measured itself. Fresh figures, each independently re-derived twice (a full
+  `-t .`/no-`-t .` `unittest discover` run and, separately, cheap
+  `TestLoader().discover(...).countTestCases()` calls) rather than carried
+  from either register: **2879 / 2130 / 19 / 749** — modules-fail moved 18 →
+  19 because `workitems/test_workitem_similar.py` (CCP-1172) joined the
+  `scripts/tests/workitems/` subpackage's relative-import set; the skipped
+  count's own delta (+10) is the new module's 11 test methods minus the 1
+  that reclassifies from "skipped" to "counted as the module's own failed-
+  import placeholder" the moment the module itself starts existing.
 - The full run takes **a couple of minutes**. If you drive it from an agent whose
   tool calls time out, start it in the background and wait for it once rather than
   polling.

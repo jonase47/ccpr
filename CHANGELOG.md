@@ -1589,6 +1589,28 @@ All notable changes to this project are documented in this file. The format is b
   because the mechanism is blind to the class. `scripts/artifact-gate.sh` gains a comment recording
   that scope decision, with no change to its matching logic.
 
+- **`workitems.py similar TEXT` (CCP-1172).** ADR-0004 settled deduplication for the `lift` path
+  ("deduplicate by behaviour described, not by id") but never reached `create` — the single-item
+  path a planning command and a human operator actually use. `similar` is the read-only half of
+  closing that gap: a ranked text search over every item's `title`+`description`, so checking for
+  a near-duplicate before filing is one command instead of an improvisation. Ranks by
+  TF-IDF-weighted cosine similarity over a stopword-filtered token set, IDF computed from the
+  corpus the backend actually lists rather than a fixed table. **Measured against the confirmed
+  case CCP-1172's own description names** (CCP-1167's text, checked against the real 174-item
+  corpus): CCP-1124 ranks 1st, CCP-1136 ranks 6th, both inside the default `--limit 10`. Same
+  three-part could-not-run shape `lint`'s `refusal()` established (CCP-1171): `results` /
+  `no-results` / **`could-not-run`**, so a search that could not read the corpus can never look
+  like one that read it and found nothing similar. Exit codes: **0** ran (results or no-results) ·
+  **3** could not run — no exit-1, since `similar` is advisory, not a gate. States its own reach
+  in every report: it ranks shared vocabulary, not shared meaning, so a paraphrase of the same
+  behaviour in different words stays invisible — a text search only approximates ADR-0004's actual
+  goal. **Regression found and fixed while building it:** plain TF-IDF's `idf = log((N+1)/(df+1))`
+  is exactly 0 for every term of a corpus with exactly one item (`df == N == 1`), zeroing that
+  item's whole vector so it could never be found however similar the query — the case a fresh
+  CCPR project hits on day one, once a single item already exists. Fixed with a `+1`-smoothed IDF
+  (the scikit-learn `smooth_idf` convention) and pinned as its own regression test, verified
+  red against the unsmoothed formula before being restored.
+
 ### Changed
 
 - **CCP-1151 stage 2: the three shared building blocks of the `skill` → `command` sweep are
@@ -1695,6 +1717,23 @@ All notable changes to this project are documented in this file. The format is b
   `PHASE_FOLDERS` at `:61`), `memory-lint.sh` walks `docs/memory/**` only, and
   `test_adr_status_mapping.py` asserts `adr_status` and `status` and nothing else. No validator
   is added here; widening that scope is a separate cut.
+
+- **`workitems.py create` now requires `--checked-against` (CCP-1172, breaking CLI change).** PO
+  decision on CCP-1172's own open question: a required, free-value argument beats both a no-op
+  warning (overlooked within weeks, the same class as a check that is red when nothing is wrong)
+  and a hard block above a similarity threshold (the threshold is arbitrary, false positives tax
+  every filing, and `--force` becomes a habit — a gate people learn to bypass measures nothing).
+  The value is never validated beyond non-empty — `"none"` is a permitted answer — but it is
+  prepended into the stored description (`"Checked against: <value>"`), so it is a permanent,
+  auditable fact in the item rather than a claim in a session nothing else can check afterward.
+  Enforced in the CLI `argparse` layer only; `backend.create()`'s own signature is untouched, so
+  the ~40 existing direct callers of it (both backends, `lift`) are unaffected. The eight shipped
+  commands that carry a `workitems.py create` invocation template
+  (`anchor`, `p4-backlog`, `p5-bugfix`, `p5-polish`, `p6-exploratory`, `p8-iteration`, `p8-ops`,
+  `p8-security`) gain the fill-in-the-blank placeholder `--checked-against "<ids searched, or
+  reasoning>"`, the same pattern `--title "<story title>"` already models — no two-step command
+  rebuild, no hard-coded `"none"` baked into a template (that would make the device ceremony on
+  day one; the answer belongs to whoever runs the command).
 
 ### Fixed
 

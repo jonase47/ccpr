@@ -54,9 +54,10 @@ Delegate iteration planning to the **project-planner** agent:
 > **B. Update Backlog**
 > Using the guard result from step 0:
 > - Structured store: new items from the feedback evaluation → `workitems create --title "<item>"
->   --type feat --description "<estimate + acceptance criteria>"` (check the full, unfiltered
->   `workitems list` for a matching title first — trim + casefold — so a re-run never duplicates an
->   already-added item; record the assigned `**Work-Item:** WI-NNNN` id in the generated view, §4).
+>   --type feat --description "<estimate + acceptance criteria>" --checked-against "<ids searched,
+>   or reasoning>"` (check the full, unfiltered `workitems list` for a matching title first — trim +
+>   casefold — so a re-run never duplicates an already-added item; record the assigned
+>   `**Work-Item:** WI-NNNN` id in the generated view, §4).
 >   Outdated items (no longer relevant) → `workitems set-status <id> "Cancelled"` (resolve `<id>` by
 >   matching title against `workitems list`), never a silent removal — a Cancelled item stays
 >   traceable. Re-prioritising existing items (ranking, not a status change) has no CLI equivalent

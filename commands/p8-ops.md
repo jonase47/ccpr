@@ -98,9 +98,10 @@ For individual incident detail (full timeline, post-mortem): optionally archive 
 
 Cross-file update, using the guard result from step 0:
 - Structured store: `workitems create --title "<follow-up task>" --type fix --description
-  "<task + deadline>"` per follow-up task (check the full, unfiltered `workitems list` for a
-  matching title first — trim + casefold — so a re-run never duplicates an already-created task;
-  record the assigned `**Work-Item:** WI-NNNN` id in this file's `## Open Action Items`).
+  "<task + deadline>" --checked-against "<ids searched, or reasoning>"` per follow-up task (check
+  the full, unfiltered `workitems list` for a matching title first — trim + casefold — so a re-run
+  never duplicates an already-created task; record the assigned `**Work-Item:** WI-NNNN` id in this
+  file's `## Open Action Items`).
 - Prose fallback: append follow-up tasks (with deadlines) to `docs/planning/BACKLOG.md` and bump
   its `last_updated`.
 

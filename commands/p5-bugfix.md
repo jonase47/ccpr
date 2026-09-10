@@ -27,8 +27,8 @@ Run `python3 ~/.claude/scripts/workitems.py list`.
     directly if it looks like a `Work-Item` id (`WI-NNNN`) from BACKLOG.md/SPRINT.md, then confirm
     with the user. If it matches no existing item (a standalone bug report, not yet tracked),
     create it first: `workitems create --title "<bug summary>" --type fix --description
-    "$ARGUMENTS"` (unfiltered `list` duplicate-title check first — trim + casefold — so a re-run
-    never recreates the same bug item).
+    "$ARGUMENTS" --checked-against "<ids searched, or reasoning>"` (unfiltered `list` duplicate-title
+    check first — trim + casefold — so a re-run never recreates the same bug item).
 - **`[]` and no `docs/workitems/` directory** → still on prose. Read SPRINT.md to find/ask which
   bug is next, as before. Emit one line: *"Tip: run `lift` to adopt the structured work-item store."*
 - **`[]` but `docs/workitems/` exists** → adopted store, just empty right now. Treat as adopted: use

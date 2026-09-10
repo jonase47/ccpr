@@ -104,7 +104,7 @@ a genuinely *renamed* story (it recreates rather than updates in that case, whic
 edge case for this minimal guard). Otherwise create it:
 
 ```
-python3 ~/.claude/scripts/workitems.py create --title "<story title>" --type feat --description "<story text + acceptance criteria>"
+python3 ~/.claude/scripts/workitems.py create --title "<story title>" --type feat --description "<story text + acceptance criteria>" --checked-against "<ids searched, or reasoning>"
 ```
 
 The backend assigns the `id` (`WI-NNNN` on the `local` provider) — never invent one. This is the

@@ -905,6 +905,21 @@ class ClassificationCountsTest(unittest.TestCase):
         growing paragraph:
 
           in-scope / flagged   when
+          1418 / 0             10.09.2026 (CCP-1172, similar-text search +
+                               required --checked-against on create): +6.
+                               5 of them are workitems/test_workitem_similar.py's
+                               SimilarCliTest methods, all driving the CLI
+                               through `self.run_similar(...)` (matches
+                               RUN_HELPER_RE); the file's other 6 methods call
+                               the lib function or `refusal()` directly, in-
+                               process, out of scope. The 6th is
+                               test_workitems_cli.py's new red-proof method
+                               (`test_create_without_checked_against_is_refused`),
+                               via the pre-existing `self.run_cli(...)`
+                               helper. All 6 carry a positive assertion on
+                               the subprocess result (an exact non-zero
+                               returncode, a specific stderr substring, or a
+                               JSON field read back) -- flagged unchanged.
           1412 / 0             09.09.2026 (CCP-1173 second cut, --dry-run
                                previews the refusal): +11, all 11 in scope.
                                With the row below it: 25/25 then 11/11 from the
@@ -1886,7 +1901,7 @@ class ClassificationCountsTest(unittest.TestCase):
         count."""
         recs = scan_tree()
         flagged = [r for r in recs if r.disposition in NEEDS_EXEMPTION]
-        self.assertEqual(1412, len(recs))
+        self.assertEqual(1418, len(recs))
         self.assertEqual(0, len(flagged))
 
 
@@ -2114,7 +2129,16 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
         test_manual_lint_check_g.py's WIRED_ROOTS).
         Proven an addition rather than a swap: `git status --porcelain
         scripts/tests` shows one `??` line for the new file plus this
-        module's own ` M`, nothing deleted, nothing renamed."""
+        module's own ` M`, nothing deleted, nothing renamed.
+
+        Bumped 73 -> 75, 10.09.2026 (CCP-1172): added
+        workitems/test_workitem_similar.py (`similar`'s TDD suite) and
+        workitems/similar_fixture_texts.py -- the latter carries no test
+        class, only frozen fixture text, but this glob is filename-based
+        (`*.py`), not content-based, so it enters the corpus the same as
+        any other module. Proven an addition, not a swap: `git status
+        --porcelain scripts/tests` at write time showed two `??` lines (the
+        two new files) plus this module's own ` M`, nothing deleted."""
         files = sorted(TESTS_DIR.glob("*.py")) + sorted((TESTS_DIR / "workitems").glob("*.py"))
         names = sorted(f.relative_to(TESTS_DIR).as_posix() for f in files if f.name != "__init__.py")
         # The floor first, and it does exactly one job: it catches this glob
@@ -2126,9 +2150,9 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
         # floor; it is why the set pin below stands beside it. Keeping both is
         # the decision (WI-0133 T1), not redundancy left in by accident.
         self.assertGreaterEqual(  # pin: floor tests-corpus-files
-            len(names), 73,
-            "the scripts/tests corpus glob reached {} file(s); it reached 73 "
-            "when this floor was measured (09.09.2026). A SHRINKING scope is "
+            len(names), 75,
+            "the scripts/tests corpus glob reached {} file(s); it reached 75 "
+            "when this floor was measured (10.09.2026). A SHRINKING scope is "
             "a blind scanner, not a clean tree.".format(len(names)),
         )
         # The set pin, replacing a bare count (WI-0133 T1). A count cannot
@@ -2211,6 +2235,7 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
             "test_workitems_cli.py",
             "workitems/contract.py",
             "workitems/fake_youtrack_transport.py",
+            "workitems/similar_fixture_texts.py",
             "workitems/test_duration.py",
             "workitems/test_frontmatter.py",
             "workitems/test_lift.py",
@@ -2220,21 +2245,18 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
             "workitems/test_sweep.py",
             "workitems/test_validation.py",
             "workitems/test_workitem_lint.py",
+            "workitems/test_workitem_similar.py",
             "workitems/test_youtrack.py",
             ],
             names,
-            "the scripts/tests corpus (72 -> 73, 09.09.2026, CCP-1171: "
-            "workitems/test_workitem_lint.py added; proven an addition "
+            "the scripts/tests corpus (73 -> 75, 10.09.2026, CCP-1172: "
+            "workitems/test_workitem_similar.py and "
+            "workitems/similar_fixture_texts.py added; proven an addition "
             "rather than a swap by `git status --porcelain scripts/tests` "
-            "-- one `??` line (this new module) plus this module\'s own "
-            "` M` line; nothing deleted, nothing renamed. NOTE: the "
-            "previous prose here said 69 -> 70 and the floor below said "
-            "70, both measured against `test_*.py` rather than this "
-            "test\'s own `*.py` glob; the corpus at the parent commit was "
-            "72, verified by `git ls-tree -r --name-only HEAD`. The set "
-            "assertion itself was never wrong -- only the numbers written "
-            "beside it, which is why a set pin stands here and a count "
-            "does not)",
+            "-- two `??` lines (both new files) plus this module\'s own "
+            "` M` line; nothing deleted, nothing renamed. Earlier "
+            "trajectory: 72 -> 73, 09.09.2026, CCP-1171, "
+            "workitems/test_workitem_lint.py)",
         )
 
 

@@ -113,8 +113,9 @@ For each `polish-now` item, delegate to the **senior-developer** agent:
   - Structured store: create a work item per `backlog` item — check the full, unfiltered
     `workitems list` for a matching title first (trim + casefold), so a re-run never duplicates an
     already-created polish item. Otherwise: `workitems create --title "<item title>" --type
-    refactor --description "POL-NN-MM: <effort estimate + description>"` (use `--type chore` instead
-    of `refactor` for tooling/cleanup items, matching the commit-type convention in step 5). Record
+    refactor --description "POL-NN-MM: <effort estimate + description>" --checked-against
+    "<ids searched, or reasoning>"` (use `--type chore` instead of `refactor` for tooling/cleanup
+    items, matching the commit-type convention in step 5). Record
     the assigned `**Work-Item:** WI-NNNN` id in the POLISH file's "Moved to Backlog" list (§7) — the
     view references it, it never re-derives it from the title.
   - Prose fallback: append to `BACKLOG.md` as mini-stories with effort estimate, reference to POL-ID.

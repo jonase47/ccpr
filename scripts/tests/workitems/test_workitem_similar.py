@@ -118,8 +118,15 @@ class VerdictTest(unittest.TestCase):
     (CCP-1172 acceptance 1's could-not-run half; mirrors lint's VerdictTest,
     CCP-1171)."""
 
+    def setUp(self):
+        # Fixture, not a repository measurement -- mirrors test_workitem_lint.py's
+        # own LocalFixtureTestCase.setUp(), which routes the same fake through
+        # self.unreachable_backend rather than constructing it inline at the
+        # call site.
+        self.unreachable_backend = _UnreachableBackend()
+
     def test_an_unreachable_backend_is_a_refusal_never_a_silent_no_results(self):
-        report = similar_module.similar(_UnreachableBackend(), "some query text")
+        report = similar_module.similar(self.unreachable_backend, "some query text")
 
         self.assertEqual(report["verdict"], "could-not-run")
         self.assertNotEqual(report["verdict"], "no-results")

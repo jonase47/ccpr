@@ -98,7 +98,8 @@ shows drift with no invalidated claim:
 ```
 python3 ~/.claude/scripts/workitems.py create --title "Anchor drift: <document> vs <path(s)>" \
   --type chore --tag anchor-drift \
-  --description "<what changed, which claim it invalidates, the anchor delta (old..new SHA)>"
+  --description "<what changed, which claim it invalidates, the anchor delta (old..new SHA)>" \
+  --checked-against "<ids searched, or reasoning>"
 ```
 
 This is `workitems create` exactly as specified in `handbook/WORKITEMS.md` §1/§4 — no contract
