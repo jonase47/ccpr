@@ -187,9 +187,45 @@ python3 -m unittest discover -s scripts/tests -t .
   found rather than caused here:** this trajectory's own last entry said
   `2781 / 2064 / 17 / 717`, while the headline sentence above it already said
   `2867 / 2128 / 18 / 739` — the modules-fail and skip columns disagreed with
-  the headline before this round touched anything, and this round cannot
+  the headline before this round touched anything, and this round could not
   say which of the two was measured correctly at `2781`, only what it
-  measured itself. Fresh figures, each independently re-derived twice (a full
+  measured itself.
+
+  **Resolved 10.09.2026:** neither figure was wrong, and the gap between them
+  is now bridged with two more measured points rather than left as an
+  either-or. Reproduced independently in a throwaway worktree at `309440c`
+  (the commit this trajectory's own `2781 / 2064 / 17 / 717` entry
+  describes; `git worktree add --detach`, then
+  `unittest.TestLoader().discover("scripts/tests")` without a top-level
+  dir): **2064 tests, 17 import-failing modules**, an exact match. `17`
+  decomposes as the eight non-`workitems/` relative-import modules named
+  above (unchanged across every round since 05.09.2026) plus the nine
+  `scripts/tests/workitems/` modules that existed at that commit.
+
+  The missing row is filled in from a second throwaway worktree at
+  `02930a9` — CCP-1171's own merge commit, which also carries CCP-1157
+  (docs-only, no test-suite effect) and CCP-1166 since no round measured the
+  tree in between — using the same method as every other entry here (a full
+  `-t .` and no-`-t .` `unittest discover` CLI run each): **2831 / 2092 / 18
+  / 739**. Modules-fail moved 17 → 18 because CCP-1171's `0fa9460` added a
+  tenth `scripts/tests/workitems/` module, `test_workitem_lint.py`, and
+  skip held its `with-total − without-total` identity (`2831 − 2092 =
+  739`). This figure is not only self-measured here but independently
+  corroborated by the commit history itself: CCP-1173's own two commits
+  each state the register they re-measured against — `7c98791` logs
+  "CONTRIBUTING.md 2831 -> 2856 with `-t .` and 2092 -> 2117 without (18
+  import errors unchanged...)" and `12f6382` logs "2856 -> 2867 with `-t .`
+  and 2117 -> 2128 without (18 import errors unchanged... 739 never execute
+  ... stays correct)" — landing exactly on `2867 / 2128 / 18 / 739`, the
+  figure already on record two paragraphs below as the shared fork base for
+  both CCP-1170 and CCP-1172. Three independently-sourced points now chain
+  without a gap: `2781 / 2064 / 17 / 717` (this trajectory, reproduced
+  above) → `2831 / 2092 / 18 / 739` (CCP-1171 round, measured here, matching
+  CCP-1173's own commit log) → `2867 / 2128 / 18 / 739` (CCP-1173's own
+  commit log, matching the pre-existing fork-base citation below). The
+  drift was a missing row, not a wrong number in either register.
+
+  Fresh figures for the CCP-1172 round, each independently re-derived twice (a full
   `-t .`/no-`-t .` `unittest discover` run and, separately, cheap
   `TestLoader().discover(...).countTestCases()` calls) rather than carried
   from either register: **2879 / 2130 / 19 / 749** — modules-fail moved 18 →

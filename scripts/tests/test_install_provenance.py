@@ -1688,8 +1688,8 @@ class NonFrameworkDocsAreNotExpectedInTheInstallationTest(WidenedScopeBase):
         self.assertEqual(["docs/HANDOVER.md"], report_block(r.stdout, "UNEXPECTED"))
 
     def test_the_untracked_twin_is_excused_by_the_ignore_rule_not_dropped(self):
-        """The production shape, and the branch a code review caught this
-        module asserting only in prose (CCP-1166).
+        """The production shape, and the branch this module asserted only
+        in prose until a CCP-1166 code review caught the gap.
 
         In THIS repository docs/HANDOVER.md is untracked and named by the
         shipped .gitignore. So the two rules overlap: the allowlist keeps it
