@@ -129,6 +129,33 @@ class VerdictTest(unittest.TestCase):
         self.assertIn("NOT the same as 'no similar items'", report["message"])
 
 
+class SingleItemCorpusTest(LocalFixtureTestCase):
+    """Regression pin, found during CCP-1172's own build: with EXACTLY one item in
+    the corpus, plain TF-IDF's `idf = log((N+1)/(df+1))` is 0 for every term of
+    that one item (df == N == 1), so its vector goes entirely to zero and it can
+    never be found -- silently, for every query, however similar. This is the
+    case a fresh CCPR project hits on its very first `similar` call, once a
+    single item already exists. Fixed with a +1-smoothed IDF (`_tfidf_vector`);
+    this test pins the fix, not just the shape of the corpus."""
+
+    def test_a_lone_existing_item_is_still_found(self):
+        target_id = self.plant(
+            "Dark mode toggle does not persist across browser sessions",
+            "The theme preference resets to light mode on every page reload.",
+        )
+
+        report = similar_module.similar(
+            self.backend, "Dark mode toggle resets on every reload",
+        )
+
+        result_ids = [r["id"] for r in report["results"]]
+        self.assertIn(
+            target_id, result_ids,
+            "the sole existing item must be findable, not zeroed out by its own "
+            "IDF weight in a one-item corpus",
+        )
+
+
 class KnownNeighbourTest(LocalFixtureTestCase):
     """CCP-1172 acceptance 2: the CCP-1167 text must surface CCP-1136 and
     CCP-1124, its human-confirmed true neighbours."""
