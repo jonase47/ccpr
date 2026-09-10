@@ -399,11 +399,26 @@ path_is_docs_working_state() {
 #
 # What it excuses is reported by name in its own IGNORED block rather than
 # dropped -- an exemption nobody can see is the next drifting skip list.
+#
+# CCP-1170: reports which RULE excused the path, not only whether one did,
+# via a global (`PATH_IGNORE_RULE`) rather than a return value -- this
+# script has no other channel for a function result besides its exit code.
+# `-v` and `-q` cannot be combined (`git check-ignore` refuses that
+# combination outright, exit 128), so this reads `-v`'s own stdout and
+# decides ignored-or-not from ITS exit code instead: measured to carry the
+# same 0/1 semantics `-q` had, one call, nothing decided twice.
 path_is_source_ignored() {
-  local rc=0
-  git -C "$SRC" -c core.excludesFile=/dev/null check-ignore -q -- "$1" \
-    >/dev/null 2>&1 || rc=$?
-  [[ "$rc" -eq 0 ]]
+  local rc=0 out=""
+  out="$(git -C "$SRC" -c core.excludesFile=/dev/null check-ignore -v -- "$1" 2>/dev/null)" \
+    || rc=$?
+  if [[ "$rc" -ne 0 ]]; then
+    PATH_IGNORE_RULE=""
+    return 1
+  fi
+  # check-ignore -v prints one line, `<source>:<line>:<pattern>\t<path>`;
+  # the rule is everything before the first tab.
+  PATH_IGNORE_RULE="${out%%$'\t'*}"
+  return 0
 }
 
 SRC_PHYS=""
@@ -485,7 +500,8 @@ verify_installation() {
   local expected_raw meta path sha ahash
   local expected_count=0 compared=0
   local missing="" differing="" extra="" ignored=""
-  local missing_n=0 differing_n=0 extra_n=0 ignored_n=0
+  local missing_n=0 differing_n=0 extra_n=0 ignored_n=0 ignored_rules_n=0
+  local ignored_groups="" gline gcount grule
   local exp_paths d f rel total toplevel scan_out prefix dname
   local enum_incomplete=0
   local allowlist_ok=0 docs_unclassifiable=0
@@ -713,7 +729,12 @@ verify_installation() {
         *$'\n'"$rel"$'\n'*) ;;
         *)
           if path_is_source_ignored "$rel"; then
-            ignored="${ignored}${rel}"$'\n'; ignored_n=$((ignored_n + 1))
+            # "<rule>\t<rel>\n" -- one line per excused path, keyed by the
+            # rule that excused it. bash 3.2 (macOS /bin/bash) has no
+            # associative arrays, so grouping happens at print time via a
+            # cut/sort/uniq pipeline over these lines, not here.
+            ignored="${ignored}${PATH_IGNORE_RULE}"$'\t'"${rel}"$'\n'
+            ignored_n=$((ignored_n + 1))
           else
             extra="${extra}${rel}"$'\n'; extra_n=$((extra_n + 1))
           fi
@@ -740,11 +761,27 @@ verify_installation() {
   fi
   if [[ "$ignored_n" -gt 0 ]]; then
     echo "  IGNORED -- in the installation, ignored by the SOURCE CHECKOUT (excused, not skipped):"
-    printf '%s' "$ignored" | LC_ALL=C sort | sed 's/^/    - /'
-    echo "    (git check-ignore against $SRC as it stands now -- the one rule here"
-    echo "     NOT resolved from commit $p_commit. A path this repository will not"
-    echo "     track is in no commit, so having it here is not drift from one --"
-    echo "     it is locally generated. Not counted as a finding.)"
+    # Grouped by the .gitignore RULE `git check-ignore -v` named for each
+    # path (CCP-1170), not listed one path per line -- a correct installation
+    # can grow dozens of __pycache__ entries under one rule, and a per-path
+    # listing buried the report under them. bash 3.2 has no associative
+    # arrays, so the grouping runs as a cut/sort/uniq pipeline over the
+    # "<rule>\t<rel>" lines collected during the walk, sorted by count
+    # descending (most-excused rule first), rule string breaking ties.
+    ignored_groups="$(printf '%s' "$ignored" | cut -f1 | LC_ALL=C sort \
+      | uniq -c | LC_ALL=C sort -k1,1nr -k2)"
+    while IFS= read -r gline; do
+      [[ -n "$gline" ]] || continue
+      ignored_rules_n=$((ignored_rules_n + 1))
+      read -r gcount grule <<< "$gline"
+      printf '%8d file(s)  %s\n' "$gcount" "$grule"
+    done <<< "$ignored_groups"
+    echo "    ($ignored_n file(s) excused by $ignored_rules_n rule(s), named by"
+    echo "     \`git check-ignore -v\` against $SRC as it stands now -- the same call"
+    echo "     that made the decision, and the one place here NOT resolved from"
+    echo "     commit $p_commit: check-ignore is a working-tree operation, so a path"
+    echo "     this repository will not track is in no commit, and having it here is"
+    echo "     not drift from one -- it is locally generated. Not counted as a finding.)"
   fi
 
   if [[ "$docs_skipped_n" -gt 0 ]]; then

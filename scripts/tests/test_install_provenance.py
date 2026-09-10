@@ -538,6 +538,38 @@ def report_block(out, heading):
     return []
 
 
+IGNORED_GROUP_RE = re.compile(r"^\s*(\d+) file\(s\)  (\S.*)$")
+
+
+def ignored_groups(out):
+    """The grouped `    NNN file(s)  <rule>` lines following the
+    `  IGNORED -- ...` heading in a --verify report, keyed by the
+    .gitignore rule string `git check-ignore -v` named (CCP-1170: grouped
+    by CAUSE, not listed one path per line). Returns {} when the heading's
+    group rows are absent -- either the heading itself is missing, or it
+    printed with zero groups beneath it."""
+    lines = out.splitlines()
+    for i, line in enumerate(lines):
+        if line.strip().startswith("IGNORED --"):
+            groups = {}
+            for follow in lines[i + 1:]:
+                m = IGNORED_GROUP_RE.match(follow)
+                if not m:
+                    break
+                groups[m.group(2)] = int(m.group(1))
+            return groups
+    return {}
+
+
+def ignored_footer(out):
+    """The `(NNN file(s) excused by MMM rule(s), ...)` footer line under
+    the IGNORED heading, as (total_n, rules_n). None when absent."""
+    m = re.search(r"\((\d+) file\(s\) excused by (\d+) rule\(s\)", out)
+    if not m:
+        return None
+    return (int(m.group(1)), int(m.group(2)))
+
+
 # Both names come from a measured installation, not from an invented
 # placeholder: running the hooks once leaves the first, opening the tree in
 # a macOS file browser leaves the second. Neither can ever be in a commit --
@@ -605,16 +637,21 @@ class LocallyGeneratedArtefactsAreNotDivergenceTest(VerifyBase):
 
     def test_the_exempted_paths_are_reported_rather_than_silently_dropped(self):
         """An exemption nobody can see is the next drifting skip list. The
-        run names what it excused and why, so the exemption is auditable
-        from the report itself -- the same carve-out install_docs() already
-        makes when it names each skipped working-state path."""
+        run names the .gitignore RULE (CCP-1170: `git check-ignore -v`'s own
+        `<source>:<line>:<pattern>`) it excused paths under, and how many --
+        grouped by that rule rather than listed one path per line, so the
+        exemption is auditable from the report itself without flooding it."""
         self.plant(PYCACHE_ARTEFACT)
         self.plant(DS_STORE_ARTEFACT)
         r = self.verify()
         self.assertEqual(
-            [PYCACHE_ARTEFACT, DS_STORE_ARTEFACT],
-            sorted(report_block(r.stdout, "IGNORED")),
+            {
+                ".gitignore:6:__pycache__/": 1,
+                ".gitignore:3:**/.DS_Store": 1,
+            },
+            ignored_groups(r.stdout),
         )
+        self.assertEqual((2, 2), ignored_footer(r.stdout))
         self.assertIn("check-ignore", r.stdout)
 
     def test_a_foreign_file_is_still_unexpected_alongside_the_exempted_ones(self):
@@ -640,7 +677,7 @@ class LocallyGeneratedArtefactsAreNotDivergenceTest(VerifyBase):
         r = self.verify()
         self.assertEqual(1, r.returncode, r.stdout + r.stderr)
         self.assertEqual(["hooks/my-own-hook.py"], report_block(r.stdout, "UNEXPECTED"))
-        self.assertEqual([PYCACHE_ARTEFACT], report_block(r.stdout, "IGNORED"))
+        self.assertEqual({".gitignore:6:__pycache__/": 1}, ignored_groups(r.stdout))
 
     def test_a_foreign_dotfile_is_still_reported(self):
         """Discriminates the derived rule from the naive one it is easy to
@@ -655,7 +692,7 @@ class LocallyGeneratedArtefactsAreNotDivergenceTest(VerifyBase):
         self.assertEqual(1, r.returncode, r.stdout + r.stderr)
         self.assertEqual(["templates/.private-notes.md"],
                          report_block(r.stdout, "UNEXPECTED"))
-        self.assertEqual([DS_STORE_ARTEFACT], report_block(r.stdout, "IGNORED"))
+        self.assertEqual({".gitignore:3:**/.DS_Store": 1}, ignored_groups(r.stdout))
 
     def test_a_changed_shipped_file_is_still_reported(self):
         self.plant(PYCACHE_ARTEFACT)
@@ -692,7 +729,7 @@ class LocallyGeneratedArtefactsAreNotDivergenceTest(VerifyBase):
         r = self.verify()
         self.assertEqual(1, r.returncode, r.stdout + r.stderr)
         self.assertEqual(sorted(rogues), sorted(report_block(r.stdout, "UNEXPECTED")))
-        self.assertEqual([], report_block(r.stdout, "IGNORED"))
+        self.assertEqual({}, ignored_groups(r.stdout))
 
     def test_the_exemption_inherits_the_broad_rules_too_and_that_is_measured(self):
         """Recorded because it is a consequence, not a goal. `*.egg-info/`
@@ -709,8 +746,11 @@ class LocallyGeneratedArtefactsAreNotDivergenceTest(VerifyBase):
         r = self.verify()
         self.assertEqual(0, r.returncode, r.stdout + r.stderr)
         self.assertEqual(
-            ["agents/notes.log", "agents/payload.egg-info/inside.md"],
-            sorted(report_block(r.stdout, "IGNORED")),
+            {
+                ".gitignore:23:*.log": 1,
+                ".gitignore:9:*.egg-info/": 1,
+            },
+            ignored_groups(r.stdout),
         )
 
     def test_an_exempted_path_is_not_counted_into_the_compared_scope(self):
@@ -762,7 +802,7 @@ class TheExemptionIsDerivedFromTheSourceCheckoutTest(VerifyBase):
         self.plant("agents/scratch.wibble")
         r = self.verify()
         self.assertEqual(0, r.returncode, r.stdout + r.stderr)
-        self.assertEqual(["agents/scratch.wibble"], report_block(r.stdout, "IGNORED"))
+        self.assertEqual({".gitignore:1:*.wibble": 1}, ignored_groups(r.stdout))
 
     def test_a_path_the_checkout_now_tracks_is_still_not_in_the_recorded_commit(self):
         """`git check-ignore` is index-aware, and that is load-bearing here:
@@ -815,8 +855,7 @@ class TheExemptionIsDerivedFromTheSourceCheckoutTest(VerifyBase):
 
         after = self.verify()
         self.assertEqual(0, after.returncode, after.stdout + after.stderr)
-        self.assertEqual(["agents/rogue-agent.md"],
-                         report_block(after.stdout, "IGNORED"))
+        self.assertEqual({".gitignore:1:rogue-agent.md": 1}, ignored_groups(after.stdout))
 
     def test_the_adopters_global_ignore_file_does_not_widen_the_exemption(self):
         """A personal `~/.config/git/ignore` says what its owner does not
@@ -1652,7 +1691,7 @@ class NonFrameworkDocsAreNotExpectedInTheInstallationTest(WidenedScopeBase):
         self.plant("docs/HANDOVER.md", "# should not be here\n")
         r = self.verify()
         self.assertEqual(0, r.returncode, r.stdout + r.stderr)
-        self.assertEqual(["docs/HANDOVER.md"], report_block(r.stdout, "IGNORED"))
+        self.assertEqual({".gitignore:34:docs/HANDOVER.md": 1}, ignored_groups(r.stdout))
         self.assertEqual([], report_block(r.stdout, "UNEXPECTED"))
         self.assertEqual([], report_block(r.stdout, "MISSING"))
         self.assertEqual(["docs/HANDOVER.md"],
