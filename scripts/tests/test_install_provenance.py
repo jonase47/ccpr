@@ -1544,6 +1544,12 @@ class AWidenedScopeStillVerifiesACorrectInstallationTest(WidenedScopeBase):
         self.assertEqual(0, r.returncode, r.stdout + r.stderr)
         self.assertIn("Result: VERIFIED", r.stdout)
         self.assertEqual([], report_block(r.stdout, "UNEXPECTED"))
+        # Two files under the same rule aggregate to ONE group with count 2
+        # -- not two separate rows and not a count stuck at 1. Every other
+        # ignored_groups() assertion in this file plants at most one file
+        # per rule, so a broken aggregation (e.g. a dedup that drops the
+        # count) would leave them all green.
+        self.assertEqual({".gitignore:6:__pycache__/": 2}, ignored_groups(r.stdout))
 
     def test_a_finder_metadata_file_under_docs_is_not_a_divergence(self):
         self.plant("docs/.DS_Store")
