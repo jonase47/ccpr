@@ -110,9 +110,9 @@ python3 -m unittest discover -s scripts/tests -t .
 
 - **`-t .` is not optional**, and the failure mode is worth knowing because it is
   partly silent. It sets the top-level directory imports resolve against. Measured
-  on the current tree (10.09.2026, code-review round): **with** it, discovery
-  collects **2889 tests, 0 import errors**, exit 0; **without** it, **2133 tests
-  and 19 modules that fail to
+  on the current tree (10.09.2026, CCP-1172 merged with main/CCP-1170): **with**
+  it, discovery collects **2891 tests, 0 import errors**, exit 0; **without** it,
+  **2135 tests and 19 modules that fail to
   import**, exit 1 — the eight that use a relative import
   (`from .test_phase_docs_lint import …` in four modules,
   `from .test_artifact_gate import …` in two,
@@ -210,6 +210,23 @@ python3 -m unittest discover -s scripts/tests -t .
   `workitems/test_workitem_similar.py`, already one of the 19 failed-import
   modules, so they only ever show up in the `-t .` count -- the skipped
   column's own delta (+7) is exactly those seven.
+
+  10.09.2026, merge round: `ticket/CCP-1172` (**2889 / 2133 / 19 / 756**) integrated
+  `main`/CCP-1170 (**2869 / 2130 / 18 / 739**, itself base `2867 / 2128 / 18 / 739`
+  plus two `test_install_provenance.py` methods that import cleanly either way) via
+  `git merge`, not `git rebase`: both branches forked from the same base and touched
+  disjoint files everywhere except this pin file and `CONTRIBUTING.md` itself, so a
+  merge resolves the conflict once instead of a rebase re-running into it at every
+  one of CCP-1172's thirteen commits. Re-measured directly against the integrated
+  tree (a full `-t .`/no-`-t .` `unittest discover` run and a separate cheap
+  `TestLoader().discover(...).countTestCases()` cross-check agree) rather than added
+  from the two branches' deltas, because addition is arithmetic, not a measurement,
+  and the two branches could in principle have landed overlapping or interacting
+  test methods: **2891 / 2135 / 19 / 756** — with-flag and without-flag both moved by
+  exactly main's own +2/+2 delta on top of CCP-1172's code-review-round figures;
+  modules-fail stayed at 19 (main's two new methods land inside an existing module,
+  none new); skipped stayed at 756 for the same reason it always does when an
+  addition imports cleanly on both sides of the flag — main's own +2 cancels.
 - The full run takes **a couple of minutes**. If you drive it from an agent whose
   tool calls time out, start it in the background and wait for it once rather than
   polling.

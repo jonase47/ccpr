@@ -891,7 +891,7 @@ class NoStaleKnownFindingsTest(unittest.TestCase):
 
 class ClassificationCountsTest(unittest.TestCase):
     def test_classification_counts(self):
-        """Regression pin on the measured baseline: 1371 `test_*` methods
+        """Regression pin on the measured baseline: 1423 `test_*` methods
         across the corpus call something shaped like a subprocess invocation
         and are therefore in scope for this check; 0 of those are currently
         absence-only-needs-exemption -- `KNOWN_FINDINGS` above is empty for
@@ -905,6 +905,21 @@ class ClassificationCountsTest(unittest.TestCase):
         growing paragraph:
 
           in-scope / flagged   when
+          1423 / 0             10.09.2026 (CCP-1172 merged
+                               with CCP-1170, ticket/CCP-1172 integrated
+                               `main`): both branches forked from the same
+                               1412/0 tree and touched disjoint files --
+                               CCP-1172's own two rows below plus CCP-1170's
+                               one row, no file in common besides this pin
+                               itself. Re-measured directly against the
+                               integrated tree via `scan_tree()` rather than
+                               added from the two deltas (1412 + 10 + 1),
+                               because addition is arithmetic, not a
+                               measurement, and the two branches could in
+                               principle have landed overlapping or
+                               interacting test methods; they did not, and
+                               this row's own value is now the ground truth,
+                               not a derivation of the two below it.
           1422 / 0             10.09.2026 (CCP-1172, code-review fixes: empty
                                --checked-against rejected, similar's verdict
                                no longer reads the --limit-sliced list,
@@ -941,6 +956,22 @@ class ClassificationCountsTest(unittest.TestCase):
                                the subprocess result (an exact non-zero
                                returncode, a specific stderr substring, or a
                                JSON field read back) -- flagged unchanged.
+          1413 / 0             10.09.2026 (CCP-1170, IGNORED block grouped
+                               by .gitignore rule): +2 new test methods
+                               (VerifyAgreesWithAnUntouchedInstallationTest.
+                               test_the_ignored_footer_prints_even_when_
+                               nothing_was_excused, and
+                               NonFrameworkDocsAreNotExpectedInTheInstallation
+                               Test.test_a_path_excused_by_a_different_rule_
+                               lands_on_its_own_line), only 1 entered scope.
+                               The one that did calls `self.run_install`
+                               directly; the one that did not calls only
+                               `self.verify()`, which RUN_HELPER_RE does not
+                               match -- the same discriminator the 0/27 and
+                               5/23 rows below already demonstrate, not a
+                               new gap. 0 flagged: both carry a positive
+                               assertion on `ignored_groups(r.stdout)`
+                               alongside their negative ones.
           1412 / 0             09.09.2026 (CCP-1173 second cut, --dry-run
                                previews the refusal): +11, all 11 in scope.
                                With the row below it: 25/25 then 11/11 from the
@@ -1922,7 +1953,7 @@ class ClassificationCountsTest(unittest.TestCase):
         count."""
         recs = scan_tree()
         flagged = [r for r in recs if r.disposition in NEEDS_EXEMPTION]
-        self.assertEqual(1422, len(recs))
+        self.assertEqual(1423, len(recs))
         self.assertEqual(0, len(flagged))
 
 
