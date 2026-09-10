@@ -432,6 +432,61 @@ class MarkerOnANonGitSourceInventsNothingTest(InstallProvenanceBase):
         self.assertEqual("non-git", m.get("source_kind"))
         self.assertNotIn("source_commit", m)
 
+    def test_a_genuine_non_git_source_prints_no_provenance_warning(self):
+        """Counter-proof for the warning UnresolvableGitSourceWarnsInstead
+        OfStayingSilentTest pins below: a source with no `.git` at all
+        (unzipped archive, plain copy) is a LEGITIMATE non-git install and
+        must stay silent about it -- only a `.git` directory that failed
+        to resolve deserves a warning."""
+        r = self.run_install("--yes")
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertNotIn("WARNING", r.stdout + r.stderr)
+
+
+class UnresolvableGitSourceWarnsInsteadOfStayingSilentTest(InstallProvenanceBase):
+    """Acceptance 5: `non-git` is a legitimate verdict for a genuine
+    tarball/copy source and must stay possible, silently. But a source
+    directory that DOES contain a `.git` and still ends up non-git --
+    provenance could not be RESOLVED, not merely absent -- happens in a
+    mode that OVERWRITES the installation (fresh/update: write_provenance()
+    only ever runs after such a copy, never on --dry-run or --verify), and
+    deserves more than the one-line parenthetical write_provenance() always
+    prints for every kind. Reproduced with an empty git repository: `git
+    init` without a first commit resolves its own toplevel fine but has no
+    HEAD to record, so source_provenance() falls through to non-git even
+    though $SRC/.git exists."""
+
+    git_init = False
+
+    def setUp(self):
+        super().setUp()
+        subprocess.run(["git", "-C", str(self.src), "init", "-q"],
+                       check=True, capture_output=True, env=self.env())
+
+    def test_a_source_with_a_git_directory_but_no_resolvable_commit_warns(self):
+        r = self.run_install("--yes")
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        m = self.marker()
+        self.assertEqual(
+            "non-git", m.get("source_kind"),
+            "fixture assumption broken: an empty git repo (no commits "
+            "yet) should still classify as non-git",
+        )
+        self.assertIn("WARNING", r.stdout + r.stderr,
+                      "a source with its own .git directory ended up "
+                      "non-git and printed nothing louder than the usual "
+                      "one-line parenthetical:\n" + r.stdout + r.stderr)
+        self.assertIn(".git", r.stdout + r.stderr)
+
+    def test_the_marker_written_is_unaffected_by_the_warning(self):
+        # The warning is a loud notice, not a change to what gets
+        # recorded -- non-git stays non-git, with no invented commit.
+        r = self.run_install("--yes")
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        m = self.marker()
+        self.assertNotIn("source_commit", m)
+        self.assertEqual("unknown", m.get("source_state"))
+
 
 class MarkerIsReplacedNotStackedOnUpdateTest(InstallProvenanceBase):
     def test_update_leaves_exactly_one_recorded_commit_and_it_is_the_new_one(self):

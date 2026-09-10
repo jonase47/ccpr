@@ -477,6 +477,20 @@ source_provenance() {
 }
 
 # write_provenance <mode> -- overwrite (never append) the marker.
+#
+# CCP-1174, acceptance 5: `non-git` is a legitimate, silent verdict for a
+# genuine tarball or plain-copy source -- it must stay possible without
+# noise, and DOES for the common case, because $SRC/.git simply does not
+# exist there. But a source that DOES contain a `.git` and still ends up
+# non-git means provenance could not be RESOLVED (nested inside a foreign
+# checkout, or a repository with no commit yet to record), which is a
+# materially different situation from "not a checkout at all" -- and this
+# function only ever runs in a mode that OVERWRITES the installation
+# (fresh replaces everything, update replaces the framework; --dry-run and
+# --verify never reach here). Silently degrading THIS install's provenance
+# check (see the production incident this item was filed from) deserves a
+# louder notice than the one-line parenthetical below, which reads
+# identically for both cases and is easy to miss in a wall of output.
 write_provenance() {
   local mode="$1"
   source_provenance
@@ -494,6 +508,13 @@ write_provenance() {
     echo "source_state=$SRC_STATE"
   } > "$DEST/$PROVENANCE_FILE"
   echo "  wrote $PROVENANCE_FILE (source: $SRC_KIND${SRC_COMMIT:+ $SRC_COMMIT}, $SRC_STATE)"
+  if [[ "$SRC_KIND" == "non-git" && -e "$SRC/.git" ]]; then
+    echo "  !! WARNING: $SRC contains a .git directory, but its provenance could" >&2
+    echo "     not be resolved -- the installed provenance check will not be able" >&2
+    echo "     to compare this installation against a commit ('--verify' will" >&2
+    echo "     report it as could-not-run). If this is unexpected, check that" >&2
+    echo "     $SRC is the toplevel of its own checkout and has at least one commit." >&2
+  fi
 }
 
 # verify_cannot_run <reason> -- the one wording for "nothing was compared".

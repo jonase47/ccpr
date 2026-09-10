@@ -1737,6 +1737,66 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Fixed
 
+- **`source_provenance()` compared two spellings of one directory as strings, classifying a
+  real git checkout as `non-git` (CCP-1174).** Observed in production, on the maintainer's
+  own machine, after a routine `./install.sh --update`: the run succeeded and reported `wrote
+  .ccpr-install-provenance (source: non-git, unknown)` — no `source_commit` line at all,
+  though the previous marker had one. `--verify` reads that line to resolve what it compares
+  against; without it, the check CCP-1166 had just widened to 306 files could not run on the
+  maintainer's own installation, and nothing about the run said so beyond that one
+  parenthetical in a wall of expected output.
+
+  **Cause, measured under bash (the shell `install.sh` runs under — a first probe run under
+  zsh reported the mismatch as absent, because the direction reverses between the two
+  shells):** `source_provenance()` guards against a copied directory inside a foreign
+  checkout inheriting that repository's HEAD by requiring `git rev-parse --show-toplevel` to
+  equal `$SRC`'s own resolved path — both sides already routed through `pwd -P` to fold the
+  `/tmp` → `/private/tmp` symlink case. On a case-insensitive filesystem, `pwd -P` does not
+  canonicalise case; it returns the path AS TRAVERSED. The directory the script was invoked
+  through need not be the spelling git itself stored at init time, so the two sides could be
+  the IDENTICAL directory and still disagree as strings — and did, on the maintainer's own
+  machine, where the checkout's parent directory and git's own stored spelling of it differed
+  only in the case of one path segment. Routing both through `pwd -P` again is not a fix;
+  they had already been through it once.
+
+  **Fix: `-ef` (bash: same device+inode) instead of `==`.** It answers the identity question
+  that was actually meant, needs no assumption about the filesystem's case sensitivity, and —
+  unlike a case-folding string compare — stays correct on a case-**sensitive** volume, where
+  two differently-cased directories are genuinely two directories and merging them would
+  silently widen the guard this comparison exists for. Measured false (not an error) when
+  either side does not exist, so a `$toplevel` that failed to resolve still falls through to
+  `non-git` rather than tripping `set -e`. Weighed against CCP-1037's precedent (the same
+  defect class in `scripts/lib/discipline_gate.sh`, fixed by *avoiding* the git query and
+  deriving identity from the file's own resolved path instead): that avoidance does not apply
+  here, because the git query is not incidental — resolving `$SRC`'s toplevel through git IS
+  the question this function answers.
+
+  **The guard the comparison exists for still holds** (`MarkerOnANonGitSourceInventsNothingTest
+  .test_a_source_inside_an_unrelated_git_repository_is_not_claimed_as_its_own`, pre-existing
+  and re-verified unchanged after the fix): a copy sitting inside a foreign checkout is a
+  genuinely different directory (different device+inode), so it stays `non-git` and does not
+  inherit the surrounding repository's HEAD, regardless of the change from `==` to `-ef`.
+
+  **`write_provenance()` now warns when a source's provenance could not be resolved despite
+  the source directory containing its own `.git`** — a materially different situation from a
+  genuine tarball/plain-copy source, where `non-git` is the correct, silent answer and stays
+  one (no `.git` present, no warning). This function only ever runs in a mode that OVERWRITES
+  the installation (fresh or update), which is exactly the situation this item was filed
+  from, so a degraded provenance check now gets a loud, explicit notice on stderr instead of
+  the same one-line parenthetical every other `source_kind` also gets.
+
+  Five new tests in `scripts/tests/test_install_provenance.py`: installing via a
+  non-canonical case spelling of the source still records `source_kind=git` with the real
+  commit, both spellings agree, a genuine non-git source still prints no warning, and a
+  source with its own unresolvable `.git` (an empty repository, no commits yet) does warn
+  without inventing a commit. Skipped, with a stated reason, on a case-sensitive filesystem,
+  where the non-canonical spelling used in the case tests does not exist at all. **Not
+  covered by these tests:** two *distinct* directories differing only in case, genuinely two
+  directories on a case-sensitive volume, being wrongly merged by a naive case-folding fix —
+  this sandbox's filesystem is case-insensitive, so that specific failure mode cannot be
+  constructed here; using `-ef` sidesteps it by construction (it never inspects case at all),
+  but no automated regression proves that claim on this machine.
+
 - **`install.sh --verify`'s IGNORED block is grouped by `.gitignore` rule instead of listing
   every excused path (CCP-1170).** A correct installation excused 100 locally generated paths
   (97 `__pycache__` files + 3 `.DS_Store`) and printed each one, 105 of 143 report lines — an
