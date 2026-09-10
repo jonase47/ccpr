@@ -197,6 +197,44 @@ class WorkitemsCliTest(unittest.TestCase):
         # No item silently created on stdout despite the refusal.
         self.assertEqual(result.stdout, "")
 
+    def test_create_with_an_empty_checked_against_is_refused(self):
+        """Code-review finding (Critical): `required=True` only enforces the
+        FLAG's presence, not a non-empty VALUE -- `--checked-against ""` used to
+        create an item with the meaningless line `Checked against:`, exactly the
+        bypass class the PO decision excluded (a required field that accepts an
+        empty string is the rejected no-consequence warning under a stricter
+        name). handbook/WORKITEMS.md already claimed "unvalidated beyond
+        non-empty"; the code catches up to the doc, not the other way round."""
+        result = self.run_cli("create", "--title", "New feature", "--checked-against", "")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("--checked-against", result.stderr)
+        self.assertEqual(result.stdout, "")
+
+    def test_create_with_a_whitespace_only_checked_against_is_refused(self):
+        """Whitespace-only is the same bypass wearing a disguise -- a value that
+        LOOKS non-empty to a shell but carries no content."""
+        result = self.run_cli("create", "--title", "New feature", "--checked-against", "   ")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("--checked-against", result.stderr)
+        self.assertEqual(result.stdout, "")
+
+    def test_create_checked_against_is_trimmed_around_real_content(self):
+        """Silent counter-proof: real content survives, only the padding goes --
+        so the refusal above is about EMPTINESS, not about whitespace per se."""
+        result = self.run_cli(
+            "create", "--title", "New feature",
+            "--checked-against", "  CCP-1136, CCP-1124  ",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        item = json.loads(result.stdout)
+        self.assertEqual(item["description"], "Checked against: CCP-1136, CCP-1124")
+
+        reread = json.loads(self.run_cli("get", item["id"]).stdout)
+        self.assertEqual(reread["description"], "Checked against: CCP-1136, CCP-1124")
+
     def test_create_assigns_id_and_defaults_to_backlog(self):
         # "none" is the PO-permitted answer (CCP-1172) -- exercised here rather
         # than invented ad hoc in every other test that just needs SOME item.

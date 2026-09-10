@@ -389,7 +389,23 @@ def _compose_create_description(description, checked_against):
     item itself, permanently and auditable, not only in whatever session filed it.
     Kept at the CLI layer, not in backend.create()'s own signature (~40 existing
     callers construct items directly against that signature across both backends
-    and `lift`; none of them need to change for a CLI-only requirement)."""
+    and `lift`; none of them need to change for a CLI-only requirement).
+
+    `checked_against` is trimmed and REJECTED if empty after trimming (code-review
+    finding, Critical): argparse's `required=True` on the flag only enforces the
+    flag's PRESENCE, not a non-empty VALUE -- `--checked-against ""` used to
+    compose the meaningless line `Checked against:` and create the item anyway,
+    exactly the bypass class the PO decision excluded (a required field that
+    accepts an empty string is the rejected no-consequence warning under a
+    stricter name). handbook/WORKITEMS.md already documented "unvalidated beyond
+    non-empty" -- this is the code catching up to that claim, not a new promise."""
+    checked_against = (checked_against or "").strip()
+    if not checked_against:
+        raise WorkItemError(
+            "--checked-against must not be empty (or whitespace-only) -- \"none\" "
+            "is a permitted answer, an empty string is not. Run `workitems.py "
+            "similar TEXT` first to produce an honest value cheaply."
+        )
     header = f"Checked against: {checked_against}"
     if description:
         return f"{header}\n\n{description}"
