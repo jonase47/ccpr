@@ -119,6 +119,17 @@ def _rmtree(p):
     shutil.rmtree(p, ignore_errors=True)
 
 
+def _case_variant_exists(path):
+    """True if upper-casing `path` as a whole string resolves to the SAME
+    directory (device+inode) -- i.e. the filesystem backing it folds case.
+    tempfile.mkdtemp() names are lower-case/digits by construction, so
+    upper-casing the whole absolute path is enough to produce a second
+    spelling of the identical directory on a case-insensitive filesystem,
+    and a plain non-existent path on a case-sensitive one (CCP-1174)."""
+    alt = Path(str(path).upper())
+    return alt.exists() and os.path.samefile(str(path), str(alt))
+
+
 def parse_marker(text):
     """Reads the marker the same way install.sh --verify does: `key=value`
     lines, `#` comments and blank lines ignored, first `=` splits."""
@@ -275,6 +286,240 @@ class MarkerRecordsACleanGitSourceTest(InstallProvenanceBase):
         self.assertIn(shipped_marker_name(), r.stdout)
 
 
+class MarkerAgreesAcrossCaseSpellingsOfTheSourceTest(InstallProvenanceBase):
+    """CCP-1174: `source_provenance()` compared $SRC's own resolved path
+    against `git rev-parse --show-toplevel`'s resolved path as STRINGS.
+    On a case-insensitive filesystem the two can be the IDENTICAL
+    directory and still differ in spelling (CCP-1114) -- `pwd -P` returns
+    the path AS TRAVERSED, not a canonicalised case, and the directory the
+    script is invoked through need not be the spelling git itself stored
+    at init time. Skipped, with a stated reason, on a case-sensitive
+    filesystem, where a differently-cased spelling of this directory does
+    not exist at all and this scenario cannot be produced. Measured under
+    bash (`run_install`/`subprocess.run(["bash", ...])`), the shell
+    install.sh actually runs under -- CCP-1174 was nearly missed by a
+    first probe run under zsh, where the mismatch direction reverses."""
+
+    def setUp(self):
+        super().setUp()
+        if not _case_variant_exists(self.src):
+            self.skipTest(
+                "filesystem under the fixture root is case-sensitive -- "
+                "the non-canonical spelling used here would be a "
+                "different, nonexistent directory, not the same one"
+            )
+        self.alt_src = Path(str(self.src).upper())
+
+    def _run_from_alt_spelling(self, *args):
+        return subprocess.run(
+            ["bash", str(self.alt_src / "install.sh"), *args],
+            cwd=str(self.alt_src), capture_output=True, text=True, env=self.env(),
+        )
+
+    def test_installing_via_the_non_canonical_spelling_still_records_the_commit(self):
+        """Acceptance 1 -- red proof: against today's code this installs
+        and records source_kind=non-git with no source_commit at all,
+        even though $SRC is exactly the git checkout it was invoked
+        through -- only the spelling used to reach it differs."""
+        head = self.git("rev-parse", "HEAD").stdout.strip()
+        r = self._run_from_alt_spelling("--yes")
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        m = self.marker()
+        self.assertEqual(
+            "git", m.get("source_kind"),
+            "a real git checkout, entered through a differently-cased "
+            "spelling of its own path, was recorded as non-git:\n" + r.stdout,
+        )
+        self.assertEqual(head, m.get("source_commit"))
+        self.assertEqual("clean", m.get("source_state"))
+
+    def test_both_spellings_agree_on_kind_and_commit(self):
+        """Acceptance 3."""
+        head = self.git("rev-parse", "HEAD").stdout.strip()
+
+        r_canonical = self.run_install("--yes")
+        self.assertEqual(0, r_canonical.returncode, r_canonical.stdout + r_canonical.stderr)
+        canonical_marker = dict(self.marker())
+
+        r_alt = self._run_from_alt_spelling("--update", "--yes")
+        self.assertEqual(0, r_alt.returncode, r_alt.stdout + r_alt.stderr)
+        alt_marker = self.marker()
+
+        self.assertEqual("git", canonical_marker.get("source_kind"))
+        self.assertEqual(canonical_marker.get("source_kind"), alt_marker.get("source_kind"))
+        self.assertEqual(head, canonical_marker.get("source_commit"))
+        self.assertEqual(canonical_marker.get("source_commit"), alt_marker.get("source_commit"))
+
+
+def _tmp_scratch_dir_is_case_sensitive():
+    """Own probe, deliberately NOT test_check_all.py's
+    `_tmp_root_is_case_insensitive()`: that one writes a FIXED filename
+    into the shared system temp root and is evaluated at IMPORT time --
+    itself a latent concurrency hazard (two full-suite runs racing the
+    same path), found and reported, not fixed, during this ticket's
+    review. This probe uses its own `tempfile.mkdtemp()` directory
+    instead -- unique per call, so even two concurrent suite runs each
+    get their own, with nothing shared to race."""
+    d = Path(tempfile.mkdtemp(prefix="ccpr-ef-case-probe-"))
+    try:
+        probe = d / "alpha"
+        probe.mkdir()
+        alt = d / "ALPHA"
+        return not (alt.exists() and alt.samefile(probe))
+    finally:
+        _rmtree(d)
+
+
+_CASE_SENSITIVE_FS = _tmp_scratch_dir_is_case_sensitive()
+
+
+class TheEfComparisonIsNotACaseFoldingStringCompareTest(unittest.TestCase):
+    """CCP-1174 code review follow-up. `-ef` was chosen over a case-folding
+    string compare because the latter would wrongly merge two GENUINELY
+    DIFFERENT, differently-cased directories. That specific risk turns out
+    to be unreachable end-to-end through install.sh, on ANY filesystem:
+    `git rev-parse --show-toplevel`'s own contract guarantees `toplevel` is
+    always $SRC itself or a STRICT ANCESTOR of it (shorter path, never a
+    same-depth sibling) -- so the only way it can ever differ from $SRC's
+    own resolved path while naming the SAME real directory is exactly the
+    case-insensitive-ALIASING bug this ticket fixes (CCP-1174/CCP-1114),
+    and the only way it can differ while naming a DIFFERENT real directory
+    is the pre-existing nested-foreign-checkout shape
+    (MarkerOnANonGitSourceInventsNothingTest's guard test), which differs
+    in path DEPTH, not just case, and which ANY correctly-shaped
+    comparison -- case-fold included -- already keeps apart. Measured, not
+    assumed: replacing this file's own `-ef` with a bash-3.2-compatible
+    case-fold (`tr 'A-Z' 'a-z'`, since `${var,,}` needs bash 4+ and is not
+    even syntactically valid under macOS's shipped bash -- confirmed
+    separately, `bad substitution`) left the ENTIRE test_install_
+    provenance.py suite green at the time this class was written (135/135
+    tests, EXIT 0), including the guard test above.
+
+    What IS filesystem-independent: the two comparison EXPRESSIONS behave
+    differently on the same input regardless of what machine runs this,
+    which is the property a future edit copying this pattern elsewhere
+    (or "fixing" it back) would violate. A case-fold compare is pure text
+    -- no filesystem lookup, indifferent to whether either path exists.
+    `-ef` is specified (POSIX `test` / bash) as a `stat()`-based
+    device+inode comparison -- identity-based, never string-based -- so
+    two GENUINELY DIFFERENT directories are guaranteed different inodes
+    regardless of what their names look like, on any filesystem.
+
+    **What is NOT filesystem-independent, found by CI (PR #33,
+    ubuntu-latest/ext4) after a first version of this class got it wrong**:
+    what `-ef` itself reports for a real directory paired with a
+    differently-cased spelling of it. This machine's filesystem is
+    case-insensitive, so the OS aliases the differently-cased spelling to
+    the SAME real entry, and `-ef` correctly (desirably -- this is exactly
+    CCP-1174's own fix) reports "same file". A first version of this test
+    asserted exactly that, unconditionally -- true here, and WRONG on
+    ext4, where the differently-cased spelling is a genuinely different,
+    nonexistent path and `-ef` correctly reports "different". The
+    assertion text even named its own precondition ("on this
+    (case-insensitive) filesystem") without anything enforcing it -- a
+    test whose own wording states an assumption should verify it, not
+    merely narrate it. `test_ef_classifies_the_second_spelling_correctly_
+    for_this_filesystem` below branches on `_CASE_SENSITIVE_FS` instead of
+    gating a whole class behind `@unittest.skipUnless` (an earlier
+    version's approach): it asserts the CORRECT claim on BOTH sides of
+    the fact rather than staying silent on one of them, needs no entry in
+    the platform skip budget, and is exactly as filesystem-independent AS
+    A TEST (it always runs and always proves something) even though the
+    fact it proves is not."""
+
+    def test_case_folding_equates_two_spellings_regardless_of_filesystem(self):
+        """The genuinely filesystem-independent half: a case-folding
+        compare is pure text and never touches the filesystem, so it
+        treats two case-variant spellings as equal on any machine, whether
+        or not the second path exists there."""
+        tmp = Path(tempfile.mkdtemp(prefix="ccpr-ef-mutation-probe-"))
+        self.addCleanup(_rmtree, tmp)
+        real = tmp / "alpha"
+        real.mkdir()
+        alt_spelling = str(real).replace("alpha", "ALPHA")
+        self.assertNotEqual(str(real), alt_spelling)
+
+        fold = subprocess.run(
+            ["bash", "-c", '[[ "$(printf \'%s\' "$1" | tr A-Z a-z)" == '
+                            '"$(printf \'%s\' "$2" | tr A-Z a-z)" ]]',
+             "_", str(real), alt_spelling],
+        )
+        self.assertEqual(
+            0, fold.returncode,
+            "a case-folding compare did not treat two case-variant "
+            "spellings of the same text as equal -- the mutation this "
+            "test targets did not fire, so it cannot demonstrate the risk",
+        )
+
+    def test_ef_classifies_the_second_spelling_correctly_for_this_filesystem(self):
+        """The filesystem-DEPENDENT half, branched rather than gated (see
+        the class docstring for the CI failure this replaces): -ef must
+        report "same file" for the two spellings on a case-insensitive
+        filesystem (OS aliasing) and "different" on a case-sensitive one
+        (the alt spelling is a genuinely different, nonexistent path).
+        Asserts whichever is correct for THIS run, and asserts the
+        fixture's own precondition first so a silently-wrong branch cannot
+        pass by accident."""
+        tmp = Path(tempfile.mkdtemp(prefix="ccpr-ef-mutation-probe-"))
+        self.addCleanup(_rmtree, tmp)
+        real = tmp / "alpha"
+        real.mkdir()
+        alt_spelling = tmp / "ALPHA"
+
+        same_file = subprocess.run(
+            ["bash", "-c", '[[ "$1" -ef "$2" ]]', "_", str(real), str(alt_spelling)],
+        )
+        if _CASE_SENSITIVE_FS:
+            self.assertFalse(
+                alt_spelling.exists(),
+                "fixture assumption broken: a differently-cased spelling "
+                "exists on this filesystem despite the module's own "
+                "case-sensitivity probe saying otherwise",
+            )
+            self.assertNotEqual(
+                0, same_file.returncode,
+                "-ef reported a real directory and a differently-cased, "
+                "nonexistent path as the same file on a case-sensitive "
+                "filesystem",
+            )
+        else:
+            self.assertTrue(
+                alt_spelling.exists(),
+                "fixture assumption broken: a differently-cased spelling "
+                "does not exist on this filesystem despite the module's "
+                "own case-sensitivity probe saying otherwise",
+            )
+            self.assertEqual(
+                0, same_file.returncode,
+                "expected -ef to report a differently-cased spelling of "
+                "the same real directory as the same file on this "
+                "(case-insensitive) filesystem",
+            )
+
+    def test_ef_still_tells_two_real_unrelated_directories_apart(self):
+        """Counter-proof: without this, a same_file probe that is always
+        false would pass the assertion above for the wrong reason."""
+        tmp = Path(tempfile.mkdtemp(prefix="ccpr-ef-mutation-probe-"))
+        self.addCleanup(_rmtree, tmp)
+        alpha = tmp / "alpha"
+        bravo = tmp / "bravo"
+        alpha.mkdir()
+        bravo.mkdir()
+        r = subprocess.run(
+            ["bash", "-c", '[[ "$1" -ef "$2" ]]', "_", str(alpha), str(bravo)],
+        )
+        self.assertNotEqual(0, r.returncode)
+
+        r = subprocess.run(
+            ["bash", "-c", '[[ "$1" -ef "$1" ]]', "_", str(alpha)],
+        )
+        self.assertEqual(
+            0, r.returncode,
+            "-ef reported a real directory as not being the same file as "
+            "itself",
+        )
+
+
 class MarkerRecordsADirtySourceAsDirtyTest(InstallProvenanceBase):
     """A bare SHA on a dirty tree claims more than is true: what was
     installed is that commit PLUS whatever was uncommitted."""
@@ -355,6 +600,61 @@ class MarkerOnANonGitSourceInventsNothingTest(InstallProvenanceBase):
         m = self.marker()
         self.assertEqual("non-git", m.get("source_kind"))
         self.assertNotIn("source_commit", m)
+
+    def test_a_genuine_non_git_source_prints_no_provenance_warning(self):
+        """Counter-proof for the warning UnresolvableGitSourceWarnsInstead
+        OfStayingSilentTest pins below: a source with no `.git` at all
+        (unzipped archive, plain copy) is a LEGITIMATE non-git install and
+        must stay silent about it -- only a `.git` directory that failed
+        to resolve deserves a warning."""
+        r = self.run_install("--yes")
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertNotIn("WARNING", r.stdout + r.stderr)
+
+
+class UnresolvableGitSourceWarnsInsteadOfStayingSilentTest(InstallProvenanceBase):
+    """Acceptance 5: `non-git` is a legitimate verdict for a genuine
+    tarball/copy source and must stay possible, silently. But a source
+    directory that DOES contain a `.git` and still ends up non-git --
+    provenance could not be RESOLVED, not merely absent -- happens in a
+    mode that OVERWRITES the installation (fresh/update: write_provenance()
+    only ever runs after such a copy, never on --dry-run or --verify), and
+    deserves more than the one-line parenthetical write_provenance() always
+    prints for every kind. Reproduced with an empty git repository: `git
+    init` without a first commit resolves its own toplevel fine but has no
+    HEAD to record, so source_provenance() falls through to non-git even
+    though $SRC/.git exists."""
+
+    git_init = False
+
+    def setUp(self):
+        super().setUp()
+        subprocess.run(["git", "-C", str(self.src), "init", "-q"],
+                       check=True, capture_output=True, env=self.env())
+
+    def test_a_source_with_a_git_directory_but_no_resolvable_commit_warns(self):
+        r = self.run_install("--yes")
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        m = self.marker()
+        self.assertEqual(
+            "non-git", m.get("source_kind"),
+            "fixture assumption broken: an empty git repo (no commits "
+            "yet) should still classify as non-git",
+        )
+        self.assertIn("WARNING", r.stdout + r.stderr,
+                      "a source with its own .git directory ended up "
+                      "non-git and printed nothing louder than the usual "
+                      "one-line parenthetical:\n" + r.stdout + r.stderr)
+        self.assertIn(".git", r.stdout + r.stderr)
+
+    def test_the_marker_written_is_unaffected_by_the_warning(self):
+        # The warning is a loud notice, not a change to what gets
+        # recorded -- non-git stays non-git, with no invented commit.
+        r = self.run_install("--yes")
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        m = self.marker()
+        self.assertNotIn("source_commit", m)
+        self.assertEqual("unknown", m.get("source_state"))
 
 
 class MarkerIsReplacedNotStackedOnUpdateTest(InstallProvenanceBase):

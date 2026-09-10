@@ -429,10 +429,32 @@ SRC_STATE="unknown"
 # source_provenance -- classify $SRC into (kind, commit, state) without ever
 # guessing. `git rev-parse` walks UP the directory tree, so a copied
 # directory sitting inside somebody else's checkout would otherwise inherit
-# that repository's HEAD: the toplevel must be $SRC ITSELF, compared as
-# physical paths (macOS /tmp is a symlink to /private/tmp, so the logical
-# and physical spellings differ and a string compare of the two would
-# wrongly say "not a repository").
+# that repository's HEAD: the toplevel must be $SRC ITSELF.
+#
+# "Itself" is an identity question about DIRECTORIES, not a question about
+# the strings that name them -- checked with `-ef` (bash: same device+inode)
+# rather than `==` (CCP-1174). Two reasons neither side of a string compare
+# can be trusted to agree here even when they name the same directory:
+#   * macOS /tmp is a symlink to /private/tmp, so the logical and physical
+#     spellings differ (both sides already go through `pwd -P` to fold
+#     this, which is why this comment used to stop there).
+#   * On a case-insensitive filesystem, `pwd -P` does NOT canonicalise
+#     case -- it returns the path AS TRAVERSED. The directory the script
+#     was invoked through need not be the spelling git itself stored at
+#     init time (CCP-1114), so `$SRC`'s own resolved path and git's
+#     reported toplevel can be the IDENTICAL directory and still differ
+#     as strings (CCP-1174, observed in production 10.09.2026). Routing
+#     both through `pwd -P` again does not fix this, because they already
+#     went through it once and still disagree -- they were entered
+#     through different doors.
+# `-ef` answers "is this the same directory" directly, needs no assumption
+# about the filesystem's case sensitivity, and stays correct on a
+# case-SENSITIVE volume where two differently-cased directories are
+# genuinely two directories -- which a case-folding string compare would
+# wrongly merge, silently widening the guard this exists for. It is also
+# false (not an error) when either side does not exist, so a `$toplevel`
+# that failed to resolve above still falls through to `non-git` here
+# rather than tripping `set -e`.
 source_provenance() {
   local toplevel=""
   SRC_PHYS="$(cd "$SRC" && pwd -P)"
@@ -443,7 +465,7 @@ source_provenance() {
   toplevel="$(git -C "$SRC" rev-parse --show-toplevel 2>/dev/null)" || return 0
   [[ -n "$toplevel" ]] || return 0
   toplevel="$(cd "$toplevel" 2>/dev/null && pwd -P)" || return 0
-  [[ "$toplevel" == "$SRC_PHYS" ]] || return 0
+  [[ "$toplevel" -ef "$SRC_PHYS" ]] || return 0
   SRC_COMMIT="$(git -C "$SRC" rev-parse HEAD 2>/dev/null)" || SRC_COMMIT=""
   [[ -n "$SRC_COMMIT" ]] || return 0
   SRC_KIND="git"
@@ -455,6 +477,20 @@ source_provenance() {
 }
 
 # write_provenance <mode> -- overwrite (never append) the marker.
+#
+# CCP-1174, acceptance 5: `non-git` is a legitimate, silent verdict for a
+# genuine tarball or plain-copy source -- it must stay possible without
+# noise, and DOES for the common case, because $SRC/.git simply does not
+# exist there. But a source that DOES contain a `.git` and still ends up
+# non-git means provenance could not be RESOLVED (nested inside a foreign
+# checkout, or a repository with no commit yet to record), which is a
+# materially different situation from "not a checkout at all" -- and this
+# function only ever runs in a mode that OVERWRITES the installation
+# (fresh replaces everything, update replaces the framework; --dry-run and
+# --verify never reach here). Silently degrading THIS install's provenance
+# check (see the production incident this item was filed from) deserves a
+# louder notice than the one-line parenthetical below, which reads
+# identically for both cases and is easy to miss in a wall of output.
 write_provenance() {
   local mode="$1"
   source_provenance
@@ -472,6 +508,13 @@ write_provenance() {
     echo "source_state=$SRC_STATE"
   } > "$DEST/$PROVENANCE_FILE"
   echo "  wrote $PROVENANCE_FILE (source: $SRC_KIND${SRC_COMMIT:+ $SRC_COMMIT}, $SRC_STATE)"
+  if [[ "$SRC_KIND" == "non-git" && -e "$SRC/.git" ]]; then
+    echo "  !! WARNING: $SRC contains a .git entry, but its provenance could" >&2
+    echo "     not be resolved -- the installed provenance check will not be able" >&2
+    echo "     to compare this installation against a commit ('--verify' will" >&2
+    echo "     report it as could-not-run). If this is unexpected, check that" >&2
+    echo "     $SRC is the toplevel of its own checkout and has at least one commit." >&2
+  fi
 }
 
 # verify_cannot_run <reason> -- the one wording for "nothing was compared".

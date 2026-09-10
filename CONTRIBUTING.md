@@ -110,9 +110,9 @@ python3 -m unittest discover -s scripts/tests -t .
 
 - **`-t .` is not optional**, and the failure mode is worth knowing because it is
   partly silent. It sets the top-level directory imports resolve against. Measured
-  on the current tree (10.09.2026, CCP-1172 merged with main/CCP-1170): **with**
-  it, discovery collects **2891 tests, 0 import errors**, exit 0; **without** it,
-  **2135 tests and 19 modules that fail to
+  on the current tree (10.09.2026, CCP-1174 code-review follow-up): **with**
+  it, discovery collects **2899 tests, 0 import errors**, exit 0; **without** it,
+  **2143 tests and 19 modules that fail to
   import**, exit 1 — the eight that use a relative import
   (`from .test_phase_docs_lint import …` in four modules,
   `from .test_artifact_gate import …` in two,
@@ -263,6 +263,54 @@ python3 -m unittest discover -s scripts/tests -t .
   modules-fail stayed at 19 (main's two new methods land inside an existing module,
   none new); skipped stayed at 756 for the same reason it always does when an
   addition imports cleanly on both sides of the flag — main's own +2 cancels.
+
+  10.09.2026 (CCP-1174: `source_provenance()` compared two case spellings of one
+  directory as strings, classifying a real git checkout as `non-git`; fixed with
+  `-ef` same-file identity, plus a warning when an unresolvable source still
+  carries its own `.git`): **2896 / 2140 / 19 / 756** — +5 on both totals, all in
+  `test_install_provenance.py` (no relative import, so the addition lands on
+  both sides of the flag and cancels out of skipped); modules-fail unchanged
+  (five new methods, no new module). Re-measured with a full `-t .`/no-`-t .`
+  `unittest discover` run and a separate `TestLoader().discover(...)
+  .countTestCases()` cross-check, agreeing.
+
+  **A first attempt at this measurement was discarded, not corrected.** Running
+  the `-t .` and no-`-t .` full suites at the same time against the same
+  checkout reported 2896 / 2102 / **20** / — the twentieth failing import being
+  `test_check_all`, which is not one of the 19 named above. Its failure trace
+  pointed at `_tmp_root_is_case_insensitive()` (module-level, evaluated at
+  import time), which writes a FIXED filename into the shared system temp
+  directory and unlinks it in a `finally` — two concurrent interpreters racing
+  the same path, one's `unlink()` running after the other's already removed it.
+  Killed both runs, re-ran them one at a time (`test_workitems_cli.py` has the
+  same shape of hazard — it writes a fake provider into
+  `scripts/lib/workitems/` at runtime and cleans it up, so it does not tolerate
+  a second run beside it either): `test_check_all` dropped out of the error
+  list on both flags, back to the expected 19. The suspected cause was removed
+  and the effect went with it — the control that turns a plausible diagnosis
+  into a measured one (this repository's own rule against arguing conformance
+  instead of running it, applied to itself). Not a defect in this ticket's own
+  changes; a pre-existing, unrelated hazard in `test_check_all.py`, out of
+  scope for CCP-1174 and left unfixed here, reported to the PO instead.
+
+  10.09.2026, same day (CCP-1174 code-review follow-up: a filesystem-independent
+  regression guard on the `-ef`-vs-case-folding-compare choice, plus one
+  `@skipUnless`-gated supplementary test meaningful on a case-sensitive
+  filesystem): **2899 / 2143 / 19 / 756** — +3 on both totals, all in
+  `test_install_provenance.py` again (no relative import, cancels out of
+  skipped the same way); modules-fail unchanged. The skipped-test COUNT (a
+  different figure from this pair's own "skipped" column, which counts tests
+  that never execute without `-t .`) moved too:
+  `scripts/tests/test_platform_conditional_skip_budget.py`'s pinned budget
+  went 0 → 1 contributed on this machine, registering the new
+  `@skipUnless`-gated class the same way its docstring requires every
+  platform/toolchain-conditional skip to be accounted for — re-derived via
+  its own `expected_skip_count()`, not hand-typed, and confirmed by two
+  mutation probes (a wrong per-source count, and an unregistered file) both
+  still failing loudly afterward. Re-measured with a full `-t .`/no-`-t .`
+  `unittest discover` run and a separate `TestLoader().discover(...)
+  .countTestCases()` cross-check, agreeing; both runs sequential, not
+  concurrent, per the previous entry's own lesson.
 - The full run takes **a couple of minutes**. If you drive it from an agent whose
   tool calls time out, start it in the background and wait for it once rather than
   polling.

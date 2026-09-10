@@ -891,7 +891,7 @@ class NoStaleKnownFindingsTest(unittest.TestCase):
 
 class ClassificationCountsTest(unittest.TestCase):
     def test_classification_counts(self):
-        """Regression pin on the measured baseline: 1423 `test_*` methods
+        """Regression pin on the measured baseline: 1431 `test_*` methods
         across the corpus call something shaped like a subprocess invocation
         and are therefore in scope for this check; 0 of those are currently
         absence-only-needs-exemption -- `KNOWN_FINDINGS` above is empty for
@@ -905,6 +905,51 @@ class ClassificationCountsTest(unittest.TestCase):
         growing paragraph:
 
           in-scope / flagged   when
+          1431 / 0             10.09.2026 (CCP-1174 code-review follow-up:
+                               a filesystem-independent regression guard on
+                               the `-ef`-vs-case-folding-compare choice
+                               itself, plus a `@skipUnless`-gated
+                               supplement meaningful on a case-sensitive
+                               filesystem): +3, all in
+                               test_install_provenance.py --
+                               TheEfComparisonIsNotACaseFoldingStringCompareTest's
+                               two methods and
+                               OnACaseSensitiveFilesystemEfKeepsCaseVariantsApartTest's
+                               one (skipped on this machine, still counted
+                               -- scan_tree() classifies by AST shape, not
+                               by whether the method ran), all three via a
+                               raw `subprocess.run(["bash", "-c", ...])`
+                               call matching RUN_HELPER_RE/
+                               `_calls_a_subprocess`. None flagged: each
+                               asserts a positive fact (an exact 0 or
+                               non-zero returncode) about the probed
+                               comparison's own result.
+          1428 / 0             10.09.2026 (CCP-1174: source_provenance()
+                               compared two case spellings of one directory
+                               as strings, classifying a real git checkout
+                               as non-git; fixed with `-ef` same-file
+                               identity instead, plus a warning when an
+                               unresolvable source still carries its own
+                               `.git`): +5, all in
+                               test_install_provenance.py -- 2 in the new
+                               MarkerAgreesAcrossCaseSpellingsOfTheSourceTest
+                               (via `self.run_install`/a raw
+                               `subprocess.run(["bash", ...])` call, both
+                               matching RUN_HELPER_RE/`_calls_a_subprocess`),
+                               1 counter-proof added to the pre-existing
+                               MarkerOnANonGitSourceInventsNothingTest, and 2
+                               in the new
+                               UnresolvableGitSourceWarnsInsteadOfStayingSilentTest
+                               (both via `self.run_install`). None flagged:
+                               every method asserts a positive fact about
+                               the run (`source_kind`/`source_commit`
+                               equality, or an `assertIn("WARNING", ...)` on
+                               combined stdout+stderr) alongside any negative
+                               one. Proven a pure addition rather than a
+                               swap by `git diff scripts/tests/test_install_
+                               provenance.py | grep -c '^+    def test_'`: 5,
+                               0 removed. The file count did not move -- no
+                               new module.
           1423 / 0             10.09.2026 (CCP-1172 merged
                                with CCP-1170, ticket/CCP-1172 integrated
                                `main`): both branches forked from the same
@@ -1953,7 +1998,7 @@ class ClassificationCountsTest(unittest.TestCase):
         count."""
         recs = scan_tree()
         flagged = [r for r in recs if r.disposition in NEEDS_EXEMPTION]
-        self.assertEqual(1423, len(recs))
+        self.assertEqual(1431, len(recs))
         self.assertEqual(0, len(flagged))
 
 

@@ -1737,6 +1737,93 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Fixed
 
+- **`source_provenance()` compared two spellings of one directory as strings, classifying a
+  real git checkout as `non-git` (CCP-1174).** Observed in production, on the maintainer's
+  own machine, after a routine `./install.sh --update`: the run succeeded and reported `wrote
+  .ccpr-install-provenance (source: non-git, unknown)` — no `source_commit` line at all,
+  though the previous marker had one. `--verify` reads that line to resolve what it compares
+  against; without it, the check CCP-1166 had just widened to 306 files could not run on the
+  maintainer's own installation, and nothing about the run said so beyond that one
+  parenthetical in a wall of expected output.
+
+  **Cause, measured under bash (the shell `install.sh` runs under — a first probe run under
+  zsh reported the mismatch as absent, because the direction reverses between the two
+  shells):** `source_provenance()` guards against a copied directory inside a foreign
+  checkout inheriting that repository's HEAD by requiring `git rev-parse --show-toplevel` to
+  equal `$SRC`'s own resolved path — both sides already routed through `pwd -P` to fold the
+  `/tmp` → `/private/tmp` symlink case. On a case-insensitive filesystem, `pwd -P` does not
+  canonicalise case; it returns the path AS TRAVERSED. The directory the script was invoked
+  through need not be the spelling git itself stored at init time, so the two sides could be
+  the IDENTICAL directory and still disagree as strings — and did, on the maintainer's own
+  machine, where the checkout's parent directory and git's own stored spelling of it differed
+  only in the case of one path segment. Routing both through `pwd -P` again is not a fix;
+  they had already been through it once.
+
+  **Fix: `-ef` (bash: same device+inode) instead of `==`.** It answers the identity question
+  that was actually meant, needs no assumption about the filesystem's case sensitivity, and —
+  unlike a case-folding string compare — stays correct on a case-**sensitive** volume, where
+  two differently-cased directories are genuinely two directories and merging them would
+  silently widen the guard this comparison exists for. Measured false (not an error) when
+  either side does not exist, so a `$toplevel` that failed to resolve still falls through to
+  `non-git` rather than tripping `set -e`. Weighed against CCP-1037's precedent (the same
+  defect class in `scripts/lib/discipline_gate.sh`, fixed by *avoiding* the git query and
+  deriving identity from the file's own resolved path instead): that avoidance does not apply
+  here, because the git query is not incidental — resolving `$SRC`'s toplevel through git IS
+  the question this function answers. (CCP-1037 itself covers two distinct failure forms of
+  the same exemption — its own `discipline_gate.sh` code comment documents the OTHER one, a
+  server-side hook running outside any git repository at all; the work item's own description
+  names the case-mismatch form this change addresses, with the identical example paths.)
+
+  **The guard the comparison exists for still holds** (`MarkerOnANonGitSourceInventsNothingTest
+  .test_a_source_inside_an_unrelated_git_repository_is_not_claimed_as_its_own`, pre-existing
+  and re-verified unchanged after the fix): a copy sitting inside a foreign checkout is a
+  genuinely different directory (different device+inode), so it stays `non-git` and does not
+  inherit the surrounding repository's HEAD, regardless of the change from `==` to `-ef`.
+
+  **`write_provenance()` now warns when a source's provenance could not be resolved despite
+  the source directory containing its own `.git`** — a materially different situation from a
+  genuine tarball/plain-copy source, where `non-git` is the correct, silent answer and stays
+  one (no `.git` present, no warning). This function only ever runs in a mode that OVERWRITES
+  the installation (fresh or update), which is exactly the situation this item was filed
+  from, so a degraded provenance check now gets a loud, explicit notice on stderr instead of
+  the same one-line parenthetical every other `source_kind` also gets.
+
+  Five new tests in `scripts/tests/test_install_provenance.py`: installing via a
+  non-canonical case spelling of the source still records `source_kind=git` with the real
+  commit, both spellings agree, a genuine non-git source still prints no warning, and a
+  source with its own unresolvable `.git` (an empty repository, no commits yet) does warn
+  without inventing a commit. Skipped, with a stated reason, on a case-sensitive filesystem,
+  where the non-canonical spelling used in the case tests does not exist at all.
+
+  **Code review follow-up: the case-folding regression this fix guards against turned out to
+  be unreachable end-to-end through `install.sh` on *any* filesystem** — `git rev-parse
+  --show-toplevel`'s own contract guarantees its result is always `$SRC` itself or a strict
+  ancestor of it, never a same-depth sibling, so the only way it can differ from `$SRC`'s own
+  resolved path while naming the *same* real directory is exactly the case-insensitive-aliasing
+  bug this change fixes, and the only way it can differ while naming a *different* real
+  directory (the pre-existing nested-foreign-checkout guard) differs in path depth, not case —
+  a fact any correctly-shaped comparison, case-folding included, already keeps apart. Measured,
+  not assumed: replacing `-ef` with a bash-3.2-compatible case fold (`${var,,}` needs bash 4+
+  and is not valid syntax under macOS's shipped bash — confirmed separately, `bad
+  substitution`) left the entire `test_install_provenance.py` suite green. Because no
+  behavioural test through `install.sh` can catch this, `TheEfComparisonIsNotACaseFolding
+  StringCompareTest` pins the property directly instead: a case-folding compare is pure text
+  and treats two case-variant spellings as equal regardless of whether either path exists (this
+  half is unconditional, proven the same way on any machine), while `-ef` is a `stat()`-based
+  device+inode comparison and reports what it actually finds on disk.
+
+  **CI follow-up (PR #33, `ubuntu-latest`/ext4): a first version of the second half was gated
+  the wrong way.** It asserted `-ef` reports the same real directory and a differently-cased
+  spelling as the SAME file, unconditionally — true only because this development machine's
+  filesystem is case-insensitive and the OS aliases the spelling to the real entry. On ext4
+  (case-sensitive) that spelling is a genuinely different, nonexistent path, and `-ef` correctly
+  reports "different" — the assertion's own wording even named its precondition ("on this
+  (case-insensitive) filesystem") without anything enforcing it. Fixed by BRANCHING on the same
+  case-sensitivity probe instead of `@skipUnless`-gating a separate class for the other half (an
+  earlier version's approach, reverted): one method now asserts the filesystem-*correct* claim
+  on either side, proving something on both CI runners instead of staying silent on one — and
+  needs no entry in the platform skip budget, since it never skips.
+
 - **`install.sh --verify`'s IGNORED block is grouped by `.gitignore` rule instead of listing
   every excused path (CCP-1170).** A correct installation excused 100 locally generated paths
   (97 `__pycache__` files + 3 `.DS_Store`) and printed each one, 105 of 143 report lines — an
