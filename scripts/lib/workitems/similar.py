@@ -11,10 +11,19 @@ Ranking: TF-IDF-weighted cosine similarity over a stopword-filtered token set. T
 inverse-document-frequency term is computed FROM the corpus passed in (`backend.
 list()`), never from a fixed table, so a word common across THIS project's items
 (e.g. "item", "test", "check" in a repo about testing tooling) counts for less than
-one that appears in only a handful -- the measurement in CCP-1172's own commit
-history: raw word-overlap ranked a confirmed neighbour outside the top 10 of 173
-items; TF-IDF ranked it 2nd, because it downweights exactly the words every item in
-this corpus happens to share.
+one that appears in only a handful.
+
+Measured against a confirmed known-neighbour case (CCP-1167's text against the
+173 OTHER items in this repo's own 174-item corpus, 10.09.2026, re-derived
+against the code as shipped -- code-review follow-up, a prior revision of this
+comment quoted a rank measured before the trailing-+1 smoothing below existed):
+raw word-overlap (unweighted cosine on term counts) ranks the confirmed
+neighbour CCP-1136 15th, outside any reasonable `--limit`; TF-IDF WITHOUT the
+trailing +1 smoothing ranks it 2nd; TF-IDF WITH it -- the configuration this
+module actually ships -- ranks it 6th. All three inside the default
+`--limit 10` except the raw baseline. The smoothing trades some of that
+precision for correctness at small corpus sizes (see `_tfidf_vector`'s own
+comment): without it, a corpus of exactly one item can never be found at all.
 
 Same three-part could-not-run shape lint.py's refusal() established (CCP-1171): a
 search that could not read the corpus must never look like a search that read it
