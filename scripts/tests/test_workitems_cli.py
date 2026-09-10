@@ -151,6 +151,7 @@ class WorkitemsCliTest(unittest.TestCase):
             [
                 sys.executable, str(SCRIPT_PATH), "--project", str(self.project_dir),
                 "create", "--title", "New feature", "--type", "feat",
+                "--checked-against", "test fixture",
             ],
             capture_output=True, text=True, cwd=decoy_cwd,
         )
@@ -173,7 +174,8 @@ class WorkitemsCliTest(unittest.TestCase):
         result = subprocess.run(
             [
                 sys.executable, str(SCRIPT_PATH), "create", "--title", "New feature",
-                "--type", "feat", "--project", str(self.project_dir),
+                "--type", "feat", "--checked-against", "test fixture",
+                "--project", str(self.project_dir),
             ],
             capture_output=True, text=True, cwd=decoy_cwd,
         )
@@ -184,14 +186,28 @@ class WorkitemsCliTest(unittest.TestCase):
         self.assertTrue(created_path.is_file())
         self.assertFalse((decoy_cwd / "docs").exists())
 
-    def test_create_assigns_id_and_defaults_to_backlog(self):
+    def test_create_without_checked_against_is_refused(self):
+        """CCP-1172 acceptance 1, red half: `create` without the recorded dedup
+        evidence is refused -- argparse's own required-argument error, seen on
+        stderr, not a silent creation."""
         result = self.run_cli("create", "--title", "New feature")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("--checked-against", result.stderr)
+        # No item silently created on stdout despite the refusal.
+        self.assertEqual(result.stdout, "")
+
+    def test_create_assigns_id_and_defaults_to_backlog(self):
+        # "none" is the PO-permitted answer (CCP-1172) -- exercised here rather
+        # than invented ad hoc in every other test that just needs SOME item.
+        result = self.run_cli("create", "--title", "New feature", "--checked-against", "none")
 
         self.assertEqual(result.returncode, 0, result.stderr)
         item = json.loads(result.stdout)
         self.assertTrue(item["id"])
         self.assertEqual(item["title"], "New feature")
         self.assertEqual(item["status"], "Backlog")
+        self.assertIn("Checked against: none", item["description"])
 
         # The created item must be discoverable through the other operations too.
         list_result = self.run_cli("list")
@@ -199,15 +215,29 @@ class WorkitemsCliTest(unittest.TestCase):
         self.assertIn(item["id"], ids)
 
     def test_create_with_owner_and_description(self):
+        """CCP-1172 acceptance 1, silent counter-proof: WITH the argument, creation
+        succeeds and the value is in the STORED description -- read back through
+        `get`, not assumed from the create response or the exit code alone."""
         result = self.run_cli(
             "create", "--title", "New feature",
             "--owner", "alice", "--description", "Some text.",
+            "--checked-against", "CCP-1136, CCP-1124",
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
         item = json.loads(result.stdout)
         self.assertEqual(item["owner"], "alice")
-        self.assertEqual(item["description"], "Some text.")
+        self.assertEqual(
+            item["description"], "Checked against: CCP-1136, CCP-1124\n\nSome text.",
+        )
+
+        # Read back independently, through `get` -- the create response alone
+        # cannot prove the value actually landed in the persisted item.
+        reread = self.run_cli("get", item["id"])
+        self.assertEqual(reread.returncode, 0, reread.stderr)
+        reread_item = json.loads(reread.stdout)
+        self.assertIn("Checked against: CCP-1136, CCP-1124", reread_item["description"])
+        self.assertIn("Some text.", reread_item["description"])
 
     def test_list_defaults_to_local_provider_and_prints_json(self):
         result = self.run_cli("list")
@@ -633,7 +663,7 @@ class WorkitemsCliTest(unittest.TestCase):
         (review follow-up, 09.07.2026)."""
         provider_name = self._write_provider("_test_fake_claiming_provider_list", FAKE_CLAIMING_PROVIDER_SOURCE)
         self._use_claiming_provider(provider_name)
-        self.run_cli("create", "--title", "New feature")
+        self.run_cli("create", "--title", "New feature", "--checked-against", "test fixture")
 
         result = self.run_cli("list")
 
@@ -644,7 +674,9 @@ class WorkitemsCliTest(unittest.TestCase):
     def test_claim_with_runner_sets_runner_and_in_progress(self):
         provider_name = self._write_provider("_test_fake_claiming_provider", FAKE_CLAIMING_PROVIDER_SOURCE)
         self._use_claiming_provider(provider_name)
-        item = json.loads(self.run_cli("create", "--title", "New feature").stdout)
+        item = json.loads(
+            self.run_cli("create", "--title", "New feature", "--checked-against", "test fixture").stdout
+        )
 
         result = self.run_cli("claim", item["id"], "--runner", "agent-1")
 
@@ -656,7 +688,9 @@ class WorkitemsCliTest(unittest.TestCase):
     def test_heartbeat_subcommand_refreshes_the_timestamp(self):
         provider_name = self._write_provider("_test_fake_claiming_provider_hb", FAKE_CLAIMING_PROVIDER_SOURCE)
         self._use_claiming_provider(provider_name)
-        item = json.loads(self.run_cli("create", "--title", "New feature").stdout)
+        item = json.loads(
+            self.run_cli("create", "--title", "New feature", "--checked-against", "test fixture").stdout
+        )
         claimed = json.loads(self.run_cli("claim", item["id"], "--runner", "agent-1").stdout)
 
         result = self.run_cli("heartbeat", item["id"], "--runner", "agent-1")
@@ -670,7 +704,9 @@ class WorkitemsCliTest(unittest.TestCase):
         # treat that as "nothing to resume" (False), not raise.
         provider_name = self._write_provider("_test_fake_claiming_provider_sweep1", FAKE_CLAIMING_PROVIDER_SOURCE)
         self._use_claiming_provider(provider_name, claiming_config={"staleAfter": "1h"})
-        item = json.loads(self.run_cli("create", "--title", "New feature").stdout)
+        item = json.loads(
+            self.run_cli("create", "--title", "New feature", "--checked-against", "test fixture").stdout
+        )
         self.run_cli("claim", item["id"], "--runner", "agent-1")  # fixed old heartbeat -> always stale
 
         result = self.run_cli("sweep")
@@ -683,7 +719,9 @@ class WorkitemsCliTest(unittest.TestCase):
     def test_sweep_parks_stale_claim_with_ticket_branch_commits(self):
         provider_name = self._write_provider("_test_fake_claiming_provider_sweep2", FAKE_CLAIMING_PROVIDER_SOURCE)
         self._use_claiming_provider(provider_name, claiming_config={"staleAfter": "1h"})
-        item = json.loads(self.run_cli("create", "--title", "New feature").stdout)
+        item = json.loads(
+            self.run_cli("create", "--title", "New feature", "--checked-against", "test fixture").stdout
+        )
         self.run_cli("claim", item["id"], "--runner", "agent-1")
 
         self._init_git_repo_with_ticket_branch(item["id"])

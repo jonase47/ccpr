@@ -9,8 +9,8 @@ not a repo-root settings.json -- see load_settings()'s docstring for the exact
 precedence, including the `.claude/settings.local.json` dev override.
 
 Usage:
-  workitems.py create --title T [--type X] [--owner O] [--description D]
-                       [--tag T ...] [--project DIR]
+  workitems.py create --title T --checked-against C [--type X] [--owner O]
+                       [--description D] [--tag T ...] [--project DIR]
   workitems.py list [--status STATUS] [--owner OWNER] [--tag T ...] [--type X]
                      [--sprint N] [--priority P] [--query Q] [--project DIR]
   workitems.py get <id> [--project DIR]
@@ -36,6 +36,14 @@ Usage:
   workitems.py similar TEXT [--limit N] [--project DIR]
 
 Output: JSON on stdout for every operation (a list for `list`, an object otherwise).
+
+Dedup check (CCP-1172): `create` requires --checked-against, a free-text value
+recorded into the stored description ("Checked against: <value>"), never validated
+beyond non-empty -- "none" is a permitted answer, but it is then a permanent,
+auditable fact in the item rather than a claim in a session. Run `similar TEXT`
+first to produce an honest value cheaply; it ranks every item's title+description
+by text similarity and states in its own output what it cannot reach (a paraphrase
+of the same behaviour, not the same words).
 
 Tags (ADR-0002 2nd addendum): --tag is repeatable everywhere it appears; on `list` it
 is AND semantics (an item must carry every named tag to match). --query is a
@@ -196,6 +204,14 @@ def build_parser():
     p_create.add_argument("--type", dest="type")
     p_create.add_argument("--owner")
     p_create.add_argument("--description")
+    p_create.add_argument(
+        "--checked-against", required=True,
+        help="Ids the corpus was searched against before filing, or the reasoning "
+             "for skipping the search (CCP-1172); 'none' is a permitted value, but "
+             "it is recorded in the item's description permanently, so it is "
+             "auditable after the fact -- run `workitems.py similar` first to "
+             "produce an honest answer cheaply",
+    )
     p_create.add_argument(
         "--tag", dest="tags", action="append", default=[],
         help="Attach a tag (repeatable)",
@@ -366,11 +382,26 @@ def _parse_estimate_arg(raw):
         raise WorkItemError(f"Invalid estimate {raw!r}: must be an integer") from None
 
 
+def _compose_create_description(description, checked_against):
+    """Prepends the recorded dedup-check evidence (CCP-1172, PO decision) to
+    `create`'s description, rather than dropping it in a side channel: the whole
+    point of a REQUIRED --checked-against is that the value survives inside the
+    item itself, permanently and auditable, not only in whatever session filed it.
+    Kept at the CLI layer, not in backend.create()'s own signature (~40 existing
+    callers construct items directly against that signature across both backends
+    and `lift`; none of them need to change for a CLI-only requirement)."""
+    header = f"Checked against: {checked_against}"
+    if description:
+        return f"{header}\n\n{description}"
+    return header
+
+
 def dispatch(backend, args):
     if args.operation == "create":
         return backend.create(
             title=args.title, item_type=args.type, owner=args.owner,
-            description=args.description, tags=args.tags,
+            description=_compose_create_description(args.description, args.checked_against),
+            tags=args.tags,
         )
     if args.operation == "list":
         return backend.list(
