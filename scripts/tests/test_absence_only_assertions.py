@@ -891,7 +891,7 @@ class NoStaleKnownFindingsTest(unittest.TestCase):
 
 class ClassificationCountsTest(unittest.TestCase):
     def test_classification_counts(self):
-        """Regression pin on the measured baseline: 1371 `test_*` methods
+        """Regression pin on the measured baseline: 1413 `test_*` methods
         across the corpus call something shaped like a subprocess invocation
         and are therefore in scope for this check; 0 of those are currently
         absence-only-needs-exemption -- `KNOWN_FINDINGS` above is empty for
@@ -905,6 +905,22 @@ class ClassificationCountsTest(unittest.TestCase):
         growing paragraph:
 
           in-scope / flagged   when
+          1413 / 0             10.09.2026 (CCP-1170, IGNORED block grouped
+                               by .gitignore rule): +2 new test methods
+                               (VerifyAgreesWithAnUntouchedInstallationTest.
+                               test_the_ignored_footer_prints_even_when_
+                               nothing_was_excused, and
+                               NonFrameworkDocsAreNotExpectedInTheInstallation
+                               Test.test_a_path_excused_by_a_different_rule_
+                               lands_on_its_own_line), only 1 entered scope.
+                               The one that did calls `self.run_install`
+                               directly; the one that did not calls only
+                               `self.verify()`, which RUN_HELPER_RE does not
+                               match -- the same discriminator the 0/27 and
+                               5/23 rows below already demonstrate, not a
+                               new gap. 0 flagged: both carry a positive
+                               assertion on `ignored_groups(r.stdout)`
+                               alongside their negative ones.
           1412 / 0             09.09.2026 (CCP-1173 second cut, --dry-run
                                previews the refusal): +11, all 11 in scope.
                                With the row below it: 25/25 then 11/11 from the
@@ -1886,7 +1902,7 @@ class ClassificationCountsTest(unittest.TestCase):
         count."""
         recs = scan_tree()
         flagged = [r for r in recs if r.disposition in NEEDS_EXEMPTION]
-        self.assertEqual(1412, len(recs))
+        self.assertEqual(1413, len(recs))
         self.assertEqual(0, len(flagged))
 
 
