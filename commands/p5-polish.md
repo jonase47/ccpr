@@ -112,7 +112,9 @@ For each `polish-now` item, delegate to the **senior-developer** agent:
 - `backlog` items, using the guard result from step 0:
   - Structured store: create a work item per `backlog` item — check the full, unfiltered
     `workitems list` for a matching title first (trim + casefold), so a re-run never duplicates an
-    already-created polish item. Otherwise: `workitems create --title "<item title>" --type
+    already-created polish item, and run `workitems similar "<item title>"` to catch a
+    near-duplicate an exact title match misses (also the cheap way to fill in
+    `--checked-against` below). Otherwise: `workitems create --title "<item title>" --type
     refactor --description "POL-NN-MM: <effort estimate + description>" --checked-against
     "<ids searched, or reasoning>"` (use `--type chore` instead of `refactor` for tooling/cleanup
     items, matching the commit-type convention in step 5). Record

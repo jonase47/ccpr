@@ -28,7 +28,9 @@ Run `python3 ~/.claude/scripts/workitems.py list`.
     with the user. If it matches no existing item (a standalone bug report, not yet tracked),
     create it first: `workitems create --title "<bug summary>" --type fix --description
     "$ARGUMENTS" --checked-against "<ids searched, or reasoning>"` (unfiltered `list` duplicate-title
-    check first — trim + casefold — so a re-run never recreates the same bug item).
+    check first — trim + casefold — so a re-run never recreates the same bug item; run
+    `workitems similar "$ARGUMENTS"` too, to catch a near-duplicate an exact title match misses,
+    and use it to fill in `--checked-against`).
 - **`[]` and no `docs/workitems/` directory** → still on prose. Read SPRINT.md to find/ask which
   bug is next, as before. Emit one line: *"Tip: run `lift` to adopt the structured work-item store."*
 - **`[]` but `docs/workitems/` exists** → adopted store, just empty right now. Treat as adopted: use

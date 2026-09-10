@@ -76,8 +76,9 @@ into the backlog, using the guard result from step 0:
 - Structured store: `workitems create --title "<finding>" --type chore --description "<finding +
   reproduction>" --checked-against "<ids searched, or reasoning>"` (check the full, unfiltered
   `workitems list` for a matching title first — trim + casefold — so a re-run never duplicates an
-  already-captured finding; record the assigned `**Work-Item:** WI-NNNN` id in EXPLORATORY.md's
-  `## Findings` entry).
+  already-captured finding, and run `workitems similar "<finding>"` too, to catch a near-duplicate
+  an exact title match misses and to fill in `--checked-against`; record the assigned
+  `**Work-Item:** WI-NNNN` id in EXPLORATORY.md's `## Findings` entry).
 - Prose fallback: add it to `docs/planning/BACKLOG.md` as before.
 
 ### 4. Write Detail File
