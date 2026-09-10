@@ -1714,6 +1714,37 @@ class NonFrameworkDocsAreNotExpectedInTheInstallationTest(WidenedScopeBase):
         self.assertEqual(["docs/HANDOVER.md"],
                          report_block(r.stdout, "NOT FRAMEWORK"))
 
+    def test_a_path_excused_by_a_different_rule_lands_on_its_own_line(self):
+        """CCP-1170 acceptance addition, and the case the PO decision calls
+        F14: a docs/ path the installer never ships, excused by a rule
+        OTHER than the bytecode one, must not be folded into that group --
+        it needs its OWN line, with its OWN rule string and its OWN count,
+        distinguishable from a rule that happens to fire in the same run.
+
+        No size threshold does this; the grouping key IS the distinguisher.
+        Combines the untracked-twin shape above with a `__pycache__` cache
+        under `hooks/` in the SAME run, so the report has to carry two
+        groups at once rather than one group nobody can confuse for
+        another."""
+        self.assertIn("docs/HANDOVER.md", self.commit_blobs(),
+                      "the recorded commit must still carry it, or this "
+                      "tests a different scenario than it claims")
+        self.git("rm", "--cached", "-q", "docs/HANDOVER.md")
+        self.plant("docs/HANDOVER.md", "# should not be here\n")
+        self.plant(PYCACHE_ARTEFACT)
+        r = self.verify()
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertEqual(
+            {
+                ".gitignore:34:docs/HANDOVER.md": 1,
+                ".gitignore:6:__pycache__/": 1,
+            },
+            ignored_groups(r.stdout),
+        )
+        self.assertEqual((2, 2), ignored_footer(r.stdout))
+        self.assertEqual([], report_block(r.stdout, "UNEXPECTED"))
+        self.assertEqual([], report_block(r.stdout, "MISSING"))
+
     def test_the_split_follows_the_allowlist_file_and_not_a_list_in_install_sh(self):
         """The derivation, held to its source from both sides in one run --
         the same shape TheExemptionIsDerivedFromTheSourceCheckoutTest uses
