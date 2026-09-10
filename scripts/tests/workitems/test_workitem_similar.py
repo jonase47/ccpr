@@ -76,6 +76,23 @@ class _UnreachableBackend:
         raise WorkItemError("YouTrack request failed for GET /api/issues: connection refused")
 
 
+class VerdictTest(unittest.TestCase):
+    """An unreachable backend must refuse, never report 'ran, found nothing
+    similar' -- 'could not run' and 'no-results' are different observations
+    (CCP-1172 acceptance 1's could-not-run half; mirrors lint's VerdictTest,
+    CCP-1171)."""
+
+    def test_an_unreachable_backend_is_a_refusal_never_a_silent_no_results(self):
+        report = similar_module.similar(_UnreachableBackend(), "some query text")
+
+        self.assertEqual(report["verdict"], "could-not-run")
+        self.assertNotEqual(report["verdict"], "no-results")
+        self.assertIsNone(report["items_scanned"])
+        self.assertEqual(report["results"], [])
+        self.assertIn("connection refused", report["reason"])
+        self.assertIn("NOT the same as 'no similar items'", report["message"])
+
+
 class KnownNeighbourTest(LocalFixtureTestCase):
     """CCP-1172 acceptance 2: the CCP-1167 text must surface CCP-1136 and
     CCP-1124, its human-confirmed true neighbours."""
@@ -121,6 +138,25 @@ class KnownNeighbourTest(LocalFixtureTestCase):
             )
 
 
+UNREACHABLE_PROVIDER_SOURCE = (
+    "from workitems import WorkItemError\n\n"
+    "def create(config):\n"
+    "    return _Backend()\n\n"
+    "class _Backend:\n"
+    "    def list(self, **kwargs):\n"
+    "        raise WorkItemError('request failed: connection refused')\n"
+)
+
+# A provider whose backend cannot even be CONSTRUCTED -- the shape a remote backend
+# takes when no token resolves. Same refusal as UNREACHABLE_PROVIDER_SOURCE, a
+# different code path (mirrors test_workitem_lint.py's identically-named constant).
+UNCONSTRUCTABLE_PROVIDER_SOURCE = (
+    "from workitems import WorkItemError\n\n"
+    "def create(config):\n"
+    "    raise WorkItemError('no token available: set the env var named by tokenEnv')\n"
+)
+
+
 class SimilarCliTest(unittest.TestCase):
     """End-to-end through the real entry point, so provider resolution, JSON-on-
     stdout and the EXIT CODE are covered -- the exit code is the part a caller
@@ -138,6 +174,12 @@ class SimilarCliTest(unittest.TestCase):
         claude_dir = self.project_dir / ".claude"
         claude_dir.mkdir(parents=True, exist_ok=True)
         (claude_dir / "settings.json").write_text(json.dumps(data), encoding="utf-8")
+
+    def write_provider(self, provider_name, source):
+        path = SCRIPT_PATH.parent / "lib" / "workitems" / f"{provider_name}.py"
+        path.write_text(source, encoding="utf-8")
+        self.addCleanup(path.unlink, missing_ok=True)
+        return provider_name
 
     def run_similar(self, *extra_args):
         return subprocess.run(
@@ -165,6 +207,48 @@ class SimilarCliTest(unittest.TestCase):
         report = json.loads(result.stdout)
         self.assertEqual(report["verdict"], "no-results")
         self.assertEqual(report["results"], [])
+
+    def test_an_unreachable_backend_exits_three_and_says_so_on_stderr(self):
+        provider = self.write_provider(
+            "_test_similar_unreachable_provider", UNREACHABLE_PROVIDER_SOURCE,
+        )
+        self.write_settings({"workitems": {"provider": provider}})
+
+        result = self.run_similar("anything")
+
+        self.assertEqual(result.returncode, 3)
+        self.assertIn("COULD NOT RUN", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["verdict"], "could-not-run")
+        self.assertEqual(report["provider"], provider)
+
+    def test_a_backend_that_cannot_be_constructed_exits_three(self):
+        """A remote provider with no resolvable token fails in `create(config)`,
+        BEFORE `list()` -- nothing was compared there either (mirrors lint's
+        identically-named test, CCP-1171)."""
+        provider = self.write_provider(
+            "_test_similar_unconstructable_provider", UNCONSTRUCTABLE_PROVIDER_SOURCE,
+        )
+        self.write_settings({"workitems": {"provider": provider}})
+
+        result = self.run_similar("anything")
+
+        self.assertEqual(result.returncode, 3)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["verdict"], "could-not-run")
+        self.assertIn("no token available", report["reason"])
+
+    def test_an_unknown_provider_is_a_refusal_not_an_exit_zero(self):
+        self.write_settings({"workitems": {"provider": "does-not-exist"}})
+
+        result = self.run_similar("anything")
+
+        self.assertEqual(result.returncode, 3)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["verdict"], "could-not-run")
+        self.assertIn("does-not-exist", report["reason"])
+        self.assertIn("COULD NOT RUN", result.stderr)
 
 
 if __name__ == "__main__":
