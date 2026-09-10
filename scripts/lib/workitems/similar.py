@@ -51,7 +51,15 @@ STOPWORDS = frozenset("""
     only just also too very more most less least much many few s re
 """.split())
 
-TOKEN_PATTERN = re.compile(r"[a-zA-Z']+")
+# Unicode letters (code-review finding): `[a-zA-Z']+` broke a word at every
+# non-ASCII letter -- CCPR ships to projects that do not write their items in
+# English. `[^\W\d_]` is `\w` (Unicode-aware by default for a `str` pattern in
+# Python 3) minus the two things `\w` also matches that are not letters
+# (digits, underscore), so it reaches "Größe" and "café" the way `[a-zA-Z]`
+# reached "cafe". The apostrophe is kept as an internal joiner only (`don't`,
+# not a leading/trailing one) rather than folded into the same class as
+# before, which also accepted a bare run of apostrophes as its own "word".
+TOKEN_PATTERN = re.compile(r"[^\W\d_]+(?:'[^\W\d_]+)*")
 
 # The reference classes this search cannot reach, stated in its own output rather
 # than only in the work item that commissioned it (mirrors lint.py's NOT_REACHED,

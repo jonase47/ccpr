@@ -217,6 +217,36 @@ class LimitTest(LocalFixtureTestCase):
         self.assertEqual(report["items_scanned"], 12)
 
 
+class UnicodeTokenizationTest(LocalFixtureTestCase):
+    """Code-review finding: `TOKEN_PATTERN` was ASCII-only (`[a-zA-Z']+`), so an
+    accented word broke at every non-ASCII letter. CCPR ships to projects that
+    do not write their items in English. Two concrete failure shapes measured
+    against the pre-fix pattern: 'Größe' produced NO token at all (both
+    fragments 'Gr'/'e' are <=2 chars and get filtered), and 'Überprüfung'
+    produced two meaningless fragments ('berpr', 'fung') that could spuriously
+    match unrelated text."""
+
+    def test_an_accented_word_is_tokenized_whole_not_fragmented(self):
+        self.assertIn("größe", similar_module._tokenize("Größe"))
+        self.assertIn("überprüfung", similar_module._tokenize("Überprüfung nötig"))
+
+    def test_a_shared_accented_term_contributes_to_the_score(self):
+        # Deliberately disjoint everywhere else (including no shared German
+        # function word like "der"/"des"/"ein", which this project's English-
+        # only STOPWORDS list does not filter): the only word the query and the
+        # item have in common is "Größe" itself, so a match here can only come
+        # from that term, not from an incidental overlap elsewhere.
+        self.plant("Kontrastproblem im Nachtmodus", "Größe wirkt verschoben.")
+
+        report = similar_module.similar(self.backend, "Größe")
+
+        self.assertEqual(
+            report["verdict"], "results",
+            "the accented term 'Größe', the only word query and item share, "
+            "must contribute to the match",
+        )
+
+
 class KnownNeighbourTest(LocalFixtureTestCase):
     """CCP-1172 acceptance 2: the CCP-1167 text must surface CCP-1136 and
     CCP-1124, its human-confirmed true neighbours."""
