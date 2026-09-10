@@ -1807,12 +1807,22 @@ All notable changes to this project are documented in this file. The format is b
   and is not valid syntax under macOS's shipped bash — confirmed separately, `bad
   substitution`) left the entire `test_install_provenance.py` suite green. Because no
   behavioural test through `install.sh` can catch this, `TheEfComparisonIsNotACaseFolding
-  StringCompareTest` pins the property directly and unconditionally instead: a case-folding
-  compare is pure text and treats two case-variant spellings as equal regardless of whether
-  either path exists, while `-ef` is a `stat()`-based device+inode comparison. A supplementary
-  `@skipUnless`-gated class (`OnACaseSensitiveFilesystemEfKeepsCaseVariantsApartTest`, skipped
-  here with a stated reason, meaningful on CI's `ubuntu-latest`/ext4 `python-tests` job) proves
-  the other half where a case-sensitive filesystem actually makes it reproducible.
+  StringCompareTest` pins the property directly instead: a case-folding compare is pure text
+  and treats two case-variant spellings as equal regardless of whether either path exists (this
+  half is unconditional, proven the same way on any machine), while `-ef` is a `stat()`-based
+  device+inode comparison and reports what it actually finds on disk.
+
+  **CI follow-up (PR #33, `ubuntu-latest`/ext4): a first version of the second half was gated
+  the wrong way.** It asserted `-ef` reports the same real directory and a differently-cased
+  spelling as the SAME file, unconditionally — true only because this development machine's
+  filesystem is case-insensitive and the OS aliases the spelling to the real entry. On ext4
+  (case-sensitive) that spelling is a genuinely different, nonexistent path, and `-ef` correctly
+  reports "different" — the assertion's own wording even named its precondition ("on this
+  (case-insensitive) filesystem") without anything enforcing it. Fixed by BRANCHING on the same
+  case-sensitivity probe instead of `@skipUnless`-gating a separate class for the other half (an
+  earlier version's approach, reverted): one method now asserts the filesystem-*correct* claim
+  on either side, proving something on both CI runners instead of staying silent on one — and
+  needs no entry in the platform skip budget, since it never skips.
 
 - **`install.sh --verify`'s IGNORED block is grouped by `.gitignore` rule instead of listing
   every excused path (CCP-1170).** A correct installation excused 100 locally generated paths

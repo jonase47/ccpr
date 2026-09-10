@@ -351,119 +351,6 @@ class MarkerAgreesAcrossCaseSpellingsOfTheSourceTest(InstallProvenanceBase):
         self.assertEqual(canonical_marker.get("source_commit"), alt_marker.get("source_commit"))
 
 
-class TheEfComparisonIsNotACaseFoldingStringCompareTest(unittest.TestCase):
-    """CCP-1174 code review follow-up. `-ef` was chosen over a case-folding
-    string compare because the latter would wrongly merge two GENUINELY
-    DIFFERENT, differently-cased directories. That specific risk turns out
-    to be unreachable end-to-end through install.sh, on ANY filesystem:
-    `git rev-parse --show-toplevel`'s own contract guarantees `toplevel` is
-    always $SRC itself or a STRICT ANCESTOR of it (shorter path, never a
-    same-depth sibling) -- so the only way it can ever differ from $SRC's
-    own resolved path while naming the SAME real directory is exactly the
-    case-insensitive-ALIASING bug this ticket fixes (CCP-1174/CCP-1114),
-    and the only way it can differ while naming a DIFFERENT real directory
-    is the pre-existing nested-foreign-checkout shape
-    (MarkerOnANonGitSourceInventsNothingTest's guard test), which differs
-    in path DEPTH, not just case, and which ANY correctly-shaped
-    comparison -- case-fold included -- already keeps apart. Measured, not
-    assumed: replacing this file's own `-ef` with a bash-3.2-compatible
-    case-fold (`tr 'A-Z' 'a-z'`, since `${var,,}` needs bash 4+ and is not
-    even syntactically valid under macOS's shipped bash -- confirmed
-    separately, `bad substitution`) left the ENTIRE test_install_
-    provenance.py suite green at the time this class was written (135/135
-    tests, EXIT 0), including the guard test above. No @skipUnless-gated,
-    case-sensitive-filesystem end-to-end test was
-    built for this reason -- it would not prove anything the existing
-    suite does not already prove under EITHER comparison.
-
-    What IS filesystem-independent, and pinned here instead: the two
-    comparison EXPRESSIONS behave differently on the same input regardless
-    of what machine runs this, which is the property a future edit
-    copying this pattern elsewhere (or "fixing" it back) would violate.
-    A case-fold compare is pure text -- no filesystem lookup, indifferent
-    to whether either path exists. `-ef` is specified (POSIX `test` / bash)
-    as a `stat()`-based device+inode comparison -- identity-based, never
-    string-based -- so two GENUINELY DIFFERENT directories are guaranteed
-    different inodes regardless of what their names look like, on any
-    filesystem.
-
-    A first version of the method below tried to pair a real directory
-    with a differently-cased spelling of it that was never created on
-    disk, expecting `-ef` to report them as different. It failed, and the
-    failure is itself informative rather than a mistake to hide: on THIS
-    machine's case-insensitive filesystem, "never created on disk" does
-    not mean "does not exist" -- the OS resolves the differently-cased
-    spelling to the SAME real entry via aliasing, so `-ef` correctly (and
-    desirably -- this is exactly CCP-1174's own fix) reports them as the
-    SAME file. There is consequently no way, on this machine, to
-    empirically produce two really-different directories whose paths are
-    case-variants of each other at all -- not even by trying to fake one
-    side's non-existence -- the same structural fact
-    `MarkerAgreesAcrossCaseSpellingsOfTheSourceTest` already documents
-    from the opposite direction. `-ef`'s discrimination between two
-    real, UNRELATED (not case-variant) directories is confirmed
-    separately, empirically, by
-    `test_ef_still_tells_two_real_unrelated_directories_apart` below."""
-
-    def test_case_folding_equates_two_spellings_ef_correctly_treats_as_an_alias(self):
-        tmp = Path(tempfile.mkdtemp(prefix="ccpr-ef-mutation-probe-"))
-        self.addCleanup(_rmtree, tmp)
-        real = tmp / "alpha"
-        real.mkdir()
-        alt_spelling = str(real).replace("alpha", "ALPHA")
-        self.assertNotEqual(str(real), alt_spelling)
-
-        fold = subprocess.run(
-            ["bash", "-c", '[[ "$(printf \'%s\' "$1" | tr A-Z a-z)" == '
-                            '"$(printf \'%s\' "$2" | tr A-Z a-z)" ]]',
-             "_", str(real), alt_spelling],
-        )
-        self.assertEqual(
-            0, fold.returncode,
-            "a case-folding compare did not treat two case-variant "
-            "spellings of the same text as equal -- the mutation this "
-            "test targets did not fire, so it cannot demonstrate the risk",
-        )
-
-        # NOT a counter-example: on this case-insensitive filesystem,
-        # `alt_spelling` resolves via OS aliasing to the SAME real entry
-        # as `real` (see the class docstring) -- `-ef` correctly reports
-        # them as the same file here. If this assertion ever fails, this
-        # machine's temp-directory case behaviour changed, not `-ef`.
-        same_file = subprocess.run(
-            ["bash", "-c", '[[ "$1" -ef "$2" ]]', "_", str(real), alt_spelling],
-        )
-        self.assertEqual(
-            0, same_file.returncode,
-            "expected -ef to report a differently-cased spelling of the "
-            "same real directory as the same file on this (case-"
-            "insensitive) filesystem",
-        )
-
-    def test_ef_still_tells_two_real_unrelated_directories_apart(self):
-        """Counter-proof: without this, a same_file probe that is always
-        false would pass the assertion above for the wrong reason."""
-        tmp = Path(tempfile.mkdtemp(prefix="ccpr-ef-mutation-probe-"))
-        self.addCleanup(_rmtree, tmp)
-        alpha = tmp / "alpha"
-        bravo = tmp / "bravo"
-        alpha.mkdir()
-        bravo.mkdir()
-        r = subprocess.run(
-            ["bash", "-c", '[[ "$1" -ef "$2" ]]', "_", str(alpha), str(bravo)],
-        )
-        self.assertNotEqual(0, r.returncode)
-
-        r = subprocess.run(
-            ["bash", "-c", '[[ "$1" -ef "$1" ]]', "_", str(alpha)],
-        )
-        self.assertEqual(
-            0, r.returncode,
-            "-ef reported a real directory as not being the same file as "
-            "itself",
-        )
-
-
 def _tmp_scratch_dir_is_case_sensitive():
     """Own probe, deliberately NOT test_check_all.py's
     `_tmp_root_is_case_insensitive()`: that one writes a FIXED filename
@@ -486,43 +373,150 @@ def _tmp_scratch_dir_is_case_sensitive():
 _CASE_SENSITIVE_FS = _tmp_scratch_dir_is_case_sensitive()
 
 
-@unittest.skipUnless(
-    _CASE_SENSITIVE_FS,
-    "requires a case-sensitive filesystem (this machine's TMPDIR folds "
-    "case) -- meaningful on CI's ubuntu-latest/ext4 python-tests job; "
-    "the case-insensitive side of this same fact is proven "
-    "unconditionally by TheEfComparisonIsNotACaseFoldingStringCompareTest "
-    "above instead, which is why this class exists as a supplement, not "
-    "a replacement",
-)
-class OnACaseSensitiveFilesystemEfKeepsCaseVariantsApartTest(unittest.TestCase):
-    """The other half of TheEfComparisonIsNotACaseFoldingStringCompareTest's
-    picture, only reproducible where it is actually true: on a
-    case-sensitive filesystem, a differently-cased spelling of a real
-    directory is a genuinely different, nonexistent path (no OS aliasing
-    merges them) -- `-ef` must report it as NOT the same file, which is
-    exactly what a case-folding compare would get wrong."""
+class TheEfComparisonIsNotACaseFoldingStringCompareTest(unittest.TestCase):
+    """CCP-1174 code review follow-up. `-ef` was chosen over a case-folding
+    string compare because the latter would wrongly merge two GENUINELY
+    DIFFERENT, differently-cased directories. That specific risk turns out
+    to be unreachable end-to-end through install.sh, on ANY filesystem:
+    `git rev-parse --show-toplevel`'s own contract guarantees `toplevel` is
+    always $SRC itself or a STRICT ANCESTOR of it (shorter path, never a
+    same-depth sibling) -- so the only way it can ever differ from $SRC's
+    own resolved path while naming the SAME real directory is exactly the
+    case-insensitive-ALIASING bug this ticket fixes (CCP-1174/CCP-1114),
+    and the only way it can differ while naming a DIFFERENT real directory
+    is the pre-existing nested-foreign-checkout shape
+    (MarkerOnANonGitSourceInventsNothingTest's guard test), which differs
+    in path DEPTH, not just case, and which ANY correctly-shaped
+    comparison -- case-fold included -- already keeps apart. Measured, not
+    assumed: replacing this file's own `-ef` with a bash-3.2-compatible
+    case-fold (`tr 'A-Z' 'a-z'`, since `${var,,}` needs bash 4+ and is not
+    even syntactically valid under macOS's shipped bash -- confirmed
+    separately, `bad substitution`) left the ENTIRE test_install_
+    provenance.py suite green at the time this class was written (135/135
+    tests, EXIT 0), including the guard test above.
 
-    def test_a_differently_cased_spelling_is_not_the_same_file_here(self):
-        tmp = Path(tempfile.mkdtemp(prefix="ccpr-ef-mutation-probe-cs-"))
+    What IS filesystem-independent: the two comparison EXPRESSIONS behave
+    differently on the same input regardless of what machine runs this,
+    which is the property a future edit copying this pattern elsewhere
+    (or "fixing" it back) would violate. A case-fold compare is pure text
+    -- no filesystem lookup, indifferent to whether either path exists.
+    `-ef` is specified (POSIX `test` / bash) as a `stat()`-based
+    device+inode comparison -- identity-based, never string-based -- so
+    two GENUINELY DIFFERENT directories are guaranteed different inodes
+    regardless of what their names look like, on any filesystem.
+
+    **What is NOT filesystem-independent, found by CI (PR #33,
+    ubuntu-latest/ext4) after a first version of this class got it wrong**:
+    what `-ef` itself reports for a real directory paired with a
+    differently-cased spelling of it. This machine's filesystem is
+    case-insensitive, so the OS aliases the differently-cased spelling to
+    the SAME real entry, and `-ef` correctly (desirably -- this is exactly
+    CCP-1174's own fix) reports "same file". A first version of this test
+    asserted exactly that, unconditionally -- true here, and WRONG on
+    ext4, where the differently-cased spelling is a genuinely different,
+    nonexistent path and `-ef` correctly reports "different". The
+    assertion text even named its own precondition ("on this
+    (case-insensitive) filesystem") without anything enforcing it -- a
+    test whose own wording states an assumption should verify it, not
+    merely narrate it. `test_ef_classifies_the_second_spelling_correctly_
+    for_this_filesystem` below branches on `_CASE_SENSITIVE_FS` instead of
+    gating a whole class behind `@unittest.skipUnless` (an earlier
+    version's approach): it asserts the CORRECT claim on BOTH sides of
+    the fact rather than staying silent on one of them, needs no entry in
+    the platform skip budget, and is exactly as filesystem-independent AS
+    A TEST (it always runs and always proves something) even though the
+    fact it proves is not."""
+
+    def test_case_folding_equates_two_spellings_regardless_of_filesystem(self):
+        """The genuinely filesystem-independent half: a case-folding
+        compare is pure text and never touches the filesystem, so it
+        treats two case-variant spellings as equal on any machine, whether
+        or not the second path exists there."""
+        tmp = Path(tempfile.mkdtemp(prefix="ccpr-ef-mutation-probe-"))
+        self.addCleanup(_rmtree, tmp)
+        real = tmp / "alpha"
+        real.mkdir()
+        alt_spelling = str(real).replace("alpha", "ALPHA")
+        self.assertNotEqual(str(real), alt_spelling)
+
+        fold = subprocess.run(
+            ["bash", "-c", '[[ "$(printf \'%s\' "$1" | tr A-Z a-z)" == '
+                            '"$(printf \'%s\' "$2" | tr A-Z a-z)" ]]',
+             "_", str(real), alt_spelling],
+        )
+        self.assertEqual(
+            0, fold.returncode,
+            "a case-folding compare did not treat two case-variant "
+            "spellings of the same text as equal -- the mutation this "
+            "test targets did not fire, so it cannot demonstrate the risk",
+        )
+
+    def test_ef_classifies_the_second_spelling_correctly_for_this_filesystem(self):
+        """The filesystem-DEPENDENT half, branched rather than gated (see
+        the class docstring for the CI failure this replaces): -ef must
+        report "same file" for the two spellings on a case-insensitive
+        filesystem (OS aliasing) and "different" on a case-sensitive one
+        (the alt spelling is a genuinely different, nonexistent path).
+        Asserts whichever is correct for THIS run, and asserts the
+        fixture's own precondition first so a silently-wrong branch cannot
+        pass by accident."""
+        tmp = Path(tempfile.mkdtemp(prefix="ccpr-ef-mutation-probe-"))
         self.addCleanup(_rmtree, tmp)
         real = tmp / "alpha"
         real.mkdir()
         alt_spelling = tmp / "ALPHA"
-        self.assertFalse(
-            alt_spelling.exists(),
-            "fixture assumption broken: a differently-cased spelling "
-            "exists on this filesystem despite the module's own "
-            "case-sensitivity probe saying otherwise",
-        )
+
         same_file = subprocess.run(
             ["bash", "-c", '[[ "$1" -ef "$2" ]]', "_", str(real), str(alt_spelling)],
         )
-        self.assertNotEqual(
-            0, same_file.returncode,
-            "-ef reported a real directory and a differently-cased, "
-            "nonexistent path as the same file on a case-sensitive "
-            "filesystem",
+        if _CASE_SENSITIVE_FS:
+            self.assertFalse(
+                alt_spelling.exists(),
+                "fixture assumption broken: a differently-cased spelling "
+                "exists on this filesystem despite the module's own "
+                "case-sensitivity probe saying otherwise",
+            )
+            self.assertNotEqual(
+                0, same_file.returncode,
+                "-ef reported a real directory and a differently-cased, "
+                "nonexistent path as the same file on a case-sensitive "
+                "filesystem",
+            )
+        else:
+            self.assertTrue(
+                alt_spelling.exists(),
+                "fixture assumption broken: a differently-cased spelling "
+                "does not exist on this filesystem despite the module's "
+                "own case-sensitivity probe saying otherwise",
+            )
+            self.assertEqual(
+                0, same_file.returncode,
+                "expected -ef to report a differently-cased spelling of "
+                "the same real directory as the same file on this "
+                "(case-insensitive) filesystem",
+            )
+
+    def test_ef_still_tells_two_real_unrelated_directories_apart(self):
+        """Counter-proof: without this, a same_file probe that is always
+        false would pass the assertion above for the wrong reason."""
+        tmp = Path(tempfile.mkdtemp(prefix="ccpr-ef-mutation-probe-"))
+        self.addCleanup(_rmtree, tmp)
+        alpha = tmp / "alpha"
+        bravo = tmp / "bravo"
+        alpha.mkdir()
+        bravo.mkdir()
+        r = subprocess.run(
+            ["bash", "-c", '[[ "$1" -ef "$2" ]]', "_", str(alpha), str(bravo)],
+        )
+        self.assertNotEqual(0, r.returncode)
+
+        r = subprocess.run(
+            ["bash", "-c", '[[ "$1" -ef "$1" ]]', "_", str(alpha)],
+        )
+        self.assertEqual(
+            0, r.returncode,
+            "-ef reported a real directory as not being the same file as "
+            "itself",
         )
 
 

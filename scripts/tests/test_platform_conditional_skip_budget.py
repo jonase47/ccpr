@@ -5,7 +5,7 @@ test suite produces, so the skip set cannot silently grow.
 Why this exists: a skip is a check that did NOT run. `check-all.sh`'s own
 could-not-run idiom already treats "verified nothing" as distinct from "a
 pass" (KA-G-017) at the CHECK level; nothing did the equivalent at the
-individual-TEST level until now. Seven sources today carry a
+individual-TEST level until now. Six sources today carry a
 `@unittest.skipUnless`/`skipIf` whose condition depends on the machine
 running it rather than on anything the test itself controls:
 
@@ -33,14 +33,6 @@ running it rather than on anything the test itself controls:
     development machine and the `check-all-macos` CI runner; false on the
     `python-tests` job's `ubuntu-latest`/ext4 runner, where the case-alias
     collision this test reproduces cannot occur at all.
-  * test_install_provenance.py (CCP-1174) --
-    OnACaseSensitiveFilesystemEfKeepsCaseVariantsApartTest's one
-    class-level skip, gated the OPPOSITE direction from test_check_all.py's
-    (its own probe, a scratch `tempfile.mkdtemp()` directory rather than a
-    shared fixed filename): RUNS when the filesystem is case-sensitive,
-    SKIPS when it is not. False (0 contributed) on this machine and
-    `check-all-macos`'s runner; true (1 contributed) on `python-tests`'
-    `ubuntu-latest`/ext4 runner.
 
 NOT a flat "N skips per platform" pin. A first version of this module tried
 that (Darwin: 8, Linux: 3) and it is WRONG for any contributor whose local
@@ -76,7 +68,6 @@ from pathlib import Path
 
 from . import test_check_all
 from . import test_handover_size_hook
-from . import test_install_provenance
 from . import test_memory_sync_promote
 from . import test_push_gate
 from . import test_quality_scan
@@ -93,7 +84,6 @@ TESTS_DIR = Path(__file__).resolve().parent
 _REGISTERED_SKIP_DECORATOR_FILES = {
     "test_check_all.py",
     "test_handover_size_hook.py",
-    "test_install_provenance.py",
     "test_memory_sync_promote.py",
     "test_push_gate.py",
     "test_quality_scan.py",
@@ -129,7 +119,6 @@ def files_with_skip_decorators():
 _SKIP_SOURCE_MODULES = (
     test_check_all,
     test_handover_size_hook,
-    test_install_provenance,
     test_memory_sync_promote,
     test_push_gate,
     test_quality_scan,
@@ -210,22 +199,6 @@ def skipped_test_ids():
 #                     machine and check-all-macos's runner, false (1
 #                     contributed) on python-tests' ubuntu-latest/ext4
 #                     runner.
-#   install_prov / 1 CCP-1174 (10.09.2026, code-review follow-up):
-#                     OnACaseSensitiveFilesystemEfKeepsCaseVariantsApartTest's
-#                     one class-level skip -- the OPPOSITE direction from
-#                     check_all's: gated on its OWN runtime probe of
-#                     whether a scratch tempfile.mkdtemp() directory is
-#                     case-SENSITIVE (deliberately not test_check_all.py's
-#                     shared-fixed-filename probe, to avoid replicating
-#                     the concurrency hazard found during this ticket's
-#                     review), skipUnless-gated so it RUNS when the
-#                     filesystem is case-sensitive and SKIPS (1
-#                     contributed) when it is not. True (0 contributed) on
-#                     this machine and check-all-macos's runner; false (1
-#                     contributed) on python-tests' ubuntu-latest/ext4 --
-#                     the inverse of check_all's own contribution on that
-#                     same runner, since the two probes gate opposite
-#                     directions of the same case-sensitivity fact.
 def expected_skip_count():
     count = 0
     if test_shellcheck_run.REAL_SHELLCHECK_DIR is None:
@@ -245,8 +218,6 @@ def expected_skip_count():
     if not hasattr(os, "mkfifo"):
         count += 1
     if not test_check_all._CASE_INSENSITIVE_TMP:
-        count += 1
-    if not test_install_provenance._CASE_SENSITIVE_FS:
         count += 1
     return count
 
