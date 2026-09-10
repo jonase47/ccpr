@@ -119,6 +119,17 @@ def _rmtree(p):
     shutil.rmtree(p, ignore_errors=True)
 
 
+def _case_variant_exists(path):
+    """True if upper-casing `path` as a whole string resolves to the SAME
+    directory (device+inode) -- i.e. the filesystem backing it folds case.
+    tempfile.mkdtemp() names are lower-case/digits by construction, so
+    upper-casing the whole absolute path is enough to produce a second
+    spelling of the identical directory on a case-insensitive filesystem,
+    and a plain non-existent path on a case-sensitive one (CCP-1174)."""
+    alt = Path(str(path).upper())
+    return alt.exists() and os.path.samefile(str(path), str(alt))
+
+
 def parse_marker(text):
     """Reads the marker the same way install.sh --verify does: `key=value`
     lines, `#` comments and blank lines ignored, first `=` splits."""
@@ -273,6 +284,71 @@ class MarkerRecordsACleanGitSourceTest(InstallProvenanceBase):
         r = self.run_install("--yes")
         self.assertEqual(0, r.returncode, r.stdout + r.stderr)
         self.assertIn(shipped_marker_name(), r.stdout)
+
+
+class MarkerAgreesAcrossCaseSpellingsOfTheSourceTest(InstallProvenanceBase):
+    """CCP-1174: `source_provenance()` compared $SRC's own resolved path
+    against `git rev-parse --show-toplevel`'s resolved path as STRINGS.
+    On a case-insensitive filesystem the two can be the IDENTICAL
+    directory and still differ in spelling (CCP-1114) -- `pwd -P` returns
+    the path AS TRAVERSED, not a canonicalised case, and the directory the
+    script is invoked through need not be the spelling git itself stored
+    at init time. Skipped, with a stated reason, on a case-sensitive
+    filesystem, where a differently-cased spelling of this directory does
+    not exist at all and this scenario cannot be produced. Measured under
+    bash (`run_install`/`subprocess.run(["bash", ...])`), the shell
+    install.sh actually runs under -- CCP-1174 was nearly missed by a
+    first probe run under zsh, where the mismatch direction reverses."""
+
+    def setUp(self):
+        super().setUp()
+        if not _case_variant_exists(self.src):
+            self.skipTest(
+                "filesystem under the fixture root is case-sensitive -- "
+                "the non-canonical spelling used here would be a "
+                "different, nonexistent directory, not the same one"
+            )
+        self.alt_src = Path(str(self.src).upper())
+
+    def _run_from_alt_spelling(self, *args):
+        return subprocess.run(
+            ["bash", str(self.alt_src / "install.sh"), *args],
+            cwd=str(self.alt_src), capture_output=True, text=True, env=self.env(),
+        )
+
+    def test_installing_via_the_non_canonical_spelling_still_records_the_commit(self):
+        """Acceptance 1 -- red proof: against today's code this installs
+        and records source_kind=non-git with no source_commit at all,
+        even though $SRC is exactly the git checkout it was invoked
+        through -- only the spelling used to reach it differs."""
+        head = self.git("rev-parse", "HEAD").stdout.strip()
+        r = self._run_from_alt_spelling("--yes")
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        m = self.marker()
+        self.assertEqual(
+            "git", m.get("source_kind"),
+            "a real git checkout, entered through a differently-cased "
+            "spelling of its own path, was recorded as non-git:\n" + r.stdout,
+        )
+        self.assertEqual(head, m.get("source_commit"))
+        self.assertEqual("clean", m.get("source_state"))
+
+    def test_both_spellings_agree_on_kind_and_commit(self):
+        """Acceptance 3."""
+        head = self.git("rev-parse", "HEAD").stdout.strip()
+
+        r_canonical = self.run_install("--yes")
+        self.assertEqual(0, r_canonical.returncode, r_canonical.stdout + r_canonical.stderr)
+        canonical_marker = dict(self.marker())
+
+        r_alt = self._run_from_alt_spelling("--update", "--yes")
+        self.assertEqual(0, r_alt.returncode, r_alt.stdout + r_alt.stderr)
+        alt_marker = self.marker()
+
+        self.assertEqual("git", canonical_marker.get("source_kind"))
+        self.assertEqual(canonical_marker.get("source_kind"), alt_marker.get("source_kind"))
+        self.assertEqual(head, canonical_marker.get("source_commit"))
+        self.assertEqual(canonical_marker.get("source_commit"), alt_marker.get("source_commit"))
 
 
 class MarkerRecordsADirtySourceAsDirtyTest(InstallProvenanceBase):

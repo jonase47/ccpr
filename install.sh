@@ -429,10 +429,32 @@ SRC_STATE="unknown"
 # source_provenance -- classify $SRC into (kind, commit, state) without ever
 # guessing. `git rev-parse` walks UP the directory tree, so a copied
 # directory sitting inside somebody else's checkout would otherwise inherit
-# that repository's HEAD: the toplevel must be $SRC ITSELF, compared as
-# physical paths (macOS /tmp is a symlink to /private/tmp, so the logical
-# and physical spellings differ and a string compare of the two would
-# wrongly say "not a repository").
+# that repository's HEAD: the toplevel must be $SRC ITSELF.
+#
+# "Itself" is an identity question about DIRECTORIES, not a question about
+# the strings that name them -- checked with `-ef` (bash: same device+inode)
+# rather than `==` (CCP-1174). Two reasons neither side of a string compare
+# can be trusted to agree here even when they name the same directory:
+#   * macOS /tmp is a symlink to /private/tmp, so the logical and physical
+#     spellings differ (both sides already go through `pwd -P` to fold
+#     this, which is why this comment used to stop there).
+#   * On a case-insensitive filesystem, `pwd -P` does NOT canonicalise
+#     case -- it returns the path AS TRAVERSED. The directory the script
+#     was invoked through need not be the spelling git itself stored at
+#     init time (CCP-1114), so `$SRC`'s own resolved path and git's
+#     reported toplevel can be the IDENTICAL directory and still differ
+#     as strings (CCP-1174, observed in production 10.09.2026). Routing
+#     both through `pwd -P` again does not fix this, because they already
+#     went through it once and still disagree -- they were entered
+#     through different doors.
+# `-ef` answers "is this the same directory" directly, needs no assumption
+# about the filesystem's case sensitivity, and stays correct on a
+# case-SENSITIVE volume where two differently-cased directories are
+# genuinely two directories -- which a case-folding string compare would
+# wrongly merge, silently widening the guard this exists for. It is also
+# false (not an error) when either side does not exist, so a `$toplevel`
+# that failed to resolve above still falls through to `non-git` here
+# rather than tripping `set -e`.
 source_provenance() {
   local toplevel=""
   SRC_PHYS="$(cd "$SRC" && pwd -P)"
@@ -443,7 +465,7 @@ source_provenance() {
   toplevel="$(git -C "$SRC" rev-parse --show-toplevel 2>/dev/null)" || return 0
   [[ -n "$toplevel" ]] || return 0
   toplevel="$(cd "$toplevel" 2>/dev/null && pwd -P)" || return 0
-  [[ "$toplevel" == "$SRC_PHYS" ]] || return 0
+  [[ "$toplevel" -ef "$SRC_PHYS" ]] || return 0
   SRC_COMMIT="$(git -C "$SRC" rev-parse HEAD 2>/dev/null)" || SRC_COMMIT=""
   [[ -n "$SRC_COMMIT" ]] || return 0
   SRC_KIND="git"
