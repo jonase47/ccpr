@@ -110,8 +110,9 @@ python3 -m unittest discover -s scripts/tests -t .
 
 - **`-t .` is not optional**, and the failure mode is worth knowing because it is
   partly silent. It sets the top-level directory imports resolve against. Measured
-  on the current tree (10.09.2026): **with** it, discovery collects **2879 tests, 0
-  import errors**, exit 0; **without** it, **2130 tests and 19 modules that fail to
+  on the current tree (10.09.2026, code-review round): **with** it, discovery
+  collects **2889 tests, 0 import errors**, exit 0; **without** it, **2133 tests
+  and 19 modules that fail to
   import**, exit 1 — the eight that use a relative import
   (`from .test_phase_docs_lint import …` in four modules,
   `from .test_artifact_gate import …` in two,
@@ -119,7 +120,7 @@ python3 -m unittest discover -s scripts/tests -t .
   `from . import …` of five sibling modules in the skip budget), plus the eleven
   modules of the `scripts/tests/workitems/` subpackage (CCP-1172 added
   `test_workitem_similar.py` as the eleventh). The run does go red on those
-  19, so you will notice something — but **749 tests simply never execute**, and
+  19, so you will notice something — but **756 tests simply never execute**, and
   nothing in the output says so.
 
   That skipped count moves whenever a module gains a relative import:
@@ -197,6 +198,18 @@ python3 -m unittest discover -s scripts/tests -t .
   count's own delta (+10) is the new module's 11 test methods minus the 1
   that reclassifies from "skipped" to "counted as the module's own failed-
   import placeholder" the moment the module itself starts existing.
+
+  10.09.2026, same day, code-review round: **2879 / 2130 / 19 / 749** against a
+  tree at **2889 / 2133 / 19 / 756** — +10 test methods total (a full `-t .`/
+  no-`-t .` `unittest discover` run and a separate cheap
+  `TestLoader().discover(...).countTestCases()` cross-check agree). Modules-fail
+  did NOT move (still 19): every new method landed inside an existing file, none
+  in a new module. +3 count without `-t .` are `test_workitems_cli.py`'s three
+  new `--checked-against` validation methods (no relative import, so they count
+  either way); the other +7 are all inside
+  `workitems/test_workitem_similar.py`, already one of the 19 failed-import
+  modules, so they only ever show up in the `-t .` count -- the skipped
+  column's own delta (+7) is exactly those seven.
 - The full run takes **a couple of minutes**. If you drive it from an agent whose
   tool calls time out, start it in the background and wait for it once rather than
   polling.

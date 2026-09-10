@@ -905,6 +905,27 @@ class ClassificationCountsTest(unittest.TestCase):
         growing paragraph:
 
           in-scope / flagged   when
+          1422 / 0             10.09.2026 (CCP-1172, code-review fixes: empty
+                               --checked-against rejected, similar's verdict
+                               no longer reads the --limit-sliced list,
+                               Unicode tokenization, empty/stopword-only-query
+                               limit named): +4. 3 are
+                               test_workitems_cli.py's new checked-against
+                               validation methods (empty, whitespace-only, a
+                               trim counter-proof), all via the pre-existing
+                               `self.run_cli(...)` helper. The 4th is
+                               workitems/test_workitem_similar.py's new
+                               SimilarCliTest.test_the_limit_flag_reaches_
+                               the_lib_function, via `self.run_similar(...)`.
+                               The other 6 new methods this round (LimitTest's
+                               3, UnicodeTokenizationTest's 2,
+                               ScopeStatementTest's 1) call the lib function
+                               or `_tokenize` directly, in-process -- out of
+                               scope, same shape as the previous round's
+                               lib-level additions. All 4 in-scope carry a
+                               positive assertion (an exact non-zero
+                               returncode, a specific stderr substring, or a
+                               JSON field read back) -- flagged unchanged.
           1418 / 0             10.09.2026 (CCP-1172, similar-text search +
                                required --checked-against on create): +6.
                                5 of them are workitems/test_workitem_similar.py's
@@ -1901,7 +1922,7 @@ class ClassificationCountsTest(unittest.TestCase):
         count."""
         recs = scan_tree()
         flagged = [r for r in recs if r.disposition in NEEDS_EXEMPTION]
-        self.assertEqual(1418, len(recs))
+        self.assertEqual(1422, len(recs))
         self.assertEqual(0, len(flagged))
 
 
