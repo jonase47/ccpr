@@ -73,6 +73,10 @@ NOT_REACHED = (
     "and description are scored",
     "an item with no vocabulary at all in common with the query -- it scores "
     "0.0 and is dropped from the ranking rather than listed with a zero",
+    "a QUERY that is empty or made entirely of stopwords: it produces an "
+    "empty vector, so every item scores 0.0 the same way an item with no "
+    "shared vocabulary does -- the verdict reads `no-results`, indistinguishable "
+    "from a genuine negative search over real content",
 )
 
 

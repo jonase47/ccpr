@@ -98,6 +98,18 @@ class ScopeStatementTest(unittest.TestCase):
         self.assertIn("MEANING", limit_statements)
         self.assertIn("ADR-0004", limit_statements)
 
+    def test_the_report_states_the_empty_or_stopword_only_query_limit(self):
+        """Code-review finding: a query that is empty or made entirely of
+        stopwords produces an empty vector, so `_cosine` scores every item
+        0.0 and the verdict is unconditionally `no-results` -- indistinguishable
+        from a genuine negative search over real content. Documented rather
+        than given a new verdict state (a rare case, and a new state widens the
+        contract this module's callers have to handle)."""
+        report = similar_module.similar(self.backend, "a query")
+
+        limit_statements = " ".join(report["scope"]["not_reached"])
+        self.assertIn("stopword", limit_statements.lower())
+
     def test_the_report_names_the_fields_it_scored(self):
         report = similar_module.similar(self.backend, "a query")
 

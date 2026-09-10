@@ -437,6 +437,9 @@ codes: **0** ran (results or no-results) · **3** could not run. Unlike `lint`, 
   are scored, the same fields `lint` reads.
 - an item with no vocabulary at all in common with the query — it scores `0.0` and is dropped from
   the ranking rather than listed with a zero.
+- a query that is empty or made entirely of stopwords — it produces an empty vector, so every item
+  scores `0.0` the same way an item with no shared vocabulary does. The verdict reads `no-results`,
+  indistinguishable from a genuine negative search over real content.
 
 **`--checked-against`** (§1) is the other half: `create` requires it, unvalidated beyond
 non-empty — `"none"` is a permitted answer, but it is then a permanent fact in the item's stored
