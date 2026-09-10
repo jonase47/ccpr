@@ -1698,6 +1698,19 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Fixed
 
+- **`install.sh --verify`'s IGNORED block is grouped by `.gitignore` rule instead of listing
+  every excused path (CCP-1170).** A correct installation excused 100 locally generated paths
+  (97 `__pycache__` files + 3 `.DS_Store`) and printed each one, 105 of 143 report lines — an
+  unread report on the correct case. `path_is_source_ignored()` now reads `git check-ignore -v`
+  instead of `-q` (the two flags refuse to combine) and groups by the exact
+  `<source>:<line>:<pattern>` rule string it names, sorted by count descending — the same call
+  that decides the exemption also supplies the grouping key, so there is no second, typed
+  register of the rule shapes to drift from the first. The block now also prints
+  unconditionally, for the same reason USER-OWNED already does: a reader must see how much was
+  set aside without first having to trigger it. A path excused by a *different* rule —
+  `docs/HANDOVER.md`, untracked in this repository — still lands on its own line,
+  distinguishable from the bytecode-cache group in the same run.
+
 - **A fresh `install.sh` no longer silently replaces an installation that is already there
   (CCP-1173).** It now refuses a target that carries the provenance marker **or** that
   merely exists and is not empty: exit **4**, nothing written, and a message naming

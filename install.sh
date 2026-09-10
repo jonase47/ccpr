@@ -399,11 +399,26 @@ path_is_docs_working_state() {
 #
 # What it excuses is reported by name in its own IGNORED block rather than
 # dropped -- an exemption nobody can see is the next drifting skip list.
+#
+# CCP-1170: reports which RULE excused the path, not only whether one did,
+# via a global (`PATH_IGNORE_RULE`) rather than a return value -- this
+# script has no other channel for a function result besides its exit code.
+# `-v` and `-q` cannot be combined (`git check-ignore` refuses that
+# combination outright, exit 128), so this reads `-v`'s own stdout and
+# decides ignored-or-not from ITS exit code instead: measured to carry the
+# same 0/1 semantics `-q` had, one call, nothing decided twice.
 path_is_source_ignored() {
-  local rc=0
-  git -C "$SRC" -c core.excludesFile=/dev/null check-ignore -q -- "$1" \
-    >/dev/null 2>&1 || rc=$?
-  [[ "$rc" -eq 0 ]]
+  local rc=0 out=""
+  out="$(git -C "$SRC" -c core.excludesFile=/dev/null check-ignore -v -- "$1" 2>/dev/null)" \
+    || rc=$?
+  if [[ "$rc" -ne 0 ]]; then
+    PATH_IGNORE_RULE=""
+    return 1
+  fi
+  # check-ignore -v prints one line, `<source>:<line>:<pattern>\t<path>`;
+  # the rule is everything before the first tab.
+  PATH_IGNORE_RULE="${out%%$'\t'*}"
+  return 0
 }
 
 SRC_PHYS=""
@@ -485,7 +500,8 @@ verify_installation() {
   local expected_raw meta path sha ahash
   local expected_count=0 compared=0
   local missing="" differing="" extra="" ignored=""
-  local missing_n=0 differing_n=0 extra_n=0 ignored_n=0
+  local missing_n=0 differing_n=0 extra_n=0 ignored_n=0 ignored_rules_n=0
+  local ignored_groups="" gline gcount grule
   local exp_paths d f rel total toplevel scan_out prefix dname
   local enum_incomplete=0
   local allowlist_ok=0 docs_unclassifiable=0
@@ -713,7 +729,12 @@ verify_installation() {
         *$'\n'"$rel"$'\n'*) ;;
         *)
           if path_is_source_ignored "$rel"; then
-            ignored="${ignored}${rel}"$'\n'; ignored_n=$((ignored_n + 1))
+            # "<rule>\t<rel>\n" -- one line per excused path, keyed by the
+            # rule that excused it. bash 3.2 (macOS /bin/bash) has no
+            # associative arrays, so grouping happens at print time via a
+            # cut/sort/uniq pipeline over these lines, not here.
+            ignored="${ignored}${PATH_IGNORE_RULE}"$'\t'"${rel}"$'\n'
+            ignored_n=$((ignored_n + 1))
           else
             extra="${extra}${rel}"$'\n'; extra_n=$((extra_n + 1))
           fi
@@ -738,14 +759,33 @@ verify_installation() {
     echo "  UNEXPECTED -- in the installation, not in the recorded commit:"
     printf '%s' "$extra" | LC_ALL=C sort | sed 's/^/    - /'
   fi
-  if [[ "$ignored_n" -gt 0 ]]; then
-    echo "  IGNORED -- in the installation, ignored by the SOURCE CHECKOUT (excused, not skipped):"
-    printf '%s' "$ignored" | LC_ALL=C sort | sed 's/^/    - /'
-    echo "    (git check-ignore against $SRC as it stands now -- the one rule here"
-    echo "     NOT resolved from commit $p_commit. A path this repository will not"
-    echo "     track is in no commit, so having it here is not drift from one --"
-    echo "     it is locally generated. Not counted as a finding.)"
-  fi
+  # Printed UNCONDITIONALLY (CCP-1170), unlike the NOT FRAMEWORK block below
+  # -- see the comment ahead of USER-OWNED for why. The rule set is derived
+  # per run and CAN be empty on a correct installation, but "nothing was
+  # excused this run" is exactly the number a reader needs without having
+  # to cause an excused file first.
+  echo "  IGNORED -- in the installation, ignored by the SOURCE CHECKOUT (excused, not skipped):"
+  # Grouped by the .gitignore RULE `git check-ignore -v` named for each
+  # path (CCP-1170), not listed one path per line -- a correct installation
+  # can grow dozens of __pycache__ entries under one rule, and a per-path
+  # listing buried the report under them. bash 3.2 has no associative
+  # arrays, so the grouping runs as a cut/sort/uniq pipeline over the
+  # "<rule>\t<rel>" lines collected during the walk, sorted by count
+  # descending (most-excused rule first), rule string breaking ties.
+  ignored_groups="$(printf '%s' "$ignored" | cut -f1 | LC_ALL=C sort \
+    | uniq -c | LC_ALL=C sort -k1,1nr -k2)"
+  while IFS= read -r gline; do
+    [[ -n "$gline" ]] || continue
+    ignored_rules_n=$((ignored_rules_n + 1))
+    read -r gcount grule <<< "$gline"
+    printf '%8d file(s)  %s\n' "$gcount" "$grule"
+  done <<< "$ignored_groups"
+  echo "    ($ignored_n file(s) excused by $ignored_rules_n rule(s), named by"
+  echo "     \`git check-ignore -v\` against $SRC as it stands now -- the same call"
+  echo "     that made the decision, and the one place here NOT resolved from"
+  echo "     commit $p_commit: check-ignore is a working-tree operation, so a path"
+  echo "     this repository will not track is in no commit, and having it here is"
+  echo "     not drift from one -- it is locally generated. Not counted as a finding.)"
 
   if [[ "$docs_skipped_n" -gt 0 ]]; then
     echo "  NOT FRAMEWORK -- under docs/ in the recorded commit, never installed:"
@@ -758,13 +798,16 @@ verify_installation() {
     echo "     allowlist is read from this checkout as it stands, not from the"
     echo "     recorded commit: same door the IGNORED rule declares above.)"
   fi
-  # Printed UNCONDITIONALLY, unlike the IGNORED and NOT FRAMEWORK blocks
-  # which are gated on having something to say. Deliberate, and the reason
-  # is the asymmetry in what the three exclusions cost: those two are
-  # derived per run and an empty one means "nothing was excused this time",
-  # which is worth nothing to print. This one is a FIXED list that is in
-  # force on every run, applies in BOTH directions, and can hide a MISSING
-  # -- the only exclusion here that can. A reader must be able to see it
+  # Printed UNCONDITIONALLY, unlike the NOT FRAMEWORK block above, which
+  # stays gated on having something to say. IGNORED used to be gated the
+  # same way and moved to this side of the line (CCP-1170) -- its own
+  # comment above states why. NOT FRAMEWORK is left where it was: its
+  # empty case genuinely means "nothing under docs/ was skipped this
+  # run", worth nothing to print, and it cannot hide a MISSING (an
+  # allowlisted docs/ path was never in the expected set to begin with).
+  # USER-OWNED is different from both: it is a FIXED list that is in force
+  # on every run, applies in BOTH directions, and can hide a MISSING --
+  # the only exclusion here that can. A reader must be able to see it
   # without first having to trigger it.
   echo "  USER-OWNED -- inside the scope but yours: compared in NEITHER direction:"
   for prefix in "${PROTECTED[@]}"; do
