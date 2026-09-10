@@ -110,9 +110,9 @@ python3 -m unittest discover -s scripts/tests -t .
 
 - **`-t .` is not optional**, and the failure mode is worth knowing because it is
   partly silent. It sets the top-level directory imports resolve against. Measured
-  on the current tree (10.09.2026, CCP-1174): **with**
-  it, discovery collects **2896 tests, 0 import errors**, exit 0; **without** it,
-  **2140 tests and 19 modules that fail to
+  on the current tree (10.09.2026, CCP-1174 code-review follow-up): **with**
+  it, discovery collects **2899 tests, 0 import errors**, exit 0; **without** it,
+  **2143 tests and 19 modules that fail to
   import**, exit 1 — the eight that use a relative import
   (`from .test_phase_docs_lint import …` in four modules,
   `from .test_artifact_gate import …` in two,
@@ -292,6 +292,25 @@ python3 -m unittest discover -s scripts/tests -t .
   instead of running it, applied to itself). Not a defect in this ticket's own
   changes; a pre-existing, unrelated hazard in `test_check_all.py`, out of
   scope for CCP-1174 and left unfixed here, reported to the PO instead.
+
+  10.09.2026, same day (CCP-1174 code-review follow-up: a filesystem-independent
+  regression guard on the `-ef`-vs-case-folding-compare choice, plus one
+  `@skipUnless`-gated supplementary test meaningful on a case-sensitive
+  filesystem): **2899 / 2143 / 19 / 756** — +3 on both totals, all in
+  `test_install_provenance.py` again (no relative import, cancels out of
+  skipped the same way); modules-fail unchanged. The skipped-test COUNT (a
+  different figure from this pair's own "skipped" column, which counts tests
+  that never execute without `-t .`) moved too:
+  `scripts/tests/test_platform_conditional_skip_budget.py`'s pinned budget
+  went 0 → 1 contributed on this machine, registering the new
+  `@skipUnless`-gated class the same way its docstring requires every
+  platform/toolchain-conditional skip to be accounted for — re-derived via
+  its own `expected_skip_count()`, not hand-typed, and confirmed by two
+  mutation probes (a wrong per-source count, and an unregistered file) both
+  still failing loudly afterward. Re-measured with a full `-t .`/no-`-t .`
+  `unittest discover` run and a separate `TestLoader().discover(...)
+  .countTestCases()` cross-check, agreeing; both runs sequential, not
+  concurrent, per the previous entry's own lesson.
 - The full run takes **a couple of minutes**. If you drive it from an agent whose
   tool calls time out, start it in the background and wait for it once rather than
   polling.
