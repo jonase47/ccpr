@@ -163,6 +163,60 @@ class SingleItemCorpusTest(LocalFixtureTestCase):
         )
 
 
+class LimitTest(LocalFixtureTestCase):
+    """Code-review finding (Important): the verdict used to be derived from the
+    ALREADY-SLICED `results` list, so `--limit 0` against a corpus with real
+    matches reported `no-results` -- "found, but truncated" read as "nothing
+    found", the same confusion the three-verdict form exists to prevent, one
+    level deeper. No test exercised `--limit` at all before this class -- not
+    the default, not an explicit value, not 0."""
+
+    def _plant_matching_items(self, count):
+        return [
+            self.plant(
+                f"Dark mode toggle variant {n} does not persist across sessions",
+                "The theme preference resets to light mode on every page reload.",
+            )
+            for n in range(count)
+        ]
+
+    def test_limit_zero_still_reports_results_when_matches_exist(self):
+        self._plant_matching_items(2)
+
+        report = similar_module.similar(
+            self.backend, "Dark mode toggle resets on reload", limit=0,
+        )
+
+        self.assertEqual(
+            report["verdict"], "results",
+            "truncated to zero results is not the same observation as no "
+            "matching vocabulary at all -- the verdict must come from the "
+            "ranked list BEFORE the --limit slice",
+        )
+        self.assertEqual(report["results"], [])
+        self.assertEqual(report["items_scanned"], 2)
+
+    def test_an_explicit_limit_truncates_the_ranked_list(self):
+        self._plant_matching_items(5)
+
+        report = similar_module.similar(
+            self.backend, "Dark mode toggle resets on reload", limit=2,
+        )
+
+        self.assertEqual(report["verdict"], "results")
+        self.assertEqual(len(report["results"]), 2)
+        self.assertEqual(report["items_scanned"], 5)
+
+    def test_default_limit_returns_at_most_ten(self):
+        self._plant_matching_items(12)
+
+        report = similar_module.similar(self.backend, "Dark mode toggle resets on reload")
+
+        self.assertEqual(report["verdict"], "results")
+        self.assertEqual(len(report["results"]), 10)
+        self.assertEqual(report["items_scanned"], 12)
+
+
 class KnownNeighbourTest(LocalFixtureTestCase):
     """CCP-1172 acceptance 2: the CCP-1167 text must surface CCP-1136 and
     CCP-1124, its human-confirmed true neighbours."""
@@ -269,6 +323,17 @@ class SimilarCliTest(unittest.TestCase):
         report = json.loads(result.stdout)
         self.assertEqual(report["verdict"], "results")
         self.assertEqual(report["provider"], "local")
+
+    def test_the_limit_flag_reaches_the_lib_function(self):
+        for n in range(5):
+            self.backend.create(title=f"Dark mode toggle variant {n} resets on reload")
+
+        result = self.run_similar("Dark mode toggle does not persist", "--limit", "2")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["verdict"], "results")
+        self.assertEqual(len(report["results"]), 2)
 
     def test_an_empty_corpus_is_no_results_not_a_refusal(self):
         result = self.run_similar("Nothing has been filed yet")

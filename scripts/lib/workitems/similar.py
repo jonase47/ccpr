@@ -148,10 +148,16 @@ def similar(backend, query_text, limit=DEFAULT_LIMIT, provider=None):
             scored.append({"id": item["id"], "title": item["title"], "score": round(score, 4)})
 
     scored.sort(key=lambda result: (-result["score"], result["id"]))
+    # Verdict comes from the RANKED list, before the --limit slice (code-review
+    # finding, Important): "found, but truncated to zero by --limit" is not the
+    # same observation as "no vocabulary in common at all" -- exactly the
+    # confusion the three-verdict form exists to prevent, one level deeper than
+    # could-not-run vs. no-results.
+    verdict = "results" if scored else "no-results"
     results = scored[:limit]
 
     return {
-        "verdict": "results" if results else "no-results",
+        "verdict": verdict,
         "provider": provider,
         "items_scanned": len(items),
         "query": query_text,
