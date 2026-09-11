@@ -110,9 +110,9 @@ python3 -m unittest discover -s scripts/tests -t .
 
 - **`-t .` is not optional**, and the failure mode is worth knowing because it is
   partly silent. It sets the top-level directory imports resolve against. Measured
-  on the current tree (11.09.2026, CCP-1178): **with**
-  it, discovery collects **2906 tests, 0 import errors**, exit 0; **without** it,
-  **2150 tests and 19 modules that fail to
+  on the current tree (11.09.2026, CCP-1178 merged with CCP-1177): **with**
+  it, discovery collects **2923 tests, 0 import errors**, exit 0; **without** it,
+  **2152 tests and 19 modules that fail to
   import**, exit 1 — the eight that use a relative import
   (`from .test_phase_docs_lint import …` in four modules,
   `from .test_artifact_gate import …` in two,
@@ -120,7 +120,7 @@ python3 -m unittest discover -s scripts/tests -t .
   `from . import …` of five sibling modules in the skip budget), plus the eleven
   modules of the `scripts/tests/workitems/` subpackage (CCP-1172 added
   `test_workitem_similar.py` as the eleventh). The run does go red on those
-  19, so you will notice something — but **756 tests simply never execute**, and
+  19, so you will notice something — but **771 tests simply never execute**, and
   nothing in the output says so.
 
   That skipped count moves whenever a module gains a relative import:
@@ -312,7 +312,23 @@ python3 -m unittest discover -s scripts/tests -t .
   .countTestCases()` cross-check, agreeing; both runs sequential, not
   concurrent, per the previous entry's own lesson.
 
-  11.09.2026 (CCP-1178: agents/*.md's generic "update HANDOVER.md at the
+  11.09.2026 (CCP-1177: the link lint stops reading `create --checked-against`'s
+  recorded dedup-evidence line as claimed relations): **2916 / 2145 / 19 / 771** —
+  +17 with the flag, **+2 without it**, and the difference is the point: 15 of the
+  17 are `scripts/tests/workitems/test_workitem_lint.py`'s new
+  `DedupEvidenceLineTest` (12) and `DedupEvidenceComposerDriftTest` (3), and that
+  module lives in the subpackage that cannot be imported without `-t .`, so they
+  land in the skipped column instead (756 → 771, +15). Two of the 15 came from
+  code review rather than from the ACs (a mixed linked/unlinked evidence line, and
+  a pin on the shape-not-provenance limitation). The other 2 are
+  `test_workitems_cli.py`'s end-to-end pair, which executes under both flags and
+  therefore cancels out of skipped. Modules-fail unchanged at 19 — no new module.
+  Both figures re-measured with `TestLoader().discover(...).countTestCases()` under
+  each flag rather than added to the row above: the +17/+2 split is what a
+  measurement shows and arithmetic on a single total would have hidden.
+
+  11.09.2026 (CCP-1178, measured on its own branch off `790039e`, before
+  CCP-1177 landed: agents/*.md's generic "update HANDOVER.md at the
   end of your work" instruction, contradicting the rest of the framework's
   orchestrator-owned HANDOVER model, replaced by a read-only-for-context
   instruction with the `## Open Points` inbox as the only remaining,
@@ -326,6 +342,15 @@ python3 -m unittest discover -s scripts/tests -t .
   agreement test uses — cross-checked against the base commit (790039e) in
   a throwaway worktree, which measured 2899 there, confirming the +7 delta
   independently of the subprocess CLI route.
+
+  11.09.2026, merge round: `ticket/CCP-1178` (**2906 / 2150 / 19 / 756**)
+  integrated `main`/CCP-1177 (**2916 / 2145 / 19 / 771**) via `git merge`, the
+  same way the CCP-1172 merge round above did — both branches forked from
+  `790039e` and conflicted only in this file. Re-measured on the integrated tree
+  with `TestLoader().discover(...).countTestCases()` under each flag rather than
+  added: **2923 / 2152 / 19 / 771** — CCP-1178's +7 lands on both sides of the
+  flag on top of CCP-1177's figures (its new module has no relative import), so
+  skipped keeps CCP-1177's 771 and modules-fail stays at 19.
 - The full run takes **a couple of minutes**. If you drive it from an agent whose
   tool calls time out, start it in the background and wait for it once rather than
   polling.

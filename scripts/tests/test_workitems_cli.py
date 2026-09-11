@@ -277,6 +277,59 @@ class WorkitemsCliTest(unittest.TestCase):
         self.assertIn("Checked against: CCP-1136, CCP-1124", reread_item["description"])
         self.assertIn("Some text.", reread_item["description"])
 
+    def test_an_id_only_in_the_written_evidence_line_is_excused_by_lint(self):
+        """CCP-1177 AC 4, the binding proof, and it is deliberately end-to-end:
+        the item is WRITTEN by the real `create` path and READ by the real `lint`
+        path, two subprocesses, with nothing but the stored artifact between them.
+        `lint.compose_evidence_description()` is the single register of the line's
+        shape and `_compose_create_description()` calls it -- but a later edit that
+        re-typed the composition here would still agree with itself, so agreement
+        is not what is asserted. What is asserted is that the line this CLI
+        actually wrote is the line that lint actually excused."""
+        created = self.run_cli(
+            "create", "--title", "Follow-up",
+            "--checked-against", "WI-0001 via `workitems.py similar`",
+            "--description", "Body prose that names nothing.",
+        )
+        self.assertEqual(created.returncode, 0, created.stderr)
+        source = json.loads(created.stdout)["id"]
+
+        lint_result = self.run_cli("lint")
+
+        self.assertEqual(lint_result.returncode, 0, lint_result.stdout)
+        report = json.loads(lint_result.stdout)
+        self.assertEqual(report["verdict"], "pass")
+        self.assertEqual(report["findings"], [])
+        # Excused, not unseen: the report says what the exemption cost.
+        self.assertEqual(
+            report["scope"]["dedup_evidence_line"]["excused"]["by_item"],
+            {source: ["WI-0001"]},
+        )
+
+    def test_the_same_id_in_the_description_body_is_still_a_finding(self):
+        """The counter-proof, through the same two subprocesses: the exemption is
+        about WHERE the id sits in the item the CLI wrote, not about the id, the
+        item, or the presence of an evidence line. Without this arm the test above
+        is equally satisfied by a lint that stopped reporting anything."""
+        created = self.run_cli(
+            "create", "--title", "Follow-up", "--checked-against", "none",
+            "--description", "The regression reproduces against WI-0001.",
+        )
+        self.assertEqual(created.returncode, 0, created.stderr)
+        source = json.loads(created.stdout)["id"]
+
+        lint_result = self.run_cli("lint")
+
+        self.assertEqual(lint_result.returncode, 1, lint_result.stdout)
+        report = json.loads(lint_result.stdout)
+        self.assertEqual(
+            [(f["kind"], f["item"], f["target"]) for f in report["findings"]],
+            [("named-without-link", source, "WI-0001")],
+        )
+        self.assertEqual(
+            report["scope"]["dedup_evidence_line"]["excused"]["count"], 0,
+        )
+
     def test_list_defaults_to_local_provider_and_prints_json(self):
         result = self.run_cli("list")
 
