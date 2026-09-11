@@ -123,9 +123,14 @@ class AbsenceTest(unittest.TestCase):
     carry it and must not gain it back either."""
 
     def test_the_old_update_instruction_is_gone_from_every_agent_file(self):
-        offenders = [
-            name for name in _agent_names() if OLD_SENTENCE in _read(name)
-        ]
+        # Built as a for/append loop rather than a comprehension -- the same
+        # shape test_handover_epilogue_bullet.py's own `violations` uses --
+        # so the assertion states an invariant ("must be empty"), not a count
+        # that ages with the repository.
+        offenders = []
+        for name in _agent_names():
+            if OLD_SENTENCE in _read(name):
+                offenders.append(name)
         self.assertEqual(
             [],
             offenders,
@@ -158,16 +163,23 @@ class PresenceTest(unittest.TestCase):
         self.assertNotIn(STANDARD_BLOCK, text)
 
     def test_12_files_carry_the_standard_block(self):
+        # A real pin (ADR-0012): 12 ages if an agent is added, removed, or
+        # rewritten to a different block -- see pin_registry.py's PIN_GROUPS
+        # for what "derived" commits to.
         count = sum(
             1 for name in _agent_names() if STANDARD_BLOCK in _read(name)
         )
-        self.assertEqual(12, count)
+        self.assertEqual(  # pin: derived agent-handover-standard-block-count
+            12, count
+        )
 
     def test_exactly_one_file_carries_the_reviewer_block(self):
         count = sum(
             1 for name in _agent_names() if CODE_REVIEWER_BLOCK in _read(name)
         )
-        self.assertEqual(1, count)
+        self.assertEqual(  # pin: derived agent-handover-reviewer-block-count
+            1, count
+        )
 
     def test_out_of_scope_agents_carry_neither_block(self):
         for name in sorted(OUT_OF_SCOPE_AGENTS):

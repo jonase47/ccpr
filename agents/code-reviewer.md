@@ -170,7 +170,7 @@ Return ONLY a short summary (max. 5 sentences):
 
 ## Handover
 
-If `docs/HANDOVER.md` exists in the project directory, read it at the start for context. Update it at the end of your work with your result and the next steps.
+If `docs/HANDOVER.md` exists in the project directory, read it at the start for context. Do not edit it: the orchestrator owns it and consolidates after your run — report your result and the next steps in your final message instead. Your `Edit`/`Write` access is memory-only, so the `## Open Points` inbox append is not yours to make either: hand any finding outside your assignment over as a ready-made `- INBOX | …` line, in the format defined in `templates/HANDOVER_TEMPLATE.md`, for the orchestrator to append.
 
 **Update your agent memory** as you discover code patterns, style conventions, common issues, architectural decisions, project-specific conventions, recurring vulnerabilities, and testing patterns in this codebase. This builds up institutional knowledge across conversations. Write concise notes about what you found and where.
 

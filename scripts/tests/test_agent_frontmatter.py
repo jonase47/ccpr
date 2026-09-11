@@ -966,6 +966,35 @@ KNOWN_POST_CONTRACT_EDITS = (
      "a specific agent, file path, skill, or tool-chain symbol",
      "a specific agent, file path, command, or tool-chain symbol",
      1),
+    # CCP-1178: the generic "Update it at the end of your work..." HANDOVER
+    # instruction (present since the initial release) is replaced by a
+    # read-only-for-context instruction, with the `## Open Points` inbox as
+    # the only remaining agent write -- code-reviewer gets a report-only
+    # variant (it hands the inbox line over instead of appending it, matching
+    # its `Edit`/`Write` access being memory-only), business-analyst gets the
+    # standard, worktree-gated wording shared by 11 other agents. See
+    # scripts/tests/test_agent_handover_write_boundary.py for the full
+    # rationale and both blocks' exact text.
+    ("code-reviewer",
+     "Update it at the end of your work with your result and the next steps.",
+     "Do not edit it: the orchestrator owns it and consolidates after your "
+     "run — report your result and the next steps in your final message "
+     "instead. Your `Edit`/`Write` access is memory-only, so the `## Open "
+     "Points` inbox append is not yours to make either: hand any finding "
+     "outside your assignment over as a ready-made `- INBOX | …` line, "
+     "in the format defined in `templates/HANDOVER_TEMPLATE.md`, for the "
+     "orchestrator to append.",
+     1),
+    ("business-analyst",
+     "Update it at the end of your work with your result and the next steps.",
+     "Do not edit it: the orchestrator owns it and consolidates after your "
+     "run — report your result and the next steps in your final message "
+     "instead. One exception: a finding outside your assignment may be "
+     "appended as one `- INBOX | …` line under `## Open Points`, in the "
+     "format defined in `templates/HANDOVER_TEMPLATE.md`, and only when you "
+     "run in the main working tree; in a worktree-isolated run, put that "
+     "line in your final message instead.",
+     1),
 )
 
 

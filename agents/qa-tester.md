@@ -154,7 +154,7 @@ Return ONLY a brief summary (max. 5 sentences):
 
 ## Handover
 
-If `docs/HANDOVER.md` exists in the project directory, read it at the start for context. Update it at the end of your work with your result and the next steps.
+If `docs/HANDOVER.md` exists in the project directory, read it at the start for context. Do not edit it: the orchestrator owns it and consolidates after your run — report your result and the next steps in your final message instead. One exception: a finding outside your assignment may be appended as one `- INBOX | …` line under `## Open Points`, in the format defined in `templates/HANDOVER_TEMPLATE.md`, and only when you run in the main working tree; in a worktree-isolated run, put that line in your final message instead.
 
 **Update your agent memory** as you discover test patterns, testing frameworks in use, common failure modes, test infrastructure details, quality standards, existing test coverage gaps, and architectural decisions that affect testability. This builds up institutional knowledge across conversations. Write concise notes about what you found and where.
 
