@@ -891,7 +891,7 @@ class NoStaleKnownFindingsTest(unittest.TestCase):
 
 class ClassificationCountsTest(unittest.TestCase):
     def test_classification_counts(self):
-        """Regression pin on the measured baseline: 1431 `test_*` methods
+        """Regression pin on the measured baseline: 1433 `test_*` methods
         across the corpus call something shaped like a subprocess invocation
         and are therefore in scope for this check; 0 of those are currently
         absence-only-needs-exemption -- `KNOWN_FINDINGS` above is empty for
@@ -905,6 +905,33 @@ class ClassificationCountsTest(unittest.TestCase):
         growing paragraph:
 
           in-scope / flagged   when
+          1433 / 0             11.09.2026 (CCP-1177: the link lint stops
+                               reading the recorded dedup-evidence line as
+                               claimed relations): +2, both in
+                               test_workitems_cli.py --
+                               test_an_id_only_in_the_written_evidence_line_
+                               is_excused_by_lint and
+                               test_the_same_id_in_the_description_body_is_
+                               still_a_finding, the end-to-end pair that
+                               writes an item through the real `create` path
+                               and reads it back through the real `lint`
+                               path, both via the pre-existing
+                               `self.run_cli(...)` helper (matches
+                               RUN_HELPER_RE). Neither flagged: each asserts
+                               an exact `returncode` AND a JSON field read
+                               back out of the report. The round's other 13
+                               new methods are
+                               workitems/test_workitem_lint.py's
+                               DedupEvidenceLineTest (10) and
+                               DedupEvidenceComposerDriftTest (3): they call
+                               `lint_module.lint()` in-process, never a
+                               subprocess, so they are out of scope -- the
+                               same discriminator this file's earlier rows
+                               record for every lib-level addition, confirmed
+                               here by listing scan_tree()'s records for that
+                               file (5, all pre-existing LintCliTest methods).
+                               Re-measured with `scan_tree()` against the
+                               integrated tree, never added to the row below.
           1431 / 0             10.09.2026 (CCP-1174 code-review follow-up:
                                a filesystem-independent regression guard on
                                the `-ef`-vs-case-folding-compare choice
@@ -1998,7 +2025,7 @@ class ClassificationCountsTest(unittest.TestCase):
         count."""
         recs = scan_tree()
         flagged = [r for r in recs if r.disposition in NEEDS_EXEMPTION]
-        self.assertEqual(1431, len(recs))
+        self.assertEqual(1433, len(recs))
         self.assertEqual(0, len(flagged))
 
 

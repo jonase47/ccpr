@@ -403,6 +403,44 @@ clause names the check, so it reads "the work-item link lint DID NOT RUN" here).
 - prose that names an item without using its id. There is nothing to match on.
 - a reference living only in a comment or a `result-link`: only `title` and `description` are read.
 
+**The recorded dedup-evidence line is excused, and the report says so.** `create
+--checked-against` (§12) writes the ids a filer *searched* into the first line of the stored
+description (`Checked against: …`, blank line, then the item's own prose). Those ids are exactly the
+ones the search **rejected** — an id found not to apply is precisely *not* a `relates-to`, so
+linking them would fill the graph with non-relations and devalue what this lint measures. The two
+features were merged hours apart and defeated each other until CCP-1177: the lint read
+provenance-of-a-search as a claimed relation, so every correctly filed item made the run redder,
+with findings nobody was supposed to fix.
+
+The exemption is **per reference, not per item**: an id the item names *anywhere else as well* is
+still reported. Quieting a whole item because its evidence line happened to mention an id would
+remove the check rather than correct it — and CCP-1177's own description is the proof, six of its
+eighteen findings being ids its ordinary prose names independently.
+
+Nothing is silently dropped. The excused references are counted and listed per item under
+`scope.dedup_evidence_line.excused`, beside the `prefix` the exemption matched on, so a reader can
+see what the run *did not* report and why. If the exemption ever stops matching, that count falls
+to zero in the same report the findings reappear in.
+
+**What the exemption itself does not reach**, stated because the list above is otherwise exhaustive
+about this check's blind spots: it is anchored to the line's **shape**, not to its **provenance**.
+Any description that opens with `Checked against: ` is treated as a recorded dedup check — including
+one written by `set-description`, which validates no shape and never goes through
+`create --checked-against`. A genuine unlinked relation can therefore be excused by writing it into
+that position. Closing it would need a provenance marker in the item, i.e. a second register of the
+same fact, free to drift from the line itself — which is the failure this design exists to avoid.
+The mitigation is that an excused reference is **listed**, not dropped: it appears under
+`scope.dedup_evidence_line.excused` on every run, so the exemption is auditable even where it is
+wrong.
+
+The exemption is anchored to how the line is **actually written**, never to a pattern re-typed from
+reading the writer: `lint.compose_evidence_description()` is the single register of the line's
+shape, and `workitems.py`'s `_compose_create_description()` calls it instead of composing its own.
+A round-trip guard re-derives the split from that composer on every run; if the two ever disagree
+the lint reports **`could-not-run`** (exit 3) rather than quietly scanning more, or less, than it
+says it does. The same rule CCP-1170 followed for `.gitignore`: the thing that decides the
+exemption supplies its definition, so there is no second register free to drift.
+
 The link graph is read **undirected**. `local` stores an edge on one side only (`add-link A relates-to B`
 touches A's file and nothing on B's) while a remote backend derives both sides from a single record —
 reading it directionally would make the verdict depend on which side happened to run `add-link`.
@@ -449,6 +487,23 @@ similarity threshold (the threshold is arbitrary, false positives tax every fili
 becomes a habit — a gate people learn to bypass measures nothing). Run `similar` first to produce
 an honest value cheaply; a required argument with no cheap way to answer it honestly would be a tax
 on filing, not a device.
+
+**How the recorded line interacts with the link lint (§11).** Because the value lands in the stored
+description, the ids in it are text the lint reads — and by CCP-1171's own rule an id in a
+description with no typed link is a finding. That is the wrong reading here: the recorded ids are
+the ones the search **rejected**, so they are provenance of a search, not claimed relations.
+CCP-1177 settled it in the lint rather than by moving the evidence out of the description (the PO
+decision deliberately put it there, so it survives in the item's own text and is readable without
+tooling) and rather than by linking the ids (which would fill the graph with non-relations). The
+line is written as `Checked against: <value>`, a blank line, then the description — the shape
+`lint.compose_evidence_description()` defines and `_compose_create_description()` calls, so writer
+and reader cannot drift apart. Two consequences worth knowing when filing:
+
+- an id you name **only** in `--checked-against` costs nothing and is reported as excused, not as a
+  finding;
+- an id you name in `--checked-against` **and** in the description body is still a finding if it
+  carries no typed link — the body is your own prose, and the lint reads it as such. If the
+  relation is real, add the link; if you are only citing the search, keep it in the evidence line.
 
 ---
 

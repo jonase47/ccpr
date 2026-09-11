@@ -398,7 +398,20 @@ def _compose_create_description(description, checked_against):
     exactly the bypass class the PO decision excluded (a required field that
     accepts an empty string is the rejected no-consequence warning under a
     stricter name). handbook/WORKITEMS.md already documented "unvalidated beyond
-    non-empty" -- this is the code catching up to that claim, not a new promise."""
+    non-empty" -- this is the code catching up to that claim, not a new promise.
+
+    The LAYOUT of the line is not composed here (CCP-1177 AC 4). `lint` has to
+    recognise this line to excuse it from `named-without-link` -- an id that was
+    searched and REJECTED is not a relation -- and a recogniser built from a
+    pattern re-typed out of this function is a second register free to drift
+    from it, silently, in whichever direction the edit happened to go. So
+    `lint.compose_evidence_description()` is the one register of the line's
+    shape and this function calls it; what stays here is the VALIDATION of the
+    value, a CLI-boundary concern that the reader needs nothing of.
+
+    `scripts/tests/test_workitems_cli.py` pins the delegation end-to-end through
+    the real `create` path rather than by inspection: a re-typed composition
+    that happened to agree today would still pass a same-module comparison."""
     checked_against = (checked_against or "").strip()
     if not checked_against:
         raise WorkItemError(
@@ -406,10 +419,7 @@ def _compose_create_description(description, checked_against):
             "is a permitted answer, an empty string is not. Run `workitems.py "
             "similar TEXT` first to produce an honest value cheaply."
         )
-    header = f"Checked against: {checked_against}"
-    if description:
-        return f"{header}\n\n{description}"
-    return header
+    return lint_module.compose_evidence_description(description, checked_against)
 
 
 def dispatch(backend, args):

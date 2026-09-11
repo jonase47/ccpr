@@ -110,9 +110,9 @@ python3 -m unittest discover -s scripts/tests -t .
 
 - **`-t .` is not optional**, and the failure mode is worth knowing because it is
   partly silent. It sets the top-level directory imports resolve against. Measured
-  on the current tree (10.09.2026, CCP-1174 code-review follow-up): **with**
-  it, discovery collects **2899 tests, 0 import errors**, exit 0; **without** it,
-  **2143 tests and 19 modules that fail to
+  on the current tree (11.09.2026, CCP-1177): **with**
+  it, discovery collects **2916 tests, 0 import errors**, exit 0; **without** it,
+  **2145 tests and 19 modules that fail to
   import**, exit 1 — the eight that use a relative import
   (`from .test_phase_docs_lint import …` in four modules,
   `from .test_artifact_gate import …` in two,
@@ -120,7 +120,7 @@ python3 -m unittest discover -s scripts/tests -t .
   `from . import …` of five sibling modules in the skip budget), plus the eleven
   modules of the `scripts/tests/workitems/` subpackage (CCP-1172 added
   `test_workitem_similar.py` as the eleventh). The run does go red on those
-  19, so you will notice something — but **756 tests simply never execute**, and
+  19, so you will notice something — but **771 tests simply never execute**, and
   nothing in the output says so.
 
   That skipped count moves whenever a module gains a relative import:
@@ -311,6 +311,21 @@ python3 -m unittest discover -s scripts/tests -t .
   `unittest discover` run and a separate `TestLoader().discover(...)
   .countTestCases()` cross-check, agreeing; both runs sequential, not
   concurrent, per the previous entry's own lesson.
+
+  11.09.2026 (CCP-1177: the link lint stops reading `create --checked-against`'s
+  recorded dedup-evidence line as claimed relations): **2916 / 2145 / 19 / 771** —
+  +17 with the flag, **+2 without it**, and the difference is the point: 15 of the
+  17 are `scripts/tests/workitems/test_workitem_lint.py`'s new
+  `DedupEvidenceLineTest` (12) and `DedupEvidenceComposerDriftTest` (3), and that
+  module lives in the subpackage that cannot be imported without `-t .`, so they
+  land in the skipped column instead (756 → 771, +15). Two of the 15 came from
+  code review rather than from the ACs (a mixed linked/unlinked evidence line, and
+  a pin on the shape-not-provenance limitation). The other 2 are
+  `test_workitems_cli.py`'s end-to-end pair, which executes under both flags and
+  therefore cancels out of skipped. Modules-fail unchanged at 19 — no new module.
+  Both figures re-measured with `TestLoader().discover(...).countTestCases()` under
+  each flag rather than added to the row above: the +17/+2 split is what a
+  measurement shows and arithmetic on a single total would have hidden.
 - The full run takes **a couple of minutes**. If you drive it from an agent whose
   tool calls time out, start it in the background and wait for it once rather than
   polling.
