@@ -38,7 +38,10 @@
 
 ## Open Points (append-only inbox)
 > Findings made **outside** the current assignment (stale doc, missing check, follow-up idea).
-> Any agent **appends** one line; nobody rewrites or deletes another's line. `/cleanup` triages and
+> Any agent **appends** one line, and only when running in the **main working tree**; a
+> worktree-isolated agent cannot safely append to a file shared with the orchestrator's own tree,
+> so it reports the line in its final message instead, for the orchestrator to append. Nobody
+> rewrites or deletes another's line. `/cleanup` triages and
 > clears this section — the only place lines are removed, and only after you confirm. `/p5-polish`
 > lands its `handover`-triage items here. What the PO must decide belongs in **Open Decisions** above.
 > One line, ≤120 characters, no sub-bullets — detail goes in the file you reference, not here.

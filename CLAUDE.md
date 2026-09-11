@@ -121,6 +121,22 @@ If a project has `docs/BASELINE.md` AND the project CLAUDE.md contains a "Baseli
 - **Active Docs**: Read at every session start (HANDOVER.md, BASELINE.md, BACKLOG.md, SPRINT.md, docs/memory/MEMORY.md)
 - This saves tokens during post-release feature iterations
 
+### Worktree-Dispatched Agents (CCP-1178)
+A subagent reads `docs/HANDOVER.md` for context only — the orchestrator owns it and consolidates
+after the run (see `agents/*.md`'s own `## Handover` sections). The one exception, the
+`## Open Points` append-only inbox, is gated on running in the **main working tree**: a
+worktree-isolated agent cannot safely append to a file shared with the orchestrator's own tree, so
+it reports the `- INBOX | …` line in its final message instead. Two obligations follow, both on
+the **orchestrator** (an agent has no reliable way to self-detect worktree isolation — most agent
+definitions do not even carry `Bash`):
+- **State it in the briefing.** When dispatching an agent with `isolation: "worktree"` (Agent tool),
+  say so explicitly in the prompt, so the agent knows to report an inbox-worthy finding in its final
+  message instead of trying to append it. Mirrors the existing convention of briefing worktree
+  agents with repo-relative paths.
+- **Consolidate on return.** After a worktree-isolated agent's work is merged, fold any `- INBOX | …`
+  line it reported in its final message into `docs/HANDOVER.md`'s `## Open Points` section yourself,
+  in the same format (`templates/HANDOVER_TEMPLATE.md`) — the agent could not do this itself.
+
 ## Continuous Learning (Instincts)
 
 Global instincts are split into a **slim autoloaded index** plus thematic topic files plus a postmortem archive:

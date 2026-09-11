@@ -110,9 +110,9 @@ python3 -m unittest discover -s scripts/tests -t .
 
 - **`-t .` is not optional**, and the failure mode is worth knowing because it is
   partly silent. It sets the top-level directory imports resolve against. Measured
-  on the current tree (11.09.2026, CCP-1177): **with**
-  it, discovery collects **2916 tests, 0 import errors**, exit 0; **without** it,
-  **2145 tests and 19 modules that fail to
+  on the current tree (11.09.2026, CCP-1178 merged with CCP-1177): **with**
+  it, discovery collects **2923 tests, 0 import errors**, exit 0; **without** it,
+  **2152 tests and 19 modules that fail to
   import**, exit 1 — the eight that use a relative import
   (`from .test_phase_docs_lint import …` in four modules,
   `from .test_artifact_gate import …` in two,
@@ -326,6 +326,31 @@ python3 -m unittest discover -s scripts/tests -t .
   Both figures re-measured with `TestLoader().discover(...).countTestCases()` under
   each flag rather than added to the row above: the +17/+2 split is what a
   measurement shows and arithmetic on a single total would have hidden.
+
+  11.09.2026 (CCP-1178, measured on its own branch off `790039e`, before
+  CCP-1177 landed: agents/*.md's generic "update HANDOVER.md at the
+  end of your work" instruction, contradicting the rest of the framework's
+  orchestrator-owned HANDOVER model, replaced by a read-only-for-context
+  instruction with the `## Open Points` inbox as the only remaining,
+  worktree-gated agent write; new guard test
+  test_agent_handover_write_boundary.py): **2906 / 2150 / 19 / 756** — +7 on
+  both totals, all in the new module (no relative import, so it lands on
+  both sides of the flag and cancels out of skipped); modules-fail
+  unchanged (a new module with no relative import joins neither side's
+  failure set). Measured via `TestLoader().discover(...).countTestCases()`
+  — the same in-process measurement test_doc_counts_agree.py's own
+  agreement test uses — cross-checked against the base commit (790039e) in
+  a throwaway worktree, which measured 2899 there, confirming the +7 delta
+  independently of the subprocess CLI route.
+
+  11.09.2026, merge round: `ticket/CCP-1178` (**2906 / 2150 / 19 / 756**)
+  integrated `main`/CCP-1177 (**2916 / 2145 / 19 / 771**) via `git merge`, the
+  same way the CCP-1172 merge round above did — both branches forked from
+  `790039e` and conflicted only in this file. Re-measured on the integrated tree
+  with `TestLoader().discover(...).countTestCases()` under each flag rather than
+  added: **2923 / 2152 / 19 / 771** — CCP-1178's +7 lands on both sides of the
+  flag on top of CCP-1177's figures (its new module has no relative import), so
+  skipped keeps CCP-1177's 771 and modules-fail stays at 19.
 - The full run takes **a couple of minutes**. If you drive it from an agent whose
   tool calls time out, start it in the background and wait for it once rather than
   polling.
