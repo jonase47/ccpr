@@ -1778,9 +1778,7 @@ All notable changes to this project are documented in this file. The format is b
   for `code-reviewer.md`/`business-analyst.md`; the new file's two block-count assertions are
   marked `# pin: derived …` and registered in `test_pin_inventory.py`'s marker inventory, and
   `test_absence_only_assertions.py`'s `scripts/tests` corpus floor/set pin moved 75 → 76.
-  Verified against the base commit (790039e) in a throwaway worktree: its own 101 failures / 8
-  errors are pre-existing and untouched by this change (byte-for-byte identical test names on
-  both sides of the diff); the test-suite count pair in `CONTRIBUTING.md` moves 2899 → 2906
+  The test-suite count pair in `CONTRIBUTING.md` moves 2899 → 2906
   (with `-t .`) / 2143 → 2150 (without), modules-fail unchanged at 19, skipped unchanged at 756
   — the new module carries no relative import, so it lands on both sides of the flag and
   cancels out of skipped, the same convention every prior addition here has followed.

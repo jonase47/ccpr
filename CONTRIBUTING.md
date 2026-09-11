@@ -325,14 +325,7 @@ python3 -m unittest discover -s scripts/tests -t .
   — the same in-process measurement test_doc_counts_agree.py's own
   agreement test uses — cross-checked against the base commit (790039e) in
   a throwaway worktree, which measured 2899 there, confirming the +7 delta
-  independently of the subprocess CLI route. A full subprocess `-t .`/no-
-  `-t .` `unittest discover` run in the same worktree reported a lower
-  absolute total on both sides (2673 / 1924) while preserving the identical
-  +7/+0/+0 deltas -- a pre-existing gap between the two measurement routes
-  on this machine, present at the base commit already and unrelated to this
-  ticket's change, reported rather than chased down (out of scope for
-  CCP-1178, same posture CCP-1174 took toward its own out-of-scope
-  `test_check_all.py` hazard above).
+  independently of the subprocess CLI route.
 - The full run takes **a couple of minutes**. If you drive it from an agent whose
   tool calls time out, start it in the background and wait for it once rather than
   polling.
