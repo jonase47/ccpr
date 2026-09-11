@@ -1737,6 +1737,48 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Fixed
 
+- **12 domain agents plus `code-reviewer` instructed the agent to rewrite `docs/HANDOVER.md`
+  at the end of every run, contradicting the framework's own orchestrator-owned HANDOVER model
+  (CCP-1178).** All 13 `agents/*.md` files carried the identical line "read it at the start for
+  context. Update it at the end of your work with your result and the next steps." — present
+  since the initial public release, never touched by a later change. This contradicted
+  `commands/p3-architecture.md`'s own "the orchestrator owns the final `docs/HANDOVER.md`
+  update", and for `code-reviewer` specifically contradicted `CLAUDE.md`'s "never writes
+  source, tests or project docs — only its own memory silo" (its own `tools:` comment already
+  restricted `Edit`/`Write` to memory files only, so the agent's body told it to do something
+  its own frontmatter comment already denied). Observed while updating an installation
+  (11.09.2026); shipped since `0845801`, not introduced by a recent change.
+
+  **PO decision (option B of three):** removed the generic rewrite instruction from all 13
+  agents; kept the `## Open Points` append-only inbox (CCP-1001) as the only permitted agent
+  write, gated on running in the main working tree — a worktree-isolated agent cannot safely
+  append to a file shared with the orchestrator's own tree, and now reports the line in its
+  final message instead. `code-reviewer` is report-only even for the inbox line, matching its
+  existing memory-only write restriction. `templates/HANDOVER_TEMPLATE.md`'s inbox header and
+  `commands/cleanup.md`'s description of it carry the same worktree clause, so the three texts
+  agree. `commands/p5-polish.md`'s own inbox-append step is unchanged: it runs as an orchestrator
+  slash command, never dispatched into a worktree, so the clause does not apply there.
+  `hooks/agent-monitor.py`'s `check_handover_staleness` fired on both `SubagentStop` and `Stop`
+  with a docstring and a printed warning that both read as "an agent forgot to update HANDOVER"
+  — now wrong advice under the corrected model; reworded to name the orchestrator as the one
+  who consolidates, with no change to the warn/no-warn decision logic.
+
+  New guard test `scripts/tests/test_agent_handover_write_boundary.py` (positive-form, per this
+  repo's `test_absence_only_assertions.py` / `test_handover_epilogue_bullet.py` convention: it
+  proves both that the old sentence is gone AND that the corrected block is present in exactly
+  the 13 in-scope files, not merely the absence of the old string) was RED before this fix (16
+  failures) and is GREEN after. Fixing it up surfaced two more ADR-0012 pin-governance
+  consequences: `test_agent_frontmatter.py`'s `KNOWN_POST_CONTRACT_EDITS` now names this edit
+  for `code-reviewer.md`/`business-analyst.md`; the new file's two block-count assertions are
+  marked `# pin: derived …` and registered in `test_pin_inventory.py`'s marker inventory, and
+  `test_absence_only_assertions.py`'s `scripts/tests` corpus floor/set pin moved 75 → 76.
+  Verified against the base commit (790039e) in a throwaway worktree: its own 101 failures / 8
+  errors are pre-existing and untouched by this change (byte-for-byte identical test names on
+  both sides of the diff); the test-suite count pair in `CONTRIBUTING.md` moves 2899 → 2906
+  (with `-t .`) / 2143 → 2150 (without), modules-fail unchanged at 19, skipped unchanged at 756
+  — the new module carries no relative import, so it lands on both sides of the flag and
+  cancels out of skipped, the same convention every prior addition here has followed.
+
 - **`source_provenance()` compared two spellings of one directory as strings, classifying a
   real git checkout as `non-git` (CCP-1174).** Observed in production, on the maintainer's
   own machine, after a routine `./install.sh --update`: the run succeeded and reported `wrote

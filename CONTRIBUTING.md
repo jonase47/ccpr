@@ -110,9 +110,9 @@ python3 -m unittest discover -s scripts/tests -t .
 
 - **`-t .` is not optional**, and the failure mode is worth knowing because it is
   partly silent. It sets the top-level directory imports resolve against. Measured
-  on the current tree (10.09.2026, CCP-1174 code-review follow-up): **with**
-  it, discovery collects **2899 tests, 0 import errors**, exit 0; **without** it,
-  **2143 tests and 19 modules that fail to
+  on the current tree (11.09.2026, CCP-1178): **with**
+  it, discovery collects **2906 tests, 0 import errors**, exit 0; **without** it,
+  **2150 tests and 19 modules that fail to
   import**, exit 1 — the eight that use a relative import
   (`from .test_phase_docs_lint import …` in four modules,
   `from .test_artifact_gate import …` in two,
@@ -311,6 +311,28 @@ python3 -m unittest discover -s scripts/tests -t .
   `unittest discover` run and a separate `TestLoader().discover(...)
   .countTestCases()` cross-check, agreeing; both runs sequential, not
   concurrent, per the previous entry's own lesson.
+
+  11.09.2026 (CCP-1178: agents/*.md's generic "update HANDOVER.md at the
+  end of your work" instruction, contradicting the rest of the framework's
+  orchestrator-owned HANDOVER model, replaced by a read-only-for-context
+  instruction with the `## Open Points` inbox as the only remaining,
+  worktree-gated agent write; new guard test
+  test_agent_handover_write_boundary.py): **2906 / 2150 / 19 / 756** — +7 on
+  both totals, all in the new module (no relative import, so it lands on
+  both sides of the flag and cancels out of skipped); modules-fail
+  unchanged (a new module with no relative import joins neither side's
+  failure set). Measured via `TestLoader().discover(...).countTestCases()`
+  — the same in-process measurement test_doc_counts_agree.py's own
+  agreement test uses — cross-checked against the base commit (790039e) in
+  a throwaway worktree, which measured 2899 there, confirming the +7 delta
+  independently of the subprocess CLI route. A full subprocess `-t .`/no-
+  `-t .` `unittest discover` run in the same worktree reported a lower
+  absolute total on both sides (2673 / 1924) while preserving the identical
+  +7/+0/+0 deltas -- a pre-existing gap between the two measurement routes
+  on this machine, present at the base commit already and unrelated to this
+  ticket's change, reported rather than chased down (out of scope for
+  CCP-1178, same posture CCP-1174 took toward its own out-of-scope
+  `test_check_all.py` hazard above).
 - The full run takes **a couple of minutes**. If you drive it from an agent whose
   tool calls time out, start it in the background and wait for it once rather than
   polling.
