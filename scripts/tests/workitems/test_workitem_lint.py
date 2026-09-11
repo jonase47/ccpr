@@ -98,6 +98,338 @@ class NamedWithoutLinkTest(LocalFixtureTestCase):
         self.assertEqual(self.kinds_of(report, "named-without-link"), [])
 
 
+class DedupEvidenceLineTest(LocalFixtureTestCase):
+    """CCP-1177. `create --checked-against` (CCP-1172) writes the ids a filer
+    SEARCHED into the description; this lint (CCP-1171) reads ids in the description
+    as claimed relations. The two defeat each other: an id that was searched and
+    found NOT to apply is precisely not a `relates-to`, so linking it -- the cheap
+    fix -- would fill the graph with non-relations and devalue what the lint
+    measures. The evidence line is provenance OF A SEARCH; it is excused from
+    `named-without-link` and COUNTED under `scope`, never silently dropped.
+
+    The exemption is per REFERENCE, not per item: an id also named anywhere else in
+    the item is not excused. Narrowing it to the whole item would quiet the corpus by
+    removing the check rather than correcting it.
+    """
+
+    def evidence_description(self, checked_against, description=None):
+        """Builds the fixture through the SAME composer `create` writes with, so a
+        change to the line's shape moves the fixture and the production path
+        together rather than leaving this test asserting a shape nothing writes."""
+        return lint_module.compose_evidence_description(description, checked_against)
+
+    def test_an_id_named_only_in_the_dedup_evidence_line_is_not_a_finding(self):
+        target = self.backend.create(title="The pinned entry")["id"]
+        self.backend.create(
+            title="Follow-up",
+            description=self.evidence_description(
+                f"{target} via `workitems.py similar`", "Unrelated body prose.",
+            ),
+        )
+
+        report = lint_module.lint(self.backend)
+
+        self.assertEqual(self.kinds_of(report, "named-without-link"), [])
+        self.assertEqual(report["verdict"], "pass")
+
+    def test_an_id_named_in_ordinary_prose_is_still_a_finding(self):
+        """AC 2, the half that carries the risk: an item with no evidence line at
+        all keeps the check it always had. A fix that quiets the corpus by widening
+        the exemption to the whole description reds here."""
+        target = self.backend.create(title="The pinned entry")["id"]
+        source = self.backend.create(
+            title="Follow-up", description=f"Two of {target}'s pin entries are stale.",
+        )["id"]
+
+        report = lint_module.lint(self.backend)
+
+        self.assertEqual(
+            [(f["item"], f["target"]) for f in self.kinds_of(report, "named-without-link")],
+            [(source, target)],
+        )
+
+    def test_an_id_in_both_the_evidence_line_and_ordinary_prose_is_still_a_finding(self):
+        """AC 2, the sharp half. A per-ITEM exemption ("this item searched for X, so
+        never report X for this item") passes the test above and still removes the
+        check -- it is exactly the shape CCP-1177's own description has, where six of
+        its eighteen findings name ids in ordinary prose that the evidence line also
+        mentions. The exemption has to be per reference."""
+        target = self.backend.create(title="The pinned entry")["id"]
+        source = self.backend.create(
+            title="Follow-up",
+            description=self.evidence_description(
+                f"{target} via `workitems.py similar`",
+                f"The measured regression reproduces against {target}.",
+            ),
+        )["id"]
+
+        report = lint_module.lint(self.backend)
+
+        self.assertEqual(
+            [(f["item"], f["target"]) for f in self.kinds_of(report, "named-without-link")],
+            [(source, target)],
+        )
+
+    def test_an_evidence_line_id_that_carries_a_typed_link_stays_unflagged_and_linked(self):
+        """AC 3, the silent counter-proof: the exemption removes a REFERENCE from the
+        id scan, never an EDGE from the link graph. An implementation that cut the
+        evidence line out of the item before reading it would still pass the first
+        test here and would quietly stop resolving that item's real links."""
+        target = self.backend.create(title="The pinned entry")["id"]
+        source = self.backend.create(
+            title="Follow-up",
+            description=self.evidence_description(
+                f"{target} via `workitems.py similar`", "Body prose.",
+            ),
+        )["id"]
+        self.backend.add_link(source, "relates-to", target)
+
+        report = lint_module.lint(self.backend)
+
+        self.assertEqual(self.kinds_of(report, "named-without-link"), [])
+        self.assertEqual(self.kinds_of(report, "dangling-link"), [])
+        self.assertEqual(self.kinds_of(report, "link-outside-project"), [])
+        # The edge is still there to be read -- asserted against the backend, not
+        # inferred from the lint's silence, which is what an exemption that DELETED
+        # the edge would also produce.
+        self.assertIn(
+            {"type": "relates-to", "target": target}, self.backend.get(source)["links"],
+        )
+
+    def test_a_linked_id_in_both_the_evidence_line_and_prose_is_still_silent(self):
+        """AC 3 with a mutation that can actually reach it. The test above asserts
+        an ABSENCE that this implementation cannot produce -- an exemption that
+        dropped the edge from the link graph leaves it equally silent, because the
+        reference it would have been matched against was excused too. Naming the id
+        in ordinary prose as well restores the comparison: the finding is suppressed
+        by the EDGE and by nothing else, so an exemption that reached into the link
+        graph reds here."""
+        target = self.backend.create(title="The pinned entry")["id"]
+        source = self.backend.create(
+            title="Follow-up",
+            description=self.evidence_description(
+                f"{target} via `workitems.py similar`",
+                f"Supersedes the approach {target} took.",
+            ),
+        )["id"]
+        self.backend.add_link(source, "relates-to", target)
+
+        report = lint_module.lint(self.backend)
+
+        self.assertEqual(self.kinds_of(report, "named-without-link"), [])
+        self.assertEqual(report["verdict"], "pass")
+        self.assertIn(
+            {"type": "relates-to", "target": target}, self.backend.get(source)["links"],
+        )
+
+    def test_the_excused_references_are_counted_in_the_reports_scope(self):
+        """Direction (b), and the reason it was picked over (a): this module's own
+        rule is that a remainder is "counted and reported as scope, not silently
+        dropped". An exemption that leaves no trace in the report is a scan the
+        reader cannot see the extent of -- and if it ever stops matching, the count
+        falling to zero says so in the same breath the findings reappear."""
+        target = self.backend.create(title="The pinned entry")["id"]
+        source = self.backend.create(
+            title="Follow-up",
+            description=self.evidence_description(
+                f"{target} via `workitems.py similar`", "Body prose.",
+            ),
+        )["id"]
+
+        excused = lint_module.lint(self.backend)["scope"]["dedup_evidence_line"]
+
+        self.assertEqual(excused["excused"]["count"], 1)
+        self.assertEqual(excused["excused"]["by_item"], {source: [target]})
+        self.assertEqual(excused["prefix"], lint_module.EVIDENCE_PREFIX)
+
+    def test_an_already_linked_evidence_reference_is_not_counted_as_excused(self):
+        """Counter-proof for the counter above: `excused` is the set of findings the
+        exemption SUPPRESSED, so a reference that would not have been a finding
+        anyway must not inflate it. Otherwise the number cannot be read as "this is
+        what the exemption cost"."""
+        target = self.backend.create(title="The pinned entry")["id"]
+        source = self.backend.create(
+            title="Follow-up",
+            description=self.evidence_description(f"{target}", "Body prose."),
+        )["id"]
+        self.backend.add_link(source, "relates-to", target)
+
+        excused = lint_module.lint(self.backend)["scope"]["dedup_evidence_line"]
+
+        self.assertEqual(excused["excused"]["count"], 0)
+        self.assertEqual(excused["excused"]["by_item"], {})
+
+    def test_an_unresolvable_id_in_the_evidence_line_is_still_counted_as_read(self):
+        """The exemption withholds a reference from ONE COMPARISON; it does not
+        narrow what this lint admits to having read. The cheap way to implement
+        direction (a) -- cut the evidence line out of the description before
+        scanning it at all -- passes every test above and quietly shrinks
+        `scope.unresolved_references` at the same time, so the report would
+        under-state its own reach with nothing saying so."""
+        self.backend.create(
+            title="Follow-up",
+            description=self.evidence_description("CCP-9999, CCP-9998", "Body prose."),
+        )
+
+        scope = lint_module.lint(self.backend)["scope"]
+
+        self.assertEqual(scope["unresolved_references"]["count"], 2)
+        self.assertEqual(scope["unresolved_references"]["by_namespace"], {"CCP": 2})
+
+    def test_a_description_that_does_not_open_with_the_prefix_is_scanned_whole(self):
+        """The exemption is anchored to the composed line, not to "the first
+        paragraph". An item whose description merely opens with a paragraph is
+        scanned exactly as before -- this is the guard against an implementation
+        that excuses every item's opening paragraph."""
+        target = self.backend.create(title="The pinned entry")["id"]
+        source = self.backend.create(
+            title="Follow-up",
+            description=f"Searched for {target} first.\n\nThen wrote this.",
+        )["id"]
+
+        report = lint_module.lint(self.backend)
+
+        self.assertEqual(
+            [(f["item"], f["target"]) for f in self.kinds_of(report, "named-without-link")],
+            [(source, target)],
+        )
+
+    def test_an_evidence_line_naming_two_ids_excuses_only_the_unlinked_one(self):
+        """The one combination the other tests leave out (code review): an evidence
+        line naming SEVERAL ids where some are linked and some are not. The
+        exemption is applied per element, so the excused list must be the unlinked
+        subset -- not all of them, and not none."""
+        linked = self.backend.create(title="The linked entry")["id"]
+        unlinked = self.backend.create(title="The unlinked entry")["id"]
+        source = self.backend.create(
+            title="Follow-up",
+            description=self.evidence_description(
+                f"{linked}, {unlinked} via `workitems.py similar`", "Body prose.",
+            ),
+        )["id"]
+        self.backend.add_link(source, "relates-to", linked)
+
+        report = lint_module.lint(self.backend)
+
+        self.assertEqual(self.kinds_of(report, "named-without-link"), [])
+        self.assertEqual(
+            report["scope"]["dedup_evidence_line"]["excused"]["by_item"],
+            {source: [unlinked]},
+        )
+
+    def test_a_forged_evidence_line_is_excused_but_named_in_the_report(self):
+        """A KNOWN LIMITATION, pinned so it stays deliberate (code review, Important).
+        The exemption is anchored to the line's SHAPE, not its provenance:
+        `set-description` writes arbitrary text with no shape validation and never
+        goes through `create --checked-against`, so a real unlinked relation can be
+        excused by writing it into that position. Closing it would take a provenance
+        marker -- a second register of the same fact, free to drift from the line,
+        which is the failure this whole design avoids.
+
+        What makes it tolerable is the half this test also asserts, and the reason
+        direction (b) was chosen over (a): the excused reference is REPORTED. Under
+        an exemption that merely dropped the line from the scan, this would be
+        indistinguishable from an item that never named the id at all."""
+        target = self.backend.create(title="The pinned entry")["id"]
+        source = self.backend.create(title="Follow-up")["id"]
+        # Not composed through `create --checked-against`: written directly, the way
+        # `set-description` reaches the same field.
+        self.backend.set_description(
+            source, f"{lint_module.EVIDENCE_PREFIX}{target}\n\nA body that never "
+                    "repeats the id.",
+        )
+
+        report = lint_module.lint(self.backend)
+
+        self.assertEqual(self.kinds_of(report, "named-without-link"), [])
+        self.assertEqual(
+            report["scope"]["dedup_evidence_line"]["excused"]["by_item"],
+            {source: [target]},
+        )
+        # Not a single-word `assertIn`: one keyword survives a sentence that has
+        # been gutted around it (measured -- a mutation replacing the first half
+        # of this string left an `assertIn("provenance", ...)` green). The report
+        # has to name BOTH load-bearing facts: which writer reaches this without a
+        # search, and that shape rather than provenance is what was matched.
+        stated = report["scope"]["dedup_evidence_line"]["not_reached"]
+        self.assertIn("set-description", stated)
+        self.assertIn("provenance", stated)
+        self.assertIn("SHAPE", stated)
+
+    def test_the_exemption_matches_the_line_shape_the_real_store_carries(self):
+        """A third register, and deliberately a literal one: the two tests above
+        build their fixture through `compose_evidence_description`, so a change made
+        to BOTH the composer and the splitter would move them together and prove
+        nothing (two copies cannot check each other). This string was read off the
+        real store's items, not composed here."""
+        target = self.backend.create(title="The pinned entry")["id"]
+        self.backend.create(
+            title="Follow-up",
+            description=f"Checked against: {target}, CCP-9999 via `workitems.py "
+                        "similar` over all 177 items.\n\nFOUND 10.09.2026.",
+        )
+
+        self.assertEqual(
+            self.kinds_of(lint_module.lint(self.backend), "named-without-link"), [],
+        )
+
+
+class DedupEvidenceComposerDriftTest(LocalFixtureTestCase):
+    """AC 4. The exemption must be anchored to how the line is ACTUALLY written, and
+    must fail LOUDLY rather than silently stop exempting if the two ever drift.
+
+    Anchoring is structural: `compose_evidence_description()` is the single register
+    of the line's shape -- `workitems.py`'s `_compose_create_description()` calls it
+    rather than re-typing it, so the prefix and the blank-line placement cannot
+    diverge between writer and reader. What remains is drift INSIDE this module,
+    between the composer and the splitter that has to undo it; that is what this
+    round-trip guard catches, and it lands on the `could-not-run` verdict the module
+    already reserves for "nothing was reliably compared", not on a silent `pass`.
+    """
+
+    def drift_the_composer(self, composer):
+        original = lint_module.compose_evidence_description
+        lint_module.compose_evidence_description = staticmethod(composer).__func__
+        self.addCleanup(
+            setattr, lint_module, "compose_evidence_description", original,
+        )
+
+    def test_a_composer_that_moves_the_line_off_the_top_is_a_loud_refusal(self):
+        self.backend.create(title="Standalone")
+        self.drift_the_composer(
+            lambda description, checked_against:
+                f"{description}\n\n{lint_module.EVIDENCE_PREFIX}{checked_against}"
+        )
+
+        report = lint_module.lint(self.backend)
+
+        self.assertEqual(report["verdict"], "could-not-run")
+        self.assertNotEqual(report["verdict"], "pass")
+        self.assertEqual(report["findings"], [])
+        self.assertIn("dedup-evidence", report["reason"])
+
+    def test_a_composer_that_changes_the_separator_is_a_loud_refusal(self):
+        self.backend.create(title="Standalone")
+        self.drift_the_composer(
+            lambda description, checked_against:
+                f"{lint_module.EVIDENCE_PREFIX}{checked_against}\n{description}"
+        )
+
+        report = lint_module.lint(self.backend)
+
+        self.assertEqual(report["verdict"], "could-not-run")
+        self.assertIn("dedup-evidence", report["reason"])
+
+    def test_the_undrifted_composer_is_a_pass(self):
+        """Counter-proof: the guard is not simply always-refusing. Without it, the
+        two tests above would be green against a lint that never runs at all."""
+        self.backend.create(title="Standalone")
+
+        report = lint_module.lint(self.backend)
+
+        self.assertEqual(report["verdict"], "pass")
+
+
 class DanglingLinkTest(LocalFixtureTestCase):
     def test_a_link_whose_target_does_not_exist_is_reported(self):
         source = self.backend.create(title="Follow-up")["id"]
