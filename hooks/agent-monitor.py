@@ -527,10 +527,16 @@ def flush_ghost_summary(state: dict, session_id: str):
 def check_handover_staleness(session_id: str, source_event: str):
     """Soft warning if docs/HANDOVER.md is older than the newest docs/*.md.
 
-    Catches the autonomous-pipeline failure mode where an agent writes a
-    phase artefact (DISCOVERY.md, CONCEPT.md, GATE_P0.md, ...) but does
-    not update the HANDOVER. Logs an error event and prints to stderr —
-    NEVER blocks (no exit(2)), so the pipeline keeps running.
+    Catches the autonomous-pipeline situation where a phase artefact
+    (DISCOVERY.md, CONCEPT.md, GATE_P0.md, ...) was written but
+    docs/HANDOVER.md was not consolidated afterwards. HANDOVER.md is
+    orchestrator-owned state (CCP-1178): agents read it for context and, at
+    most, append one line to its `## Open Points` inbox — they do not
+    rewrite it. A stale HANDOVER is therefore the ORCHESTRATOR's cue to
+    consolidate, never an agent's omission, and the printed warning is
+    worded accordingly regardless of which event (SubagentStop or Stop)
+    triggered it. Logs an error event and prints to stderr — NEVER blocks
+    (no exit(2)), so the pipeline keeps running.
 
     Only warns once per (session, source_event) combination to avoid spam.
     Silent no-op if no docs/HANDOVER.md exists in cwd (= not a project run).
@@ -576,7 +582,8 @@ def check_handover_staleness(session_id: str, source_event: str):
         })
         print(
             f"HANDOVER warning: docs/{newest_other_name} is {age_diff_min} min "
-            f"newer than docs/HANDOVER.md. Update HANDOVER.md before this run ends.",
+            f"newer than docs/HANDOVER.md. The orchestrator should consolidate "
+            f"docs/HANDOVER.md before this session ends.",
             file=sys.stderr
         )
     except Exception:

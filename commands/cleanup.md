@@ -21,7 +21,8 @@ stale memory or doc volume drift.
 
 The HANDOVER carries an append-only inbox (`## Open Points`, see
 `templates/HANDOVER_TEMPLATE.md`): working agents drop findings there that fall outside their
-assignment, and this step is the one place they are cleared again.
+assignment, when running in the main working tree (a worktree-isolated agent reports the line in
+its final message instead), and this step is the one place they are cleared again.
 
 Scan `docs/HANDOVER.md` for lines matching the marker pattern `^- INBOX [|]` — match on the
 **marker, not the heading**, so entries appended under a differently named heading are still found.
