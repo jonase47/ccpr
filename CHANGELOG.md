@@ -1761,7 +1761,13 @@ All notable changes to this project are documented in this file. The format is b
   `hooks/agent-monitor.py`'s `check_handover_staleness` fired on both `SubagentStop` and `Stop`
   with a docstring and a printed warning that both read as "an agent forgot to update HANDOVER"
   — now wrong advice under the corrected model; reworded to name the orchestrator as the one
-  who consolidates, with no change to the warn/no-warn decision logic.
+  who consolidates, with no change to the warn/no-warn decision logic. **Code review found the
+  worktree clause otherwise unenforceable** — no agent has a documented way to detect it is
+  running in a worktree, and nothing named the orchestrator's duty to fold a reported inbox line
+  back in. `CLAUDE.md`'s Handover Protocol section gained a "Worktree-Dispatched Agents"
+  subsection naming both obligations explicitly: the orchestrator states worktree-vs-main-tree in
+  the dispatch briefing, and consolidates a worktree agent's reported `- INBOX | …` line into
+  `## Open Points` itself after the run.
 
   New guard test `scripts/tests/test_agent_handover_write_boundary.py` (positive-form, per this
   repo's `test_absence_only_assertions.py` / `test_handover_epilogue_bullet.py` convention: it
