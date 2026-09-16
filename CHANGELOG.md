@@ -8,6 +8,36 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Added
 
+- **`scripts/lib/awk_capability.sh` — an awk-dialect probe, and a could-not-run outcome where
+  two shipped scripts used to report a false green (CCP-1179).** `mawk 1.3.4 20240123`, the
+  default `/usr/bin/awk` on Debian-family systems, aborts its regex compiler on an interval
+  quantifier `{n,m}` followed later in the same ERE by a parenthesised group
+  (`REcompile() - panic: values still on machine stack`, exit 100). `scripts/memory-lint.sh`'s
+  CommonMark block-structure scanner carried that shape, and the abort was invisible on both
+  channels automation reads: the awk child ran inside a process substitution, so its exit code
+  was unobservable by construction, and the script's own report said `**Summary:** 0 errors,
+  0 warnings, 0 info.` / `**Exit:** 0` — a check that parsed nothing reporting clean. It also
+  inverted `scripts/check-all.baseline.tsv`, which expects exit **1** from memory-lint: on a
+  mawk host the check diverged by being FALSELY GREEN. The new library probes the awk that will
+  actually run the scanners with a canary ERE carrying the failing shape, and requires three
+  things of it, not one — a zero exit, empty stderr, and the right match count. The third is not
+  redundant: an awk with no interval support at all (the original one-true-awk) compiles
+  `[ ]{0,3}` as four literal characters, exits 0, and silently matches nothing. `memory-lint.sh`
+  now reports `the memory-lint check DID NOT RUN (…)` with `_not evaluated_` findings sections
+  and exit 0 — the report-text contract `scripts/check-all.sh` already reads for this check, and
+  the same shape `scripts/shellcheck-run.sh` ships, with its causes accumulated in an array so
+  an empty scope AND an incapable awk are both named rather than the first hiding the second.
+  `scripts/migrate-review-headers.sh` instead REFUSES with exit 2, because it writes: its fence
+  tracking is what keeps an illustrative `reviewed_head:` line inside a fenced example from being
+  hoisted into the frontmatter field `/gate-p5` trusts as ground truth, so a blind scanner there
+  does not migrate less, it fabricates. **This is not a dependency declaration.** CCPR runs on
+  what the system ships — the same posture ADR-0011's bash-3.2 floor takes one tool over; gawk is
+  named in the message only as a way out of an already-broken run. `scripts/tests/test_awk_capability.py`
+  covers both sides: stub awks for the seam itself (no single machine can exercise a capable and
+  an incapable awk with a real binary), plus a stub-free agreement test that cross-asserts the
+  probe's verdict about the machine's real awk against an independently spelled instance of the
+  same ERE shape.
+
 - **`.github/workflows/ci.yml`'s `check-all-macos` job now forwards a deny-list into CI via a
   GitHub Actions secret (CCP-1148 / F2).** Before this, the only path enforcing the deny-list
   (tenant/project names that must never land in the public CCPR repo on GitHub — PO precision

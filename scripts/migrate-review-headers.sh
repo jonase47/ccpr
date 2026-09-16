@@ -93,6 +93,29 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/frontmatter.sh
 source "$SCRIPT_DIR/lib/frontmatter.sh"
+# shellcheck source=lib/awk_capability.sh
+source "$SCRIPT_DIR/lib/awk_capability.sh"
+
+# CCP-1179: _body_text below is an awk fence state machine, and the fence
+# tracking is not a nicety — it is what keeps an illustrative
+# `reviewed_head: <40 hex>` line inside a ```yaml block from being hoisted
+# into real frontmatter, where /gate-p5 trusts it as ground truth for
+# staleness detection. An awk that cannot compile the block-structure EREs
+# does not degrade this script into "migrates less"; it degrades it into
+# "writes a fabricated anchor value into a file and reports success".
+#
+# So unlike memory-lint.sh's sibling check — a read-only linter, which
+# REPORTS could-not-run and exits 0 for check-all.sh to classify — this one
+# REFUSES before touching anything. Exit 2 is this script's existing "called
+# in a way it cannot honour" code (bad option, unknown argument); a run whose
+# awk cannot parse the input is the same class of answer: nothing was done,
+# and nothing should be read into the fact that nothing was done.
+_awk_capability_reason="$(awkcap_could_not_run_reason)"
+if [[ -n "$_awk_capability_reason" ]]; then
+    echo "migrate-review-headers: the migration DID NOT RUN — $_awk_capability_reason" >&2
+    echo "migrate-review-headers: refusing rather than migrating with a fence scanner that cannot see fences — no file was written." >&2
+    exit 2
+fi
 
 PROJECT_DIR=""
 DRY_RUN=false

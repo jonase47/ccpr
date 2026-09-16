@@ -19,6 +19,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/frontmatter.sh
 source "$SCRIPT_DIR/lib/frontmatter.sh"
+# shellcheck source=lib/awk_capability.sh
+source "$SCRIPT_DIR/lib/awk_capability.sh"
 
 PROJECT_DIR="${1:-$(pwd)}"
 MEMORY_DIR="$PROJECT_DIR/docs/memory"
@@ -208,9 +210,77 @@ TARGETS_PRESENT=0
 [[ -d "$TIER1_GLOBAL_TOPIC_DIR" ]] && TARGETS_PRESENT=$((TARGETS_PRESENT + 1))
 [[ -d "$TIER2_GLOBAL_DIR" ]] && TARGETS_PRESENT=$((TARGETS_PRESENT + 1))
 
-TARGETS_SUFFIX=""
+# Two INDEPENDENT could-not-run causes, accumulated rather than short-
+# circuited — shellcheck-run.sh's own reasons array is the reference
+# implementation, and it carries the scar of why: two separate early-exit
+# blocks meant a machine hitting both only ever saw the first, and the
+# second silently disappeared from the report.
+#
+# The second cause (CCP-1179) is a DIALECT gap, not a scope gap: an awk that
+# aborts on this script's CommonMark block-structure EREs leaves the whole
+# link scan unparsed. Before this check existed, that produced "**Summary:**
+# 0 errors, 0 warnings, 0 info." / "**Exit:** 0" — a check that read nothing
+# reporting clean, on a machine whose stock /usr/bin/awk is mawk. See
+# scripts/lib/awk_capability.sh for the probe and the measurement.
+COULD_NOT_RUN_REASONS=()
 if (( TARGETS_PRESENT == 0 )); then
-    TARGETS_SUFFIX=" — the memory-lint check DID NOT RUN (no docs/memory/, no ~/.claude/instincts.md, no ~/.claude/instincts/, no ~/.claude/memory/)"
+    COULD_NOT_RUN_REASONS+=("no docs/memory/, no ~/.claude/instincts.md, no ~/.claude/instincts/, no ~/.claude/memory/")
+fi
+AWK_CAPABILITY_REASON="$(awkcap_could_not_run_reason)"
+if [[ -n "$AWK_CAPABILITY_REASON" ]]; then
+    COULD_NOT_RUN_REASONS+=("$AWK_CAPABILITY_REASON")
+fi
+
+TARGETS_SUFFIX=""
+if (( ${#COULD_NOT_RUN_REASONS[@]} > 0 )); then
+    reasons_joined=""
+    for reason in "${COULD_NOT_RUN_REASONS[@]}"; do
+        if [[ -z "$reasons_joined" ]]; then
+            reasons_joined="$reason"
+        else
+            reasons_joined="$reasons_joined; $reason"
+        fi
+    done
+    TARGETS_SUFFIX=" — the memory-lint check DID NOT RUN ($reasons_joined)"
+fi
+
+# The two causes differ in ONE respect, and only one: whether the checks
+# below can still be run truthfully.
+#
+# An empty scope can. Nothing is present, every check honestly finds nothing,
+# and the report that comes out the far end is correct — the DID NOT RUN
+# suffix is there so check-all.sh does not compare that nothing against a
+# baseline expecting findings. Execution continues.
+#
+# An awk that cannot compile the block-structure EREs cannot. Every check
+# downstream of the scanner would report an answer it never computed, which
+# is the exact false green this whole ticket is about — so the run stops
+# here, before the first finding is invented.
+if [[ -n "$AWK_CAPABILITY_REASON" ]]; then
+    NOW="$(date '+%d.%m.%Y %H:%M')"
+    echo "# Memory Lint Report"
+    echo
+    echo "**Scope:** $PROJECT_DIR/docs/memory/**"
+    echo "**Run:** $NOW"
+    echo "**Targets:** $TARGETS_PRESENT of $TARGETS_TOTAL present$TARGETS_SUFFIX"
+    echo "**Files scanned:** 0"
+    echo
+    # The three section headings are kept — check-all.sh reads the Scope
+    # line, but a human (and this suite's own "did the script actually run"
+    # precondition) reads the shape of the report. What changes is the body:
+    # `_none_` is a claim that nothing was found, and nothing was looked for.
+    for section in Errors Warnings Info; do
+        echo "## $section (0)"
+        echo
+        echo "_not evaluated — see Scope above_"
+        echo
+    done
+    echo "---"
+    echo
+    echo "**Summary:** 0 files scanned, 0 findings — could-not-run"
+    echo "**Exit:** 0"
+    echo "memory-lint: could-not-run — $AWK_CAPABILITY_REASON" >&2
+    exit 0
 fi
 
 for file in "${FILES[@]:-}"; do

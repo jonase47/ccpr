@@ -110,9 +110,9 @@ python3 -m unittest discover -s scripts/tests -t .
 
 - **`-t .` is not optional**, and the failure mode is worth knowing because it is
   partly silent. It sets the top-level directory imports resolve against. Measured
-  on the current tree (11.09.2026, CCP-1178 merged with CCP-1177): **with**
-  it, discovery collects **2923 tests, 0 import errors**, exit 0; **without** it,
-  **2152 tests and 19 modules that fail to
+  on the current tree (16.09.2026, CCP-1179): **with**
+  it, discovery collects **2948 tests, 0 import errors**, exit 0; **without** it,
+  **2177 tests and 19 modules that fail to
   import**, exit 1 — the eight that use a relative import
   (`from .test_phase_docs_lint import …` in four modules,
   `from .test_artifact_gate import …` in two,
@@ -342,6 +342,14 @@ python3 -m unittest discover -s scripts/tests -t .
   agreement test uses — cross-checked against the base commit (790039e) in
   a throwaway worktree, which measured 2899 there, confirming the +7 delta
   independently of the subprocess CLI route.
+
+  16.09.2026, CCP-1179 (the mawk interval-before-group defect): **2923 ->
+  2948** with `-t .` and **2152 -> 2177** without, 19 modules-fail and 771
+  never-execute both unchanged. +25 is the new `test_awk_capability.py`,
+  which has no relative import and therefore lands on both sides of the flag
+  and cancels out of the never-execute figure. Re-measured with
+  `TestLoader().discover(...).countTestCases()` under each flag rather than
+  added.
 
   11.09.2026, merge round: `ticket/CCP-1178` (**2906 / 2150 / 19 / 756**)
   integrated `main`/CCP-1177 (**2916 / 2145 / 19 / 771**) via `git merge`, the

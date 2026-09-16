@@ -1344,7 +1344,16 @@ class ExternalToolExitStatusTest(unittest.TestCase):
         scripts/conformance-run.sh; updated again 30.08.2026 when WI-0129 D2
         added scripts/shellcheck-run.sh; updated again 03.09.2026 when
         CCP-1137 added scripts/push-gate.sh; updated again 03.09.2026 when
-        CCP-1137R3 Auflage 2 added scripts/install-push-gate-hook.sh)."""
+        CCP-1137R3 Auflage 2 added scripts/install-push-gate-hook.sh;
+        updated again 16.09.2026 when CCP-1179 added
+        scripts/lib/awk_capability.sh).
+
+        The new file contributes NOTHING to the disposition counts pinned
+        above, and that is a property of the file rather than an omission:
+        every awk call in it goes through a `$awk_bin` parameter, and this
+        module's scanner matches tool NAMES literally. Verified by running
+        the scanner, not by eye -- `by_disposition` was re-measured after
+        the file landed and was unchanged."""
         files = sorted(SCRIPTS_DIR.glob("*.sh")) + sorted((SCRIPTS_DIR / "lib").glob("*.sh"))
         names = sorted(f.relative_to(SCRIPTS_DIR).as_posix() for f in files)
         self.assertEqual(  # pin: set external-tool-scanned-scripts
@@ -1359,6 +1368,7 @@ class ExternalToolExitStatusTest(unittest.TestCase):
                 "freeze-phase-docs.sh",
                 "install-push-gate-hook.sh",
                 "instinct-check.sh",
+                "lib/awk_capability.sh",
                 "lib/discipline_gate.sh",
                 "lib/frontmatter.sh",
                 "log-cleanup.sh",
