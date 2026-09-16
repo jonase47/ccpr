@@ -746,9 +746,9 @@ while [ "$ci" -lt "$CHECK_COUNT" ]; do
     # words.
     #
     # Taken to END OF LINE rather than to the first `)`: a reason may itself
-    # contain parentheses (the awk one names the interpreter version and a
-    # shell command), so matching a closing paren would truncate it mid-
-    # sentence. Only the single wrapping pair is stripped.
+    # contain parentheses (the awk one names the interpreter version), so
+    # matching a closing paren would truncate it mid-sentence. Only the single
+    # wrapping pair is stripped.
     if [ "$name" = "memory-lint" ]; then
       case "$stdout_text" in
         *"the memory-lint check DID NOT RUN"*)

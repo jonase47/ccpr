@@ -68,8 +68,9 @@
 #
 # NOT A DEPENDENCY DECLARATION. CCPR runs on what the system ships — the same
 # posture ADR-0011's bash-3.2 floor takes one tool over. Nothing here asks a
-# contributor to install anything; `awkcap_could_not_run_reason` names gawk
-# only as a way OUT of an already-broken run.
+# contributor to install anything, and `awkcap_could_not_run_reason`
+# deliberately does not either: see its own comment for why the remedy it
+# names is a bug report rather than a package.
 
 # The canary program. `# awkcap-canary` is a stable marker for test fixtures
 # that need to recognise this specific program; nothing in the shipped path
@@ -195,10 +196,23 @@ awkcap_could_not_run_reason() {
     if [ "$answer" = "$AWKCAP_CANARY_EXPECTED" ]; then
         return 0
     fi
+    # THE REMEDY IS A BUG REPORT, NOT A PACKAGE (PO decision, 16.09.2026).
+    # This used to end in "install gawk, then run update-alternatives --set
+    # awk /usr/bin/gawk". After the CCP-1179 rewrites, no awk program this
+    # repository ships uses a construct any known awk chokes on — so the only
+    # way to arrive here is an awk dialect CCPR has never seen, and that is a
+    # gap in CCPR, not a misconfigured machine. Sending the operator to
+    # reconfigure their system-wide awk answered it at the wrong layer twice
+    # over: it changes a machine to work around a repository defect, and it
+    # guarantees the repository never learns the dialect exists. The clause
+    # about another awk on PATH stays because someone mid-run needs a way
+    # forward, but it is a passing note without a recipe — no invocation, no
+    # package named as the fix.
+    #
     # Deliberately free of apostrophes and backticks: the format string is
     # single-quoted (an apostrophe would end it) and a backtick would have to
     # be double-quoted, where it becomes command substitution. Both dodges
     # cost more than writing the sentence without them.
-    printf '%s cannot compile and correctly apply the CommonMark block-structure patterns in this repository: the capability canary answered %s where %s of 4 checks must pass (CCP-1179). Interim workaround, not a CCPR requirement: make a capable awk the awk on PATH (Debian-family: install gawk, then run update-alternatives --set awk /usr/bin/gawk).\n' \
+    printf '%s cannot compile and correctly apply the CommonMark block-structure patterns in this repository: the capability canary answered %s where %s of 4 checks must pass. No awk program CCPR ships uses a construct known to fail, so this is a gap in CCPR rather than a misconfiguration on this machine: please report this line as a CCPR issue, referencing CCP-1179 for the context. A different awk on PATH may get past it in the meantime.\n' \
         "$(awkcap_identity "$awk_bin")" "[$answer]" "$AWKCAP_CANARY_EXPECTED"
 }

@@ -196,12 +196,25 @@ class CouldNotRunReasonTest(AwkCapabilityLibTestBase):
         self.assertEqual(1, len(r.stdout.strip().splitlines()), r.stdout)
 
     def test_the_reason_names_the_awk_that_was_probed(self):
+        # Kept where a companion "...names the ticket" assertion was dropped,
+        # and the criterion is FAILURE MODE, not coverage count -- the two are
+        # equally redundant by count, so that would not separate them. The
+        # shipped-script classes below assert `/awk` and `CCP-1179` side by
+        # side (test_the_report_names_the_awk_and_the_ticket,
+        # test_the_refusal_names_the_awk_the_reason_and_the_ticket), so both
+        # literals are already caught end-to-end.
+        #
+        # What differs is how each one can BREAK. `CCP-1179` is a constant
+        # typed once into one printf: the only way it disappears is someone
+        # editing that literal, and an edit is caught everywhere at once.
+        # The awk identity is COMPUTED -- `$(awkcap_identity "$awk_bin")` --
+        # so it can go missing with the sentence untouched: a dropped
+        # interpolation, an argument threaded wrong, an identity lookup that
+        # silently yields nothing. That failure deserves a check at the layer
+        # that produces it, naming the function, rather than only a report
+        # two scripts downstream that says some larger string looks wrong.
         r = self.call("awkcap_could_not_run_reason", _aborting_stub())
         self.assertIn("/awk", r.stdout, "the resolved awk path must be named")
-
-    def test_the_reason_names_the_ticket(self):
-        r = self.call("awkcap_could_not_run_reason", _aborting_stub())
-        self.assertIn("CCP-1179", r.stdout)
 
     def test_the_reason_reports_what_the_canary_actually_answered(self):
         # "it failed" is not diagnosable; "[exit 100]" and "[3]" point at two
@@ -211,16 +224,6 @@ class CouldNotRunReasonTest(AwkCapabilityLibTestBase):
         self.assertIn("[exit 100]", r.stdout)
         r = self.call("awkcap_could_not_run_reason", WRONG_ANSWER_STUB)
         self.assertIn("[3]", r.stdout)
-
-    def test_the_workaround_is_offered_as_interim_and_not_as_a_requirement(self):
-        # CCPR runs on what the system ships (ADR-0011's bash-3.2 floor is the
-        # same posture one tool over). gawk is a way OUT of a broken run, never
-        # a prerequisite for a normal one -- if this ever reads as a dependency,
-        # the sentence is wrong, not the test.
-        r = self.call("awkcap_could_not_run_reason", _aborting_stub())
-        self.assertIn("gawk", r.stdout)
-        self.assertIn("interim", r.stdout.lower())
-        self.assertIn("not a CCPR requirement", r.stdout)
 
 
 class IdentityTest(AwkCapabilityLibTestBase):

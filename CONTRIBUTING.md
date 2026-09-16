@@ -111,8 +111,8 @@ python3 -m unittest discover -s scripts/tests -t .
 - **`-t .` is not optional**, and the failure mode is worth knowing because it is
   partly silent. It sets the top-level directory imports resolve against. Measured
   on the current tree (16.09.2026, CCP-1179): **with**
-  it, discovery collects **2953 tests, 0 import errors**, exit 0; **without** it,
-  **2182 tests and 19 modules that fail to
+  it, discovery collects **2951 tests, 0 import errors**, exit 0; **without** it,
+  **2180 tests and 19 modules that fail to
   import**, exit 1 — the eight that use a relative import
   (`from .test_phase_docs_lint import …` in four modules,
   `from .test_artifact_gate import …` in two,
@@ -344,11 +344,18 @@ python3 -m unittest discover -s scripts/tests -t .
   independently of the subprocess CLI route.
 
   16.09.2026, CCP-1179 (the mawk block-structure regex defects): **2923 ->
-  2953** with `-t .` and **2152 -> 2182** without, 19 modules-fail and 771
-  never-execute both unchanged. +30 is the new `test_awk_capability.py` (29)
-  plus one review-driven addition to `test_check_all.py`; the new module
-  has no relative import, so both additions land on both sides of the flag and
-  cancel out of the never-execute figure. Re-measured with
+  2951** with `-t .` and **2152 -> 2180** without, 19 modules-fail and 771
+  never-execute both unchanged. The net +28 is two cuts, not one, and the
+  second is a DELETION — worth stating plainly, because a shrinking suite is
+  otherwise exactly what the README floor check exists to make someone
+  investigate. The first cut added 30: the new `test_awk_capability.py` (29)
+  plus one review-driven addition to `test_check_all.py`. The second removed 2
+  from `test_awk_capability.py` when the PO cut the gawk workaround out of the
+  could-not-run message — one test existed only to police the sentence that
+  went away, and one asserted the ticket id, a literal already guarded six
+  times over through the real scripts. Neither removed a failure mode. The new
+  module has no relative import, so every one of these lands on both sides of
+  the flag and cancels out of the never-execute figure. Re-measured with
   `TestLoader().discover(...).countTestCases()` under each flag rather than
   added.
 

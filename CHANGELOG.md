@@ -31,8 +31,16 @@ All notable changes to this project are documented in this file. The format is b
   tracking is what keeps an illustrative `reviewed_head:` line inside a fenced example from being
   hoisted into the frontmatter field `/gate-p5` trusts as ground truth, so a blind scanner there
   does not migrate less, it fabricates. **This is not a dependency declaration.** CCPR runs on
-  what the system ships — the same posture ADR-0011's bash-3.2 floor takes one tool over; gawk is
-  named in the message only as a way out of an already-broken run. `scripts/tests/test_awk_capability.py`
+  what the system ships — the same posture ADR-0011's bash-3.2 floor takes one tool over — and the
+  could-not-run message asks for a **bug report, not a package** (PO decision, 16.09.2026). It
+  first read "install gawk, then run `update-alternatives --set awk /usr/bin/gawk`", which the
+  rewrites above made wrong: once no shipped awk program uses a construct any known awk chokes on,
+  the only way to reach that message is a dialect CCPR has never seen — a gap in CCPR, not a
+  misconfigured machine. Telling the operator to reconfigure their system-wide awk fixed the wrong
+  layer and guaranteed the project never heard about the dialect. It now names the awk, what the
+  canary answered, and asks for the line to be reported as a CCPR issue referencing this ticket,
+  keeping only a recipe-free note that another awk on PATH may get past it meanwhile.
+  `scripts/tests/test_awk_capability.py`
   covers both sides: stub awks for the seam itself (no single machine can exercise a capable and
   an incapable awk with a real binary), plus a stub-free agreement test that cross-asserts the
   probe's verdict about the machine's real awk against an independently spelled instance of the
