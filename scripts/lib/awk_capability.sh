@@ -152,7 +152,13 @@ awkcap_canary_answer() {
     rc=0
     stdout_text="$(LC_ALL=C "$awk_bin" "$AWKCAP_CANARY_PROG" </dev/null 2>"$stderr_file")" || rc=$?
     stderr_text="$(cat "$stderr_file")"
-    rm -f "$stderr_file"
+    # `|| true` for the same reason migrate-review-headers.sh's own temp-file
+    # cleanup carries one: this library is SOURCED into scripts running under
+    # `set -euo pipefail`, and a temp file that is itself unremovable
+    # (permissions race, immutable flag) would abort the caller here — turning
+    # a diagnosable dialect gap into an unexplained crash, which is precisely
+    # what this file exists to prevent.
+    rm -f "$stderr_file" 2>/dev/null || true
     if [ "$rc" -ne 0 ]; then
         printf 'exit %s' "$rc"
     elif [ -n "$stderr_text" ]; then
