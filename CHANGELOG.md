@@ -1787,7 +1787,11 @@ All notable changes to this project are documented in this file. The format is b
   (`RSTART`/`RLENGTH` are consumed at the fence opener) before the CommonMark corpus was consulted
   as the behavioural oracle. All 373 tests in `test_memory_lint.py`,
   `test_memory_lint_commonmark_corpus.py` and `test_migrate_review_headers.py` now pass under mawk,
-  where 109 of them failed before. The mutation tests that embed literal script source were
+  where 109 of them failed before. `scripts/check-all.sh`'s memory-lint branch now SURFACES the
+  cause memory-lint reported instead of re-deriving a hardcoded "no targets present" — correct
+  while an empty scope was the only cause, and a claim it never verified once CCP-1179 added a
+  second one (on a mawk host with `docs/memory/` present it would have sent the operator looking
+  for a directory that is right there). The mutation tests that embed literal script source were
   respelled along with the source they mutate — including the ones reproducing HISTORICAL shapes,
   since a mutant carrying the old spelling would itself have been unrunnable on the awk under test.
 

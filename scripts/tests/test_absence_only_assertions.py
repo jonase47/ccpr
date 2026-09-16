@@ -891,7 +891,7 @@ class NoStaleKnownFindingsTest(unittest.TestCase):
 
 class ClassificationCountsTest(unittest.TestCase):
     def test_classification_counts(self):
-        """Regression pin on the measured baseline: 1446 `test_*` methods
+        """Regression pin on the measured baseline: 1450 `test_*` methods
         across the corpus call something shaped like a subprocess invocation
         and are therefore in scope for this check; 0 of those are currently
         absence-only-needs-exemption -- `KNOWN_FINDINGS` above is empty for
@@ -905,8 +905,8 @@ class ClassificationCountsTest(unittest.TestCase):
         growing paragraph:
 
           in-scope / flagged   when
-          1446 / 0             16.09.2026 (CCP-1179: the awk-dialect probe):
-                               +13, all in the new test_awk_capability.py,
+          1450 / 0             16.09.2026 (CCP-1179: the awk-dialect probe):
+                               +17. Thirteen in the new test_awk_capability.py,
                                and measured by running this scanner rather
                                than counted by eye -- the 7 + 5
                                `self.run_script(...)` methods of
@@ -924,7 +924,15 @@ class ClassificationCountsTest(unittest.TestCase):
                                scanner's scope at all -- the
                                `_calls_a_subprocess` boundary the paragraph
                                below already describes, not a gap this entry
-                               introduces.
+                               introduces. The remaining four came out of the
+                               code review: three more `run_script(...)`
+                               methods covering BOTH could-not-run causes
+                               firing at once (the accumulate-do-not-short-
+                               circuit branch, previously untested), and one
+                               `run_check_all(...)` method in
+                               test_check_all.py pinning that check-all.sh
+                               surfaces memory-lint's REPORTED cause instead
+                               of re-deriving a hardcoded one.
           1433 / 0             11.09.2026 (CCP-1177: the link lint stops
                                reading the recorded dedup-evidence line as
                                claimed relations): +2, both in
@@ -2045,7 +2053,7 @@ class ClassificationCountsTest(unittest.TestCase):
         count."""
         recs = scan_tree()
         flagged = [r for r in recs if r.disposition in NEEDS_EXEMPTION]
-        self.assertEqual(1446, len(recs))
+        self.assertEqual(1450, len(recs))
         self.assertEqual(0, len(flagged))
 
 

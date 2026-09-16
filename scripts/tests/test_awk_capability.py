@@ -435,6 +435,44 @@ class MemoryLintCouldNotRunTest(ShippedScriptCouldNotRunTestBase):
         self.assertNotIn("REcompile", r.stderr)
 
 
+class MemoryLintBothCausesTest(ShippedScriptCouldNotRunTestBase):
+    """Both could-not-run causes at once -- an empty scope AND an incapable
+    awk.
+
+    memory-lint.sh accumulates its causes in an array rather than
+    short-circuiting, and shellcheck-run.sh's own array carries the scar of
+    why: two separate early-exit blocks meant a machine hitting both only
+    ever saw the first, and the second silently disappeared. That the scar
+    exists one script over is not evidence this script is free of it, so the
+    combination gets its own fixture: NO docs/memory/ and no ~/.claude at all
+    (the empty-scope cause), on the stub awk (the dialect cause).
+    """
+
+    SCRIPT = REPO_ROOT / "scripts" / "memory-lint.sh"
+
+    # setUp deliberately creates NOTHING under the project: the base class
+    # already gives an empty project dir and an empty fake HOME, which is
+    # precisely all four targets absent.
+
+    def test_both_causes_are_named_not_just_the_first(self):
+        r = self.run_script()
+        self.assertIn("the memory-lint check DID NOT RUN", r.stdout)
+        self.assertIn("no docs/memory/", r.stdout,
+                      f"the empty-scope cause vanished: {r.stdout!r}")
+        self.assertIn("CCP-1179", r.stdout,
+                      f"the awk-dialect cause vanished: {r.stdout!r}")
+
+    def test_the_two_causes_are_separated_readably(self):
+        r = self.run_script()
+        self.assertIn("; ", r.stdout,
+                      "accumulated causes are joined with '; ' -- the same "
+                      "separator shellcheck-run.sh uses")
+
+    def test_it_still_exits_zero(self):
+        r = self.run_script()
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+
+
 class MigrateReviewHeadersCouldNotRunTest(ShippedScriptCouldNotRunTestBase):
     """migrate-review-headers.sh WRITES to files, and its fence tracking is
     the thing that keeps an illustrative `reviewed_head:` line inside a
@@ -458,8 +496,17 @@ class MigrateReviewHeadersCouldNotRunTest(ShippedScriptCouldNotRunTestBase):
             "base_commit: abc1234\n"
             "reviewed_head: def5678\n"
             "\n"
+            # A SHORT example SHA, deliberately: the shipped-artifact gate
+            # (scripts/artifact-gate.sh, via GATE_RE_SECRET_BLOB's
+            # `[A-Fa-f0-9]{32,}`) reads a 40-hex run in a tracked file as a
+            # possible secret blob, and it is right to -- it cannot tell an
+            # illustrative commit id from a token. Seven hex digits is still a
+            # valid anchor value by migrate-review-headers.sh's own shape check
+            # (`^[0-9a-fA-F]{7,40}$`), so the fixture keeps the property that
+            # matters here: a hoistable-looking anchor line sitting INSIDE a
+            # fence, where the fence scanner is the only thing stopping it.
             "```yaml\n"
-            "reviewed_head: 0000000000000000000000000000000000000000\n"
+            "reviewed_head: 0badc0f\n"
             "```\n",
             encoding="utf-8",
         )

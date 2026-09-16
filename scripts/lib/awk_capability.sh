@@ -117,7 +117,13 @@ awkcap_identity() {
     # tool NAMES literally — it does not see these invocations at all. Each
     # one is guarded on its own terms regardless; see awkcap_canary_answer
     # below, which reads the exit code, stderr and the result separately.
-    version="$("$awk_bin" --version 2>&1 | head -n 1 || true)"
+    #
+    # `</dev/null` for the same reason the canary carries one: this library is
+    # sourced into non-interactive runs, and an awk that waited on stdin here
+    # would hang the caller — a worse failure than any it diagnoses. None of
+    # the awks this ticket names reads stdin for `--version`; the redirect
+    # costs nothing and removes the question.
+    version="$("$awk_bin" --version </dev/null 2>&1 | head -n 1 || true)"
     case "$version" in
         ''|*usage*|*Usage*|*"not found"*) printf '%s' "$resolved" ;;
         *) printf '%s (%s)' "$resolved" "$version" ;;
@@ -148,7 +154,9 @@ awkcap_canary_answer() {
         printf 'not on PATH'
         return 0
     fi
-    stderr_file="$(mktemp)" || { printf 'probe could not create a temp file'; return 0; }
+    # A failing mktemp is not an awk problem, and must not be dressed up as
+    # one — the answer text is what the caller's message quotes verbatim.
+    stderr_file="$(mktemp)" || { printf 'not probed: no usable temp file'; return 0; }
     rc=0
     stdout_text="$(LC_ALL=C "$awk_bin" "$AWKCAP_CANARY_PROG" </dev/null 2>"$stderr_file")" || rc=$?
     stderr_text="$(cat "$stderr_file")"

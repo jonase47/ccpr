@@ -729,14 +729,35 @@ while [ "$ci" -lt "$CHECK_COUNT" ]; do
     # detector would go back to misreading a genuine no-scope exit-0 run as
     # a real divergence — the exact defect this branch exists to fix,
     # reintroduced by its own coupling (code review finding, WI-0129 Paket
-    # B). memory-lint.sh guarantees the DID NOT RUN suffix is present
-    # precisely when, and only when, its scope is empty; the count is for a
-    # human reader, not for this match.
+    # B).
+    #
+    # The CAUSE is read out of the report, not re-derived here (CCP-1179).
+    # This used to hardcode "no targets present (…)", which was true while an
+    # empty scope was memory-lint.sh's only reason to report DID NOT RUN.
+    # CCP-1179 gave it a second, independent one — an awk that cannot compile
+    # or correctly apply its CommonMark block-structure patterns — accumulated
+    # into the same reasons list. A hardcoded cause then becomes a claim this
+    # script never verified: on a Debian/mawk host WITH docs/memory/ present,
+    # it would have told the operator "no targets present" and sent them
+    # looking for a missing directory that is right there. That is the same
+    # class of defect memory-lint.sh's own false green was — a report naming
+    # something it did not check — one level up, so it gets the same answer
+    # the conformance-run branch above already applies: read the report's own
+    # words.
+    #
+    # Taken to END OF LINE rather than to the first `)`: a reason may itself
+    # contain parentheses (the awk one names the interpreter version and a
+    # shell command), so matching a closing paren would truncate it mid-
+    # sentence. Only the single wrapping pair is stripped.
     if [ "$name" = "memory-lint" ]; then
       case "$stdout_text" in
         *"the memory-lint check DID NOT RUN"*)
           state="could-not-run"
-          reason="no targets present (no docs/memory/, no ~/.claude instincts/memory files) — nothing to compare against a baseline exit code"
+          ml_cause="${stdout_text#*the memory-lint check DID NOT RUN }"
+          ml_cause="${ml_cause%%$'\n'*}"
+          ml_cause="${ml_cause#(}"
+          ml_cause="${ml_cause%)}"
+          reason="$ml_cause — nothing to compare against a baseline exit code"
           ;;
       esac
     fi

@@ -86,7 +86,12 @@
 #
 # Exit codes: 0 clean, 1 warnings (sprint conflict, an anchor-field
 # body/frontmatter conflict, or a document left incomplete because required
-# fields are still missing after the hoist attempt), 2 errors (bad args).
+# fields are still missing after the hoist attempt), 2 errors — bad args, OR
+# (CCP-1179) a refusal to start at all because this machine's awk cannot run
+# the fence scanner this script depends on. Both are "called in a way it
+# cannot honour": nothing was done, and nothing should be read into the fact
+# that nothing was done. They are NOT distinguished by exit code; the refusal
+# names itself on stderr with "the migration DID NOT RUN".
 
 set -euo pipefail
 
