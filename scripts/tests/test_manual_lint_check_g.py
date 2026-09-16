@@ -1186,7 +1186,7 @@ class RealCorpusRegressionTest(unittest.TestCase):
         working tree (`docs/memory/code-reviewer/lint-and-prompts.md`,
         `docs/memory/senior-developer/generic-doc-tree-linting.md`) turn
         out to live entirely inside `docs/memory/**` -- gitignored
-        persona working state (`.gitignore:66`), never part of the
+        persona working state (ignored by `.gitignore`'s `docs/` block), never part of the
         tracked corpus at all. A scan of the live working tree would still
         find them; a scan of the tracked-only snapshot below correctly
         does not, and that difference is the whole reason this class uses

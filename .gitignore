@@ -26,51 +26,130 @@ desktop.ini
 # (settings.json stays versioned for project-wide defaults)
 .claude/settings.local.json
 
-# Maintainer-local working state (CCPR dogfooding its own conventions).
-# The repo ships docs/ as framework content; these are session artefacts, not
-# distribution. Keeping them untracked also keeps tenant identifiers out of
-# shipped artefacts (Constitution, Inviolable "No personal or tenant data").
-# Decision drafts are extracted into a de-personalised ADR under docs/adr/.
-docs/HANDOVER.md
-docs/.handover-archive/
-docs/decisions/
-
-# Project working state, not framework content: 89 work items about CCPR's own
-# defects (560 KB) and 400 KB of persona review notes, which would arrive in an
-# installation looking like the user's own state. Framework docs that explain the
-# design stay tracked -- and the allowlist named below, not this comment, is what
-# says which ones: adr/, logo/, CONSTITUTION.md, NEXT_STEPS_REFERENCE.md,
-# PROJECT_PHASES.md.
+# docs/ IS DEFAULT-DENY (CCP-1214). Everything under docs/ is maintainer
+# working state unless scripts/lib/docs-framework-allowlist.txt says it is
+# framework content. The `!` lines below are that file's entries, one for one
+# -- see "the two registers" at the end of this block.
 #
-# This paragraph used to end "..., the flat Tier-1 memory files) stay tracked".
-# That was never true: `git ls-files docs/memory` has always returned nothing,
-# because the rule below ignores docs/memory/ wholesale. Corrected 23.08.2026
-# after measuring it rather than reading it.
+# WHY THE RULE IS INVERTED. This used to ENUMERATE the working state:
+# docs/HANDOVER.md, docs/.handover-archive/, docs/decisions/, docs/workitems/,
+# docs/memory/, docs/workitems-idmap.yml, and a docs/.* dotfile pattern. An
+# enumeration only covers what its author thought of, and measured on
+# 16.09.2026 it had fallen 24 top-level entries (145 paths) behind, 21 of
+# them genuine working state: every Full-Track phase folder (discovery/,
+# concept/, validation/, architecture/, planning/, quality/, launch/,
+# operations/, reviews/), the Lean-Track and session artefacts (instincts.md,
+# BASELINE.md, FRAME.md, CLAUDE-lean.md, LEARNINGS.md, PROMOTION_BRIEF.md,
+# TRACK_DECISION.md) and five further folders (concepts/, epics/, roadmaps/,
+# user-stories/, lean-archive/). None of them was ignored, and none was
+# allowlisted either. (The remaining 3 are the sweep erring wide on purpose:
+# README.md and somewhere/ occur only as illustrations in comments, and chore
+# is a false positive off "feat/fix/refactor/docs/chore". Over-inclusion can
+# only cause a spurious failure somebody reads; under-inclusion is a path the
+# guard stops seeing. CCP-1214 itself reported 16, sweeping
+# commands/ and scripts/ for the phase folders and sprint artefacts and
+# counting BACKLOG.md / SPRINT.md / PROJECT_PLAN.md at the top level where the
+# shipped commands spell them under planning/; the figure here is the same
+# method widened to hooks/, agents/ and templates/ and to every docs/ path
+# those files name, which is what test_docs_boundary_default_deny.py
+# asserts.) commands/postmortem.md
+# tells a maintainer to store project-specific instincts in docs/instincts.md,
+# so the command that ENDS a CCPR session wrote an untracked, un-ignored file
+# into CCPR's own repository -- one `git add -A` away from the accident
+# CCP-1017 records as having already happened once, when 17 CCPR work items
+# were committed and pushed into what every user reads as their own state.
 #
-# Tracking those 8 flat files (80 KB) later is NOT a one-line change here. The
-# allowlist below serves BOTH sides of the boundary, so "tracked but not shipped"
-# is not expressible today: artifact-gate.sh fails a tracked docs/ path that is
-# not listed, and install.sh copies exactly what IS listed. Measured 23.08.2026 --
-# all 8 files fail the gate's docs-boundary check. Making them tracked-but-local
-# means either moving them to a framework home that earns an allowlist entry, or
-# splitting the allowlist into two lists, which is an ADR-sized change.
-# Since WI-0018, install.sh no longer copies docs/ wholesale: install_docs()
-# filters each top-level docs/ child against
-# scripts/lib/docs-framework-allowlist.txt and reports what it skipped. This
-# ignore rule is therefore no longer the only thing keeping working state out of
-# an installation -- but it stays the first line, and it is the one that also
-# keeps the state out of a clone. Note the two mechanisms cover different sets:
-# the allowlist is per top-level entry and reads the filesystem, so an ignored
-# file inside an ALLOWLISTED directory is still installed (see docs/logo/ below).
-docs/workitems/
-docs/memory/
-
-# The id-map `migrate` writes (docs/workitems-idmap.yml) is working state of the
-# same kind as docs/workitems/ above -- a snapshot of one machine's migration,
-# not a shipped artifact. It sits outside docs/workitems/ and outside the docs/.*
-# dotfile pattern further down, so neither of them covers it; without this line
-# it would be the one migration artifact that lands in a clone.
-docs/workitems-idmap.yml
+# CCP-1057 already chose a PATTERN over an enumeration here, deliberately and
+# correctly: "a pattern nobody has to remember to extend is what actually
+# keeps pace with a script adding a new report next quarter". The pattern it
+# picked was docs/.*, which matches dotfiles only, while every artefact above
+# is a normal filename. This is that same argument at its full width, not a
+# reversal of it -- and docs/* subsumes docs/.*, since a gitignore `*` matches
+# a leading dot (pinned by test_docs_boundary_default_deny.py).
+#
+# WHAT THE ENUMERATED LINES USED TO SAY, kept because the rules they justified
+# are now implicit in docs/*:
+#   * HANDOVER.md, .handover-archive/ and decisions/ are session artefacts,
+#     not distribution. Keeping them untracked also keeps tenant identifiers
+#     out of shipped artefacts (Constitution, Inviolable "No personal or
+#     tenant data"). Decision drafts are extracted into a de-personalised ADR
+#     under docs/adr/, which is why decisions/ needs no tracked home.
+#   * workitems/ and memory/ are 89 work items about CCPR's own defects
+#     (560 KB) and 400 KB of persona review notes, which would arrive in an
+#     installation looking like the user's own state.
+#   * workitems-idmap.yml is the id map `migrate` writes -- a snapshot of one
+#     machine's migration. Its old comment argued it needed a line of its own
+#     because it sat outside docs/workitems/ AND outside the docs/.* dotfile
+#     pattern, "so neither of them covers it". That was true of the two
+#     patterns it named and is no longer true of docs/*, which covers it like
+#     any other depth-1 entry. The line is gone; the reasoning is why the rule
+#     above has to be wide.
+#
+# THE FLAT TIER-1 MEMORY FILES, corrected 23.08.2026 after measuring rather
+# than reading. This paragraph once ended "..., the flat Tier-1 memory files)
+# stay tracked". That was never true: `git ls-files docs/memory` has always
+# returned nothing. Tracking those 8 files (80 KB) later is still NOT a
+# one-line change, and default-deny does not make it one. The allowlist serves
+# BOTH sides of the boundary, so "tracked but not shipped" remains
+# inexpressible: artifact-gate.sh fails a tracked docs/ path that is not
+# listed, and install.sh copies exactly what IS listed. Measured 23.08.2026 --
+# all 8 files fail the gate's docs-boundary check. Making them tracked-but-
+# local means either moving them to a framework home that earns an allowlist
+# entry, or splitting the allowlist into two lists, which is an ADR-sized
+# change.
+#
+# THE TWO MECHANISMS STILL COVER DIFFERENT SETS. Since WI-0018, install.sh no
+# longer copies docs/ wholesale: install_docs() filters each top-level docs/
+# child against scripts/lib/docs-framework-allowlist.txt and reports what it
+# skipped. This ignore rule is therefore not the only thing keeping working
+# state out of an installation -- but it stays the first line, and it is the
+# one that also keeps the state out of a clone. The allowlist is per top-level
+# entry and reads the FILESYSTEM, not the git index, so an ignored file inside
+# an ALLOWLISTED directory is still installed (see assets/ below). Inverting
+# this rule does not close that gap and was not meant to: the `!` lines
+# re-open the allowlisted directories, so e.g. docs/adr/.session-context.md is
+# not ignored here either. (docs/adr/.DS_Store IS ignored, but by the
+# **/.DS_Store rule at the top of this file, not by anything in this block.)
+# That hole is CCP-1156's and it stays open. It is CHARACTERISED -- stated in
+# executable form, not fixed -- by test_docs_boundary_default_deny.py's
+# ReincludedDirectoriesAreTheKnownBlindSpotTest. It is deliberately NOT in
+# test_docs_dotfile_gitignore_coverage.py, whose sweep anchors on `docs/\.`
+# and structurally cannot produce a path inside a subdirectory; that was
+# tried, and a mutation adding docs/adr/.session-context.md to a shipped
+# command left its suite green.
+#
+# THE TWO REGISTERS, AND WHY A TEST HOLDS THEM TOGETHER. The `!` lines are a
+# THIRD copy of the allowlist, beside artifact-gate.sh's reader and
+# install.sh's. CCP-1017's PO decision accepted that cost in advance and named
+# the condition: "two lists that must agree are exactly the shape that
+# produced WI-0059 ... derive one from the other or pin their agreement with a
+# test". A .gitignore cannot include another file, so derivation is
+# unavailable and the pin is the obligation --
+# scripts/tests/test_docs_boundary_default_deny.py reads both files
+# independently and fails whichever one is edited alone.
+#
+# ADDING A FRAMEWORK DOCUMENT IS THEREFORE TWO LINES, not one: the allowlist
+# entry (so the gate accepts it and install.sh ships it) and the `!docs/` line
+# here (so this repository still tracks it). Forgetting either is a test
+# failure, never a silent miss.
+#
+# ORDER AND FORM ARE LOAD-BEARING, measured in a throwaway repo rather than
+# assumed. `docs/*` + `!docs/adr/` works; `docs/` + `!docs/adr/` erases the
+# whole tree, because git never descends into an excluded DIRECTORY and the
+# re-inclusion can no longer be reached. A `!` line placed BEFORE docs/* is
+# overruled by it -- last matching pattern wins. Both are pinned.
+#
+# A project generated by scripts/project-init.sh still gets an ENUMERATED
+# dotfile block instead of this rule, and that difference is deliberate: a
+# user's docs/ is their own working directory and may legitimately track
+# things CCPR's docs/ never does. Default-deny is right for a repository whose
+# docs/ ships as framework content; it would be wrong for theirs.
+docs/*
+!docs/adr/
+!docs/logo/
+!docs/CONSTITUTION.md
+!docs/NEXT_STEPS_REFERENCE.md
+!docs/PROJECT_PHASES.md
 
 # The project's own Claude settings. `migrate` creates or rewrites this file to
 # flip `workitems.provider`, and a youtrack-backed project must put its
@@ -94,13 +173,3 @@ docs/workitems-idmap.yml
 # nothing here ships. Ignored on top of that, to keep `git status` quiet.
 assets/
 
-# WI-0058: volatile generator outputs directly under docs/ (session snapshots,
-# gate-preflight notes, quality-scan / cross-check / baseline-prep reports --
-# scripts/tests/test_docs_dotfile_gitignore_coverage.py sweeps the shipped
-# scripts and commands for the current list). A broad dotfile pattern, not an
-# enumeration: this repo tracks no dotfile directly under docs/ today (verified
-# via `git ls-files`), and a pattern nobody has to remember to extend is what
-# actually keeps pace with a script adding a new report next quarter. A new
-# project generated by scripts/project-init.sh gets an enumerated block instead
-# -- a user's docs/ may deliberately track a dotfile this repo does not.
-docs/.*

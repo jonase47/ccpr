@@ -895,6 +895,41 @@ PYCACHE_ARTEFACT = "hooks/__pycache__/agent-monitor.cpython-314.pyc"
 DS_STORE_ARTEFACT = "templates/.DS_Store"
 
 
+def shipped_gitignore_rule(pattern):
+    """The `<source>:<line>:<pattern>` string `git check-ignore -v` prints for
+    a rule in the SHIPPED .gitignore (which these fixtures copy verbatim into
+    `$SRC`, so the line numbers agree).
+
+    The PATTERN is the assertion -- "which rule excused this path" is the
+    thing CCP-1170 made the report carry. The LINE NUMBER is incidental: it
+    moves whenever a comment above the rule is edited. It was written out in
+    full here, and CCP-1214's .gitignore rewrite duly broke two tests whose
+    invariants had not changed at all (`docs/HANDOVER.md` is now excused by
+    the `docs/*` default-deny rule instead of by a line naming it). Deriving
+    the number keeps the expectation about the rule and not about the file's
+    layout.
+
+    Deliberately NOT applied to the `__pycache__/` expectations elsewhere in
+    this module: those sit in the .gitignore's stable header block, they were
+    not touched by CCP-1214, and rewriting passing assertions to prove a point
+    is churn.
+    """
+    lines = (REPO_ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
+    matches = [i for i, line in enumerate(lines, start=1)
+               if line.strip() == pattern]
+    if len(matches) != 1:
+        raise AssertionError(
+            "expected exactly one {!r} line in the shipped .gitignore, "
+            "found {}".format(pattern, len(matches)))
+    return ".gitignore:{}:{}".format(matches[0], pattern)
+
+
+# The rule that keeps maintainer working state under docs/ out of a clone.
+# Since CCP-1214 that is the default-deny rule rather than a line naming each
+# path; `docs/HANDOVER.md` is the path these tests plant.
+DOCS_WORKING_STATE_RULE = "docs/*"
+
+
 class LocallyGeneratedArtefactsAreNotDivergenceTest(VerifyBase):
     """An installation grows files nobody put there. A `.pyc` cache appears
     the first time a hook runs; a `.DS_Store` appears when the directory is
@@ -1991,8 +2026,10 @@ class NonFrameworkDocsAreNotExpectedInTheInstallationTest(WidenedScopeBase):
         """The production shape, and the branch this module asserted only
         in prose until a CCP-1166 code review caught the gap.
 
-        In THIS repository docs/HANDOVER.md is untracked and named by the
-        shipped .gitignore. So the two rules overlap: the allowlist keeps it
+        In THIS repository docs/HANDOVER.md is untracked and denied by the
+        shipped .gitignore -- by the `docs/*` default-deny rule since
+        CCP-1214, where it used to be by a line naming the path. So the two
+        rules overlap: the allowlist keeps it
         out of the expected set, and then path_is_source_ignored() excuses
         it on the walk -- IGNORED, exit 0, not UNEXPECTED. Measured against
         the real tree before this test was written; the fixture reaches the
@@ -2014,7 +2051,9 @@ class NonFrameworkDocsAreNotExpectedInTheInstallationTest(WidenedScopeBase):
         self.plant("docs/HANDOVER.md", "# should not be here\n")
         r = self.verify()
         self.assertEqual(0, r.returncode, r.stdout + r.stderr)
-        self.assertEqual({".gitignore:34:docs/HANDOVER.md": 1}, ignored_groups(r.stdout))
+        self.assertEqual(
+            {shipped_gitignore_rule(DOCS_WORKING_STATE_RULE): 1},
+            ignored_groups(r.stdout))
         self.assertEqual([], report_block(r.stdout, "UNEXPECTED"))
         self.assertEqual([], report_block(r.stdout, "MISSING"))
         self.assertEqual(["docs/HANDOVER.md"],
@@ -2042,7 +2081,7 @@ class NonFrameworkDocsAreNotExpectedInTheInstallationTest(WidenedScopeBase):
         self.assertEqual(0, r.returncode, r.stdout + r.stderr)
         self.assertEqual(
             {
-                ".gitignore:34:docs/HANDOVER.md": 1,
+                shipped_gitignore_rule(DOCS_WORKING_STATE_RULE): 1,
                 ".gitignore:6:__pycache__/": 1,
             },
             ignored_groups(r.stdout),

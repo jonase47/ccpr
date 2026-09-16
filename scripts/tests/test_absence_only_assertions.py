@@ -2268,7 +2268,14 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
         test_agent_handover_write_boundary.py, the HANDOVER write-boundary
         guard. Proven an addition, not a swap: `git status --porcelain
         scripts/tests` showed one `??` line for the new file plus this
-        module's own ` M`, nothing deleted, nothing renamed."""
+        module's own ` M`, nothing deleted, nothing renamed.
+
+        Bumped 76 -> 77, 16.09.2026 (CCP-1214): added
+        test_docs_boundary_default_deny.py, the docs/ default-deny guard.
+        Proven an addition, not a swap: `git status --porcelain scripts/tests`
+        showed one `??` line for the new file plus a ` M` on
+        test_docs_dotfile_gitignore_coverage.py (whose repo-side gap-1 class
+        was folded into the new module); nothing deleted, nothing renamed."""
         files = sorted(TESTS_DIR.glob("*.py")) + sorted((TESTS_DIR / "workitems").glob("*.py"))
         names = sorted(f.relative_to(TESTS_DIR).as_posix() for f in files if f.name != "__init__.py")
         # The floor first, and it does exactly one job: it catches this glob
@@ -2280,9 +2287,9 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
         # floor; it is why the set pin below stands beside it. Keeping both is
         # the decision (WI-0133 T1), not redundancy left in by accident.
         self.assertGreaterEqual(  # pin: floor tests-corpus-files
-            len(names), 76,
-            "the scripts/tests corpus glob reached {} file(s); it reached 76 "
-            "when this floor was measured (11.09.2026). A SHRINKING scope is "
+            len(names), 77,
+            "the scripts/tests corpus glob reached {} file(s); it reached 77 "
+            "when this floor was measured (16.09.2026). A SHRINKING scope is "
             "a blind scanner, not a clean tree.".format(len(names)),
         )
         # The set pin, replacing a bare count (WI-0133 T1). A count cannot
@@ -2322,6 +2329,7 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
             "test_conformance_run.py",
             "test_doc_counts_agree.py",
             "test_doc_volume_check.py",
+            "test_docs_boundary_default_deny.py",
             "test_docs_dotfile_gitignore_coverage.py",
             "test_external_tool_exit_status.py",
             "test_freeze_phase_docs.py",
@@ -2380,12 +2388,14 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
             "workitems/test_youtrack.py",
             ],
             names,
-            "the scripts/tests corpus (75 -> 76, 11.09.2026, CCP-1178: "
-            "test_agent_handover_write_boundary.py added; proven an "
-            "addition rather than a swap by `git status --porcelain "
-            "scripts/tests` -- one `??` line (the new file) plus this "
-            "module\'s own ` M` line; nothing deleted, nothing renamed. "
-            "Earlier trajectory: 73 -> 75, 10.09.2026, CCP-1172, "
+            "the scripts/tests corpus (76 -> 77, 16.09.2026, CCP-1214: "
+            "test_docs_boundary_default_deny.py added; proven an addition "
+            "rather than a swap by `git status --porcelain scripts/tests` -- "
+            "one `??` line (the new file) plus a ` M` on "
+            "test_docs_dotfile_gitignore_coverage.py; nothing deleted, "
+            "nothing renamed. Earlier trajectory: 75 -> 76, 11.09.2026, "
+            "CCP-1178, test_agent_handover_write_boundary.py; "
+            "73 -> 75, 10.09.2026, CCP-1172, "
             "workitems/test_workitem_similar.py and "
             "workitems/similar_fixture_texts.py; 72 -> 73, 09.09.2026, "
             "CCP-1171, workitems/test_workitem_lint.py)",
