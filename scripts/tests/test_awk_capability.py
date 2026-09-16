@@ -1,45 +1,64 @@
 r"""test_awk_capability.py -- CCP-1179: `scripts/lib/awk_capability.sh`, the
 shared probe that answers "can the awk that will actually run this repo's
-CommonMark block-structure scanners compile the EREs they use?".
+CommonMark block-structure scanners compile and correctly APPLY the regex
+constructs they are built out of?", plus the two shipped scripts' responses
+when the answer is no.
 
 ## Why a probe exists at all
 
 `mawk 1.3.4 20240123` -- the default `/usr/bin/awk` on Debian-family
-systems -- has a regex-compiler bug: an interval quantifier `{n,m}`
-followed later in the same ERE by a parenthesised group aborts the whole
-program with `REcompile() - panic: values still on machine stack`, exit
-100. Two shipped scripts carried exactly that shape in their fence /
-heading / list-marker detection. The abort is loud on the awk child's
-stderr and INVISIBLE on both channels automation reads: memory-lint.sh's
-own report said `0 errors, 0 warnings, 0 info` / `**Exit:** 0` -- a check
-that parsed nothing reporting clean (KA-G-017's "a run that verified
-nothing is not a pass", one level below where that rule was written).
+systems -- carries two independent regex defects, and they fail in opposite
+directions:
 
-CCP-1179 rewrote the EREs so every awk compiles them. This probe is the
-part that stays: the next dialect surprise must produce a could-not-run
-outcome, not a false green.
+  * LOUD: an interval quantifier `{n,m}` followed later in the same ERE by a
+    parenthesised group aborts the program with `REcompile() - panic: values
+    still on machine stack`, exit 100.
+  * QUIET: `X{3,}` compiles fine and is then applied as `X{3}`. A fenced
+    block closed by a run LONGER than its opener stops closing, and the rest
+    of the file is swallowed as fence content. No error, no exit code.
+
+memory-lint.sh's block-structure scanner hit both. The loud one was still
+invisible on the two channels automation reads: the scanner runs inside a
+process substitution, so the awk child's exit code is unobservable by
+construction, and the report said `0 errors, 0 warnings, 0 info` /
+`**Exit:** 0` -- a check that parsed nothing reporting clean (KA-G-017's "a
+run that verified nothing is not a pass", one level below where that rule
+was written).
+
+CCP-1179 rewrote the patterns so that neither defect is reachable. The probe
+is the part that stays.
+
+## The probe does NOT ask "does this awk have mawk's bug"
+
+That question has a shelf life: keyed to one vendor defect, it answers no
+for mawk forever, including after the patterns that tripped over it are
+gone. The library asks the durable question instead -- can this awk run the
+constructs we actually ship -- and its canary is therefore derived from the
+shipped patterns, not from the bug. The cost is stated honestly in the
+library's own docstring: it is a smoke test over constructs, so a future
+pattern built from a construct neither canary exercises is not covered.
 
 ## Two-sided coverage, and why the stubs are not the whole story
 
-`CanaryVerdictTest` drives the probe with STUB `awk` binaries on PATH.
-A stub is not the real thing (G-127), and it is used here for one reason:
-the incapable side of the seam cannot be reproduced on a machine whose awk
-is capable, and the capable side cannot be reproduced on a machine whose
-awk is mawk -- no single machine can exercise both with a real binary, and
-gating either half on the local awk variant would mean the shipped
-could-not-run path is verified on some machines and not others.
+`CanaryVerdictTest`, `CouldNotRunReasonTest` and the two
+`*CouldNotRunTest` classes drive the probe and the shipped scripts with STUB
+`awk` binaries. A stub is not the real thing (G-127), and it is used here
+for one reason: no single machine can exercise both a capable and an
+incapable awk with a real binary, and gating either half on the local awk
+variant would leave the shipped could-not-run path verified on some machines
+and unverified on others.
 
-`RealAwkAgreementTest` is the other half and uses no stub at all: it
-cross-asserts the probe's verdict about THIS machine's real awk against an
-independent, differently-spelled instance of the same ERE shape (the
-literal fence-opener pattern memory-lint.sh:1770 shipped before CCP-1179).
-That is a genuine cross-assert rather than a tautology (G-095): the canary
-and the witness share only the *shape* under test, not their text, and the
-assertion is correct on a gawk machine (both compile), on a mawk machine
-(neither compiles) and on a `{n,m}`-less awk (neither matches) alike.
+`RealAwkAgreementTest` is the other half and uses no stub at all. It
+compares the probe's verdict about THIS machine's real awk against the
+end-to-end truth measured independently: does the real memory-lint.sh
+actually find a known dead link? The two are genuinely independent (G-095)
+-- two synthetic EREs in a BEGIN block versus 2000 lines of shell and awk
+over a Markdown file -- so a canary that drifted into accepting an awk the
+scanner cannot use, or rejecting one it can, breaks it.
 """
 
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -48,20 +67,13 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 LIB = REPO_ROOT / "scripts" / "lib" / "awk_capability.sh"
+MEMORY_LINT = REPO_ROOT / "scripts" / "memory-lint.sh"
 
 # The same sandboxed PATH test_shellcheck_run.py / test_artifact_gate.py use.
 # It is also the PATH test_memory_lint.py hands memory-lint.sh, so the awk a
 # probe run here resolves is the awk those runs resolve.
 SANDBOX_PATH = "/usr/bin:/bin:/usr/sbin:/sbin"
 
-# The ERE `scripts/memory-lint.sh:1770` and `scripts/migrate-review-headers.sh:278`
-# both carried before CCP-1179 -- the CommonMark fence opener. Kept here as a
-# WITNESS of the failing shape (interval quantifier, then a parenthesised
-# group), not as a claim about what those files contain today: the whole point
-# of the fix is that they no longer contain it. Spelled differently from the
-# probe's own canary on purpose, so the agreement test below compares two
-# independent instances of the shape rather than an expression against itself.
-HISTORICAL_FENCE_OPENER_ERE = r"^[ ]{0,3}(```+|~~~+)"
 
 
 def _stub_dir(script_body):
@@ -73,28 +85,40 @@ def _stub_dir(script_body):
     return tmp
 
 
-# Compiles and matches: the shape of a capable awk's answer to the canary.
-CAPABLE_STUB = "#!/bin/sh\nprintf '1\\n'\n"
+# All four canary checks passed: the answer a capable awk gives.
+CAPABLE_STUB = "#!/bin/sh\nprintf '4\\n'\n"
 
-def _panicking_stub():
-    """An awk that is mawk 1.3.4 in the one respect under test, and a real
-    awk in every other.
+# The QUIET failure class, and the reason the canary counts correct ANSWERS
+# rather than merely a successful exit. An awk can compile every canary ERE,
+# exit 0, print nothing on stderr -- and still apply one of them wrongly.
+# That is not hypothetical: mawk 1.3.4 compiles `X{3,}` and then applies it as
+# `X{3}`, so a fenced block closed by a run LONGER than its opener stops
+# closing and the rest of the file is swallowed as fence content. No error, no
+# exit code, just a scanner that quietly stops finding things.
+WRONG_ANSWER_STUB = "#!/bin/sh\nprintf '3\\n'\n"
 
-    It MODELS the measured trigger -- an interval quantifier `{n,m}` followed
-    later in the same ERE by a parenthesised group -- rather than matching the
-    canary's literal text, and delegates everything else to the machine's real
-    awk. Both properties are load-bearing:
 
-    * A stub that panicked on every argv is a machine nobody runs. It would
-      also make `memory-lint.sh`'s unrelated date and frontmatter awk passes
-      die BEFORE the probe, so the tests below would be describing a
-      catastrophic-awk scenario rather than the dialect gap CCP-1179 is about.
-    * A stub keyed to the canary's literal spelling would be an expression
-      checked against a copy of itself (G-095). Keyed to the SHAPE, it stays a
-      real question: change the canary to something that no longer carries the
-      shape and this fixture stops panicking, loudly.
+def _aborting_stub():
+    """An awk that aborts on the capability canary and is a real awk for
+    everything else.
 
-    `--version` is answered the way the real binary answers it.
+    Keyed to the canary program's own `# awkcap-canary` marker. That is a
+    deliberate, narrow choice: this fixture's job is to exercise how the
+    SHIPPED SCRIPTS RESPOND to an awk that cannot run the probe, not to
+    re-detect any particular vendor's bug. Whether the probe's verdict is
+    itself correct about a real awk is a different question, and
+    RealAwkAgreementTest below answers it against the real binary with no
+    stub involved.
+
+    Delegating everything else to the machine's real awk is load-bearing: an
+    awk that failed on every argv is a machine nobody runs, and it would make
+    memory-lint.sh's unrelated date and frontmatter passes die BEFORE the
+    probe ever ran, so these tests would be describing a catastrophic-awk
+    scenario rather than the dialect gap CCP-1179 is about.
+
+    The panic text is mawk 1.3.4's, byte-for-byte, because that is the failure
+    a reader of these tests will have seen. `--version` is answered the way
+    the real binary answers it.
     """
     real = shutil.which("awk", path=SANDBOX_PATH)
     assert real, "the sandboxed PATH must contain an awk to delegate to"
@@ -102,21 +126,13 @@ def _panicking_stub():
         "#!/bin/sh\n"
         "case \"$1\" in --version|-W*) echo 'mawk 1.3.4 20240123'; exit 0 ;; esac\n"
         "for _a in \"$@\"; do\n"
-        "  if printf '%s' \"$_a\" | grep -qE '[{][0-9]+,[0-9]*[}][^(]*[(]'; then\n"
+        "  case \"$_a\" in *awkcap-canary*)\n"
         "    echo 'REcompile() - panic:  values still on machine stack' >&2\n"
-        "    exit 100\n"
-        "  fi\n"
+        "    exit 100 ;;\n"
+        "  esac\n"
         "done\n"
         f"exec {real} \"$@\"\n"
     )
-
-# The quieter dialect gap, and the reason the canary asserts a MATCH rather
-# than merely a successful exit: an awk with no interval-quantifier support at
-# all (the original one-true-awk, busybox built without them) compiles
-# `[ ]{0,3}` as four literal characters, exits 0, and silently matches
-# nothing. Every downstream scanner then reports a clean file it never
-# understood -- the exact false-green CCP-1179 exists to close.
-NO_INTERVALS_STUB = "#!/bin/sh\nprintf '0\\n'\n"
 
 
 class AwkCapabilityLibTestBase(unittest.TestCase):
@@ -148,19 +164,19 @@ class CanaryVerdictTest(AwkCapabilityLibTestBase):
         self.assertEqual(0, r.returncode, r.stdout + r.stderr)
 
     def test_an_awk_that_aborts_on_the_canary_is_not_capable(self):
-        r = self.call("awkcap_canary_ok", _panicking_stub())
+        r = self.call("awkcap_canary_ok", _aborting_stub())
         self.assertNotEqual(0, r.returncode, r.stdout + r.stderr)
 
     def test_an_awk_that_exits_clean_without_matching_is_not_capable(self):
-        # Exit 0 alone is not the question -- see NO_INTERVALS_STUB's comment.
-        r = self.call("awkcap_canary_ok", NO_INTERVALS_STUB)
+        # Exit 0 alone is not the question -- see WRONG_ANSWER_STUB's comment.
+        r = self.call("awkcap_canary_ok", WRONG_ANSWER_STUB)
         self.assertNotEqual(0, r.returncode, r.stdout + r.stderr)
 
     def test_the_panic_text_never_reaches_the_callers_stderr(self):
         # The probe's job is to REPLACE the raw panic with a sentence a human
         # can act on; leaking it too would put the unexplained crash back on
         # the channel the could-not-run message is supposed to own.
-        r = self.call("awkcap_canary_ok || true", _panicking_stub())
+        r = self.call("awkcap_canary_ok || true", _aborting_stub())
         self.assertNotIn("REcompile", r.stderr)
         self.assertNotIn("REcompile", r.stdout)
 
@@ -176,28 +192,32 @@ class CouldNotRunReasonTest(AwkCapabilityLibTestBase):
 
     def test_the_reason_is_a_single_line(self):
         # Both call sites interpolate it into one report line / one warn().
-        r = self.call("awkcap_could_not_run_reason", _panicking_stub())
+        r = self.call("awkcap_could_not_run_reason", _aborting_stub())
         self.assertEqual(1, len(r.stdout.strip().splitlines()), r.stdout)
 
     def test_the_reason_names_the_awk_that_was_probed(self):
-        r = self.call("awkcap_could_not_run_reason", _panicking_stub())
+        r = self.call("awkcap_could_not_run_reason", _aborting_stub())
         self.assertIn("/awk", r.stdout, "the resolved awk path must be named")
 
     def test_the_reason_names_the_ticket(self):
-        r = self.call("awkcap_could_not_run_reason", _panicking_stub())
+        r = self.call("awkcap_could_not_run_reason", _aborting_stub())
         self.assertIn("CCP-1179", r.stdout)
 
-    def test_the_reason_names_the_ere_shape_that_failed(self):
-        r = self.call("awkcap_could_not_run_reason", _panicking_stub())
-        self.assertIn("interval", r.stdout)
-        self.assertIn("group", r.stdout)
+    def test_the_reason_reports_what_the_canary_actually_answered(self):
+        # "it failed" is not diagnosable; "[exit 100]" and "[3]" point at two
+        # completely different problems, and the second one is invisible in
+        # any exit code.
+        r = self.call("awkcap_could_not_run_reason", _aborting_stub())
+        self.assertIn("[exit 100]", r.stdout)
+        r = self.call("awkcap_could_not_run_reason", WRONG_ANSWER_STUB)
+        self.assertIn("[3]", r.stdout)
 
     def test_the_workaround_is_offered_as_interim_and_not_as_a_requirement(self):
         # CCPR runs on what the system ships (ADR-0011's bash-3.2 floor is the
         # same posture one tool over). gawk is a way OUT of a broken run, never
         # a prerequisite for a normal one -- if this ever reads as a dependency,
         # the sentence is wrong, not the test.
-        r = self.call("awkcap_could_not_run_reason", _panicking_stub())
+        r = self.call("awkcap_could_not_run_reason", _aborting_stub())
         self.assertIn("gawk", r.stdout)
         self.assertIn("interim", r.stdout.lower())
         self.assertIn("not a CCPR requirement", r.stdout)
@@ -221,30 +241,105 @@ class IdentityTest(AwkCapabilityLibTestBase):
         self.assertIn("/awk", r.stdout.strip())
 
 
-class RealAwkAgreementTest(AwkCapabilityLibTestBase):
-    """No stubs: the probe's verdict about THIS machine's real awk, against
-    an independent witness of the same ERE shape."""
+class RealAwkAgreementTest(unittest.TestCase):
+    """No stubs anywhere: does the probe's verdict about THIS machine's real
+    awk agree with whether the real script really works on it?
 
-    def _real_awk_compiles(self, ere):
-        prog = '{ if (match($0, /%s/)) hits++ } END { print hits+0 }' % ere
+    This is the half that keeps the canary honest. The canary is a proxy --
+    two EREs standing in for the constructs memory-lint.sh's block scanner is
+    built out of -- and a proxy can drift from what it proxies. The check
+    below compares it against the end-to-end truth, measured independently:
+    run the real script over a fixture with exactly one known dead link and
+    see whether it finds it.
+
+    The two are genuinely independent (G-095): one compiles two synthetic
+    EREs in a BEGIN block, the other runs 2000 lines of shell and awk over a
+    Markdown file. On a capable awk both say yes; on an awk that cannot run
+    the scanner the probe says no AND the script reports could-not-run, so
+    the link is not found. A canary that drifted into accepting an awk the
+    scanner cannot use -- or into rejecting one it can -- breaks this.
+    """
+
+    KNOWN_DEAD_LINK_INDEX = "# Memory Index\n\n- [Dead](nonexistent.md) — one dead link.\n"
+
+    def _probe_says_capable(self):
         r = subprocess.run(
-            ["awk", prog],
-            input="```\n", capture_output=True, text=True,
-            env={"PATH": SANDBOX_PATH, "LC_ALL": "C"},
+            ["bash", "-c", '. "$1"; awkcap_canary_ok', "_", str(LIB)],
+            capture_output=True, text=True,
+            env={"PATH": SANDBOX_PATH, "HOME": os.environ.get("HOME", "/")},
         )
-        return r.returncode == 0 and r.stderr == "" and r.stdout.strip() == "1"
+        return r.returncode == 0
 
-    def test_the_canary_verdict_agrees_with_the_historical_fence_opener(self):
-        r = self.call("awkcap_canary_ok")
-        probe_says_capable = r.returncode == 0
-        witness_compiles = self._real_awk_compiles(HISTORICAL_FENCE_OPENER_ERE)
+    def _script_finds_the_known_dead_link(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "project"
+            (root / "docs" / "memory").mkdir(parents=True)
+            (root / "docs" / "memory" / "MEMORY.md").write_text(
+                self.KNOWN_DEAD_LINK_INDEX, encoding="utf-8")
+            home = Path(tmp) / "home"
+            home.mkdir()
+            r = subprocess.run(
+                ["bash", str(MEMORY_LINT), str(root)],
+                capture_output=True, text=True,
+                env={"HOME": str(home), "PATH": SANDBOX_PATH},
+            )
+            return "link target" in r.stdout
+
+    def test_the_probes_verdict_agrees_with_whether_the_script_really_works(self):
+        probe = self._probe_says_capable()
+        reality = self._script_finds_the_known_dead_link()
         self.assertEqual(
-            witness_compiles, probe_says_capable,
-            "the canary and the ERE shape it stands in for must give the same "
-            "answer on this machine's real awk -- if they diverge the canary "
-            "no longer reproduces the failing shape and the could-not-run "
-            f"path guards nothing. probe={r.stdout!r}/{r.stderr!r}",
+            reality, probe,
+            "the capability canary and the scanner it stands in for disagree "
+            "about this machine's awk. If the probe says capable and the "
+            "script finds nothing, the could-not-run path is not guarding "
+            "what it claims to; if the probe says incapable and the script "
+            "works, the canary is testing a construct the scanner does not "
+            "use and is locking out a perfectly good awk.",
         )
+
+    def test_every_anchored_ere_in_the_scanner_compiles_on_this_awk(self):
+        """The one-directional companion: when the probe says capable, EVERY
+        anchored ERE literal the scanner ships must actually compile here.
+
+        Catches a pattern added later whose construct neither canary covers
+        -- on a machine whose awk cannot compile it. It cannot catch the
+        same pattern on a machine whose awk can, which is the boundary the
+        library's own docstring names and CCP-1129's line of work addresses.
+        """
+        if not self._probe_says_capable():
+            self.skipTest("the probe already reports this awk as incapable")
+        source = MEMORY_LINT.read_text(encoding="utf-8")
+        # `(?:[^/\n\\]|\\.)*` rather than a plain `[^/\n]*`: the HTML-block-6
+        # opener contains `[\/]`, an ESCAPED slash inside a bracket
+        # expression, and a naive scan truncates the literal there and then
+        # hands awk a runaway regex of its own making.
+        eres = re.findall(r"/(\^(?:[^/\n\\]|\\.)*)/", source)
+        # A zero-literal guard, deliberately not a floor pin: the number of
+        # anchored EREs in the scanner is legitimately volatile CommonMark
+        # work, and pinning it would demand a `set` partner naming all 21 --
+        # a list that changes with every block-structure tweak and tells
+        # nobody anything. The only thing worth asserting here is that the
+        # extraction did not go BLIND, which would make the loop below
+        # vacuous. Same shape, and same reasoning, as
+        # test_bsd_gnu_portability.py's `assertGreater(len(files), 0)`.
+        self.assertGreater(
+            len(eres), 0,
+            "the anchored-ERE extraction enumerated NOTHING in "
+            "memory-lint.sh -- that is a broken scan, not a simpler script, "
+            "and it would make the per-ERE check below assert over an empty "
+            "list",
+        )
+        broken = []
+        for ere in sorted(set(eres)):
+            prog = "BEGIN { if (match(\"x\", /%s/)) n = 1 }" % ere
+            r = subprocess.run(
+                ["awk", prog], input="", capture_output=True, text=True,
+                env={"PATH": SANDBOX_PATH, "LC_ALL": "C"},
+            )
+            if r.returncode != 0 or r.stderr:
+                broken.append((ere, r.returncode, r.stderr.strip()))
+        self.assertEqual([], broken)
 
 
 class ShippedScriptCouldNotRunTestBase(unittest.TestCase):
@@ -264,7 +359,7 @@ class ShippedScriptCouldNotRunTestBase(unittest.TestCase):
         self.addCleanup(subprocess.run, ["rm", "-rf", str(self.fake_home)], check=False)
 
     def run_script(self, *args, stub_body=None):
-        stub = _stub_dir(stub_body or _panicking_stub())
+        stub = _stub_dir(stub_body or _aborting_stub())
         self.addCleanup(subprocess.run, ["rm", "-rf", stub], check=False)
         return subprocess.run(
             ["bash", str(self.SCRIPT), str(self.project), *args],

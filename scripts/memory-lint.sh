@@ -217,11 +217,16 @@ TARGETS_PRESENT=0
 # second silently disappeared from the report.
 #
 # The second cause (CCP-1179) is a DIALECT gap, not a scope gap: an awk that
-# aborts on this script's CommonMark block-structure EREs leaves the whole
-# link scan unparsed. Before this check existed, that produced "**Summary:**
-# 0 errors, 0 warnings, 0 info." / "**Exit:** 0" — a check that read nothing
-# reporting clean, on a machine whose stock /usr/bin/awk is mawk. See
-# scripts/lib/awk_capability.sh for the probe and the measurement.
+# cannot compile or cannot correctly APPLY this script's block-structure
+# patterns leaves the link scan wrong or unparsed. Before this check existed,
+# the loud version of that produced "**Summary:** 0 errors, 0 warnings, 0
+# info." / "**Exit:** 0" — a check that read nothing reporting clean, on a
+# machine whose stock /usr/bin/awk is mawk.
+#
+# The probe asks whether this awk can run the constructs this script SHIPS —
+# deliberately not whether it carries any particular known bug, which would
+# keep rejecting an awk long after the pattern it choked on was rewritten.
+# See scripts/lib/awk_capability.sh for the canary and the measurement.
 COULD_NOT_RUN_REASONS=()
 if (( TARGETS_PRESENT == 0 )); then
     COULD_NOT_RUN_REASONS+=("no docs/memory/, no ~/.claude/instincts.md, no ~/.claude/instincts/, no ~/.claude/memory/")
@@ -1792,7 +1797,23 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
             # as the opener — fence_char/fence_len carry that across lines, so a
             # `~~~` inside an open backtick fence stays content, not a close.
             if (in_fence) {
-                if (match($0, "^[ ]{0,3}" fence_char "{" fence_len ",}[ \t]*$")) {
+                # The closing run is built by REPETITION, not by an interval
+                # quantifier (CCP-1179). `X{n,}` is the one construct here whose
+                # count is dynamic, so it cannot be written out the way the
+                # literal intervals in this program were -- and mawk 1.3.4
+                # 20240123 compiles `X{3,}` silently and then applies it as
+                # `X{3}`: a fence closed by a run LONGER than its opener stops
+                # being recognised, the block never closes, and the rest of the
+                # file is swallowed as fence content. No error, no exit code,
+                # just a scanner that quietly stops finding anything. `run`
+                # holds fence_len copies of the delimiter and `[<char>]*`
+                # allows any further ones, which is exactly what `{fence_len,}`
+                # means. fence_char is only ever a backtick or a tilde, neither
+                # of which is an ERE metacharacter, and the bracket expression
+                # keeps it literal regardless.
+                fence_close_run = ""
+                for (fence_i = 0; fence_i < fence_len; fence_i++) fence_close_run = fence_close_run fence_char
+                if (match($0, "^[ ]?[ ]?[ ]?" fence_close_run "[" fence_char "]*[ \t]*$")) {
                     in_fence = 0
                     fence_char = ""
                     fence_len = 0
@@ -1837,9 +1858,9 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
             # anyway, and only as defence: reading a matched substring before
             # calling out is the ordering that stays correct if any callee ever
             # uses match() again.
-            if (!in_html_comment && match($0, /^[ ]{0,3}(```+|~~~+)/)) {
+            if (!in_html_comment && match($0, /^[ ]?[ ]?[ ]?(```+|~~~+)/)) {
                 opener = substr($0, RSTART, RLENGTH)
-                sub(/^[ ]{0,3}/, "", opener)
+                sub(/^[ ]?[ ]?[ ]?/, "", opener)
                 flush_paragraph()
                 fence_char = substr(opener, 1, 1)
                 fence_len = length(opener)
@@ -1876,7 +1897,7 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
                 if ($0 ~ /-->/) in_html_comment = 0
                 next
             }
-            if (match($0, /^[ ]{0,3}<!--/)) {
+            if (match($0, /^[ ]?[ ]?[ ]?<!--/)) {
                 flush_paragraph()
                 if ($0 !~ /-->/) {
                     in_html_comment = 1
@@ -1901,7 +1922,7 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
             # block CAN interrupt a paragraph (only type 7, not implemented
             # here, cannot) — so any buffered paragraph is flushed here, not
             # carried into the block.
-            if (match(tolower($0), /^[ ]{0,3}<(script|pre|style)([ \t>]|$)/)) {
+            if (match(tolower($0), /^[ ]?[ ]?[ ]?<(script|pre|style)([ \t>]|$)/)) {
                 flush_paragraph()
                 in_html_block1 = 1
                 next
@@ -1916,7 +1937,7 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
             # directly against the reference (see the div/pre/script
             # constructs in reference_commonmark-conformance.md), not assumed.
             # Interrupts a paragraph, same as type 1 above.
-            if (match(tolower($0), /^[ ]{0,3}<[\/]?(address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h1|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|param|section|source|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul)([ \t]|\/?>|$)/)) {
+            if (match(tolower($0), /^[ ]?[ ]?[ ]?<[\/]?(address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h1|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|param|section|source|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul)([ \t]|\/?>|$)/)) {
                 flush_paragraph()
                 in_html_block6 = 1
                 next
@@ -2031,7 +2052,7 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
             # (an unpaired backtick that finds its partner later in the
             # paragraph), where the standalone resolution done here and the
             # in-context resolution done there can still disagree.
-            if (match($0, /^[ ]{0,3}\[/)) {
+            if (match($0, /^[ ]?[ ]?[ ]?\[/)) {
                 lstart = RSTART + RLENGTH - 1
                 lnum = parse_link_label($0, lstart)
                 if (lnum >= 2 && substr($0, lstart + lnum, 1) == ":") {
@@ -2107,7 +2128,7 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
             # `<ul><li>item</li></ul><hr />`), so gating it would keep the
             # container buffered and swallow links inside it — a false
             # negative. A mutation test adds the gate and pins that.
-            if ($0 ~ /^[ ]{0,3}((\*[ \t]*){3,}|(-[ \t]*){3,}|(_[ \t]*){3,})$/) {
+            if ($0 ~ /^[ ]?[ ]?[ ]?(\*[ \t]*\*[ \t]*\*[ \t]*(\*[ \t]*)*|-[ \t]*-[ \t]*-[ \t]*(-[ \t]*)*|_[ \t]*_[ \t]*_[ \t]*(_[ \t]*)*)$/) {
                 flush_paragraph()
                 next
             }
@@ -2153,14 +2174,14 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
             # as a non-boundary, which keeps the paragraph merged — a false
             # negative, the safe direction, and the one this whole gate exists
             # to avoid trading away.
-            if (pbuf_n > 0 && pbuf_para && $0 ~ /^[ ]{0,3}(=+|-+)[ \t]*$/) {
+            if (pbuf_n > 0 && pbuf_para && $0 ~ /^[ ]?[ ]?[ ]?(=+|-+)[ \t]*$/) {
                 flush_paragraph()
                 next
             }
             # An ATX heading (`#` through `######`) is always exactly one line
             # in CommonMark, so it flushes immediately after buffering itself —
             # it never accumulates a continuation line the way a list item can.
-            if ($0 ~ /^[ ]{0,3}#{1,6}([ \t]|$)/) {
+            if ($0 ~ /^[ ]?[ ]?[ ]?##?#?#?#?#?([ \t]|$)/) {
                 flush_paragraph()
                 append_paragraph($0)
                 flush_paragraph()
@@ -2170,7 +2191,7 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
             # may run on to further lines (a wrapped list item is still one
             # block) — flush whatever came before, then keep buffering from
             # here until the next boundary.
-            if ($0 ~ /^[ ]{0,3}([-+*]|[0-9]{1,9}[.)])[ \t]/) {
+            if ($0 ~ /^[ ]?[ ]?[ ]?([-+*]|[0-9][0-9]?[0-9]?[0-9]?[0-9]?[0-9]?[0-9]?[0-9]?[0-9]?[.)])[ \t]/) {
                 flush_paragraph()
                 append_paragraph($0)
                 next
@@ -2251,7 +2272,7 @@ for INDEX_FILE in "${INDEX_FILES[@]:-}"; do
             # This extractor still models no other part of block quotes
             # beyond this one interrupt boundary and the pre-existing setext
             # guard.
-            if ($0 ~ /^[ ]{0,3}>/) {
+            if ($0 ~ /^[ ]?[ ]?[ ]?>/) {
                 if (pbuf_n > 0 && !pbuf_quote) flush_paragraph()
                 pbuf_para = 0
                 pbuf_quote = 1

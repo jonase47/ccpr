@@ -100,9 +100,11 @@ source "$SCRIPT_DIR/lib/awk_capability.sh"
 # tracking is not a nicety — it is what keeps an illustrative
 # `reviewed_head: <40 hex>` line inside a ```yaml block from being hoisted
 # into real frontmatter, where /gate-p5 trusts it as ground truth for
-# staleness detection. An awk that cannot compile the block-structure EREs
-# does not degrade this script into "migrates less"; it degrades it into
-# "writes a fabricated anchor value into a file and reports success".
+# staleness detection. An awk that cannot compile the block-structure EREs —
+# or that compiles them and applies one WRONGLY, which is the quieter half of
+# the same defect class — does not degrade this script into "migrates less";
+# it degrades it into "writes a fabricated anchor value into a file and
+# reports success".
 #
 # So unlike memory-lint.sh's sibling check — a read-only linter, which
 # REPORTS could-not-run and exits 0 for check-all.sh to classify — this one
@@ -291,16 +293,32 @@ _body_text() {
         has_fm && c==1 && $0=="---" { c=2; next }
         c==2 {
             if (in_fence) {
-                if (match($0, "^[ ]{0,3}" fence_char "{" fence_len ",}[ \t]*$")) {
+                # The closing run is built by REPETITION, not by an interval
+                # quantifier (CCP-1179). `X{n,}` is the one construct here whose
+                # count is dynamic, so it cannot be written out the way the
+                # literal intervals in this program were -- and mawk 1.3.4
+                # 20240123 compiles `X{3,}` silently and then applies it as
+                # `X{3}`: a fence closed by a run LONGER than its opener stops
+                # being recognised, the block never closes, and the rest of the
+                # file is swallowed as fence content. No error, no exit code,
+                # just a scanner that quietly stops finding anything. `run`
+                # holds fence_len copies of the delimiter and `[<char>]*`
+                # allows any further ones, which is exactly what `{fence_len,}`
+                # means. fence_char is only ever a backtick or a tilde, neither
+                # of which is an ERE metacharacter, and the bracket expression
+                # keeps it literal regardless.
+                fence_close_run = ""
+                for (fence_i = 0; fence_i < fence_len; fence_i++) fence_close_run = fence_close_run fence_char
+                if (match($0, "^[ ]?[ ]?[ ]?" fence_close_run "[" fence_char "]*[ \t]*$")) {
                     in_fence = 0
                     fence_char = ""
                     fence_len = 0
                 }
                 next
             }
-            if (match($0, /^[ ]{0,3}(```+|~~~+)/)) {
+            if (match($0, /^[ ]?[ ]?[ ]?(```+|~~~+)/)) {
                 opener = substr($0, RSTART, RLENGTH)
-                sub(/^[ ]{0,3}/, "", opener)
+                sub(/^[ ]?[ ]?[ ]?/, "", opener)
                 fence_char = substr(opener, 1, 1)
                 fence_len = length(opener)
                 in_fence = 1

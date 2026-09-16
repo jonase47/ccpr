@@ -1767,6 +1767,30 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Fixed
 
+- **`scripts/memory-lint.sh` and `scripts/migrate-review-headers.sh` produced wrong results on
+  Debian-family systems, where `/usr/bin/awk` is mawk (CCP-1179).** `mawk 1.3.4 20240123` carries
+  two independent regex defects, and the block-structure scanner both scripts share hit both. The
+  LOUD one: an interval quantifier `{n,m}` followed later in the same ERE by a parenthesised group
+  aborts the program (`REcompile() - panic: values still on machine stack`, exit 100) — six shipped
+  EREs matched that shape, so the CommonMark fence opener, thematic break, setext underline, ATX
+  heading and list marker all died. The QUIET one, found while verifying the fix against the
+  conformance corpus and **not** part of the original report: `X{3,}` compiles without complaint
+  and is then applied as `X{3}`, so a fenced block closed by a run LONGER than its opener stops
+  closing and the remainder of the file is silently swallowed as fence content. Every affected ERE
+  is now written without an interval quantifier: `[ ]{0,3}` → `[ ]?[ ]?[ ]?` (exact for a
+  single-character class), `#{1,6}` → `##?#?#?#?#?` (**not** `#?#?#?#?#?#?`, which would also match
+  zero `#` and change the semantics), `[0-9]{1,9}` → one mandatory digit plus eight optional ones,
+  `(\*[ \t]*){3,}` → three explicit repetitions followed by `(\*[ \t]*)*`. The fence CLOSER is the
+  one site whose count is dynamic and therefore cannot be written out: it now builds the required
+  run by repetition and appends `[<char>]*`, which is what `{fence_len,}` meant. Each rewrite was
+  differential-tested against its predecessor for both language AND match-span equivalence
+  (`RSTART`/`RLENGTH` are consumed at the fence opener) before the CommonMark corpus was consulted
+  as the behavioural oracle. All 373 tests in `test_memory_lint.py`,
+  `test_memory_lint_commonmark_corpus.py` and `test_migrate_review_headers.py` now pass under mawk,
+  where 109 of them failed before. The mutation tests that embed literal script source were
+  respelled along with the source they mutate — including the ones reproducing HISTORICAL shapes,
+  since a mutant carrying the old spelling would itself have been unrunnable on the awk under test.
+
 - **12 domain agents plus `code-reviewer` instructed the agent to rewrite `docs/HANDOVER.md`
   at the end of every run, contradicting the framework's own orchestrator-owned HANDOVER model
   (CCP-1178).** All 13 `agents/*.md` files carried the identical line "read it at the start for

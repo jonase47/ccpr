@@ -52,42 +52,6 @@ import tempfile
 import unittest
 from pathlib import Path
 
-
-# --- CCP-1179, stage 1: awk-dialect gate (removed again in stage 2) -------
-#
-# On an awk whose regex compiler cannot handle this repo's CommonMark
-# block-structure EREs, the script under test refuses to run at all and
-# reports could-not-run (scripts/lib/awk_capability.sh). Every test below
-# then fails for a reason that has nothing to do with the contributor's own
-# change -- 109 red results on a stock Debian machine read as "I broke
-# something", which is worse than an explicit, named skip.
-#
-# The condition is asked of the SHIPPED probe rather than re-derived here.
-# A second, independently re-typed copy of a condition is exactly how the
-# two ends drift apart, and this one has to agree with what the script
-# itself decides, not merely resemble it.
-def _awk_compiles_block_structure_eres():
-    lib = Path(__file__).resolve().parents[1] / "lib" / "awk_capability.sh"
-    probe = subprocess.run(
-        ["bash", "-c", '. "$1"; awkcap_canary_ok', "_", str(lib)],
-        capture_output=True, text=True,
-        # The same sandboxed PATH every run_* helper in this module hands the
-        # script under test, so the awk probed here is the awk those runs get.
-        env={"PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "HOME": "/"},
-    )
-    return probe.returncode == 0
-
-
-AWK_COMPILES_BLOCK_STRUCTURE_ERES = _awk_compiles_block_structure_eres()
-
-AWK_SKIP_REASON = (
-    "this machine's awk cannot compile the CommonMark block-structure EREs "
-    "the script under test uses -- see scripts/lib/awk_capability.sh and "
-    "CCP-1179; the script reports could-not-run rather than a false green, "
-    "so there is no behaviour left here to assert"
-)
-
-
 SCRIPT_PATH = Path(__file__).resolve().parents[1] / "migrate-review-headers.sh"
 FRONTMATTER_LIB_PATH = Path(__file__).resolve().parents[1] / "lib" / "frontmatter.sh"
 
@@ -126,7 +90,6 @@ FRONTMATTER_MISSING_HEAD = (
 )
 
 
-@unittest.skipUnless(AWK_COMPILES_BLOCK_STRUCTURE_ERES, AWK_SKIP_REASON)
 class MigrateTestBase(unittest.TestCase):
     def setUp(self):
         self.project_dir = Path(tempfile.mkdtemp(prefix="ccpr-migrate-review-"))
@@ -146,7 +109,6 @@ class MigrateTestBase(unittest.TestCase):
         )
 
 
-@unittest.skipUnless(AWK_COMPILES_BLOCK_STRUCTURE_ERES, AWK_SKIP_REASON)
 class FilenamePatternMatchTest(MigrateTestBase):
     """Only the exact `SPRINT-<N>-review.md` shape is the holistic sprint
     review -- everything else in docs/reviews/ is left untouched, including
@@ -201,7 +163,6 @@ class FilenamePatternMatchTest(MigrateTestBase):
         self.assertEqual(f.read_text(), original)
 
 
-@unittest.skipUnless(AWK_COMPILES_BLOCK_STRUCTURE_ERES, AWK_SKIP_REASON)
 class SprintNumberNormalizationTest(MigrateTestBase):
     """The real consumer-a corpus zero-pads sprint numbers in the
     filename (SPRINT-01-review.md, SPRINT-02-review.md, SPRINT-03-review.md)
@@ -230,7 +191,6 @@ class SprintNumberNormalizationTest(MigrateTestBase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
-@unittest.skipUnless(AWK_COMPILES_BLOCK_STRUCTURE_ERES, AWK_SKIP_REASON)
 class NoFrontmatterBlockTest(MigrateTestBase):
     """The real consumer-c corpus: 4 sprint-review-shaped files, zero of
     them carry a `---` block. Since none of WI-0072's five required fields
@@ -273,7 +233,6 @@ class NoFrontmatterBlockTest(MigrateTestBase):
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
 
 
-@unittest.skipUnless(AWK_COMPILES_BLOCK_STRUCTURE_ERES, AWK_SKIP_REASON)
 class ReconstructionStillForbiddenTest(MigrateTestBase):
     """Korrektur 2 draws the line precisely: RECONSTRUCTING a value that is
     genuinely absent stays forbidden -- this class pins that half only. The
@@ -317,7 +276,6 @@ class ReconstructionStillForbiddenTest(MigrateTestBase):
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
 
 
-@unittest.skipUnless(AWK_COMPILES_BLOCK_STRUCTURE_ERES, AWK_SKIP_REASON)
 class MovesExistingAnchorValueTest(MigrateTestBase):
     """Korrektur 2: a body line that is ALREADY an exact `<key>: <value>`
     for one of the three known anchor keys is not a guess -- it gets moved
@@ -428,7 +386,6 @@ class MovesExistingAnchorValueTest(MigrateTestBase):
         self.assertIn("warnings (anchor-field body/frontmatter conflict): 0", output.lower())
 
 
-@unittest.skipUnless(AWK_COMPILES_BLOCK_STRUCTURE_ERES, AWK_SKIP_REASON)
 class FencedCodeBlockNotHoistedTest(MigrateTestBase):
     """22.08.2026 correction, Befund 1 in review: a review report that
     documents WI-0072's own header schema (commands/p5-review-sprint.md is
@@ -537,7 +494,6 @@ class FencedCodeBlockNotHoistedTest(MigrateTestBase):
         self.assertEqual(f.read_text(), body)
 
 
-@unittest.skipUnless(AWK_COMPILES_BLOCK_STRUCTURE_ERES, AWK_SKIP_REASON)
 class AnchorValueShapeValidationTest(MigrateTestBase):
     """22.08.2026 correction, Befund 1 point 2 in review: the second
     defence line -- a hoist candidate must have the SHAPE of a commit SHA
@@ -580,7 +536,6 @@ class AnchorValueShapeValidationTest(MigrateTestBase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
-@unittest.skipUnless(AWK_COMPILES_BLOCK_STRUCTURE_ERES, AWK_SKIP_REASON)
 class CompletenessGateTest(MigrateTestBase):
     """Korrektur 3: kind: review (+sprint) is only set once every WI-0072
     field is present, counting existing frontmatter plus this run's own
@@ -660,7 +615,6 @@ class CompletenessGateTest(MigrateTestBase):
         self.assertIn("last_updated", result.stdout)
 
 
-@unittest.skipUnless(AWK_COMPILES_BLOCK_STRUCTURE_ERES, AWK_SKIP_REASON)
 class DryRunTest(MigrateTestBase):
     def test_dry_run_on_a_complete_file_writes_nothing(self):
         f = self.write("docs/reviews/SPRINT-4-review.md", complete_review_text())
@@ -700,7 +654,6 @@ class DryRunTest(MigrateTestBase):
         self.assertIn("SPRINT-6-review.md", result.stdout)
 
 
-@unittest.skipUnless(AWK_COMPILES_BLOCK_STRUCTURE_ERES, AWK_SKIP_REASON)
 class ScopeArgumentTest(MigrateTestBase):
     def test_scope_restricts_the_file_set(self):
         self.write("docs/reviews/SPRINT-1-review.md", complete_review_text())
@@ -714,7 +667,6 @@ class ScopeArgumentTest(MigrateTestBase):
         self.assertNotIn("kind: review", two)
 
 
-@unittest.skipUnless(AWK_COMPILES_BLOCK_STRUCTURE_ERES, AWK_SKIP_REASON)
 class NoReviewsDirectoryTest(MigrateTestBase):
     def test_missing_reviews_directory_is_a_clean_no_op(self):
         result = self.run_migrate()
@@ -722,7 +674,6 @@ class NoReviewsDirectoryTest(MigrateTestBase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
-@unittest.skipUnless(AWK_COMPILES_BLOCK_STRUCTURE_ERES, AWK_SKIP_REASON)
 class BadArgumentsTest(MigrateTestBase):
     def test_unknown_option_exits_2(self):
         result = self.run_migrate("--bogus")
@@ -735,7 +686,6 @@ class BadArgumentsTest(MigrateTestBase):
         self.assertEqual(result.returncode, 2)
 
 
-@unittest.skipUnless(AWK_COMPILES_BLOCK_STRUCTURE_ERES, AWK_SKIP_REASON)
 class ModePreservedTest(MigrateTestBase):
     """WI-0021's mode-narrowing defect class applies here too: writing a
     hoisted value (or the complete-path kind/sprint write) still goes
@@ -763,7 +713,6 @@ class ModePreservedTest(MigrateTestBase):
         self.assertEqual(mode, 0o644)
 
 
-@unittest.skipUnless(AWK_COMPILES_BLOCK_STRUCTURE_ERES, AWK_SKIP_REASON)
 class ReviewerAndLastUpdatedNeverInventedTest(MigrateTestBase):
     """Only `sprint` (from the filename) and `kind` (from the filename
     match itself) are derived; base_commit/reviewed_head/reviewed_base are
@@ -793,7 +742,6 @@ class ReviewerAndLastUpdatedNeverInventedTest(MigrateTestBase):
         self.assertIn("last_updated: 09.08.2026", text)
 
 
-@unittest.skipUnless(AWK_COMPILES_BLOCK_STRUCTURE_ERES, AWK_SKIP_REASON)
 class SprintConflictWarningTest(MigrateTestBase):
     """A file whose OWN frontmatter already carries a `sprint:` value that
     disagrees with the filename-derived number is a genuine ambiguity --
@@ -827,7 +775,6 @@ class SprintConflictWarningTest(MigrateTestBase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
-@unittest.skipUnless(AWK_COMPILES_BLOCK_STRUCTURE_ERES, AWK_SKIP_REASON)
 class IdempotentSecondRunTest(MigrateTestBase):
     def test_second_run_on_a_complete_file_makes_no_further_changes(self):
         self.write("docs/reviews/SPRINT-3-review.md", complete_review_text())
@@ -853,7 +800,6 @@ class IdempotentSecondRunTest(MigrateTestBase):
         self.assertEqual(f.read_text(), after_first)
 
 
-@unittest.skipUnless(AWK_COMPILES_BLOCK_STRUCTURE_ERES, AWK_SKIP_REASON)
 class MvGuardIsReportedTest(MigrateTestBase):
     """22.08.2026 correction, Befund 3 in review: `_ensure_frontmatter_
     block`'s final `mv "$tmp" "$file"` was unchecked -- a failed rename
@@ -888,7 +834,6 @@ class MvGuardIsReportedTest(MigrateTestBase):
         self.assertEqual(f.read_text(), body)
 
 
-@unittest.skipUnless(AWK_COMPILES_BLOCK_STRUCTURE_ERES, AWK_SKIP_REASON)
 class WriteFailureIsReportedTest(MigrateTestBase):
     """22.08.2026 correction, Befund 2 in review: the write into the temp
     file inside `_ensure_frontmatter_block` (`{ printf; cat; } > "$tmp"`)
@@ -945,7 +890,6 @@ class WriteFailureIsReportedTest(MigrateTestBase):
         self.assertEqual(f.read_text(), body)
 
 
-@unittest.skipUnless(AWK_COMPILES_BLOCK_STRUCTURE_ERES, AWK_SKIP_REASON)
 class FrontmatterLibMvGuardTest(unittest.TestCase):
     """22.08.2026 correction, Befund 3 in review, the other two call sites:
     fm_set's and fm_set_many's own final `mv "$tmp" "$file"` were ALSO

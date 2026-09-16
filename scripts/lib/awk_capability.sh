@@ -1,54 +1,98 @@
 #!/usr/bin/env bash
 # awk_capability.sh — can the awk that will run this repo's CommonMark
-# block-structure scanners actually compile the EREs they use?
+# block-structure scanners actually compile and apply the EREs they use?
 #
 # Source: bash ~/.claude/scripts/lib/awk_capability.sh   (for function calls from other scripts)
 #
 # WHY THIS EXISTS (CCP-1179)
 #
 # `mawk 1.3.4 20240123` — the default `/usr/bin/awk` on Debian-family
-# systems — has a regex-compiler bug: an interval quantifier `{n,m}`
-# followed later in the same ERE by a parenthesised group aborts the whole
-# program with `REcompile() - panic: values still on machine stack`, exit
-# 100. memory-lint.sh's fence/heading/list-marker detection and
+# systems — aborts its regex compiler on an interval quantifier `{n,m}`
+# followed later in the same ERE by a parenthesised group:
+#
+#     REcompile() - panic:  values still on machine stack for ^[ ]{0,3}(a+|b+)
+#
+# exit 100. memory-lint.sh's fence/heading/list-marker detection and
 # migrate-review-headers.sh's fence tracking both carried that shape.
 #
-# The abort is loud on the awk CHILD's stderr and invisible on both channels
+# The abort was loud on the awk CHILD's stderr and invisible on both channels
 # automation reads. memory-lint.sh runs its scanner in a process
-# substitution, so the child's exit code is unobservable by construction;
-# its own report said `**Summary:** 0 errors, 0 warnings, 0 info.` /
-# `**Exit:** 0` — a check that parsed nothing reporting clean. That is
-# KA-G-017's "a run that verified nothing is not a pass", one level below
-# where the rule was written, and check-all.sh's exit-code comparison would
-# have read it as a genuine pass.
+# substitution, so the child's exit code is unobservable by construction; its
+# own report said `**Summary:** 0 errors, 0 warnings, 0 info.` / `**Exit:**
+# 0` — a check that parsed nothing reporting clean. That is KA-G-017's "a run
+# that verified nothing is not a pass", one level below where the rule was
+# written, and check-all.sh's exit-code comparison would have read it as a
+# genuine pass.
 #
-# CCP-1179 rewrote the EREs into a form every awk compiles. This probe is the
-# part that stays: the NEXT dialect surprise must produce a could-not-run
-# outcome, not a false green.
+# CCP-1179 rewrote those EREs into a form every awk compiles. This probe is
+# the part that stays, and its question is deliberately NOT "does this awk
+# have mawk's bug". A probe keyed to one known bug answers no for mawk
+# forever, including after the patterns it choked on are gone — which is
+# both wrong and exactly the kind of stale taboo that outlives its reason.
+# The question asked here is the durable one:
+#
+#     can this awk compile and CORRECTLY APPLY the regex constructs this
+#     repository's block-structure scanners are built out of?
+#
+# WHAT THE CANARY COVERS, AND WHAT IT DOES NOT
+#
+# Two EREs, each checked against a string that must match AND a string that
+# must not — a compile that succeeds and then matches the wrong thing is the
+# failure mode an exit code cannot see:
+#
+#   1. `^[ ]?[ ]?[ ]?(#+|=+)([ \t]|$)` — an optional-run indent prefix
+#      followed by a parenthesised alternation. That is the shape of the
+#      fence opener, the setext underline, the ATX heading and the list
+#      marker after the CCP-1179 rewrite.
+#   2. `"^[ ]?[ ]?[ ]?" run "[~]*[ \t]*$"` — a regex BUILT AT RUNTIME from a
+#      string, with a repeated literal run followed by `[x]*`. That is the
+#      fence CLOSER, whose delimiter and length are only known per fence.
+#      Two separate things are checked here and neither is decoration: that
+#      the awk applies a string-built regex at all, and that a run LONGER
+#      than the opener still closes the fence. The second is what mawk
+#      1.3.4 gets wrong when the same thing is written as `{n,}` — it
+#      compiles silently and applies it as `{n}` — which is why the closer
+#      no longer uses an interval quantifier and why the canary asserts the
+#      longer run explicitly.
+#
+# No interval quantifier appears in either canary, and that is deliberate
+# rather than an omission: after CCP-1179 no awk program in this repository
+# uses one. Testing a construct the shipped code does not use would reject
+# awks that could run it perfectly well — the same mistake as keying the
+# probe to one vendor's bug.
+#
+# This is a SMOKE TEST over constructs, not a mirror of every shipped
+# pattern: a future ERE built from a construct neither canary exercises
+# would not be covered. Mechanical detection of that class is CCP-1129's
+# line of work, not this file's.
 #
 # NOT A DEPENDENCY DECLARATION. CCPR runs on what the system ships — the same
 # posture ADR-0011's bash-3.2 floor takes one tool over. Nothing here asks a
 # contributor to install anything; `awkcap_could_not_run_reason` names gawk
 # only as a way OUT of an already-broken run.
 
-# The canary. One ERE, carrying the exact shape that fails: the interval
-# quantifier `[ ]{0,3}`, then the parenthesised group `(a+|b+)`.
+# The canary program. `# awkcap-canary` is a stable marker for test fixtures
+# that need to recognise this specific program; nothing in the shipped path
+# reads it.
 #
-# Deliberately spelled with NOTHING from the real patterns in it — the
-# scanners' own EREs no longer carry the shape (that is the fix), so a canary
-# copied from one of them would stop reproducing the failure the moment the
-# fix landed and this probe would silently start passing on every awk.
-#
-# The program PRINTS THE MATCH COUNT rather than merely exiting 0. An awk with
-# no interval-quantifier support at all (the original one-true-awk; busybox
-# built without them) compiles `[ ]{0,3}` as four literal characters, exits 0,
-# and silently matches nothing — the quiet half of the same defect class, and
-# not distinguishable from success by an exit code.
-AWKCAP_CANARY_PROG='{ if (match($0, /^[ ]{0,3}(a+|b+)/)) hits++ } END { print hits+0 }'
+# BEGIN-only, so it needs no input and cannot be affected by one. No
+# apostrophe anywhere in it (the whole program is a single-quoted bash
+# string) and no backtick (which is why the interval canary is spelled with
+# `~` rather than with the backtick fence character).
+AWKCAP_CANARY_PROG='
+BEGIN {
+    # awkcap-canary
+    n = 0
+    if (match("  ## x", /^[ ]?[ ]?[ ]?(#+|=+)([ \t]|$)/)) n++
+    if (!match("x## x", /^[ ]?[ ]?[ ]?(#+|=+)([ \t]|$)/)) n++
+    run = "~~~"
+    if (match(" ~~~~~ ", "^[ ]?[ ]?[ ]?" run "[~]*[ \t]*$")) n++
+    if (!match(" ~~ ", "^[ ]?[ ]?[ ]?" run "[~]*[ \t]*$")) n++
+    print n
+}'
 
-# The one input line the canary is measured against: three leading spaces
-# (inside `{0,3}`) followed by a run the group must match.
-AWKCAP_CANARY_INPUT='   aaa'
+# Four checks, so four is the only passing answer.
+AWKCAP_CANARY_EXPECTED='4'
 
 # awkcap_identity [awk-binary] — "<resolved path> (<version line>)", or just
 # the resolved path when the binary answers no version flag.
@@ -71,8 +115,8 @@ awkcap_identity() {
     # can be pointed at a specific binary rather than only at whatever `awk`
     # resolves to), and test_external_tool_exit_status.py's scanner matches
     # tool NAMES literally — it does not see these invocations at all. Each
-    # one is guarded on its own terms regardless; see awkcap_canary_ok below,
-    # which reads the exit code, stderr and the result separately.
+    # one is guarded on its own terms regardless; see awkcap_canary_answer
+    # below, which reads the exit code, stderr and the result separately.
     version="$("$awk_bin" --version 2>&1 | head -n 1 || true)"
     case "$version" in
         ''|*usage*|*Usage*|*"not found"*) printf '%s' "$resolved" ;;
@@ -80,51 +124,67 @@ awkcap_identity() {
     esac
 }
 
-# awkcap_canary_ok [awk-binary] — 0 when that awk compiles AND correctly
-# applies the canary ERE, non-zero otherwise.
+# awkcap_canary_answer [awk-binary] — what that awk made of the canary, as
+# one diagnosable token:
 #
-# Three things are required, not one: a zero exit (mawk's panic is 100),
-# EMPTY stderr (an awk that warns about the construct but limps on has still
-# told us it does not understand it), and the right match count (the silent
-# no-intervals case above). stderr is captured to a file rather than folded
-# into stdout so the two can be judged separately — and so a panic never
-# reaches the caller's own stderr, where it would put the unexplained crash
-# back on the channel the could-not-run message is supposed to own.
+#   4                 every check passed
+#   <n>               it ran, but got <n> of 4 right
+#   exit <rc>         it aborted (mawk's panic is 100)
+#   stderr: <text>    it complained, whatever its exit code said
+#   not on PATH       there is no such binary
+#
+# stderr is captured to a file rather than folded into stdout so the two can
+# be judged separately — and so a panic never reaches the CALLER's stderr,
+# where it would put the unexplained crash back on the channel the
+# could-not-run message is supposed to own.
 #
 # LC_ALL=C mirrors the call sites: memory-lint.sh pins its scanner's locale
 # (WI-0099), so the probe must ask the question under the same locale the
 # answer will be used in.
-awkcap_canary_ok() {
+awkcap_canary_answer() {
     local awk_bin="${1:-awk}"
     local stderr_file stdout_text stderr_text rc
-    command -v "$awk_bin" >/dev/null 2>&1 || return 1
-    stderr_file="$(mktemp)" || return 1
+    if ! command -v "$awk_bin" >/dev/null 2>&1; then
+        printf 'not on PATH'
+        return 0
+    fi
+    stderr_file="$(mktemp)" || { printf 'probe could not create a temp file'; return 0; }
     rc=0
-    stdout_text="$(printf '%s\n' "$AWKCAP_CANARY_INPUT" \
-        | LC_ALL=C "$awk_bin" "$AWKCAP_CANARY_PROG" 2>"$stderr_file")" || rc=$?
+    stdout_text="$(LC_ALL=C "$awk_bin" "$AWKCAP_CANARY_PROG" </dev/null 2>"$stderr_file")" || rc=$?
     stderr_text="$(cat "$stderr_file")"
     rm -f "$stderr_file"
-    [ "$rc" -eq 0 ] || return 1
-    [ -z "$stderr_text" ] || return 1
-    [ "$stdout_text" = "1" ] || return 1
-    return 0
+    if [ "$rc" -ne 0 ]; then
+        printf 'exit %s' "$rc"
+    elif [ -n "$stderr_text" ]; then
+        # Trimmed to one line: this ends up inside a single report line.
+        printf 'stderr: %s' "$(printf '%s' "$stderr_text" | head -n 1)"
+    else
+        printf '%s' "$stdout_text"
+    fi
+}
+
+# awkcap_canary_ok [awk-binary] — 0 when that awk answers the canary
+# correctly, non-zero otherwise.
+awkcap_canary_ok() {
+    [ "$(awkcap_canary_answer "${1:-awk}")" = "$AWKCAP_CANARY_EXPECTED" ]
 }
 
 # awkcap_could_not_run_reason [awk-binary] — one line naming why a run must
 # not proceed, or NOTHING (and exit 0) when that awk is fine.
 #
 # Single line by contract: both call sites interpolate it into one report line
-# and one stderr warning, mirroring shellcheck-run.sh's own accumulated
-# could-not-run reasons.
+# and one stderr warning, mirroring shellcheck-run.sh's own could-not-run
+# reasons.
 awkcap_could_not_run_reason() {
-    local awk_bin="${1:-awk}"
-    if awkcap_canary_ok "$awk_bin"; then
+    local awk_bin="${1:-awk}" answer
+    answer="$(awkcap_canary_answer "$awk_bin")"
+    if [ "$answer" = "$AWKCAP_CANARY_EXPECTED" ]; then
         return 0
     fi
     # Deliberately free of apostrophes and backticks: the format string is
     # single-quoted (an apostrophe would end it) and a backtick would have to
     # be double-quoted, where it becomes command substitution. Both dodges
     # cost more than writing the sentence without them.
-    printf '%s cannot compile the CommonMark block-structure patterns in this repository: the canary ERE ^[ ]{0,3}(a+|b+) — an interval quantifier followed by a parenthesised group — did not compile and match (CCP-1179). Interim workaround, not a CCPR requirement: make a capable awk the awk on PATH (Debian-family: install gawk, then run update-alternatives --set awk /usr/bin/gawk).\n' \
-        "$(awkcap_identity "$awk_bin")"
+    printf '%s cannot compile and correctly apply the CommonMark block-structure patterns in this repository: the capability canary answered %s where %s of 4 checks must pass (CCP-1179). Interim workaround, not a CCPR requirement: make a capable awk the awk on PATH (Debian-family: install gawk, then run update-alternatives --set awk /usr/bin/gawk).\n' \
+        "$(awkcap_identity "$awk_bin")" "[$answer]" "$AWKCAP_CANARY_EXPECTED"
 }

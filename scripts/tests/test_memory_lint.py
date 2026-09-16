@@ -38,42 +38,6 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-
-# --- CCP-1179, stage 1: awk-dialect gate (removed again in stage 2) -------
-#
-# On an awk whose regex compiler cannot handle this repo's CommonMark
-# block-structure EREs, the script under test refuses to run at all and
-# reports could-not-run (scripts/lib/awk_capability.sh). Every test below
-# then fails for a reason that has nothing to do with the contributor's own
-# change -- 109 red results on a stock Debian machine read as "I broke
-# something", which is worse than an explicit, named skip.
-#
-# The condition is asked of the SHIPPED probe rather than re-derived here.
-# A second, independently re-typed copy of a condition is exactly how the
-# two ends drift apart, and this one has to agree with what the script
-# itself decides, not merely resemble it.
-def _awk_compiles_block_structure_eres():
-    lib = Path(__file__).resolve().parents[1] / "lib" / "awk_capability.sh"
-    probe = subprocess.run(
-        ["bash", "-c", '. "$1"; awkcap_canary_ok', "_", str(lib)],
-        capture_output=True, text=True,
-        # The same sandboxed PATH every run_* helper in this module hands the
-        # script under test, so the awk probed here is the awk those runs get.
-        env={"PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "HOME": "/"},
-    )
-    return probe.returncode == 0
-
-
-AWK_COMPILES_BLOCK_STRUCTURE_ERES = _awk_compiles_block_structure_eres()
-
-AWK_SKIP_REASON = (
-    "this machine's awk cannot compile the CommonMark block-structure EREs "
-    "the script under test uses -- see scripts/lib/awk_capability.sh and "
-    "CCP-1179; the script reports could-not-run rather than a false green, "
-    "so there is no behaviour left here to assert"
-)
-
-
 SCRIPT_PATH = Path(__file__).resolve().parents[1] / "memory-lint.sh"
 
 TODAY = date.today().strftime("%d.%m.%Y")
@@ -227,7 +191,6 @@ def related_text(name="related probe", related_entries=()):
     )
 
 
-@unittest.skipUnless(AWK_COMPILES_BLOCK_STRUCTURE_ERES, AWK_SKIP_REASON)
 class MemoryLintFixture:
     """Shared fixtures for memory-lint.sh end-to-end tests (WI-0111).
 
@@ -391,7 +354,6 @@ class MemoryLintFixture:
         ]
 
 
-@unittest.skipUnless(AWK_COMPILES_BLOCK_STRUCTURE_ERES, AWK_SKIP_REASON)
 class MemoryLintTest(MemoryLintFixture, unittest.TestCase):
     # --- Tier-aware type enum (WI-0008): Tier-1 and Tier-2 do not share a vocabulary ---
     # Check (c) used to apply the Tier-1 content-type enum to every file under
@@ -4027,7 +3989,6 @@ class MemoryLintTest(MemoryLintFixture, unittest.TestCase):
         self.assertTrue(any("project_hq_b.md" in f for f in findings), findings)
 
 
-@unittest.skipUnless(AWK_COMPILES_BLOCK_STRUCTURE_ERES, AWK_SKIP_REASON)
 class ScriptActuallyRanTest(unittest.TestCase):
     """WI-0037: a broken memory-lint.sh must not be able to pass its own tests.
 
@@ -4179,7 +4140,6 @@ class ScriptActuallyRanTest(unittest.TestCase):
                 MemoryLintTest._assert_known_dead_link_is_found(broken_script)
 
 
-@unittest.skipUnless(AWK_COMPILES_BLOCK_STRUCTURE_ERES, AWK_SKIP_REASON)
 class LinkScannerMutationTest(unittest.TestCase):
     """WI-0079/WI-0080/WI-0091/WI-0093/WI-0094 obligation: every rule of
     `process_link_line()`'s bracket-stack scanner, and every part of the
@@ -4944,7 +4904,6 @@ class LinkScannerMutationTest(unittest.TestCase):
         self._assert_script_untouched(original)
 
 
-@unittest.skipUnless(AWK_COMPILES_BLOCK_STRUCTURE_ERES, AWK_SKIP_REASON)
 class LinkScannerAgreementTest(unittest.TestCase):
     """WI-0117 obligation: nothing pins that protect_link_destinations()
     (~1025) and process_link_line() (~1368) AGREE on the one thing WI-0095's
@@ -5166,7 +5125,6 @@ class LinkScannerAgreementTest(unittest.TestCase):
             self._assert_script_untouched(original)
 
 
-@unittest.skipUnless(AWK_COMPILES_BLOCK_STRUCTURE_ERES, AWK_SKIP_REASON)
 class DestinationEscapeAndEntityMutationTest(unittest.TestCase):
     """WI-0081 obligation: mutation-proof for the destination-normalisation
     fix (escaped closing paren + numeric-entity decode) — both live inside
@@ -5244,7 +5202,6 @@ class DestinationEscapeAndEntityMutationTest(unittest.TestCase):
         self.assertEqual(after, original)
 
 
-@unittest.skipUnless(AWK_COMPILES_BLOCK_STRUCTURE_ERES, AWK_SKIP_REASON)
 class IndentedCodeAndHtmlBlockMutationTest(unittest.TestCase):
     """WI-0084 obligation: each of the three new block-boundary cases (indented
     code, HTML block type 1, HTML block type 6) must have been seen RED by
@@ -5260,14 +5217,14 @@ class IndentedCodeAndHtmlBlockMutationTest(unittest.TestCase):
         "            }\n"
     )
     _HTML_BLOCK1_OPENER = (
-        "            if (match(tolower($0), /^[ ]{0,3}<(script|pre|style)([ \\t>]|$)/)) {\n"
+        "            if (match(tolower($0), /^[ ]?[ ]?[ ]?<(script|pre|style)([ \\t>]|$)/)) {\n"
         "                flush_paragraph()\n"
         "                in_html_block1 = 1\n"
         "                next\n"
         "            }\n"
     )
     _HTML_BLOCK6_OPENER = (
-        "            if (match(tolower($0), /^[ ]{0,3}<[\\/]?(address|article|aside|base|"
+        "            if (match(tolower($0), /^[ ]?[ ]?[ ]?<[\\/]?(address|article|aside|base|"
         "basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|"
         "dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h1|head|header|hr|"
         "html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|"
@@ -5342,7 +5299,6 @@ class IndentedCodeAndHtmlBlockMutationTest(unittest.TestCase):
         )
 
 
-@unittest.skipUnless(AWK_COMPILES_BLOCK_STRUCTURE_ERES, AWK_SKIP_REASON)
 class ParagraphBoundaryMutationTest(unittest.TestCase):
     """WI-0086/WI-0082 obligation: each new boundary must have been seen RED,
     and by a mutation that changes the awk block's STRUCTURE rather than merely
@@ -5371,30 +5327,30 @@ class ParagraphBoundaryMutationTest(unittest.TestCase):
 
     _CR_STRIP = '            sub(/\\r$/, "")\n'
     _THEMATIC_BREAK_BRANCH = (
-        "            if ($0 ~ /^[ ]{0,3}((\\*[ \\t]*){3,}|(-[ \\t]*){3,}|(_[ \\t]*){3,})$/) {\n"
+        "            if ($0 ~ /^[ ]?[ ]?[ ]?(\\*[ \\t]*\\*[ \\t]*\\*[ \\t]*(\\*[ \\t]*)*|-[ \\t]*-[ \\t]*-[ \\t]*(-[ \\t]*)*|_[ \\t]*_[ \\t]*_[ \\t]*(_[ \\t]*)*)$/) {\n"
         "                flush_paragraph()\n"
         "                next\n"
         "            }\n"
     )
     _LIST_MARKER_BRANCH = (
-        "            if ($0 ~ /^[ ]{0,3}([-+*]|[0-9]{1,9}[.)])[ \\t]/) {\n"
+        "            if ($0 ~ /^[ ]?[ ]?[ ]?([-+*]|[0-9][0-9]?[0-9]?[0-9]?[0-9]?[0-9]?[0-9]?[0-9]?[0-9]?[.)])[ \\t]/) {\n"
         "                flush_paragraph()\n"
         "                append_paragraph($0)\n"
         "                next\n"
         "            }\n"
     )
     _GUARDED_SETEXT = (
-        "            if (pbuf_n > 0 && pbuf_para && $0 ~ /^[ ]{0,3}(=+|-+)[ \\t]*$/) {\n"
+        "            if (pbuf_n > 0 && pbuf_para && $0 ~ /^[ ]?[ ]?[ ]?(=+|-+)[ \\t]*$/) {\n"
     )
     _NAIVE_SETEXT = (
-        "            if (pbuf_n > 0 && $0 ~ /^[ ]{0,3}(=+|-+)[ \\t]*$/) {\n"
+        "            if (pbuf_n > 0 && $0 ~ /^[ ]?[ ]?[ ]?(=+|-+)[ \\t]*$/) {\n"
     )
     # Current shape: pbuf_quote (WI-0089 follow-up) answers "is the buffer
     # currently an open quote", which pbuf_para alone could not — a list
     # item's paragraph also reads pbuf_para == 0, the same value as "already
     # continuing a quote", so the flush guard could not tell them apart.
     _CONTAINER_GUARD = (
-        "            if ($0 ~ /^[ ]{0,3}>/) {\n"
+        "            if ($0 ~ /^[ ]?[ ]?[ ]?>/) {\n"
         "                if (pbuf_n > 0 && !pbuf_quote) flush_paragraph()\n"
         "                pbuf_para = 0\n"
         "                pbuf_quote = 1\n"
@@ -5403,7 +5359,7 @@ class ParagraphBoundaryMutationTest(unittest.TestCase):
     )
     _CONTAINER_GUARD_PRE_FIX = (
         "            if (pbuf_n == 0) {\n"
-        "                if ($0 ~ /^[ ]{0,3}>/) pbuf_para = 0\n"
+        "                if ($0 ~ /^[ ]?[ ]?[ ]?>/) pbuf_para = 0\n"
         "                else pbuf_para = 1\n"
         "            }\n"
     )
@@ -5412,7 +5368,7 @@ class ParagraphBoundaryMutationTest(unittest.TestCase):
     # setext branch stayed correctly gated), but never flushed the
     # paragraph buffer at the interrupt itself.
     _CONTAINER_GUARD_PRE_WI_0089 = (
-        "            if ($0 ~ /^[ ]{0,3}>/) pbuf_para = 0\n"
+        "            if ($0 ~ /^[ ]?[ ]?[ ]?>/) pbuf_para = 0\n"
         "            else if (pbuf_n == 0) pbuf_para = 1\n"
     )
     # The shape WI-0089 shipped and this round follows: the interrupt guard
@@ -5421,14 +5377,14 @@ class ParagraphBoundaryMutationTest(unittest.TestCase):
     # read pbuf_para == 0. A `>` line following an open list item never
     # flushed, and a code span straddling that join hid a real link.
     _CONTAINER_GUARD_PRE_PBUF_QUOTE = (
-        "            if ($0 ~ /^[ ]{0,3}>/) {\n"
+        "            if ($0 ~ /^[ ]?[ ]?[ ]?>/) {\n"
         "                if (pbuf_n > 0 && pbuf_para) flush_paragraph()\n"
         "                pbuf_para = 0\n"
         "            }\n"
         "            else if (pbuf_n == 0) pbuf_para = 1\n"
     )
     _GATED_THEMATIC_BREAK = (
-        "            if (pbuf_para && $0 ~ /^[ ]{0,3}((\\*[ \\t]*){3,}|(-[ \\t]*){3,}|(_[ \\t]*){3,})$/) {\n"
+        "            if (pbuf_para && $0 ~ /^[ ]?[ ]?[ ]?(\\*[ \\t]*\\*[ \\t]*\\*[ \\t]*(\\*[ \\t]*)*|-[ \\t]*-[ \\t]*-[ \\t]*(-[ \\t]*)*|_[ \\t]*_[ \\t]*_[ \\t]*(_[ \\t]*)*)$/) {\n"
     )
 
     def _run_mutant(self, mutate, markdown):
@@ -5642,7 +5598,6 @@ class ParagraphBoundaryMutationTest(unittest.TestCase):
         self.assertIn("project_mut_tbli2.md", result.stdout)
 
 
-@unittest.skipUnless(AWK_COMPILES_BLOCK_STRUCTURE_ERES, AWK_SKIP_REASON)
 class NamedEntityInfoMutationTest(unittest.TestCase):
     """WI-0081 (remainder) obligation: the info-not-dead-link reclassification
     must have been seen RED by mutation, not merely written and never
@@ -5718,7 +5673,6 @@ AGE_FINDING_RE = re.compile(
 )
 
 
-@unittest.skipUnless(AWK_COMPILES_BLOCK_STRUCTURE_ERES, AWK_SKIP_REASON)
 class StaleAgeIsAPropertyOfTheFileTest(unittest.TestCase):
     """Check (e) must report an age that depends only on `last_updated` (WI-0087).
 
@@ -5936,7 +5890,6 @@ class StaleAgeIsAPropertyOfTheFileTest(unittest.TestCase):
         )
 
 
-@unittest.skipUnless(AWK_COMPILES_BLOCK_STRUCTURE_ERES, AWK_SKIP_REASON)
 class TodayIsTheLocalCalendarDayTest(unittest.TestCase):
     """`TODAY_EPOCH` must be the local calendar day, anchored like every other
     date this script compares against it (WI-0087).
@@ -6035,7 +5988,6 @@ class TodayIsTheLocalCalendarDayTest(unittest.TestCase):
 # --------------------------------------------------------------------------- #
 
 
-@unittest.skipUnless(AWK_COMPILES_BLOCK_STRUCTURE_ERES, AWK_SKIP_REASON)
 class LastUpdatedFormTest(unittest.TestCase):
     """Check (e) must accept exactly the form MEMORY_SCHEMA.md specifies (WI-0106).
 
@@ -6179,7 +6131,6 @@ class LastUpdatedFormTest(unittest.TestCase):
 # --------------------------------------------------------------------------- #
 
 
-@unittest.skipUnless(AWK_COMPILES_BLOCK_STRUCTURE_ERES, AWK_SKIP_REASON)
 class DecayHintGracePeriodTest(MemoryLintFixture, unittest.TestCase):
     """Check (k)'s low-confidence hint must quote the DECAY policy's 30 days, not
     check (e)'s unrelated STALE_DAYS=90 (WI-0111).
@@ -6244,7 +6195,6 @@ class DecayHintGracePeriodTest(MemoryLintFixture, unittest.TestCase):
         )
 
 
-@unittest.skipUnless(AWK_COMPILES_BLOCK_STRUCTURE_ERES, AWK_SKIP_REASON)
 class NoScopeReportedForCheckAllTest(MemoryLintFixture, unittest.TestCase):
     """memory-lint.sh reads from four independent targets: <project-dir>/
     docs/memory, ~/.claude/instincts.md, ~/.claude/instincts/, and
@@ -6313,7 +6263,6 @@ class NoScopeReportedForCheckAllTest(MemoryLintFixture, unittest.TestCase):
         self.assertNotIn("the memory-lint check DID NOT RUN", result.stdout, result.stdout)
 
 
-@unittest.skipUnless(AWK_COMPILES_BLOCK_STRUCTURE_ERES, AWK_SKIP_REASON)
 class IndexFrontmatterOptionalTest(MemoryLintFixture, unittest.TestCase):
     """docs/memory/MEMORY.md and docs/memory/{agent}/MEMORY.md carry frontmatter only
     when someone chose to write it (WI-0108). Before this fix, memory-lint.sh excluded
@@ -6456,7 +6405,6 @@ last_updated: {TODAY}
         self.assertIn("**Files scanned:** 4", result.stdout, result.stdout)
 
 
-@unittest.skipUnless(AWK_COMPILES_BLOCK_STRUCTURE_ERES, AWK_SKIP_REASON)
 class Tier2GlobalIndexFrontmatterOptionalTest(MemoryLintFixture, unittest.TestCase):
     """The sibling of IndexFrontmatterOptionalTest for check (i)'s Tier-2-global silo
     scan (WI-0108). Measured: only one Tier-2-global index exists across the reference

@@ -891,7 +891,7 @@ class NoStaleKnownFindingsTest(unittest.TestCase):
 
 class ClassificationCountsTest(unittest.TestCase):
     def test_classification_counts(self):
-        """Regression pin on the measured baseline: 1445 `test_*` methods
+        """Regression pin on the measured baseline: 1446 `test_*` methods
         across the corpus call something shaped like a subprocess invocation
         and are therefore in scope for this check; 0 of those are currently
         absence-only-needs-exemption -- `KNOWN_FINDINGS` above is empty for
@@ -905,22 +905,26 @@ class ClassificationCountsTest(unittest.TestCase):
         growing paragraph:
 
           in-scope / flagged   when
-          1445 / 0             16.09.2026 (CCP-1179: the awk-dialect probe):
-                               +12, all in the new test_awk_capability.py,
+          1446 / 0             16.09.2026 (CCP-1179: the awk-dialect probe):
+                               +13, all in the new test_awk_capability.py,
                                and measured by running this scanner rather
-                               than counted by eye -- exactly the 7 + 5
+                               than counted by eye -- the 7 + 5
                                `self.run_script(...)` methods of
                                MemoryLintCouldNotRunTest and
                                MigrateReviewHeadersCouldNotRunTest (the
-                               helper matches RUN_HELPER_RE). None flagged:
-                               each asserts either an exact `returncode` or
-                               a literal the run must PRINT. The module's
-                               other 14 methods call `self.call(...)`, whose
-                               name does NOT match RUN_HELPER_RE, so they
-                               never enter this scanner's scope at all --
-                               the `_calls_a_subprocess` boundary the
-                               paragraph below already describes, not a gap
-                               this entry introduces.
+                               helper matches RUN_HELPER_RE), plus
+                               RealAwkAgreementTest's per-ERE compile sweep,
+                               which calls `subprocess.run` inline. None
+                               flagged: each asserts an exact `returncode`,
+                               a literal the run must PRINT, or an empty
+                               list of broken EREs alongside a non-blindness
+                               guard. The module's other 13 methods call
+                               `self.call(...)`, whose name does NOT match
+                               RUN_HELPER_RE, so they never enter this
+                               scanner's scope at all -- the
+                               `_calls_a_subprocess` boundary the paragraph
+                               below already describes, not a gap this entry
+                               introduces.
           1433 / 0             11.09.2026 (CCP-1177: the link lint stops
                                reading the recorded dedup-evidence line as
                                claimed relations): +2, both in
@@ -2041,7 +2045,7 @@ class ClassificationCountsTest(unittest.TestCase):
         count."""
         recs = scan_tree()
         flagged = [r for r in recs if r.disposition in NEEDS_EXEMPTION]
-        self.assertEqual(1445, len(recs))
+        self.assertEqual(1446, len(recs))
         self.assertEqual(0, len(flagged))
 
 
