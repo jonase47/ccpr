@@ -52,6 +52,42 @@ import tempfile
 import unittest
 from pathlib import Path
 
+
+# --- CCP-1179, stage 1: awk-dialect gate (removed again in stage 2) -------
+#
+# On an awk whose regex compiler cannot handle this repo's CommonMark
+# block-structure EREs, the script under test refuses to run at all and
+# reports could-not-run (scripts/lib/awk_capability.sh). Every test below
+# then fails for a reason that has nothing to do with the contributor's own
+# change -- 109 red results on a stock Debian machine read as "I broke
+# something", which is worse than an explicit, named skip.
+#
+# The condition is asked of the SHIPPED probe rather than re-derived here.
+# A second, independently re-typed copy of a condition is exactly how the
+# two ends drift apart, and this one has to agree with what the script
+# itself decides, not merely resemble it.
+def _awk_compiles_block_structure_eres():
+    lib = Path(__file__).resolve().parents[1] / "lib" / "awk_capability.sh"
+    probe = subprocess.run(
+        ["bash", "-c", '. "$1"; awkcap_canary_ok', "_", str(lib)],
+        capture_output=True, text=True,
+        # The same sandboxed PATH every run_* helper in this module hands the
+        # script under test, so the awk probed here is the awk those runs get.
+        env={"PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "HOME": "/"},
+    )
+    return probe.returncode == 0
+
+
+AWK_COMPILES_BLOCK_STRUCTURE_ERES = _awk_compiles_block_structure_eres()
+
+AWK_SKIP_REASON = (
+    "this machine's awk cannot compile the CommonMark block-structure EREs "
+    "the script under test uses -- see scripts/lib/awk_capability.sh and "
+    "CCP-1179; the script reports could-not-run rather than a false green, "
+    "so there is no behaviour left here to assert"
+)
+
+
 SCRIPT_PATH = Path(__file__).resolve().parents[1] / "memory-lint.sh"
 FIXTURE_PATH = Path(__file__).resolve().parent / "fixtures" / "commonmark_corpus.json"
 GENERATOR_PATH = Path(__file__).resolve().parent / "fixtures" / "generate_commonmark_corpus.py"
@@ -98,6 +134,7 @@ def run_memory_lint_on(markdown_text, script_path=SCRIPT_PATH):
         return sorted(FINDING_RE.findall(result.stdout))
 
 
+@unittest.skipUnless(AWK_COMPILES_BLOCK_STRUCTURE_ERES, AWK_SKIP_REASON)
 class FixtureIntegrityTest(unittest.TestCase):
     """The fixture is itself part of what this round delivers — these pins
     keep it honest independent of any live memory-lint.sh run."""
@@ -210,6 +247,7 @@ class FixtureIntegrityTest(unittest.TestCase):
                 )
 
 
+@unittest.skipUnless(AWK_COMPILES_BLOCK_STRUCTURE_ERES, AWK_SKIP_REASON)
 class CommonmarkCorpusDifferentialTest(unittest.TestCase):
     """Replays every corpus entry against the LIVE script and compares its
     findings to the frozen `expected_check_n_findings` — this is the actual
@@ -946,6 +984,7 @@ class CommonmarkCorpusDifferentialTest(unittest.TestCase):
         self.assertIsNone(entry["known_divergence"])
 
 
+@unittest.skipUnless(AWK_COMPILES_BLOCK_STRUCTURE_ERES, AWK_SKIP_REASON)
 class MutationProvesTheDifferentialTestCanFail(unittest.TestCase):
     """WI-0005 obligation: the new differential test must have been seen RED
     at least once, by mutation, not merely written and never falsified.
@@ -1009,6 +1048,7 @@ class MutationProvesTheDifferentialTestCanFail(unittest.TestCase):
         self.assertEqual(after, original)
 
 
+@unittest.skipUnless(AWK_COMPILES_BLOCK_STRUCTURE_ERES, AWK_SKIP_REASON)
 class GeneratorDocumentedIntentValidationTest(unittest.TestCase):
     """WI-0086: `generate_commonmark_corpus.py`'s `main()` now classifies
     every corpus entry's oracle comparison into one of three outcomes —
