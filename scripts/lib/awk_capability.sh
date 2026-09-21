@@ -160,7 +160,13 @@ awkcap_canary_answer() {
     stderr_file="$(mktemp)" || { printf 'not probed: no usable temp file'; return 0; }
     rc=0
     stdout_text="$(LC_ALL=C "$awk_bin" "$AWKCAP_CANARY_PROG" </dev/null 2>"$stderr_file")" || rc=$?
-    stderr_text="$(cat "$stderr_file")"
+    # Guarded the same way as $rc above and the cleanup below: a stderr file
+    # that has become unreadable between the write and this read (permissions
+    # race, another process removing it) is not the awk-dialect question this
+    # function exists to answer either, and must not be what aborts the
+    # caller under set -e. An empty stderr_text on that path just means the
+    # answer below falls through to reporting stdout_text instead.
+    stderr_text="$(cat "$stderr_file" 2>/dev/null)" || stderr_text=""
     # `|| true` for the same reason migrate-review-headers.sh's own temp-file
     # cleanup carries one: this library is SOURCED into scripts running under
     # `set -euo pipefail`, and a temp file that is itself unremovable
