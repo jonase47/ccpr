@@ -124,9 +124,9 @@ python3 -m unittest discover -s scripts/tests -t .
 - **`-t .` is not optional**, and the failure mode is worth knowing because it is
   partly silent. It sets the top-level directory imports resolve against. Measured
   on the current tree (21.09.2026, integrating CCP-1179, CCP-1214, CCP-1181,
-  CCP-1187, CCP-1211, CCP-1161, CCP-1146 and CCP-1193): **with**
-  it, discovery collects **2995 tests, 0 import errors**, exit 0; **without** it,
-  **2219 tests and 20 modules that fail to
+  CCP-1187, CCP-1211, CCP-1161, CCP-1146, CCP-1193 and CCP-1182): **with**
+  it, discovery collects **3009 tests, 0 import errors**, exit 0; **without** it,
+  **2233 tests and 20 modules that fail to
   import**, exit 1 — the nine that use a relative import
   (`from .test_phase_docs_lint import …` in five modules,
   `from .test_artifact_gate import …` in two,
@@ -464,6 +464,17 @@ python3 -m unittest discover -s scripts/tests -t .
   20 / 776** — **+15** on both sides of the flag, all in the new module (no
   relative import, so it lands on both sides and cancels out of the
   never-execute figure); modules-fail unchanged at 20. Re-measured with
+  `TestLoader().discover(...).countTestCases()` under each flag rather than
+  added.
+
+  21.09.2026, `ticket/CCP-1182` merged on top (stops instructing a
+  shell-less qa-tester to execute `run-tests.sh` itself in four `p6-func-*`
+  and `p5-acceptance.md` commands, plus a no-summary fallback for
+  `run-tests.sh`'s npm-test/unknown-framework cases,
+  `test_no_bash_agent_runs_tests.py`): **3009 / 2233 / 20 / 776** — **+14**
+  on both sides of the flag, all in the new module (no relative import, so
+  it lands on both sides and cancels out of the never-execute figure);
+  modules-fail unchanged at 20. Re-measured with
   `TestLoader().discover(...).countTestCases()` under each flag rather than
   added.
 - The full run takes **a couple of minutes**. If you drive it from an agent whose

@@ -2348,7 +2348,15 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
         citation guard. Proven an addition, not a swap: `git status
         --porcelain scripts/tests` showed one `??` line for the new file,
         nothing deleted, nothing renamed. Verified against this test's own
-        glob (83 names, matching the set pin below)."""
+        glob, was 83.
+
+        Bumped 83 -> 84, 16.09.2026 (CCP-1182, integrated 21.09.2026): added
+        test_no_bash_agent_runs_tests.py, the shell-less-qa-tester
+        run-tests.sh guard plus its no-summary-fallback review follow-up.
+        Proven an addition, not a swap: `git status --porcelain
+        scripts/tests` showed one `??` line for the new file, nothing
+        deleted, nothing renamed. Verified against this test's own glob
+        (84 names, matching the set pin below)."""
         files = sorted(TESTS_DIR.glob("*.py")) + sorted((TESTS_DIR / "workitems").glob("*.py"))
         names = sorted(f.relative_to(TESTS_DIR).as_posix() for f in files if f.name != "__init__.py")
         # The floor first, and it does exactly one job: it catches this glob
@@ -2360,12 +2368,12 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
         # floor; it is why the set pin below stands beside it. Keeping both is
         # the decision (WI-0133 T1), not redundancy left in by accident.
         self.assertGreaterEqual(  # pin: floor tests-corpus-files
-            len(names), 83,
-            "the scripts/tests corpus glob reached {} file(s); it reached 83 "
+            len(names), 84,
+            "the scripts/tests corpus glob reached {} file(s); it reached 84 "
             "when this floor was measured (21.09.2026, integrating CCP-1179, "
-            "CCP-1214, CCP-1181, CCP-1187, CCP-1211, CCP-1161, CCP-1146 and "
-            "CCP-1193). A SHRINKING scope is a blind scanner, not a clean "
-            "tree.".format(len(names)),
+            "CCP-1214, CCP-1181, CCP-1187, CCP-1211, CCP-1161, CCP-1146, "
+            "CCP-1193 and CCP-1182). A SHRINKING scope is a blind scanner, "
+            "not a clean tree.".format(len(names)),
         )
         # The set pin, replacing a bare count (WI-0133 T1). A count cannot
         # tell "one added" from "one added, one gone" (ADR-0012 obligation 2),
@@ -2437,6 +2445,7 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
             "test_migrate_review_headers.py",
             "test_next_steps_lists.py",
             "test_next_steps_placement.py",
+            "test_no_bash_agent_runs_tests.py",
             "test_p4_sprint_gate_frontmatter.py",
             "test_phase_docs_lint.py",
             "test_pin_inventory.py",
@@ -2469,14 +2478,15 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
             "workitems/test_youtrack.py",
             ],
             names,
-            "the scripts/tests corpus (76 -> 83, integrated 21.09.2026: "
+            "the scripts/tests corpus (76 -> 84, integrated 21.09.2026: "
             "test_awk_capability.py (CCP-1179), "
             "test_docs_boundary_default_deny.py (CCP-1214), "
             "test_p4_sprint_gate_frontmatter.py (CCP-1181), "
             "test_precondition_shows_says_guard.py (CCP-1187), "
             "test_qa_skeleton_single_parent.py (CCP-1211), "
-            "test_workitems_template.py (CCP-1146) and "
-            "test_handbook_citations_resolve.py (CCP-1193) added -- see "
+            "test_workitems_template.py (CCP-1146), "
+            "test_handbook_citations_resolve.py (CCP-1193) and "
+            "test_no_bash_agent_runs_tests.py (CCP-1182) added -- see "
             "this method's own docstring above for the per-ticket addition "
             "proof (each a `??` line for its new file plus a named ` M`, if "
             "any, nothing deleted, nothing renamed). Earlier trajectory: "
