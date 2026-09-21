@@ -1737,6 +1737,31 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Fixed
 
+- **`templates/QA_SKELETON/AUTHZ.md` shipped scenarios from a single foreign project and had two
+  conflicting parents (CCP-1211).** Its "Test Scenarios" table named concrete feature IDs and
+  platform-specific mechanisms (a local-auth gate for one project's delete flow, a keychain
+  service-identifier check, an app-group container check) that mean nothing outside that one
+  project — every other shipped skeleton file (`A11Y.md`, `AUDIT.md`, `FUNCTIONAL.md`,
+  `PENTEST.md`) lists framework-neutral placeholder rows instead. Replaced with four
+  framework-neutral authorization scenarios (unauthenticated access denied, cross-user/tenant
+  IDOR/BOLA, horizontal/vertical privilege escalation, session/token revocation) that apply to
+  any project with an authorization boundary, web/mobile/backend alike.
+  Separately, `AUTHZ.md` declares `parent_index: PENTEST.md` in its own frontmatter, and
+  `PENTEST.md`'s "Detail Files" table already links to it — but `QA.md`'s "Sub-Indexes" table
+  ALSO linked to it directly, as a top-level sibling of `PENTEST.md` rather than nested one level
+  down inside it. Removed the stray `QA.md` row; `AUTHZ.md` stays in `QA.md`'s `related:`
+  frontmatter list (a documented, non-hierarchical cross-reference — `templates/
+  PHASE_DOC_SCHEMA.md` line 28 — distinct from `parent_index:`, and not itself a second parent
+  claim). `scripts/tests/test_qa_skeleton_single_parent.py` adds a mechanical guard: every
+  `templates/QA_SKELETON/*.md` file must be linked as a child by exactly one sibling file, and
+  that sibling must match the file's own declared `parent_index:`. Red before this change against
+  the pre-fix `QA.md`/`AUTHZ.md` pair (`AUTHZ.md` linked by both `PENTEST.md` and `QA.md`); the
+  shipped skeleton set itself (`A11Y.md`, `AUDIT.md`, `AUTHZ.md`, `FUNCTIONAL.md`, `PENTEST.md`,
+  `QA.md`) is unchanged in membership — `CLAUDE.md`'s own "P6 sub-index skeletons" line already
+  names exactly these six as the shipped set; `PENTEST.md`'s own further detail-file rows
+  (`RECON.md`, `INJECTION.md`, `AUTH.md`, `LOGIC.md`) are deliberately not pre-shipped skeletons,
+  created live by `/p6-pentest`'s own sub-commands instead.
+
 - **`commands/p5-polish.md` stated its gate-p5 precondition as what `SPRINT.md` "shows" in
   prose, using non-existent title-case values (CCP-1187).** The "Preconditions (Hard Block on
   Violation)" section read: 'Last `gate-p5` entry in `SPRINT.md` shows `Sprint Done` or
