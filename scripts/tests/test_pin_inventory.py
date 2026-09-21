@@ -82,7 +82,7 @@ asserting the gap in prose only.
    `test_heredoc_interpolation_scan.py:390` says "the 25 scanned files" while
    the pin at :421 requires 27.
 2. **Prose registers** in `handbook/`, `README.md`, `CLAUDE.md`,
-   `CONTRIBUTING.md`. CONTRIBUTING.md:85-102 alone carries four discovery
+   `CONTRIBUTING.md`. CONTRIBUTING.md:124-138 alone carries four discovery
    numbers, known stale.
 3. **Numbers in YAML comments**, e.g. `.github/workflows/ci.yml:57` ("1923
    tests"), which no Python parser in this repository reads.
@@ -242,7 +242,7 @@ import unittest
 from pathlib import Path
 
 # sys.path.insert, deliberately, rather than `from .pin_registry import ...`:
-# CONTRIBUTING.md:85-102 pins in prose how many modules fail to import without
+# CONTRIBUTING.md:124-138 pins in prose how many modules fail to import without
 # `-t .`, and how many tests are silently skipped as a result. A new relative
 # import moves those numbers, and CONTRIBUTING.md is outside this round's write
 # boundary. Same idiom as test_next_steps_lists.py:53 and scripts/tests/
@@ -1532,7 +1532,7 @@ class PatternLimitsTest(unittest.TestCase):
     def test_a_number_in_a_comment_is_not_reached(self):
         """Gap 1 again, in its other form, and the form gaps 2 and 3 reduce
         to. A prose register (handbook/, README.md, CLAUDE.md,
-        CONTRIBUTING.md:85-102's four known-stale discovery numbers) and a
+        CONTRIBUTING.md:124-138's four known-stale discovery numbers) and a
         YAML comment (.github/workflows/ci.yml:57's "1923 tests") are the same
         case seen from a Python AST: text no parser in this repository reads
         as a claim."""

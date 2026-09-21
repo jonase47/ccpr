@@ -2382,7 +2382,7 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
         # arrived and what left. Same shape as
         # test_external_tool_exit_status.py:1236-1261's 21-name list.
         #
-        # Local import rather than a module-level one: CONTRIBUTING.md:85-102
+        # Local import rather than a module-level one: CONTRIBUTING.md:124-138
         # pins in prose how many modules fail to import without `-t .`, and a
         # new module-level import edge moves those numbers.
         import sys as _sys
