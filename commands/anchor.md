@@ -104,13 +104,12 @@ python3 ~/.claude/scripts/workitems.py create --title "Anchor drift: <document> 
   --checked-against "<ids searched, or reasoning>"
 ```
 
-This is `workitems create` exactly as specified in `handbook/WORKITEMS.md` §1/§4 — no contract
-change, `local` backend by default. Apply the adoption guard from `handbook/WORKITEMS.md` §8
-before calling it: check `python3 ~/.claude/scripts/workitems.py list` **and** whether
-`docs/workitems/` exists: an adopted store gets the CLI call above; a project still on prose
-gets the finding written into `docs/HANDOVER.md`'s `## Open Points` inbox instead (marker
-format per `commands/cleanup.md` §1), plus the one-line tip `handbook/WORKITEMS.md` §8
-specifies.
+This is `workitems create` exactly as specified in `docs/adr/ADR-0002-workitem-backend-contract.md`
+— no contract change, `local` backend by default. Apply the adoption guard from that ADR before
+calling it: check `python3 ~/.claude/scripts/workitems.py list` **and** whether `docs/workitems/`
+exists: an adopted store gets the CLI call above; a project still on prose gets the finding written
+into `docs/HANDOVER.md`'s `## Open Points` inbox instead (marker format per `commands/cleanup.md`
+§1), plus the one-line tip: *"Tip: run `lift` to adopt the structured work-item store."*
 
 ### 4. The quittance statistic — every run, not a separate call
 

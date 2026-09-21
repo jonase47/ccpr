@@ -27,7 +27,7 @@ Run `python3 ~/.claude/scripts/workitems.py list`.
 - **`[]` but `docs/workitems/` exists** → adopted store, just empty right now (e.g. between
   sprints). Treat as adopted: use the CLI, not the prose fallback.
 
-See handbook/WORKITEMS.md §8 for the full guard rationale and the status-verb mapping.
+See `docs/adr/ADR-0002-workitem-backend-contract.md` for the adoption-guard rationale and the status vocabulary.
 
 ## Flow
 
@@ -48,7 +48,7 @@ See handbook/WORKITEMS.md §8 for the full guard rationale and the status-verb m
     `workitems append-result <id> <PR-link>`.
   - Prose fallback: update SPRINT.md — mark story as "In Review".
 - Once wired, item status is never hand-edited in SPRINT.md/BACKLOG.md — those are planning views
-  (handbook/WORKITEMS.md §8).
+  (`docs/adr/ADR-0002-workitem-backend-contract.md`).
 
 ### Handover Epilog
 Update `docs/HANDOVER.md`:

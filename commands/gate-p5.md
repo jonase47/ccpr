@@ -41,8 +41,8 @@ sprint with zero actually-tracked story status.
   SPRINT.md/BACKLOG.md for story status, as before. Emit one line: *"Tip: run `lift` to adopt the
   structured work-item store."*
 
-See handbook/WORKITEMS.md §8 for the full guard rationale, the directory-check requirement, and the
-status-verb mapping.
+See `docs/adr/ADR-0002-workitem-backend-contract.md` for the adoption-guard rationale and the status
+vocabulary.
 
 ### 1. Read Preflight Report
 
@@ -104,7 +104,7 @@ Delegate the sprint gate check to the **project-planner** agent with a focused p
 ### 3. Create Gate Protocol
 
 Add the gate result to **SPRINT.md** (sprint review and retrospective — this stays prose narrative,
-not item state, per handbook/WORKITEMS.md §10).
+not item state, per `docs/adr/ADR-0002-workitem-backend-contract.md`).
 
 **Set `docs/planning/SPRINT.md`'s frontmatter field `gate:`** to this sprint's verdict —
 `done` / `conditionally_done` / `not_done`, or `pending` while the gate is still being written.
@@ -122,7 +122,7 @@ Using the guard result from step 0a:
 - Prose fallback: update BACKLOG.md — mark completed stories, return deferred stories to the backlog.
 
 Once wired, item status is never hand-edited in SPRINT.md/BACKLOG.md — those are planning views
-(handbook/WORKITEMS.md §8).
+(`docs/adr/ADR-0002-workitem-backend-contract.md`).
 
 ---
 
