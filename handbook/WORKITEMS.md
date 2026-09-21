@@ -98,6 +98,13 @@ plus **`Parked`**, **`Blocked`**, and **`Cancelled`** crosscutting (the two gate
 
 ## 3. Provider configuration
 
+`.claude/settings.json` is gitignored (never ships with a clone), so there is nothing to copy
+from by default. [`templates/workitems.example.json`](../templates/workitems.example.json) is a
+copyable, placeholder-only starting point for the `workitems` block below (CCP-1146) — copy its
+`workitems` key into your own `.claude/settings.json` and replace the placeholders with your
+instance's own values (never commit the filled-in file, same rule as
+[`templates/memory-sync.example.json`](../templates/memory-sync.example.json)).
+
 `.claude/settings.json` (the project's config; a `.claude/settings.local.json` overrides it locally):
 
 ```json
