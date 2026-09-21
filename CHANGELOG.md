@@ -44,7 +44,17 @@ All notable changes to this project are documented in this file. The format is b
   covers both sides: stub awks for the seam itself (no single machine can exercise a capable and
   an incapable awk with a real binary), plus a stub-free agreement test that cross-asserts the
   probe's verdict about the machine's real awk against an independently spelled instance of the
-  same ERE shape.
+  same ERE shape. A code-review follow-up in the same ticket closes two remaining gaps.
+  `.github/workflows/ci.yml`'s `python-tests` job now installs mawk and PATH-prepends a
+  directory holding only an `awk` -> mawk symlink before running `test_memory_lint`,
+  `test_memory_lint_commonmark_corpus`, `test_migrate_review_headers` and `test_awk_capability`
+  under it, asserting `awk -W version` actually answers `mawk` first — before this, CI had zero
+  real-mawk coverage (ubuntu-latest's own `awk` resolves to gawk, the macOS job's to BSD awk), so
+  a rewrite that happened to be wrong the same way mawk's regex compiler was could have gone
+  green here undetected. `CONTRIBUTING.md` now states the awk expectation next to its existing
+  shellcheck paragraph, per this ticket's own acceptance criterion. Separately,
+  `awkcap_canary_answer`'s stderr readback is now guarded the same way its neighbours already
+  were, so an unreadable stderr temp file cannot abort a `set -e` caller.
 
 - **`.github/workflows/ci.yml`'s `check-all-macos` job now forwards a deny-list into CI via a
   GitHub Actions secret (CCP-1148 / F2).** Before this, the only path enforcing the deny-list
