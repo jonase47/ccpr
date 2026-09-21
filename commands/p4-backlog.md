@@ -217,7 +217,7 @@ All IDs follow this consistent schema. Phase is metadata in BACKLOG.md, not part
 - Work items created via `workitems create` — one per story, backend-assigned ids (source of truth)
 - **`docs/planning/BACKLOG.md`** (generated **view** over the created items — living, prioritized,
   estimated; frontmatter `status: living`; item status is never hand-edited here, see
-  `docs/adr/ADR-0002-workitem-backend-contract.md`)
+  ADR-0002-workitem-backend-contract.md)
 - **`docs/planning/PROJECT_PLAN.md`** (phase index with `## Milestones & Release Planning` body section)
 - Foundation for `/p4-sprint` (populate first sprint) and all P5 commands
 
