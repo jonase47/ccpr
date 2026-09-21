@@ -123,10 +123,10 @@ python3 -m unittest discover -s scripts/tests -t .
 
 - **`-t .` is not optional**, and the failure mode is worth knowing because it is
   partly silent. It sets the top-level directory imports resolve against. Measured
-  on the current tree (21.09.2026, integrating CCP-1179, CCP-1214 and
-  CCP-1181): **with**
-  it, discovery collects **2964 tests, 0 import errors**, exit 0; **without** it,
-  **2191 tests and 20 modules that fail to
+  on the current tree (21.09.2026, integrating CCP-1179, CCP-1214, CCP-1181
+  and CCP-1187): **with**
+  it, discovery collects **2968 tests, 0 import errors**, exit 0; **without** it,
+  **2195 tests and 20 modules that fail to
   import**, exit 1 — the nine that use a relative import
   (`from .test_phase_docs_lint import …` in five modules,
   `from .test_artifact_gate import …` in two,
@@ -417,6 +417,15 @@ python3 -m unittest discover -s scripts/tests -t .
   `TestLoader().discover(...).countTestCases()` under each flag, and the
   failing-module set independently enumerated via
   `unittest.loader._FailedTest` entries, rather than assumed from the delta.
+
+  21.09.2026, `ticket/CCP-1187` merged on top (the p5-polish.md precondition
+  now reads SPRINT.md's `gate:` field instead of document prose,
+  `test_precondition_shows_says_guard.py`): **2968 / 2195 / 20 / 773** —
+  **+4** on both sides of the flag, all in the new module (no relative
+  import, so it lands on both sides and cancels out of the never-execute
+  figure); modules-fail unchanged at 20. Re-measured with
+  `TestLoader().discover(...).countTestCases()` under each flag rather than
+  added.
 - The full run takes **a couple of minutes**. If you drive it from an agent whose
   tool calls time out, start it in the background and wait for it once rather than
   polling.
