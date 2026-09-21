@@ -43,7 +43,9 @@ class FakeYouTrackTransport:
                  known_sprints=None, estimate_field_name=None, link_type_names=None,
                  symmetric_type_names=None, known_groups=None,
                  corrupt_tag_visibility_readback=False,
-                 corrupt_tag_creation_response=False):
+                 corrupt_tag_creation_response=False,
+                 tags_page_size_cap=None, groups_page_size_cap=None,
+                 admin_projects_page_size_cap=None, extra_admin_projects=None):
         self.project_short_name = project_short_name
         self.project_internal_id = "0-0"
         self.commands_received = []  # for tests asserting on the exact command string
@@ -156,6 +158,25 @@ class FakeYouTrackTransport:
         # (fail_tag_visibility_set_at raises WorkItemError; this one returns
         # successfully but with unusable content).
         self.corrupt_tag_creation_response = corrupt_tag_creation_response
+        # CCP-1161: simulates a real instance's default page size on GET /api/tags,
+        # same idea as page_size_cap for GET /api/issues above -- without an
+        # explicit "$top=-1" (or a $top large enough), the fake truncates to the
+        # first `tags_page_size_cap` tags (in registration order), exactly how a
+        # real YouTrack instance silently caps an unpaginated collection GET. Lets
+        # a test prove _known_tag_names() sees every tag, not just the first page.
+        self.tags_page_size_cap = tags_page_size_cap
+        # CCP-1161 follow-up (code-review finding: the ticket's own two OTHER
+        # unpaginated-collection fixes -- GET /api/groups and GET /api/admin/projects
+        # -- shipped with no RED-first proof of their own, unlike GET /api/tags
+        # above). Same shape as tags_page_size_cap: without an explicit "$top=-1",
+        # the fake truncates to the first N entries (registration order).
+        self.groups_page_size_cap = groups_page_size_cap
+        self.admin_projects_page_size_cap = admin_projects_page_size_cap
+        # Extra decoy projects (short names only -- ids are assigned here) listed
+        # BEFORE this instance's own project in GET /api/admin/projects, so a test
+        # can push the configured project past admin_projects_page_size_cap --
+        # mirrors seed_existing_tags' role for tags_page_size_cap.
+        self._extra_admin_projects = list(extra_admin_projects) if extra_admin_projects else []
 
     def request(self, method, url, token, body=None):
         parsed = urllib.parse.urlparse(url)
@@ -163,7 +184,16 @@ class FakeYouTrackTransport:
         query_params = dict(urllib.parse.parse_qsl(parsed.query))
 
         if method == "GET" and path == "/api/admin/projects":
-            return [{"id": self.project_internal_id, "shortName": self.project_short_name}]
+            all_projects = [
+                {"id": f"0-{index + 1}", "shortName": name}
+                for index, name in enumerate(self._extra_admin_projects)
+            ] + [{"id": self.project_internal_id, "shortName": self.project_short_name}]
+            if (
+                self.admin_projects_page_size_cap is not None
+                and query_params.get("$top") != "-1"
+            ):
+                return all_projects[:self.admin_projects_page_size_cap]
+            return all_projects
 
         if method == "POST" and path == "/api/issues":
             return self._create_issue(body)
@@ -218,10 +248,15 @@ class FakeYouTrackTransport:
             return None
 
         if method == "GET" and path == "/api/groups":
+            if self.groups_page_size_cap is not None and query_params.get("$top") != "-1":
+                return list(self._groups)[:self.groups_page_size_cap]
             return list(self._groups)
 
         if method == "GET" and path == "/api/tags":
-            return [self._tag_public(tag) for tag in self._tags.values()]
+            all_tags = [self._tag_public(tag) for tag in self._tags.values()]
+            if self.tags_page_size_cap is not None and query_params.get("$top") != "-1":
+                return all_tags[:self.tags_page_size_cap]
+            return all_tags
 
         if method == "POST" and path == "/api/tags":
             name = body["name"]
@@ -348,6 +383,16 @@ class FakeYouTrackTransport:
         test can target "the 2nd of this issue's own links" or "the 1st link
         of the NEXT issue" purely by counting calls."""
         self._fail_link_at_indices.add(index)
+
+    def seed_existing_tags(self, names):
+        """Test helper: registers `names` as tags that already exist on the
+        instance, in order -- cheaper than driving them through create()/add_tag()
+        one at a time, and the ORDER matters for tags_page_size_cap tests (a fake
+        page cap slices `self._tags.values()` in insertion order, mirroring how a
+        real instance's default page would return some deterministic-but-uncontrolled
+        subset first)."""
+        for name in names:
+            self._ensure_tag_registered(name)
 
     def seed_foreign_issue(self, item_id, project_short_name, summary="Foreign issue"):
         """Test helper: injects an issue belonging to a DIFFERENT project directly,

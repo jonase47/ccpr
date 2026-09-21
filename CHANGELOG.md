@@ -1785,6 +1785,23 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Fixed
 
+- **`workitems.py add-tag` rejected tags that already existed on the YouTrack instance, for any
+  tag past the instance's default `GET /api/tags` page (CCP-1161).** `_known_tag_names()`
+  fetched the tag registry without `$top`, so a real instance silently truncated the response to
+  its default page size — measured against a live instance: 42 of 57 tags on the first page. A
+  tag past that page was judged missing, `add-tag` then re-issued `POST /api/tags` for it, and
+  the instance rejected with HTTP 400 `invalid_properties` ("already has tag with name …") — an
+  idempotent call failing on exactly the case it exists to handle. Fixed by reusing the `top=-1`
+  idiom `list()` already relies on for `GET /api/issues`'s identical default-page-cap behaviour,
+  applied to every other unpaginated collection GET in the adapter: `GET /api/tags`
+  (`_known_tag_names`), `GET /api/groups` (`_resolve_tag_visibility_group_id`), and
+  `GET /api/admin/projects` (`_resolve_project_id`). `fake_youtrack_transport.py` could not
+  previously truncate `GET /api/tags` at all, so no test in the suite could reproduce a
+  truncation bug even though the module was fully green — the fake now supports a
+  `tags_page_size_cap`, mirroring the existing issues-list one, and a dedicated regression test
+  is seen failing against the pre-fix code with the exact live-instance symptom before the fix
+  makes it pass.
+
 - **`templates/QA_SKELETON/AUTHZ.md` shipped scenarios from a single foreign project and had two
   conflicting parents (CCP-1211).** Its "Test Scenarios" table named concrete feature IDs and
   platform-specific mechanisms (a local-auth gate for one project's delete flow, a keychain
