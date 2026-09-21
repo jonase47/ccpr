@@ -1738,7 +1738,7 @@ All notable changes to this project are documented in this file. The format is b
 ### Fixed
 
 - **`.gitignore` enumerated the working state under `docs/` where `artifact-gate.sh` and
-  `install.sh` are both default-deny, leaving 23 top-level entries untracked AND unignored
+  `install.sh` are both default-deny, leaving 24 top-level entries untracked AND unignored
   (CCP-1214).** Three tools decide what may live under `docs/`, and the ignore file was the one
   still working the other way round: it listed the paths somebody had remembered
   (`docs/HANDOVER.md`, `docs/workitems/`, `docs/memory/`, `docs/decisions/`,

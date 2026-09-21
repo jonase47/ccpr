@@ -376,7 +376,7 @@ class EveryDocsPathTheFrameworkNamesIsIgnoredOrAllowlistedTest(unittest.TestCase
     1. It is the acceptance criterion as written, over REAL paths from the
        shipped surface rather than invented ones. The other two classes prove
        the rule; this one proves the rule covers the actual corpus.
-    2. It was the RED witness: 23 top-level entries / 142 paths before the
+    2. It was the RED witness: 24 top-level entries / 145 paths before the
        change, which is the evidence the defect existed at all.
     3. Its failure message is the actionable one -- it names the offending
        paths grouped by entry, so whoever breaks the boundary is told which

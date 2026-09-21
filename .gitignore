@@ -105,7 +105,7 @@ desktop.ini
 # state out of an installation -- but it stays the first line, and it is the
 # one that also keeps the state out of a clone. The allowlist is per top-level
 # entry and reads the FILESYSTEM, not the git index, so an ignored file inside
-# an ALLOWLISTED directory is still installed (see assets/ below). Inverting
+# an ALLOWLISTED directory is still installed (see docs/logo/ below). Inverting
 # this rule does not close that gap and was not meant to: the `!` lines
 # re-open the allowlisted directories, so e.g. docs/adr/.session-context.md is
 # not ignored here either. (docs/adr/.DS_Store IS ignored, but by the
