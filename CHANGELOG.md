@@ -8,6 +8,18 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Added
 
+- **`templates/workitems.example.json`, a copyable template for `.claude/settings.json`'s
+  `workitems` block (CCP-1146).** `.claude/settings.json` is gitignored, so a second contributor
+  configuring the `youtrack` provider previously had only prose (`handbook/WORKITEMS.md` §3) to
+  copy from — unlike the other gitignored settings file, `~/.claude/memory-sync.json`, which
+  already ships `templates/memory-sync.example.json`. The new template carries placeholder
+  values only (no real host, project short name or token — PO decision 11.09.2026), and
+  `handbook/WORKITEMS.md` §3 now links to it. `scripts/tests/test_workitems_template.py` asserts
+  the template's `youtrack` keys are exactly what `youtrack.create(config)`'s own `config.get(...)`
+  calls read, derived via `inspect.getsource()` rather than a second hand-maintained list, so the
+  template cannot silently drift from the loader. Explicitly out of scope: making a missing
+  `workitems` block fail loudly instead of silently defaulting to the `local` provider.
+
 - **`scripts/lib/awk_capability.sh` — an awk-dialect probe, and a could-not-run outcome where
   two shipped scripts used to report a false green (CCP-1179).** `mawk 1.3.4 20240123`, the
   default `/usr/bin/awk` on Debian-family systems, aborts its regex compiler on an interval
