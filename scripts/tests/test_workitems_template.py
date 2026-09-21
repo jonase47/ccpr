@@ -93,6 +93,20 @@ class WorkitemsTemplateNoRealValuesTest(unittest.TestCase):
         self.assertNotRegex(base_url, r"^https?://\d")  # no bare IP literal
         self.assertIn("<", base_url)
 
+    def test_project_is_a_placeholder_not_a_real_short_name(self):
+        template = json.loads(TEMPLATE_PATH.read_text(encoding="utf-8"))
+
+        project = template["workitems"]["youtrack"]["project"]
+
+        self.assertIn("<", project)
+
+    def test_tokenfile_is_a_placeholder_not_a_real_path(self):
+        template = json.loads(TEMPLATE_PATH.read_text(encoding="utf-8"))
+
+        token_file = template["workitems"]["youtrack"]["tokenFile"]
+
+        self.assertIn("<", token_file)
+
 
 if __name__ == "__main__":
     unittest.main()
