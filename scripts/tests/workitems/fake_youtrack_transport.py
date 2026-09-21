@@ -43,7 +43,8 @@ class FakeYouTrackTransport:
                  known_sprints=None, estimate_field_name=None, link_type_names=None,
                  symmetric_type_names=None, known_groups=None,
                  corrupt_tag_visibility_readback=False,
-                 corrupt_tag_creation_response=False):
+                 corrupt_tag_creation_response=False,
+                 tags_page_size_cap=None):
         self.project_short_name = project_short_name
         self.project_internal_id = "0-0"
         self.commands_received = []  # for tests asserting on the exact command string
@@ -156,6 +157,13 @@ class FakeYouTrackTransport:
         # (fail_tag_visibility_set_at raises WorkItemError; this one returns
         # successfully but with unusable content).
         self.corrupt_tag_creation_response = corrupt_tag_creation_response
+        # CCP-1161: simulates a real instance's default page size on GET /api/tags,
+        # same idea as page_size_cap for GET /api/issues above -- without an
+        # explicit "$top=-1" (or a $top large enough), the fake truncates to the
+        # first `tags_page_size_cap` tags (in registration order), exactly how a
+        # real YouTrack instance silently caps an unpaginated collection GET. Lets
+        # a test prove _known_tag_names() sees every tag, not just the first page.
+        self.tags_page_size_cap = tags_page_size_cap
 
     def request(self, method, url, token, body=None):
         parsed = urllib.parse.urlparse(url)
@@ -221,7 +229,10 @@ class FakeYouTrackTransport:
             return list(self._groups)
 
         if method == "GET" and path == "/api/tags":
-            return [self._tag_public(tag) for tag in self._tags.values()]
+            all_tags = [self._tag_public(tag) for tag in self._tags.values()]
+            if self.tags_page_size_cap is not None and query_params.get("$top") != "-1":
+                return all_tags[:self.tags_page_size_cap]
+            return all_tags
 
         if method == "POST" and path == "/api/tags":
             name = body["name"]
@@ -348,6 +359,16 @@ class FakeYouTrackTransport:
         test can target "the 2nd of this issue's own links" or "the 1st link
         of the NEXT issue" purely by counting calls."""
         self._fail_link_at_indices.add(index)
+
+    def seed_existing_tags(self, names):
+        """Test helper: registers `names` as tags that already exist on the
+        instance, in order -- cheaper than driving them through create()/add_tag()
+        one at a time, and the ORDER matters for tags_page_size_cap tests (a fake
+        page cap slices `self._tags.values()` in insertion order, mirroring how a
+        real instance's default page would return some deterministic-but-uncontrolled
+        subset first)."""
+        for name in names:
+            self._ensure_tag_registered(name)
 
     def seed_foreign_issue(self, item_id, project_short_name, summary="Foreign issue"):
         """Test helper: injects an issue belonging to a DIFFERENT project directly,

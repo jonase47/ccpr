@@ -832,9 +832,15 @@ class YouTrackBackend:
         trips for 35 answers. Any tag this backend itself creates (via
         _ensure_tag_visibility) is added to the SAME cache immediately, so a tag
         created earlier in this run is never mistaken for missing a second time
-        -- the cache would otherwise go blind to writes it caused itself."""
+        -- the cache would otherwise go blind to writes it caused itself.
+
+        CCP-1161: `top=-1` disables pagination explicitly, same as list()'s own
+        GET /api/issues call -- without it, a real instance silently truncates
+        this collection to its default page size (measured: 42 of 57 tags), this
+        method concludes a tag past that page is missing, and the POST /api/tags
+        it then issues is rejected (HTTP 400) for a tag that already exists."""
         if self._known_tag_names_cache is None:
-            existing = self._request("GET", "/api/tags", fields="id,name") or []
+            existing = self._request("GET", "/api/tags", fields="id,name", top=-1) or []
             self._known_tag_names_cache = {
                 tag["name"] for tag in existing if tag.get("name")
             }
@@ -856,7 +862,9 @@ class YouTrackBackend:
         instance (e.g. two same-named project teams), so the guard costs
         nothing to keep either way."""
         if self._all_groups_cache is None:
-            self._all_groups_cache = self._request("GET", "/api/groups", fields="id,name") or []
+            # CCP-1161: same unpaginated-collection shape as _known_tag_names()'s
+            # GET /api/tags -- top=-1 disables the instance's default page cap.
+            self._all_groups_cache = self._request("GET", "/api/groups", fields="id,name", top=-1) or []
         matches = [g for g in self._all_groups_cache if g.get("name") == group_name]
         if not matches:
             print(
@@ -1020,7 +1028,11 @@ class YouTrackBackend:
         # than letting the raw HTTP error propagate, since a permission failure
         # would otherwise look identical to a misconfigured project short name.
         try:
-            projects = self._request("GET", "/api/admin/projects", fields="id,shortName")
+            # CCP-1161: same unpaginated-collection shape as _known_tag_names()'s
+            # GET /api/tags -- top=-1 disables the instance's default page cap.
+            projects = self._request(
+                "GET", "/api/admin/projects", fields="id,shortName", top=-1
+            )
         except WorkItemError as exc:
             raise WorkItemError(
                 f"Could not resolve YouTrack project {self.project!r} via "

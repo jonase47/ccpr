@@ -102,6 +102,37 @@ class YouTrackPaginationTest(unittest.TestCase):
         self.assertEqual(len(items), 5)
 
 
+class YouTrackTagLookupPaginationTest(unittest.TestCase):
+    """CCP-1161: GET /api/tags is just as unpaginated-by-default as GET /api/issues
+    (see YouTrackPaginationTest above), but _known_tag_names() never sent $top=-1.
+    Measured against a live instance: a tag that exists but fell past the first
+    page is judged "missing", add_tag() then issues POST /api/tags for it, and the
+    instance rejects with HTTP 400 invalid_properties ("already has tag with name
+    ...") -- an idempotent call fails on a tag that is already there."""
+
+    def test_add_tag_recognises_a_tag_that_exists_past_the_first_page(self):
+        transport = FakeYouTrackTransport(
+            project_short_name="TEST", tags_page_size_cap=2,
+            known_groups=[{"id": "102-0", "name": "All Users"}],
+        )
+        # Registration order matters here: the fake's page cap returns the first
+        # 2 tags in insertion order, so "late-tag" is the one that falls off --
+        # exactly the shape of the live-instance defect (a tag past the default
+        # page, not absent).
+        transport.seed_existing_tags(["early-tag", "another-early-tag", "late-tag"])
+        backend = youtrack.YouTrackBackend(
+            base_url="https://faketrack.example.org", project="TEST",
+            token="fake-token", transport=transport,
+            tag_visibility_group="All Users",
+        )
+        item = backend.create(title="New feature")
+
+        backend.add_tag(item["id"], "late-tag")
+
+        fetched = backend.get(item["id"])
+        self.assertIn("late-tag", fetched["tags"])
+
+
 class YouTrackInvalidCommandTest(unittest.TestCase):
     """Verified against a real instance: an unresolvable Command API query (an
     unknown State/user name) returns HTTP 400 and leaves the issue UNCHANGED
