@@ -1,5 +1,5 @@
 {
-  "_comment": "Template for the `workitems` block of `.claude/settings.json` (gitignored -- see .gitignore -- so nothing else ships a copyable starting point for it). Copy the `workitems` key below into your own `.claude/settings.json` (merge it in if that file already has other keys), then replace every placeholder with your own instance's values. See handbook/WORKITEMS.md §3 for the full field reference and docs/adr/ADR-0005-claiming-runner-protocol.md for `claiming`. Leaving `provider` on \"local\" (CCPR's default, no server, no token) is also valid -- this template exists for the youtrack provider specifically, not to talk you into using it.",
+  "_comment": "Template for the `workitems` block of `.claude/settings.json` (gitignored -- see .gitignore -- so nothing else ships a copyable starting point for it). Copy the `workitems` key below into your own `.claude/settings.json` (merge it in if that file already has other keys), then replace every placeholder with your own instance's values. See docs/adr/ADR-0005-claiming-runner-protocol.md for `claiming`. Leaving `provider` on \"local\" (CCPR's default, no server, no token) is also valid -- this template exists for the youtrack provider specifically, not to talk you into using it.",
   "workitems": {
     "provider": "youtrack",
     "youtrack": {
