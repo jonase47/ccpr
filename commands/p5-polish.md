@@ -17,7 +17,7 @@ This is **not** a retrospective – `/gate-p5` keeps the 3-point retro. This com
 ## Preconditions (Hard Block on Violation)
 
 Before doing anything else, verify:
-1. **Gate-p5 passed**: Last `gate-p5` entry in `SPRINT.md` shows `Sprint Done` or `Conditionally Done`. If not → stop, recommend `/gate-p5` first.
+1. **Gate-p5 passed**: `docs/planning/SPRINT.md`'s frontmatter `gate:` field is `done` or `conditionally_done` (the closed vocabulary `templates/PHASE_DOC_SCHEMA.md`'s "Gate verdict" section defines for this file). If not → stop, recommend `/gate-p5` first.
 2. **CI green**: No failing tests or build errors on current commit. If red → stop, recommend `/p5-bugfix`.
 3. **Working tree clean**: No uncommitted changes. If dirty → stop, ask user to commit or stash.
 
