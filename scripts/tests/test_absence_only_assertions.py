@@ -2334,7 +2334,15 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
         double-parent guard. Proven an addition, not a swap: `git status
         --porcelain scripts/tests` showed one `??` line for the new file,
         nothing deleted, nothing renamed. Verified against this test's own
-        glob (81 names, matching the set pin below)."""
+        glob, was 81.
+
+        Bumped 81 -> 82, 16.09.2026 (CCP-1146, integrated 21.09.2026): added
+        test_workitems_template.py, the workitems.example.json /
+        youtrack.create(config) key-agreement guard. Proven an addition,
+        not a swap: `git status --porcelain scripts/tests` showed one `??`
+        line for the new file, nothing deleted, nothing renamed. Verified
+        against this test's own glob (82 names, matching the set pin
+        below)."""
         files = sorted(TESTS_DIR.glob("*.py")) + sorted((TESTS_DIR / "workitems").glob("*.py"))
         names = sorted(f.relative_to(TESTS_DIR).as_posix() for f in files if f.name != "__init__.py")
         # The floor first, and it does exactly one job: it catches this glob
@@ -2346,11 +2354,12 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
         # floor; it is why the set pin below stands beside it. Keeping both is
         # the decision (WI-0133 T1), not redundancy left in by accident.
         self.assertGreaterEqual(  # pin: floor tests-corpus-files
-            len(names), 81,
-            "the scripts/tests corpus glob reached {} file(s); it reached 81 "
+            len(names), 82,
+            "the scripts/tests corpus glob reached {} file(s); it reached 82 "
             "when this floor was measured (21.09.2026, integrating CCP-1179, "
-            "CCP-1214, CCP-1181, CCP-1187 and CCP-1211). A SHRINKING scope "
-            "is a blind scanner, not a clean tree.".format(len(names)),
+            "CCP-1214, CCP-1181, CCP-1187, CCP-1211, CCP-1161 and "
+            "CCP-1146). A SHRINKING scope is a blind scanner, not a clean "
+            "tree.".format(len(names)),
         )
         # The set pin, replacing a bare count (WI-0133 T1). A count cannot
         # tell "one added" from "one added, one gone" (ADR-0012 obligation 2),
@@ -2436,6 +2445,7 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
             "test_shell_script_syntax.py",
             "test_shellcheck_run.py",
             "test_workitems_cli.py",
+            "test_workitems_template.py",
             "workitems/contract.py",
             "workitems/fake_youtrack_transport.py",
             "workitems/similar_fixture_texts.py",
@@ -2452,12 +2462,13 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
             "workitems/test_youtrack.py",
             ],
             names,
-            "the scripts/tests corpus (76 -> 81, integrated 21.09.2026: "
+            "the scripts/tests corpus (76 -> 82, integrated 21.09.2026: "
             "test_awk_capability.py (CCP-1179), "
             "test_docs_boundary_default_deny.py (CCP-1214), "
             "test_p4_sprint_gate_frontmatter.py (CCP-1181), "
-            "test_precondition_shows_says_guard.py (CCP-1187) and "
-            "test_qa_skeleton_single_parent.py (CCP-1211) added -- see this "
+            "test_precondition_shows_says_guard.py (CCP-1187), "
+            "test_qa_skeleton_single_parent.py (CCP-1211) and "
+            "test_workitems_template.py (CCP-1146) added -- see this "
             "method's own docstring above for the per-ticket addition proof "
             "(each a `??` line for its new file plus a named ` M`, if any, "
             "nothing deleted, nothing renamed). Earlier trajectory: "

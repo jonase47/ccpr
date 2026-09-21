@@ -124,9 +124,9 @@ python3 -m unittest discover -s scripts/tests -t .
 - **`-t .` is not optional**, and the failure mode is worth knowing because it is
   partly silent. It sets the top-level directory imports resolve against. Measured
   on the current tree (21.09.2026, integrating CCP-1179, CCP-1214, CCP-1181,
-  CCP-1187, CCP-1211 and CCP-1161): **with**
-  it, discovery collects **2973 tests, 0 import errors**, exit 0; **without** it,
-  **2197 tests and 20 modules that fail to
+  CCP-1187, CCP-1211, CCP-1161 and CCP-1146): **with**
+  it, discovery collects **2980 tests, 0 import errors**, exit 0; **without** it,
+  **2204 tests and 20 modules that fail to
   import**, exit 1 — the nine that use a relative import
   (`from .test_phase_docs_lint import …` in five modules,
   `from .test_artifact_gate import …` in two,
@@ -446,6 +446,16 @@ python3 -m unittest discover -s scripts/tests -t .
   all 3 new tests fall straight into the never-execute figure (773 → 776).
   Re-measured with `TestLoader().discover(...).countTestCases()` under each
   flag rather than added.
+
+  21.09.2026, `ticket/CCP-1146` merged on top (`templates/workitems.
+  example.json`, `test_workitems_template.py`): **2980 / 2204 / 20 / 776**
+  — **+7** on both sides of the flag, all in the new module. Not a relative
+  import (`sys.path.insert(0, …)` against `scripts/lib` plus a plain
+  `from workitems import youtrack`), so it imports the same with or
+  without `-t .` and the delta cancels out of the never-execute figure;
+  modules-fail unchanged at 20. Re-measured with
+  `TestLoader().discover(...).countTestCases()` under each flag rather than
+  added.
 - The full run takes **a couple of minutes**. If you drive it from an agent whose
   tool calls time out, start it in the background and wait for it once rather than
   polling.
