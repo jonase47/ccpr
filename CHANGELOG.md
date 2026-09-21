@@ -1776,8 +1776,19 @@ All notable changes to this project are documented in this file. The format is b
   already reads) instead of a hard-coded glob, so a future shipped `docs/` document is covered
   automatically. Fixed each by dropping a now-redundant `related:` entry where `ADR-0002` was
   already listed, removing it where no shipped equivalent exists, or rewording a prose mention to
-  name the handbook chapter without the unresolvable path shape — none of it rewrites what
-  `CONSTITUTION.md`'s historical Changelog entries record, only how they cite a filename.
+  name the handbook chapter without the unresolvable path shape.
+
+  **Second review correction:** the first pass of the follow-up above also reworded
+  `CONSTITUTION.md`'s v1.3 `## Changelog` entry, which was wrong — that entry itself states a
+  changelog record "is not rewritten retroactively" (PO correction, 08.09.2026), and its
+  `handbook/*.md` mentions are correct as history (the paths that existed when it was written).
+  Reverted it to its exact original wording and taught the scanner the general rule instead:
+  `_lines_outside_changelog_sections()` skips any line inside a markdown section headed
+  "Changelog" (any level, case-insensitive, nested subsections included) — derived from the
+  heading text, not a hard-coded exception for this one file, so any other shipped document with
+  its own `## Changelog` section is covered the same way. `HistoricalChangelogSectionIsSkippedTest`
+  is the RED/GREEN proof (a citation inside such a section is ignored, one outside it in the same
+  document is still caught).
 
 - **12 domain agents plus `code-reviewer` instructed the agent to rewrite `docs/HANDOVER.md`
   at the end of every run, contradicting the framework's own orchestrator-owned HANDOVER model
