@@ -1737,6 +1737,24 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Fixed
 
+- **`commands/p5-polish.md` stated its gate-p5 precondition as what `SPRINT.md` "shows" in
+  prose, using non-existent title-case values (CCP-1187).** The "Preconditions (Hard Block on
+  Violation)" section read: 'Last `gate-p5` entry in `SPRINT.md` shows `Sprint Done` or
+  `Conditionally Done`.' Two problems: (1) "shows" points at document prose rather than the
+  frontmatter `gate:` field `scripts/phase-docs-lint.sh` and `scripts/command-check.py` actually
+  read; (2) `Sprint Done` / `Conditionally Done` are not members of either gate-verdict
+  vocabulary `scripts/lib/gate_checklists.py`'s `GATE_VERDICT_VOCABULARIES` defines — SPRINT.md's
+  own values are the snake_case `pending` / `done` / `conditionally_done` / `not_done`, and the
+  passing set is `done` / `conditionally_done` (`GATE_VERDICT_PASSING_VALUES["SPRINT"]`). The
+  precondition now reads the frontmatter field directly.
+  `scripts/tests/test_precondition_shows_says_guard.py` adds a grep-based guard across
+  `commands/*.md`: no line may combine the verb "shows"/"says" with a backtick-quoted `.md`
+  reference — the shape that identifies "the document says/shows X" as a precondition. Measured
+  against the full corpus before the fix: exactly one match, this line; every other "shows"/
+  "says" occurrence in commands/ (a CLI's own diff output, an Inviolable's wording, a monitoring
+  checklist item) has no `.md` reference on the same line and is correctly left alone — reported
+  rather than folded into this fix, per the item's own scope instruction.
+
 - **`commands/p4-sprint.md`'s two `docs/planning/SPRINT.md` frontmatter templates (flat and
   sub-index layout) shipped without the `gate:` field `scripts/phase-docs-lint.sh` requires on
   that file (CCP-1181).** SPRINT.md is the one living-file exception the lint still validates
