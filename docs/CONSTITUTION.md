@@ -1,8 +1,8 @@
 ---
 kind: constitution
 status: active
-version: 1.4
-last_updated: 08.09.2026
+version: 1.5
+last_updated: 21.09.2026
 related:
   - README.md
   - CLAUDE.md
@@ -48,6 +48,9 @@ related:
 
 ## Changelog
 
+- **v1.5** (21.09.2026): editorial — the frontmatter `related:` entry and the Lean-Track-sunset
+  measurement no longer cite a handbook chapter that the installer does not ship (CCP-1193, PO
+  decision 21.09.2026). No Inviolable, Default or Aspirational goal changed in substance.
 - **v1.4** (08.09.2026): added a `*Reference:*` pointer from Inviolable #2 ("No personal or tenant
   data in shipped artifacts") to `docs/adr/ADR-0015-bare-first-names-are-not-personal-data.md`
   (CCP-1157). ADR-0015 records the repo-owner's reading that a bare first name used in an
