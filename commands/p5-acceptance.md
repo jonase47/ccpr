@@ -40,18 +40,29 @@ Read the following files (if available):
 - **UX_CONCEPT.md** (UI specifications for visual checks)
 - **TEST_STRATEGY.md** (test levels and methods)
 
-### 2. Delegation to QA-Tester Agent (Lead)
-Delegate acceptance tests to the **qa-tester** agent:
+The **qa-tester** agent has no `Bash` (`agents/qa-tester.md`) — it cannot execute the automated
+suite itself. If the story's implementation carries automated tests (from P5's TDD cycle), run
+`~/.claude/scripts/run-tests.sh [story scope] [projectdir]` and capture the JSON result before
+delegating below; where no automated test covers a criterion, the agent verifies it by reading the
+code and UX_CONCEPT.md instead (its own charter: "derived from user stories", never invented either
+way).
 
-> Run acceptance tests for the following feature: **$ARGUMENTS**
+### 2. Delegation to QA-Tester Agent (Lead)
+Delegate acceptance verification to the **qa-tester** agent:
+
+> Verify the following feature against its acceptance criteria: **$ARGUMENTS**
 > Acceptance criteria from BACKLOG.md: [Insert all acceptance criteria of the story]
 > Persona context from USER_JOURNEYS.md: [Insert relevant persona]
+> Automated results (from `scripts/run-tests.sh`, already executed by the orchestrator, if any exist
+> for this scope): [inline JSON, or "no automated coverage for this story"]
 >
 > **A. Acceptance Criteria Check**
 > Check each acceptance criterion individually:
 > | Criterion | Test Result | Finding |
 > |---|---|---|
-> | [Criterion 1] | Passed / Failed | [Description] |
+> | [Criterion 1] | Passed / Failed / Manually Verified | [Description] |
+> Where an automated result exists for a criterion, transcribe Passed/Failed from it — never
+> estimate. Where none exists, mark Manually Verified (or Failed) from your own code/UX review.
 >
 > **B. Happy Path Tests**
 > - Test the standard flow from a user perspective completely

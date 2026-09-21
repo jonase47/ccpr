@@ -19,30 +19,54 @@ If not provided: Ask about the paths to be tested.
 - **Model**: sonnet
 
 ## Context (Orchestrator prepares)
-Orchestrator reads in advance and delivers inline:
+The **qa-tester** agent has no `Bash` (`agents/qa-tester.md`) — it can design and write E2E test
+files (it has `Write`/`Edit`) but cannot execute them. That splits this command into two steps: the
+agent designs the tests first, then the orchestrator runs them and hands the results back for
+analysis. Prepared before step 1:
 - From USER_JOURNEYS.md: The journey to be tested (exact steps)
 - From TEST_STRATEGY.md: Defined critical E2E paths
 
 ## Prompt Template
-> **Goal**: Run E2E tests for: [journey/feature]
+
+### Step 1: Design & write the tests (qa-tester)
+> **Goal**: Design and write E2E tests for: [journey/feature]. Do not claim any test has passed or
+> failed at this stage — results come from step 2 below, run by the orchestrator.
 >
 > **User Journey**:
 > [inline from USER_JOURNEYS.md]
 >
 > **Output Format**:
 > A step-by-step table per journey:
-> | Step | Action | Expected | Actual | Status |
-> |---|---|---|---|---|
->
-> Overall result: PASSED / FAILED
+> | Step | Action | Expected |
+> |---|---|---|
+> Plus the path(s) of the test file(s) written.
 >
 > **Constraints**:
 > - E2E tests ONLY (no unit, no integration tests)
 > - Test from the user's perspective, not from the code perspective
 > - Max. 5 journeys per run
 
+### Step 2: Execute (orchestrator, not the agent)
+Run `~/.claude/scripts/run-tests.sh [new E2E test path] [projectdir]` against the file(s) step 1
+wrote and capture the JSON result.
+
+### Step 3: Report (qa-tester analyzes the results)
+> **Goal**: Fill in the Actual/Status columns for the journey table from step 1, using only the
+> results below — transcribed, never estimated.
+>
+> **Results** (from `scripts/run-tests.sh`, already executed by the orchestrator):
+> [inline JSON: framework, summary.total/passed/failed, failures[]]
+>
+> **Output Format**:
+> The step 1 table, extended:
+> | Step | Action | Expected | Actual | Status |
+> |---|---|---|---|---|
+>
+> Overall result: PASSED / FAILED (derived from the results' `summary.failed` count)
+
 ## Orchestrator Checkpoint
 - [ ] All critical paths from TEST_STRATEGY.md covered?
+- [ ] Step 2 actually ran before step 3 was delegated?
 - [ ] Failed steps clearly documented?
 
 ## Write Detail File

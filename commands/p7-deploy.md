@@ -54,9 +54,12 @@ Delegate the deployment to the **devops** agent:
 > 4. Analyse the cause before the next deployment attempt
 
 ### 3. Delegation to QA Tester Agent (Support)
-Delegate smoke test verification to the **qa-tester** agent:
+The **qa-tester** agent has no `Bash` (`agents/qa-tester.md`) — it cannot execute the smoke tests
+itself; the devops agent already did in step B above. Delegate a second-opinion analysis of those
+results to the **qa-tester** agent, with devops's own step-B log inlined:
 
-> Execute the smoke tests after deployment and document the results:
+> Analyze the smoke-test results devops already produced (inlined below) — do not re-run them:
+> [inline devops's step B log: which checks passed/failed]
 > 1. Have all smoke tests passed?
 > 2. Are there behavioural differences compared to the staging environment?
 > 3. Recommendation: confirm deployment as successful – yes/no?
