@@ -124,8 +124,8 @@ python3 -m unittest discover -s scripts/tests -t .
 - **`-t .` is not optional**, and the failure mode is worth knowing because it is
   partly silent. It sets the top-level directory imports resolve against. Measured
   on the current tree (21.09.2026, integrating CCP-1179, CCP-1214, CCP-1181,
-  CCP-1187 and CCP-1211): **with**
-  it, discovery collects **2970 tests, 0 import errors**, exit 0; **without** it,
+  CCP-1187, CCP-1211 and CCP-1161): **with**
+  it, discovery collects **2973 tests, 0 import errors**, exit 0; **without** it,
   **2197 tests and 20 modules that fail to
   import**, exit 1 — the nine that use a relative import
   (`from .test_phase_docs_lint import …` in five modules,
@@ -134,7 +134,7 @@ python3 -m unittest discover -s scripts/tests -t .
   `from . import …` of five sibling modules in the skip budget), plus the eleven
   modules of the `scripts/tests/workitems/` subpackage (CCP-1172 added
   `test_workitem_similar.py` as the eleventh). The run does go red on those
-  20, so you will notice something — but **773 tests simply never execute**, and
+  20, so you will notice something — but **776 tests simply never execute**, and
   nothing in the output says so.
 
   That skipped count moves whenever a module gains a relative import:
@@ -435,6 +435,17 @@ python3 -m unittest discover -s scripts/tests -t .
   modules-fail unchanged at 20. Re-measured with
   `TestLoader().discover(...).countTestCases()` under each flag rather than
   added.
+
+  21.09.2026, `ticket/CCP-1161` merged on top (the YouTrack adapter paginates
+  `GET /api/groups` and `GET /api/admin/projects`, closing the same
+  default-page-cap gap CCP-1161 also closed for `GET /api/tags`): **2973 /
+  2197 / 20 / 776** — **+3** with the flag, **+0** without it, because both
+  new test methods land inside `workitems/test_youtrack.py`, a module that
+  was already among the eleven `workitems/` subpackage modules failing to
+  import without `-t .` — no new module, so modules-fail stays at 20, and
+  all 3 new tests fall straight into the never-execute figure (773 → 776).
+  Re-measured with `TestLoader().discover(...).countTestCases()` under each
+  flag rather than added.
 - The full run takes **a couple of minutes**. If you drive it from an agent whose
   tool calls time out, start it in the background and wait for it once rather than
   polling.
