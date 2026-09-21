@@ -8,6 +8,18 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Added
 
+- **`templates/workitems.example.json`, a copyable template for `.claude/settings.json`'s
+  `workitems` block (CCP-1146).** `.claude/settings.json` is gitignored, so a second contributor
+  configuring the `youtrack` provider previously had only prose (`handbook/WORKITEMS.md` §3) to
+  copy from — unlike the other gitignored settings file, `~/.claude/memory-sync.json`, which
+  already ships `templates/memory-sync.example.json`. The new template carries placeholder
+  values only (no real host, project short name or token — PO decision 11.09.2026), and
+  `handbook/WORKITEMS.md` §3 now links to it. `scripts/tests/test_workitems_template.py` asserts
+  the template's `youtrack` keys are exactly what `youtrack.create(config)`'s own `config.get(...)`
+  calls read, derived via `inspect.getsource()` rather than a second hand-maintained list, so the
+  template cannot silently drift from the loader. Explicitly out of scope: making a missing
+  `workitems` block fail loudly instead of silently defaulting to the `local` provider.
+
 - **`.github/workflows/ci.yml`'s `check-all-macos` job now forwards a deny-list into CI via a
   GitHub Actions secret (CCP-1148 / F2).** Before this, the only path enforcing the deny-list
   (tenant/project names that must never land in the public CCPR repo on GitHub — PO precision
