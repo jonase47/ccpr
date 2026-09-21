@@ -3,7 +3,7 @@ kind: adr
 adr_id: ADR-0014
 adr_status: accepted
 status: active
-last_updated: 08.09.2026
+last_updated: 16.09.2026
 related:
   - ADR-0012-derived-values-are-not-stored.md
   - ADR-0015-bare-first-names-are-not-personal-data.md
@@ -69,11 +69,19 @@ The ignored bulk is `docs/HANDOVER.md`, `docs/.handover-archive/`, `docs/decisio
 `docs/workitems/`, `docs/memory/`, `docs/workitems-idmap.yml` and the broad `docs/.*` dotfile
 rule, all listed in `.gitignore:34-36,65-66,73,106`.
 
+> **Superseded 16.09.2026 (CCP-1214), measurement and conclusion both unchanged.** Those six
+> rules and their line numbers no longer exist. `.gitignore` is now default-deny under `docs/`
+> — `docs/*` plus one `!docs/` re-inclusion per entry in
+> `scripts/lib/docs-framework-allowlist.txt` — because the enumeration above only ever covered
+> what someone remembered to add, and had fallen 24 top-level entries behind. This ADR's
+> finding is *strengthened*, not weakened: the ignored bulk is no longer a list that can go
+> stale but the default, and the five installed entries are the explicit exceptions.
+
 So the corrected sentence has two halves, and which one applies depends on who is asking:
 
 - **In a working machine, `docs/` is a working-state directory with five shipped exceptions.**
   This is the reading that governs the install boundary, because `install.sh` and the allowlist
-  read the **filesystem**, not the index (`.gitignore:63-64,88-94`) — which is why an ignored
+  read the **filesystem**, not the index (`.gitignore`'s `docs/` and `assets/` blocks) — which is why an ignored
   file inside an allowlisted directory still ships.
 - **In a clone, the inverse holds: `docs/` is 100 % shipped framework**, and every working-state
   file under it is untracked. This is the reading a contributor gets when they ask "what is
@@ -273,9 +281,12 @@ migration every adopter has to run. There is no third moment.
    framework namespace holds `CONSTITUTION.md` and every phase document — artifacts a person
    opens, edits and reviews. Dot-directories are hidden by default in file browsers, in `ls`,
    and in many editor trees. This repository already uses a leading dot under a doc root to
-   mean *volatile, not content*: `.gitignore:106` ignores `docs/.*` wholesale for exactly that
-   reason. Moving the framework's readable content into a dot-directory inverts a convention
-   this repository is currently relying on.
+   mean *volatile, not content*: at the time of this ADR `.gitignore:106` ignored `docs/.*`
+   wholesale for exactly that reason. Moving the framework's readable content into a
+   dot-directory inverts a convention this repository is currently relying on. (Since CCP-1214
+   the ignoring is done by the wider `docs/*` default-deny rule, so the dot no longer carries it
+   alone — but the convention this point rests on, a leading dot under a doc root meaning
+   *volatile, not content*, is unchanged and still observed by every generated artifact.)
 
 4. **The name being freed is not the name that is wanted.** The reason to vacate `docs/` would
    be to give human documentation a good home. `handbook/` *is* a better name for a human
@@ -292,8 +303,8 @@ be a major version. That is the risk this decision accepts. It is why the naming
 this assessment are both listed as deferred review items, and why the review should happen
 while the window is still open rather than after.
 
-**What option (b) would *not* have fixed, and (a) does not fix either.** `.gitignore:50-56`
-records a dated, measured finding: because a single allowlist serves both sides of the boundary,
+**What option (b) would *not* have fixed, and (a) does not fix either.** `.gitignore`'s `docs/`
+block records a dated, measured finding: because a single allowlist serves both sides of the boundary,
 "tracked but not shipped" is not expressible today — the eight flat Tier-1 memory files fail
 the gate's docs-boundary check, and the note itself calls the fix "an ADR-sized change".
 Neither (a) nor (b) addresses that. It is a property of the one-list design, not of the name.
@@ -479,7 +490,8 @@ manual switching step fails silently, and its failure looks identical to the che
 
 **Split `docs-framework-allowlist.txt` into two lists — tracked-but-not-shipped and shipped.**
 Not rejected, and not decided here either: it is a different question that this ADR's Context
-touched (`.gitignore:50-56`) and that neither namespace option addresses. Recorded so it is not
+touched (`.gitignore`'s `docs/` block, "the flat Tier-1 memory files") and that neither
+namespace option addresses. Recorded so it is not
 lost, and so nobody proposes a namespace move to solve it.
 
 ## Deferred review items
@@ -523,7 +535,7 @@ in a plan. These three are open and are recorded here to be found.
    deferred to the cut that makes them mandatory, so the register never describes a field no
    check enforces.
 5. **The allowlist is per top-level entry and reads the filesystem, not the git index**
-   (`.gitignore:63-64,88-94`, measured 21.08.2026), so an ignored file inside an allowlisted
+   (`.gitignore`'s `docs/` and `assets/` blocks, measured 21.08.2026), so an ignored file inside an allowlisted
    directory still ships. Measured again 05.09.2026: `docs/logo/.DS_Store` exists on disk and is
    inside the allowlisted `logo/` entry. Not a namespace question and not fixed here; recorded
    because the measurement for this ADR walked past it.

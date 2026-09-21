@@ -4,8 +4,9 @@ an undotted sibling no other convention names.
 
 ## Why this exists
 
-Three other places already use the dotted spelling: `.gitignore:35` ignores
-`docs/.handover-archive/`, `commands/cleanup.md` documents
+Three other places already use the dotted spelling: `.gitignore` ignores
+`docs/.handover-archive/` (by a line naming it until CCP-1214, by the
+`docs/*` default-deny rule since), `commands/cleanup.md` documents
 `docs/.handover-archive/<YYYY-MM-DD>-<slug>.md` twice as the established
 convention, and the only such directory that exists on disk in a real
 project is the dotted one. `scripts/baseline.sh` was the outlier: it built

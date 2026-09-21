@@ -286,8 +286,11 @@ path_is_user_owned() {
 # 09.09.2026, on this repository, with docs/HANDOVER.md planted in $DEST:
 # it lands in **IGNORED**, exit 0. The walk still consults
 # path_is_source_ignored() afterwards, and this repository's own .gitignore
-# names exactly these paths (docs/HANDOVER.md, docs/workitems/,
-# docs/memory/, docs/decisions/, docs/.*). Which block it lands in is
+# denies them. It used to do so by NAMING each one (docs/HANDOVER.md,
+# docs/workitems/, docs/memory/, docs/decisions/, docs/.*); since CCP-1214 it
+# is default-deny (docs/*, with a !docs/ re-inclusion per framework-allowlist
+# entry), so the rule reported for such a path is the wide one rather than a
+# line naming it. Which block it lands in is unchanged and is still
 # decided by the INDEX, because check-ignore is index-aware:
 #
 #   tracked in $SRC   -> not ignored -> UNEXPECTED, a finding, exit 1

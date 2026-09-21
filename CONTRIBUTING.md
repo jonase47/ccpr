@@ -123,9 +123,9 @@ python3 -m unittest discover -s scripts/tests -t .
 
 - **`-t .` is not optional**, and the failure mode is worth knowing because it is
   partly silent. It sets the top-level directory imports resolve against. Measured
-  on the current tree (16.09.2026, CCP-1179): **with**
-  it, discovery collects **2951 tests, 0 import errors**, exit 0; **without** it,
-  **2180 tests and 19 modules that fail to
+  on the current tree (21.09.2026, integrating CCP-1179 and CCP-1214): **with**
+  it, discovery collects **2961 tests, 0 import errors**, exit 0; **without** it,
+  **2190 tests and 19 modules that fail to
   import**, exit 1 — the eight that use a relative import
   (`from .test_phase_docs_lint import …` in four modules,
   `from .test_artifact_gate import …` in two,
@@ -380,6 +380,26 @@ python3 -m unittest discover -s scripts/tests -t .
   added: **2923 / 2152 / 19 / 771** — CCP-1178's +7 lands on both sides of the
   flag on top of CCP-1177's figures (its new module has no relative import), so
   skipped keeps CCP-1177's 771 and modules-fail stays at 19.
+
+  16.09.2026, CCP-1214: **2933 / 2162 / 19 / 771**. Net **+10** on both sides of
+  the flag — `test_docs_boundary_default_deny.py` adds 11 tests and
+  `test_docs_dotfile_gitignore_coverage.py` loses 1, its repo-side gap-1 class
+  having become true by construction once `.gitignore` went default-deny. The
+  new module has no relative import, so the delta cancels out of the
+  never-execute figure and 771 stands. Measured with
+  `TestLoader().discover(...).countTestCases()` under each flag rather than
+  added.
+
+  21.09.2026, merge round: `ticket/CCP-1179` (**2951 / 2180 / 19 / 771**)
+  integrated `ticket/CCP-1214` (**2933 / 2162 / 19 / 771**) via `git merge`,
+  the same shape as the 11.09.2026 merge round above — both branches forked
+  from the same post-CCP-1178/CCP-1177 base (**2923 / 2152 / 19 / 771**) and
+  conflicted only in this file. Re-measured on the integrated tree with
+  `TestLoader().discover(...).countTestCases()` under each flag rather than
+  added: **2961 / 2190 / 19 / 771** — CCP-1179's +28 and CCP-1214's +10 both
+  land on both sides of the flag on top of the shared base (neither new
+  module carries a relative import), so 771 never-execute and 19
+  modules-fail stand unchanged.
 - The full run takes **a couple of minutes**. If you drive it from an agent whose
   tool calls time out, start it in the background and wait for it once rather than
   polling.

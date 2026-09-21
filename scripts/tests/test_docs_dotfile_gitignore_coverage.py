@@ -28,6 +28,39 @@ gaps:
    standard block -- newer than both, and exactly the drift G-049 exists to
    prevent.
 
+## GAP 1 HAS MOVED (CCP-1214), and this module keeps gaps 2 and 3
+
+CCP-1214 inverted this repository's docs/ rule to default-deny (`docs/*` plus
+one `!docs/` re-inclusion per framework-allowlist entry). That made gap 1's
+assertion -- "every swept artifact is ignored HERE" -- true by construction,
+so `ThisRepoGitignoreCoversEverySweptArtifactTest` was removed rather than
+left green. It is asserted more directly, and with teeth, by
+`test_docs_boundary_default_deny.py`.
+
+Measured before removing it, not assumed. Three mutations of the
+post-CCP-1214 .gitignore: as shipped -> green; `docs/*` removed -> RED;
+`docs/*` swapped back for the narrower `docs/.*` -> green. Its one remaining
+trigger was the removal of `docs/*`, which the new module states outright.
+
+The re-aiming option was tried first and REJECTED on evidence. The candidate
+invariant was CCP-1156's: an artifact inside an ALLOWLISTED directory is not
+ignored, because the `!docs/adr/` line re-opens it, and install_docs() copies
+it from the filesystem regardless. That is a real hole -- but `DOTFILE_RE`
+below anchors on `docs/\\.`, so this sweep only ever finds dotfiles DIRECTLY
+under docs/ and can never deliver such a path. A mutation proved it: adding
+`docs/adr/.session-context.md` to a shipped command left the suite green.
+Widening the regex was rejected as out of scope, because `block_patterns()`
+feeds gaps 2 and 3, and a depth-2 hit would start demanding entries in
+project-init.sh's generated block and in both standard-block carriers -- a
+change to WI-0058's contract, not to CCP-1214's. The hole is characterised in
+`test_docs_boundary_default_deny.py` instead, where nothing depends on this
+sweep.
+
+Gaps 2 and 3 are untouched by all of this: they are about what a GENERATED
+project and the shipped G-049 standard block must enumerate, and enumeration
+is still the right shape there -- a user's docs/ is their own working
+directory and may legitimately track dotfiles this repository never does.
+
 ## What this test derives, and what it cannot see
 
 `swept_docs_dotfile_paths()` re-derives the expected set the same way the
@@ -50,14 +83,12 @@ scripts/ or commands/, would not be found by this test.
 """
 
 import re
-import subprocess
 import unittest
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS_DIR = REPO_ROOT / "scripts"
 COMMANDS_DIR = REPO_ROOT / "commands"
-GITIGNORE = REPO_ROOT / ".gitignore"
 PROJECT_INIT = REPO_ROOT / "scripts" / "project-init.sh"
 
 # Every file carrying a copy of the "Standard block for .gitignore in CCPR
@@ -126,13 +157,6 @@ def block_patterns():
     return patterns
 
 
-def git_check_ignore(rel_path):
-    return subprocess.run(
-        ["git", "check-ignore", "-q", rel_path],
-        cwd=REPO_ROOT,
-    ).returncode == 0
-
-
 class DocsDotfileSweepTest(unittest.TestCase):
     """Characterises the sweep method itself, independent of any fix below --
     a regression here means the sweep's own scope silently changed."""
@@ -171,20 +195,6 @@ class DocsDotfileSweepTest(unittest.TestCase):
                 "docs/.session-context.md",
                 "docs/.gate-preflight-*.md",
             },
-        )
-
-
-class ThisRepoGitignoreCoversEverySweptArtifactTest(unittest.TestCase):
-    """Gap 1 from the WI-0058 sweep: this repository's own .gitignore."""
-
-    def test_every_swept_artifact_is_ignored_in_this_repo(self):
-        uncovered = sorted(
-            p for p in concrete_artifact_paths() if not git_check_ignore(p)
-        )
-        self.assertEqual(
-            uncovered, [],
-            "docs/ artifacts named in scripts/ or commands/ but not covered "
-            "by this repo's .gitignore: " + ", ".join(uncovered),
         )
 
 
