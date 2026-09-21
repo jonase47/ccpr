@@ -1851,7 +1851,7 @@ All notable changes to this project are documented in this file. The format is b
   ADR-0014 (`docs/`  is the framework namespace, `handbook/` is the human handbook, not
   installed at all). `commands/p5-implement.md:30`, `p5-review.md:34`, `p5-acceptance.md:31,99`,
   `p5-bugfix.md:39,97`, `p4-backlog.md:73,114,218`, `gate-p4.md:33`, `gate-p5.md:44,107,125`,
-  `anchor.md:107-112` and nine more, plus `CLAUDE.md:37`, pointed a reader at that unshippable
+  `anchor.md:107-112` and seven more, plus `CLAUDE.md:37`, pointed a reader at that unshippable
   path for the work-item adoption guard's rationale, the claiming protocol, and the status
   vocabulary. The operative guard logic was already restated inline in every command, so no
   instruction was actually broken — only the "see X for more" pointer led nowhere on an
