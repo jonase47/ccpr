@@ -171,7 +171,8 @@ Run `bash ~/.claude/scripts/doc-volume-check.sh [projectdir]/docs`. Same output 
 Run `bash ~/.claude/scripts/manual-lint.sh [projectdir]/docs`. Same output handling as §3.
 Validates the `kind`/`parent_index` frontmatter contract (`templates/PHASE_DOC_SCHEMA.md`'s
 `## kind` and `## manual-lint.sh` sections) — generic over its root argument, not hardwired to
-this repository's own `handbook/` (`install.sh` never ships `handbook/`, see `handbook/README.md:2-5`).
+this repository's own `handbook/` (`install.sh` never ships `handbook/`, see
+`docs/adr/ADR-0014-documentation-namespace.md`).
 Most projects will scan clean here today (`kind`/`parent_index` are optional fields few sub-
 indexes use yet) — that is expected, not a sign the check did not run; the report's own
 `Files scanned` line and stderr notice on an empty scope make the difference legible. A project

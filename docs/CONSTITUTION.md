@@ -1,12 +1,11 @@
 ---
 kind: constitution
 status: active
-version: 1.4
-last_updated: 08.09.2026
+version: 1.5
+last_updated: 21.09.2026
 related:
   - README.md
   - CLAUDE.md
-  - handbook/LEAN_TRACK.md
 ---
 
 # Constitution – CCPR (Claude Code Project Runner)
@@ -45,10 +44,13 @@ related:
 - **Multi-tenant readiness:** CCPR usable in parallel by multiple persons on multiple projects for multiple clients without modification. *Measurement:* at least one real client project running on CCPR without local patches. *Review cadence:* quarterly during the v1.0 stabilisation period.
 - **Command-footprint consolidation:** reduce the current 116-command surface where sub-commands always run sequentially (e.g. P3 sub-trees). *Measurement:* command-invocation frequency from session logs; merge candidates after 30 days of consistent co-occurrence. *Review cadence:* every `/postmortem`.
 - **v1.0 release with versioning and changelog:** SemVer tags (`v1.0.0`, `v1.1.0`, …), `CHANGELOG.md` in the repo root, and a defined update procedure for users. *Measurement:* tag `v1.0.0` exists, CHANGELOG complete, update path documented. *Review cadence:* target = before declaring CCPR **stable** (v1.0). A public **beta** ships earlier under `0.x` with rough edges flagged (see `BETA.md`); stable status — stable interfaces and a defined upgrade path — is what this goal gates.
-- **Lean-Track sunset:** the Lean-Track is removed after CCPR v1.0 stabilises. *Measurement:* `commands/lean-*.md`, `commands/track-decision.md`, `handbook/LEAN_TRACK.md` removed (or repurposed), references purged from README/CLAUDE.md. *Review cadence:* immediately post-v1.0.
+- **Lean-Track sunset:** the Lean-Track is removed after CCPR v1.0 stabilises. *Measurement:* `commands/lean-*.md`, `commands/track-decision.md`, and the Lean-Track handbook chapter removed (or repurposed), references purged from README/CLAUDE.md. *Review cadence:* immediately post-v1.0.
 
 ## Changelog
 
+- **v1.5** (21.09.2026): editorial — the frontmatter `related:` entry and the Lean-Track-sunset
+  measurement no longer cite a handbook chapter that the installer does not ship (CCP-1193, PO
+  decision 21.09.2026). No Inviolable, Default or Aspirational goal changed in substance.
 - **v1.4** (08.09.2026): added a `*Reference:*` pointer from Inviolable #2 ("No personal or tenant
   data in shipped artifacts") to `docs/adr/ADR-0015-bare-first-names-are-not-personal-data.md`
   (CCP-1157). ADR-0015 records the repo-owner's reading that a bare first name used in an

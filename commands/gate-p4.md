@@ -30,8 +30,8 @@ project with zero committed work.
   reading BACKLOG.md/SPRINT.md prose for criterion 6, as before, and evaluate readiness from the
   prose story status. Emit one line: *"Tip: run `lift` to adopt the structured work-item store."*
 
-See handbook/WORKITEMS.md §8 for the full guard rationale, the directory-check requirement, and the
-status-verb mapping.
+See `docs/adr/ADR-0002-workitem-backend-contract.md` for the adoption-guard rationale and the status
+vocabulary.
 
 ## Execution
 

@@ -1797,6 +1797,59 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Fixed
 
+- **15 installed commands plus `CLAUDE.md` cited `handbook/WORKITEMS.md §N`, a path
+  `install.sh` never ships (CCP-1193).** `install.sh:45`'s `FRAMEWORK` array
+  (`agents commands docs hooks scripts templates`) never lists `handbook` — deliberate per
+  ADR-0014 (`docs/`  is the framework namespace, `handbook/` is the human handbook, not
+  installed at all). `commands/p5-implement.md:30`, `p5-review.md:34`, `p5-acceptance.md:31,99`,
+  `p5-bugfix.md:39,97`, `p4-backlog.md:73,114,218`, `gate-p4.md:33`, `gate-p5.md:44,107,125`,
+  `anchor.md:107-112` and nine more, plus `CLAUDE.md:37`, pointed a reader at that unshippable
+  path for the work-item adoption guard's rationale, the claiming protocol, and the status
+  vocabulary. The operative guard logic was already restated inline in every command, so no
+  instruction was actually broken — only the "see X for more" pointer led nowhere on an
+  installed machine. `commands/cleanup.md:174` carried the identical shape for a different
+  handbook file (`handbook/README.md`), found while building this fix's guard test.
+
+  **Fix:** repointed each citation to the ADR that actually carries the cited rule instead of
+  blindly aiming everything at ADR-0002 — claiming (§6) to
+  `docs/adr/ADR-0005-claiming-runner-protocol.md` (a dedicated ADR), the adoption guard /
+  write-loop / status vocabulary / contract shape to
+  `docs/adr/ADR-0002-workitem-backend-contract.md` (which documents the underlying decisions
+  even where the handbook's own worked-example detail — the exact directory-check algorithm, the
+  status-verb table — stays handbook-only elaboration not duplicated in the ADR), and
+  `commands/cleanup.md`'s citation to `docs/adr/ADR-0014-documentation-namespace.md`. Adding
+  `WORKITEMS.md` to `scripts/lib/docs-framework-allowlist.txt` (the ticket's alternative) would
+  not have worked: that allowlist only governs `docs/` subpaths, and `handbook/` is a different
+  top-level tree entirely absent from `FRAMEWORK` by design. Adds
+  `scripts/tests/test_handbook_citations_resolve.py`, a RED-first guard scanning
+  `commands/*.md`, `agents/*.md`, `templates/*.md` and `CLAUDE.md` for a concrete
+  `handbook/<file>` citation, deriving the "handbook is unshipped" fact from `install.sh`'s own
+  arrays rather than asserting it from memory.
+
+  **Review follow-up:** the guard's scope left out `docs/` entirely, even though `docs/adr/*.md`
+  (the allowlist's own first entry) is itself shipped. Twelve more citations of the identical
+  shape were hiding there: five ADRs' own `related:` frontmatter (`ADR-0001`, `ADR-0003`,
+  `ADR-0004`, `ADR-0008`, `ADR-0013`) and seven in `docs/CONSTITUTION.md`/`docs/PROJECT_PHASES.md`
+  (frontmatter `related:`, an Aspirational measurement, a historical Changelog entry, and a "Full
+  spec" pointer). `shipped_citation_scope()` now derives the shipped `docs/` file set from
+  `scripts/lib/docs-framework-allowlist.txt` (the same source `test_install_docs_boundary.py`
+  already reads) instead of a hard-coded glob, so a future shipped `docs/` document is covered
+  automatically. Fixed each by dropping a now-redundant `related:` entry where `ADR-0002` was
+  already listed, removing it where no shipped equivalent exists, or rewording a prose mention to
+  name the handbook chapter without the unresolvable path shape.
+
+  **Second review correction:** the first pass of the follow-up above also reworded
+  `CONSTITUTION.md`'s v1.3 `## Changelog` entry, which was wrong — that entry itself states a
+  changelog record "is not rewritten retroactively" (PO correction, 08.09.2026), and its
+  `handbook/*.md` mentions are correct as history (the paths that existed when it was written).
+  Reverted it to its exact original wording and taught the scanner the general rule instead:
+  `_lines_outside_changelog_sections()` skips any line inside a markdown section headed
+  "Changelog" (any level, case-insensitive, nested subsections included) — derived from the
+  heading text, not a hard-coded exception for this one file, so any other shipped document with
+  its own `## Changelog` section is covered the same way. `HistoricalChangelogSectionIsSkippedTest`
+  is the RED/GREEN proof (a citation inside such a section is ignored, one outside it in the same
+  document is still caught).
+
 - **`workitems.py add-tag` rejected tags that already existed on the YouTrack instance, for any
   tag past the instance's default `GET /api/tags` page (CCP-1161).** `_known_tag_names()`
   fetched the tag registry without `$top`, so a real instance silently truncated the response to
