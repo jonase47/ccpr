@@ -19,31 +19,62 @@ If not provided: Ask about the test scope.
 - **Model**: sonnet
 
 ## Context (Orchestrator prepares)
-Orchestrator reads in advance and delivers inline:
+The **qa-tester** agent has no `Bash` (`agents/qa-tester.md`) — it can design and write integration
+test files (it has `Write`/`Edit`) but cannot execute them. That splits this command into two steps:
+the agent designs the tests first, then the orchestrator runs them and hands the results back for
+analysis. Prepared before step 1:
 - From TEST_STRATEGY.md: Integration test level, tools, scope
 - From ARCHITECTURE.md: Component diagram, interfaces (relevant section only)
 - From API_SPEC.md: Endpoints to be tested
 
 ## Prompt Template
-> **Goal**: Write and run integration tests for: [area]
+
+### Step 1: Design & write the tests (qa-tester)
+> **Goal**: Design and write integration tests for: [area]. Do not claim any test has passed or
+> failed at this stage — results come from step 2 below, run by the orchestrator.
 >
 > **Components and Interfaces**:
 > [inline from ARCHITECTURE.md / API_SPEC.md]
 >
 > **Output Format**:
 > Table with max. 20 test cases:
-> | # | Test Case | Components | Expected | Actual | Status |
-> |---|---|---|---|---|---|
->
-> Summary: X passed, Y failed
+> | # | Test Case | Components | Expected |
+> |---|---|---|---|
+> Plus the path(s) of the test file(s) written.
 >
 > **Constraints**:
 > - Integration tests ONLY (no unit, no E2E)
 > - Focus on interfaces between components
 > - Test external services against mocks
 
+### Step 2: Execute (orchestrator, not the agent)
+Run `~/.claude/scripts/run-tests.sh [new integration test path] [projectdir]` against the file(s)
+step 1 wrote and capture the JSON result.
+
+### Step 3: Report (qa-tester analyzes the results)
+> **Goal**: Fill in the Actual/Status columns for the table from step 1, using only the results
+> below — transcribed, never estimated.
+>
+> **Results** (from `scripts/run-tests.sh`, already executed by the orchestrator):
+> [inline JSON: framework, summary.total/passed/failed, failures[]]
+>
+> **No-summary fallback**: if the results carry no `summary` field (`run-tests.sh`'s `npm test`
+> path returns `{"framework":"npm-test","raw_output":…}`, and an undetected framework returns
+> `{"framework":"unknown","error":…}`) — do not produce any pass/fail count. Mark every row
+> "Manually Verified" / "No parseable automated result" instead, and say so explicitly in the
+> summary.
+>
+> **Output Format**:
+> The step 1 table, extended:
+> | # | Test Case | Components | Expected | Actual | Status |
+> |---|---|---|---|---|---|
+>
+> Summary (derived from the results' `summary`): X passed, Y failed — or "Manually Verified" /
+> "No parseable automated result" per the fallback above
+
 ## Orchestrator Checkpoint
 - [ ] All critical interfaces tested?
+- [ ] Step 2 actually ran before step 3 was delegated?
 - [ ] Failed tests are reproducible?
 
 ## Write Detail File

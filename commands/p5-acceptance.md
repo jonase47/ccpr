@@ -40,18 +40,36 @@ Read the following files (if available):
 - **UX_CONCEPT.md** (UI specifications for visual checks)
 - **TEST_STRATEGY.md** (test levels and methods)
 
-### 2. Delegation to QA-Tester Agent (Lead)
-Delegate acceptance tests to the **qa-tester** agent:
+The **qa-tester** agent has no `Bash` (`agents/qa-tester.md`) — it cannot execute the automated
+suite itself. If the story's implementation carries automated tests (from P5's TDD cycle), run
+`~/.claude/scripts/run-tests.sh [story scope] [projectdir]` and capture the JSON result before
+delegating below; where no automated test covers a criterion, the agent verifies it by reading the
+code and UX_CONCEPT.md instead (its own charter: "derived from user stories", never invented either
+way).
 
-> Run acceptance tests for the following feature: **$ARGUMENTS**
+### 2. Delegation to QA-Tester Agent (Lead)
+Delegate acceptance verification to the **qa-tester** agent:
+
+> Verify the following feature against its acceptance criteria: **$ARGUMENTS**
 > Acceptance criteria from BACKLOG.md: [Insert all acceptance criteria of the story]
 > Persona context from USER_JOURNEYS.md: [Insert relevant persona]
+> Automated results (from `scripts/run-tests.sh`, already executed by the orchestrator, if any exist
+> for this scope): [inline JSON, or "no automated coverage for this story"]
+>
+> **No-summary fallback**: if the results carry no `summary` field (`run-tests.sh`'s `npm test`
+> path returns `{"framework":"npm-test","raw_output":…}`, and an undetected framework returns
+> `{"framework":"unknown","error":…}`) — treat that criterion as if no automated coverage exists;
+> do not produce a pass/fail count from it.
 >
 > **A. Acceptance Criteria Check**
 > Check each acceptance criterion individually:
 > | Criterion | Test Result | Finding |
 > |---|---|---|
-> | [Criterion 1] | Passed / Failed | [Description] |
+> | [Criterion 1] | Passed / Failed / Manually Verified / No parseable automated result | [Description] |
+> Where an automated result with a `summary` exists for a criterion, transcribe Passed/Failed from
+> it — never estimate. Where none exists (no coverage, or the no-summary fallback above), mark
+> Manually Verified (or Failed) from your own code/UX review, or "No parseable automated result" if
+> you cannot verify it manually either.
 >
 > **B. Happy Path Tests**
 > - Test the standard flow from a user perspective completely

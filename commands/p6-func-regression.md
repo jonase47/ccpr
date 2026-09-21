@@ -19,31 +19,49 @@ If not provided: Test all areas affected by the latest changes.
 - **Model**: sonnet
 
 ## Context (Orchestrator prepares)
-Orchestrator reads in advance and delivers inline:
+The **qa-tester** agent has no `Bash` (`agents/qa-tester.md`) — it cannot run the suite itself. The
+orchestrator runs it first and hands the agent the result to analyze:
 - From SPRINT.md: Which features/modules were changed most recently
 - From tests/: Existing test files (file names + test case overview only)
+- **Test-run output**: run `~/.claude/scripts/run-tests.sh [area] [projectdir]` scoped to the areas
+  affected by recent changes (or the full suite if `$ARGUMENTS` was not given) and capture its JSON
+  output — this is the agent's sole source for pass/fail counts below
 
 ## Prompt Template
-> **Goal**: Run regression tests – check whether recent changes have broken existing functionality
+> **Goal**: Analyze the results below – identify whether recent changes have broken existing
+> functionality. Every number in your report must be transcribed from the provided results, never
+> invented or estimated.
 >
 > **Recent Changes**:
 > [inline from SPRINT.md]
 >
+> **Results** (already produced by the orchestrator, via `scripts/run-tests.sh`):
+> [inline JSON: framework, summary.total/passed/failed, failures[]]
+>
+> **No-summary fallback**: if the results carry no `summary` field (`run-tests.sh`'s `npm test`
+> path returns `{"framework":"npm-test","raw_output":…}`, and an undetected framework returns
+> `{"framework":"unknown","error":…}`) — do not produce any pass/fail count. Mark every row
+> "Manually Verified" / "No parseable automated result" instead, and say so explicitly in the
+> summary.
+>
 > **Output Format**:
 > | # | Test Area | Total Tests | Passed | Failed | Regressions |
 > |---|---|---|---|---|---|
+> (Total/Passed/Failed transcribed from the results' `summary` — never estimated. No `summary`
+> present → "Manually Verified" / "No parseable automated result" per the fallback above, not a
+> number)
 >
-> New regressions (if any):
+> New regressions (if any, derived from the `failures[]` entries):
 > | # | Regression | Affected Feature | Suspected Cause |
 > |---|---|---|---|
 >
 > **Constraints**:
-> - Run existing tests ONLY, do not write new ones
+> - Analyze the provided results ONLY — no new test files, no independent suite execution
 > - Focus on areas affected by recent changes
 > - Assign each regression clearly to a change
 
 ## Orchestrator Checkpoint
-- [ ] All existing tests executed?
+- [ ] Test-run output captured and passed to the agent before delegation?
 - [ ] Regressions clearly documented and assigned?
 
 ## Write Detail File

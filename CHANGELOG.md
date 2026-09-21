@@ -1797,6 +1797,54 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Fixed
 
+- **Four commands ordered the shell-less `qa-tester` agent to run/execute a test suite and report
+  invented pass/fail counts (CCP-1182).** `agents/qa-tester.md:4` carries `tools: Glob, Grep,
+  Read, Write, Edit` — no `Bash` — and `:133` says so outright: "You have no shell: you cannot
+  run tests yourself. Analyze test output the orchestrator hands you." `p6-func-integration.md`
+  ("Write and run integration tests"), `p6-func-e2e.md` ("Run E2E tests"),
+  `p6-func-regression.md` ("Run regression tests"), and `p5-acceptance.md` ("Run acceptance
+  tests") all delegated to `qa-tester` and asked it to execute a suite it cannot run, then report
+  a `Summary: X passed, Y failed` line or a `Passed | Failed` table column that could only be
+  invented — none of their `## Context (Orchestrator prepares)` blocks listed test-run output as
+  an input. `p7-deploy.md` carried the identical shape for its `qa-tester` support delegation
+  ("Execute the smoke tests after deployment"), found while building this fix's guard test, not
+  in the original defect report.
+
+  **Fix, matched to what each command actually needs:** `p6-func-regression.md` already only
+  runs EXISTING tests, so the orchestrator now runs `scripts/run-tests.sh` before delegating and
+  the agent analyzes the JSON result instead of producing it. `p6-func-integration.md` and
+  `p6-func-e2e.md` write NEW test files, so test-run output cannot exist before the agent has
+  written anything — split into three steps: the agent designs and writes the tests with no
+  pass/fail claim, the orchestrator runs them, and the agent fills in Actual/Status from the
+  results, transcribed only. `p5-acceptance.md` mixes automated-test coverage (from the story's
+  own P5 TDD cycle, where it exists) with manual/code review (where it doesn't) — the criteria
+  table now transcribes Passed/Failed from provided results where covered and marks Manually
+  Verified otherwise, never inventing either way. `p7-deploy.md`'s `devops` agent (which has
+  Bash) already executes the smoke tests; `qa-tester`'s role is now an explicit second-opinion
+  analysis of `devops`'s own log, not a re-execution. Adds
+  `scripts/tests/test_no_bash_agent_runs_tests.py`, a RED-first guard deriving which agents lack
+  Bash straight from `agents/*.md` frontmatter, attributing each command's delegation blockquotes
+  to the specific agent they were written for (not the whole file), and failing on a "run"/
+  "execute" instruction aimed at a Bash-less agent's own test suite — exempting exploratory
+  testing (manual by this project's QA methodology) and "how to run tests" as documentation
+  content an agent writes rather than executes.
+
+  **Review follow-up:** `scripts/run-tests.sh`'s `npm test` path (`run_npm_test()`, ~:393) returns
+  `{"framework":"npm-test","raw_output":…}` — no `summary`, no `failures[]` — and an undetected
+  framework returns `{"framework":"unknown","error":…}`. The four rewritten commands all told the
+  agent to transcribe pass/fail counts from `summary`, with nothing covering its absence — a plain
+  `npm test` project would have silently reintroduced invented numbers one level deeper than the
+  original fix reached. Added one shared "No-summary fallback" paragraph to each of the four
+  commands: when `summary` is absent, the agent produces no pass/fail count and marks every row
+  "Manually Verified" / "No parseable automated result" instead. `p7-deploy.md` was not touched —
+  its `qa-tester` delegation analyzes `devops`'s own log directly and never invokes
+  `scripts/run-tests.sh`, confirmed by grep. Did not change `run-tests.sh`'s output shape (out of
+  scope for this fix). `test_no_bash_agent_runs_tests.py` gains
+  `TranscribeFromSummaryRequiresNoSummaryFallbackTest`: derives which commands rely on the
+  `summary` field (mentions `run-tests.sh` AND a `summary.total`/`passed`/`failed` or `` `summary` ``
+  reference — measured to be exactly the four commands, `p7-deploy.md` correctly excluded by
+  construction) and fails if any lacks the fallback marker.
+
 - **15 installed commands plus `CLAUDE.md` cited `handbook/WORKITEMS.md §N`, a path
   `install.sh` never ships (CCP-1193).** `install.sh:45`'s `FRAMEWORK` array
   (`agents commands docs hooks scripts templates`) never lists `handbook` — deliberate per
