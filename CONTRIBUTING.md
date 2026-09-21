@@ -357,6 +357,15 @@ python3 -m unittest discover -s scripts/tests -t .
   a throwaway worktree, which measured 2899 there, confirming the +7 delta
   independently of the subprocess CLI route.
 
+  11.09.2026, merge round: `ticket/CCP-1178` (**2906 / 2150 / 19 / 756**)
+  integrated `main`/CCP-1177 (**2916 / 2145 / 19 / 771**) via `git merge`, the
+  same way the CCP-1172 merge round above did — both branches forked from
+  `790039e` and conflicted only in this file. Re-measured on the integrated tree
+  with `TestLoader().discover(...).countTestCases()` under each flag rather than
+  added: **2923 / 2152 / 19 / 771** — CCP-1178's +7 lands on both sides of the
+  flag on top of CCP-1177's figures (its new module has no relative import), so
+  skipped keeps CCP-1177's 771 and modules-fail stays at 19.
+
   16.09.2026, CCP-1179 (the mawk block-structure regex defects): **2923 ->
   2951** with `-t .` and **2152 -> 2180** without, 19 modules-fail and 771
   never-execute both unchanged. The net +28 is two cuts, not one, and the
@@ -372,15 +381,6 @@ python3 -m unittest discover -s scripts/tests -t .
   the flag and cancels out of the never-execute figure. Re-measured with
   `TestLoader().discover(...).countTestCases()` under each flag rather than
   added.
-
-  11.09.2026, merge round: `ticket/CCP-1178` (**2906 / 2150 / 19 / 756**)
-  integrated `main`/CCP-1177 (**2916 / 2145 / 19 / 771**) via `git merge`, the
-  same way the CCP-1172 merge round above did — both branches forked from
-  `790039e` and conflicted only in this file. Re-measured on the integrated tree
-  with `TestLoader().discover(...).countTestCases()` under each flag rather than
-  added: **2923 / 2152 / 19 / 771** — CCP-1178's +7 lands on both sides of the
-  flag on top of CCP-1177's figures (its new module has no relative import), so
-  skipped keeps CCP-1177's 771 and modules-fail stays at 19.
 
   16.09.2026, CCP-1214: **2933 / 2162 / 19 / 771**. Net **+10** on both sides of
   the flag — `test_docs_boundary_default_deny.py` adds 11 tests and
@@ -439,11 +439,12 @@ python3 -m unittest discover -s scripts/tests -t .
   21.09.2026, `ticket/CCP-1161` merged on top (the YouTrack adapter paginates
   `GET /api/groups` and `GET /api/admin/projects`, closing the same
   default-page-cap gap CCP-1161 also closed for `GET /api/tags`): **2973 /
-  2197 / 20 / 776** — **+3** with the flag, **+0** without it, because both
-  new test methods land inside `workitems/test_youtrack.py`, a module that
-  was already among the eleven `workitems/` subpackage modules failing to
-  import without `-t .` — no new module, so modules-fail stays at 20, and
-  all 3 new tests fall straight into the never-execute figure (773 → 776).
+  2197 / 20 / 776** — **+3** with the flag, **+0** without it, because all
+  three new test methods (tags, groups, projects) land inside
+  `workitems/test_youtrack.py`, a module that was already among the eleven
+  `workitems/` subpackage modules failing to import without `-t .` — no new
+  module, so modules-fail stays at 20, and all 3 new tests fall straight
+  into the never-execute figure (773 → 776).
   Re-measured with `TestLoader().discover(...).countTestCases()` under each
   flag rather than added.
 
