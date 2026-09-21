@@ -125,8 +125,8 @@ python3 -m unittest discover -s scripts/tests -t .
   partly silent. It sets the top-level directory imports resolve against. Measured
   on the current tree (21.09.2026, integrating CCP-1179, CCP-1214, CCP-1181,
   CCP-1187, CCP-1211, CCP-1161, CCP-1146, CCP-1193 and CCP-1182): **with**
-  it, discovery collects **3009 tests, 0 import errors**, exit 0; **without** it,
-  **2233 tests and 20 modules that fail to
+  it, discovery collects **3012 tests, 0 import errors**, exit 0; **without** it,
+  **2236 tests and 20 modules that fail to
   import**, exit 1 — the nine that use a relative import
   (`from .test_phase_docs_lint import …` in five modules,
   `from .test_artifact_gate import …` in two,
@@ -475,6 +475,18 @@ python3 -m unittest discover -s scripts/tests -t .
   `test_no_bash_agent_runs_tests.py`): **3009 / 2233 / 20 / 776** — **+14**
   on both sides of the flag, all in the new module (no relative import, so
   it lands on both sides and cancels out of the never-execute figure);
+  modules-fail unchanged at 20. Re-measured with
+  `TestLoader().discover(...).countTestCases()` under each flag rather than
+  added.
+
+  21.09.2026, CCP-1193 follow-up (a post-merge holistic review found the
+  guard's `shipped_citation_scope()` only globbed `templates/*.md`, missing
+  the two shipped `templates/*.json` example configs that also carried
+  unresolvable `handbook/` citations; `test_handbook_citations_resolve.py`
+  gained `shipped_templates_paths()` plus three new tests proving the
+  widened scope): **3012 / 2236 / 20 / 776** — **+3** on both sides of the
+  flag, all in the (pre-existing) module, which has no relative import, so
+  it lands on both sides and cancels out of the never-execute figure;
   modules-fail unchanged at 20. Re-measured with
   `TestLoader().discover(...).countTestCases()` under each flag rather than
   added.
