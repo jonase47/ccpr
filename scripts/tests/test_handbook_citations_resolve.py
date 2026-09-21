@@ -190,16 +190,51 @@ def shipped_docs_paths():
     return paths
 
 
+def shipped_templates_paths():
+    """Every TEXT file under `templates/`, recursively -- not just `*.md`.
+    `templates/` is copied wholesale by install.sh's `FRAMEWORK` array (a
+    whole top-level directory, not filtered by extension), so a citation
+    defect can just as easily hide in a shipped `templates/*.json` file as in
+    a `templates/*.md` one -- exactly the gap that let
+    `templates/workitems.example.json` and `templates/memory-sync.example.json`
+    slip past the original `templates/*.md`-only glob (post-merge review
+    finding, CCP-1193 follow-up).
+
+    Walked and filtered by content (no NUL byte in the first chunk read),
+    never a hard-coded extension allowlist -- so a future non-`.md` template
+    file of any text shape is covered automatically, while a genuine binary
+    asset (e.g. a logo) is skipped rather than raising a decode error. No
+    binary file exists under `templates/` today; the filter is defensive, not
+    reactive to a current file."""
+    root = REPO_ROOT / "templates"
+    if not root.exists():
+        return []
+    paths = []
+    for candidate in sorted(root.rglob("*")):
+        if not candidate.is_file():
+            continue
+        try:
+            with candidate.open("rb") as f:
+                chunk = f.read(8192)
+        except OSError:
+            continue
+        if b"\x00" in chunk:
+            continue
+        paths.append(candidate)
+    return paths
+
+
 def shipped_citation_scope():
-    """commands/*.md, agents/*.md, templates/*.md, CLAUDE.md -- the scope
-    CCP-1193 originally named -- plus every shipped `docs/*.md` file
-    (`shipped_docs_paths()`, above). Globbed/derived at runtime, never a
-    hard-coded file list, so a future file in any of these locations is
-    covered automatically."""
+    """commands/*.md, agents/*.md, every shipped text file under templates/
+    (`shipped_templates_paths()`, not just `*.md` -- see its own docstring),
+    CLAUDE.md -- the scope CCP-1193 originally named -- plus every shipped
+    `docs/*.md` file (`shipped_docs_paths()`, above). Globbed/derived at
+    runtime, never a hard-coded file list, so a future file in any of these
+    locations is covered automatically."""
     paths = []
     paths.extend(sorted((REPO_ROOT / "commands").glob("*.md")))
     paths.extend(sorted((REPO_ROOT / "agents").glob("*.md")))
-    paths.extend(sorted((REPO_ROOT / "templates").glob("*.md")))
+    paths.extend(shipped_templates_paths())
     paths.append(REPO_ROOT / "CLAUDE.md")
     paths.extend(shipped_docs_paths())
     return [p for p in paths if p.exists()]
@@ -243,6 +278,49 @@ class ShippedDocsScopeCoversAdrTest(unittest.TestCase):
         for stray in (REPO_ROOT / "docs" / "HANDOVER.md",
                       REPO_ROOT / "docs" / "adr-notes.md"):
             self.assertNotIn(stray.resolve(), scope)
+
+
+class ShippedTemplatesScopeCoversNonMdTest(unittest.TestCase):
+    """Pins the post-merge review gap fix: `templates/*.json` (not just
+    `templates/*.md`) must be part of the scanned scope, since `templates/`
+    ships as a whole directory, not filtered by extension."""
+
+    def test_workitems_example_json_is_in_scope(self):
+        scope = {p.resolve() for p in shipped_citation_scope()}
+        self.assertIn(
+            (REPO_ROOT / "templates" / "workitems.example.json").resolve(), scope
+        )
+
+    def test_memory_sync_example_json_is_in_scope(self):
+        scope = {p.resolve() for p in shipped_citation_scope()}
+        self.assertIn(
+            (REPO_ROOT / "templates" / "memory-sync.example.json").resolve(), scope
+        )
+
+    def test_a_synthetic_binary_file_under_templates_is_excluded(self):
+        # Mutation proof (G-107/G-109 pattern, same as DocsPathsMutationProofTest
+        # above): swap REPO_ROOT to a synthetic tree carrying one text file and
+        # one NUL-containing "binary" file, and prove the derived set keeps the
+        # former while dropping the latter -- not just that the real templates/
+        # tree happens to be all-text today.
+        import scripts.tests.test_handbook_citations_resolve as mod
+
+        with tempfile.TemporaryDirectory(prefix="ccpr-templates-scope-") as tmp:
+            fake_repo = Path(tmp)
+            templates_dir = fake_repo / "templates"
+            templates_dir.mkdir()
+            (templates_dir / "some.json").write_text("{}\n", encoding="utf-8")
+            (templates_dir / "some.bin").write_bytes(b"\x00\x01\x02binary")
+
+            original_root = mod.REPO_ROOT
+            mod.REPO_ROOT = fake_repo
+            try:
+                paths = {p.resolve() for p in mod.shipped_templates_paths()}
+            finally:
+                mod.REPO_ROOT = original_root
+
+            self.assertIn((templates_dir / "some.json").resolve(), paths)
+            self.assertNotIn((templates_dir / "some.bin").resolve(), paths)
 
 
 class HistoricalChangelogSectionIsSkippedTest(unittest.TestCase):
