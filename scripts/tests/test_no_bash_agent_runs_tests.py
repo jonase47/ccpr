@@ -51,6 +51,7 @@ regression test:
 """
 
 import re
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -269,6 +270,118 @@ class MutationProofTest(unittest.TestCase):
             self.assertEqual(len(findings), 1)
             self.assertEqual(findings[0][0], "p9-fake.md")
             self.assertEqual(findings[0][1], "qa-tester")
+
+
+# ---------------------------------------------------------------------------
+# Review follow-up (CCP-1182): scripts/run-tests.sh's own npm-test path
+# (`run_npm_test()`, ~:393) returns `{"framework":"npm-test","raw_output":…}`
+# -- no `summary`, no `failures[]` -- and an undetected framework returns
+# `{"framework":"unknown","error":…}`. The four commands fixed above tell the
+# agent to "transcribe from the results' `summary`", so a plain `npm test`
+# project (or one run-tests.sh cannot classify at all) reintroduces exactly
+# the invented-numbers defect this guard exists to catch, just one level
+# deeper: the agent has real "results", but no summary field inside them to
+# transcribe, and nothing told it that case is different from "results with
+# a summary". This does NOT change run-tests.sh's output shape (out of
+# scope for this fix) -- it requires every command that leans on `summary`
+# for pass/fail transcription to also carry an explicit no-summary fallback.
+# ---------------------------------------------------------------------------
+NO_SUMMARY_FALLBACK_MARKER = "No parseable automated result"
+RUN_TESTS_SH_MENTION_RE = re.compile(r"run-tests\.sh")
+SUMMARY_FIELD_REF_RE = re.compile(r"summary\.(?:total|passed|failed)\b|`summary`")
+
+
+def commands_relying_on_run_tests_summary(commands_dir=None):
+    """Names of every commands/*.md file that both (a) tells the orchestrator
+    to run `scripts/run-tests.sh` and (b) references the JSON result's
+    `summary` field (`summary.total`/`summary.passed`/`summary.failed`, or a
+    backtick-wrapped `` `summary` ``) -- i.e. relies on that field for
+    pass/fail transcription. Measured 21.09.2026: exactly the four commands
+    this guard already covers (`p5-acceptance.md`, `p6-func-e2e.md`,
+    `p6-func-integration.md`, `p6-func-regression.md`) mention
+    `run-tests.sh` at all; `p7-deploy.md`'s qa-tester delegation analyzes
+    devops's own step-B log instead and never invokes the script, so it is
+    correctly excluded by construction, not by a name-list exception."""
+    if commands_dir is None:
+        commands_dir = COMMANDS_DIR
+    names = []
+    for path in sorted(commands_dir.glob("*.md")):
+        text = path.read_text(encoding="utf-8")
+        if RUN_TESTS_SH_MENTION_RE.search(text) and SUMMARY_FIELD_REF_RE.search(text):
+            names.append(path.name)
+    return names
+
+
+def find_missing_no_summary_fallback(commands_dir=None):
+    """Names of the commands from commands_relying_on_run_tests_summary()
+    that do NOT carry the no-summary fallback marker."""
+    return [
+        name for name in commands_relying_on_run_tests_summary(commands_dir)
+        if NO_SUMMARY_FALLBACK_MARKER not in
+        (COMMANDS_DIR / name if commands_dir is None else commands_dir / name)
+        .read_text(encoding="utf-8")
+    ]
+
+
+class TranscribeFromSummaryRequiresNoSummaryFallbackTest(unittest.TestCase):
+    def test_relying_commands_are_exactly_the_four_fixed_ones(self):
+        # Precondition: the detector's own scope must not silently drift --
+        # p7-deploy.md staying excluded is a real, checked fact here, not an
+        # assumption.
+        self.assertEqual(
+            sorted(commands_relying_on_run_tests_summary()),
+            ["p5-acceptance.md", "p6-func-e2e.md", "p6-func-integration.md",
+             "p6-func-regression.md"],
+        )
+
+    def test_every_summary_relying_command_carries_the_no_summary_fallback(self):
+        findings = find_missing_no_summary_fallback()
+        self.assertEqual(
+            findings, [],
+            "command(s) transcribe pass/fail from run-tests.sh's `summary` field "
+            "but carry no fallback for run_npm_test()/the unknown-framework case, "
+            "where `summary` is absent: " + ", ".join(findings),
+        )
+
+
+class NoSummaryFallbackMutationProofTest(unittest.TestCase):
+    """Proves find_missing_no_summary_fallback() actually fires -- on a
+    synthetic fixture that reproduces the pre-fix shape (run-tests.sh +
+    summary transcription, no fallback), since the real corpus is fixed now
+    (G-107/G-109)."""
+
+    def test_fires_on_a_command_with_no_fallback(self):
+        with tempfile.TemporaryDirectory(prefix="ccpr-no-summary-fallback-") as tmp:
+            d = Path(tmp)
+            (d / "p9-fake.md").write_text(
+                "Run `~/.claude/scripts/run-tests.sh` and capture the result.\n"
+                "Transcribe Passed/Failed from the results' `summary` — never estimate.\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(find_missing_no_summary_fallback(commands_dir=d), ["p9-fake.md"])
+
+    def test_is_silent_once_the_fallback_marker_is_present(self):
+        with tempfile.TemporaryDirectory(prefix="ccpr-no-summary-fallback-") as tmp:
+            d = Path(tmp)
+            (d / "p9-fake.md").write_text(
+                "Run `~/.claude/scripts/run-tests.sh` and capture the result.\n"
+                "Transcribe Passed/Failed from the results' `summary` — never estimate.\n"
+                "No `summary` field present -> mark rows No parseable automated result.\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(find_missing_no_summary_fallback(commands_dir=d), [])
+
+    def test_a_command_that_never_mentions_run_tests_sh_is_out_of_scope(self):
+        # p7-deploy.md's real shape: qa-tester analyzes devops's own log,
+        # run-tests.sh is never invoked -- must not be flagged just because
+        # it happens to mention "summary" in some unrelated sense.
+        with tempfile.TemporaryDirectory(prefix="ccpr-no-summary-fallback-") as tmp:
+            d = Path(tmp)
+            (d / "p9-fake.md").write_text(
+                "## Executive summary\nDeployment succeeded.\n", encoding="utf-8",
+            )
+            self.assertEqual(commands_relying_on_run_tests_summary(commands_dir=d), [])
+            self.assertEqual(find_missing_no_summary_fallback(commands_dir=d), [])
 
 
 if __name__ == "__main__":

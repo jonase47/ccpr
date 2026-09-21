@@ -56,13 +56,20 @@ Delegate acceptance verification to the **qa-tester** agent:
 > Automated results (from `scripts/run-tests.sh`, already executed by the orchestrator, if any exist
 > for this scope): [inline JSON, or "no automated coverage for this story"]
 >
+> **No-summary fallback**: if the results carry no `summary` field (`run-tests.sh`'s `npm test`
+> path returns `{"framework":"npm-test","raw_output":…}`, and an undetected framework returns
+> `{"framework":"unknown","error":…}`) — treat that criterion as if no automated coverage exists;
+> do not produce a pass/fail count from it.
+>
 > **A. Acceptance Criteria Check**
 > Check each acceptance criterion individually:
 > | Criterion | Test Result | Finding |
 > |---|---|---|
-> | [Criterion 1] | Passed / Failed / Manually Verified | [Description] |
-> Where an automated result exists for a criterion, transcribe Passed/Failed from it — never
-> estimate. Where none exists, mark Manually Verified (or Failed) from your own code/UX review.
+> | [Criterion 1] | Passed / Failed / Manually Verified / No parseable automated result | [Description] |
+> Where an automated result with a `summary` exists for a criterion, transcribe Passed/Failed from
+> it — never estimate. Where none exists (no coverage, or the no-summary fallback above), mark
+> Manually Verified (or Failed) from your own code/UX review, or "No parseable automated result" if
+> you cannot verify it manually either.
 >
 > **B. Happy Path Tests**
 > - Test the standard flow from a user perspective completely

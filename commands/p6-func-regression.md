@@ -38,10 +38,18 @@ orchestrator runs it first and hands the agent the result to analyze:
 > **Results** (already produced by the orchestrator, via `scripts/run-tests.sh`):
 > [inline JSON: framework, summary.total/passed/failed, failures[]]
 >
+> **No-summary fallback**: if the results carry no `summary` field (`run-tests.sh`'s `npm test`
+> path returns `{"framework":"npm-test","raw_output":…}`, and an undetected framework returns
+> `{"framework":"unknown","error":…}`) — do not produce any pass/fail count. Mark every row
+> "Manually Verified" / "No parseable automated result" instead, and say so explicitly in the
+> summary.
+>
 > **Output Format**:
 > | # | Test Area | Total Tests | Passed | Failed | Regressions |
 > |---|---|---|---|---|---|
-> (Total/Passed/Failed transcribed from the results' `summary` — never estimated)
+> (Total/Passed/Failed transcribed from the results' `summary` — never estimated. No `summary`
+> present → "Manually Verified" / "No parseable automated result" per the fallback above, not a
+> number)
 >
 > New regressions (if any, derived from the `failures[]` entries):
 > | # | Regression | Affected Feature | Suspected Cause |

@@ -58,12 +58,19 @@ step 1 wrote and capture the JSON result.
 > **Results** (from `scripts/run-tests.sh`, already executed by the orchestrator):
 > [inline JSON: framework, summary.total/passed/failed, failures[]]
 >
+> **No-summary fallback**: if the results carry no `summary` field (`run-tests.sh`'s `npm test`
+> path returns `{"framework":"npm-test","raw_output":…}`, and an undetected framework returns
+> `{"framework":"unknown","error":…}`) — do not produce any pass/fail count. Mark every row
+> "Manually Verified" / "No parseable automated result" instead, and say so explicitly in the
+> summary.
+>
 > **Output Format**:
 > The step 1 table, extended:
 > | # | Test Case | Components | Expected | Actual | Status |
 > |---|---|---|---|---|---|
 >
-> Summary (derived from the results' `summary`): X passed, Y failed
+> Summary (derived from the results' `summary`): X passed, Y failed — or "Manually Verified" /
+> "No parseable automated result" per the fallback above
 
 ## Orchestrator Checkpoint
 - [ ] All critical interfaces tested?
