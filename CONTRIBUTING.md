@@ -95,6 +95,19 @@ and it never lands in the matched count.
 also means you will not see a finding it would have caught until CI does. It is
 the only non-stdlib dependency anywhere in the checks.
 
+**Any POSIX-shaped `awk` is expected to work; the block-structure scanners
+verify that rather than assume it.** `memory-lint.sh` and
+`migrate-review-headers.sh` parse CommonMark fences, headings and list
+markers with `awk`. `mawk 1.3.4` — the default `/usr/bin/awk` on
+Debian-family systems — used to panic mid-parse on that pattern shape
+(CCP-1179); the patterns are now rewritten so every awk dialect CCPR has
+tested compiles and applies them correctly. A capability probe
+(`scripts/lib/awk_capability.sh`) still checks the actual runtime `awk`
+before either script trusts it, so an awk dialect CCPR has never seen does
+not fail silently: `memory-lint.sh` reports `could-not-run` instead of a
+false clean pass, and `migrate-review-headers.sh` refuses to write anything
+rather than migrate with a fence scanner that cannot see fences.
+
 When you change what a check legitimately returns, update the baseline in the
 same commit and say why in the commit body. The sections below stay useful for
 running one check on its own while you work.
