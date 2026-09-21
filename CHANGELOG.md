@@ -1737,6 +1737,21 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Fixed
 
+- **`commands/p4-sprint.md`'s two `docs/planning/SPRINT.md` frontmatter templates (flat and
+  sub-index layout) shipped without the `gate:` field `scripts/phase-docs-lint.sh` requires on
+  that file (CCP-1181).** SPRINT.md is the one living-file exception the lint still validates
+  (check (k), WI-0129): `/gate-p5` records its verdict there and no other document carries it,
+  so a `gate:` field absent from the file is a lint error, not a skip. A project author who
+  copied either template verbatim (step 4b or 4c) would write a SPRINT.md that immediately
+  failed the project's own `phase-docs-lint.sh`. Both templates now carry `gate: pending` — the
+  creation-time value from `templates/PHASE_DOC_SCHEMA.md`'s "Gate verdict" vocabulary, the same
+  value the `GATE_P*.md` templates already start at before their own gate command runs — with no
+  trailing inline `#` comment, because `scripts/lib/frontmatter.sh`'s `fm_field` does not strip
+  one and the sprint-verdict enum check compares the field's raw value exactly.
+  `scripts/tests/test_p4_sprint_gate_frontmatter.py` extracts both `docs/planning/SPRINT.md`
+  templates out of `commands/p4-sprint.md`'s own source (never a hand-typed copy) and runs the
+  shipped lint against each, pinning that neither trips the `gate:` check.
+
 - **12 domain agents plus `code-reviewer` instructed the agent to rewrite `docs/HANDOVER.md`
   at the end of every run, contradicting the framework's own orchestrator-owned HANDOVER model
   (CCP-1178).** All 13 `agents/*.md` files carried the identical line "read it at the start for
