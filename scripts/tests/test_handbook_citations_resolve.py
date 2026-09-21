@@ -32,7 +32,7 @@ This module proves two things, not one:
    `handbook/`") is not flagged -- only a citation to a *specific file* is,
    since only that shape promises a reader something resolvable.
 
-## Post-merge review gap (`docs/` scope)
+## Post-merge review gap #1 (`docs/` scope)
 
 Code review of the original CCP-1193 fix found `shipped_citation_scope()`
 left out `docs/` entirely, even though `docs/` (or at least `docs/adr/*.md`)
@@ -45,11 +45,31 @@ Aspirational measurement, and a historical Changelog entry) plus
 repointing/removing each (ADR-0003/0004/0008 already listed ADR-0002 as a
 `related:` entry, so their handbook line was redundant and simply dropped;
 ADR-0001/ADR-0013/CONSTITUTION.md's frontmatter had no shipped equivalent to
-repoint to, so the entry was removed; the two prose mentions were reworded to
-name the handbook chapter without the unresolvable path shape).
+repoint to, so the entry was removed; the Aspirational-measurement prose was
+reworded to name the handbook chapter without the unresolvable path shape).
 `shipped_citation_scope()` now covers this via `shipped_docs_paths()`, so a
 new shipped `docs/` document citing an unshipped `handbook/` path is caught
-automatically, not just the five files fixed today.
+automatically, not just the files fixed today.
+
+## Post-merge review gap #2 (historical Changelog entries)
+
+The first pass also reworded `CONSTITUTION.md`'s v1.3 `## Changelog` entry,
+which was wrong: that very entry states the principle that a changelog
+record "is not rewritten retroactively" (a PO correction, dated
+08.09.2026) -- it names `handbook/README.md` etc. because those were the
+paths that existed AT THE TIME that entry was written, which is correct as
+history, not a dangling citation. Reverted the rewording and instead taught
+`find_handbook_file_citations()` to skip any line inside a markdown section
+headed "Changelog" (`_lines_outside_changelog_sections()`, any heading
+level, case-insensitive, nested subsections included) -- a structural rule
+derived from the heading text, not a hard-coded exception for
+`docs/CONSTITUTION.md` by name, so any other shipped document with its own
+"## Changelog" section gets the same treatment automatically.
+`HistoricalChangelogSectionIsSkippedTest` is the RED/GREEN proof: a citation
+inside a Changelog section is ignored (RED for the naive line scanner, GREEN
+here), a citation outside one in the SAME document is still caught (stays
+GREEN either way), plus edge cases for nested subsections and a sibling
+heading that closes the section.
 
 Mutation-proof: `MutationProofTest` writes a synthetic fixture carrying
 exactly the CCP-1193 defect shape and proves the scanner used by the real
@@ -70,6 +90,12 @@ INSTALL_SH = REPO_ROOT / "install.sh"
 # mention -- see module docstring.
 HANDBOOK_FILE_CITATION = re.compile(r"handbook/[A-Za-z0-9_./-]*\.[A-Za-z0-9]+")
 
+# A markdown ATX heading line ("## Changelog", "### v1.3", ...). Used to find
+# the boundary of a historical-changelog section -- see
+# _lines_outside_changelog_sections()'s own docstring for why that section is
+# excluded, generically, rather than by file name.
+HEADING_RE = re.compile(r"^(#{1,6})\s+(.*\S)\s*$")
+
 
 def shipped_top_level_dirs():
     """The set of top-level names install.sh actually ships, read straight
@@ -85,12 +111,50 @@ def shipped_top_level_dirs():
     return names
 
 
+def _lines_outside_changelog_sections(text):
+    """Yields (line_no, line) for every line NOT inside a markdown section
+    headed "Changelog" (any heading level, case-insensitive -- "## Changelog",
+    "### Changelog"), including its nested subsections.
+
+    Why: a historical changelog entry records what a document looked like AT
+    THE TIME an earlier change was made -- naming a path that existed then is
+    correct AS HISTORY, not a dangling citation to fix going forward
+    (`docs/CONSTITUTION.md`'s own v1.3 entry states the principle explicitly:
+    a changelog entry "is not rewritten retroactively", a PO correction dated
+    08.09.2026). The rule is derived structurally from the heading text, not
+    a hard-coded file-name exception for CONSTITUTION.md -- any shipped doc
+    with its own "## Changelog" section gets the same treatment.
+
+    A nested subsection (e.g. "### v1.3" under "## Changelog") stays excluded
+    until a heading at the SAME OR SHALLOWER level than the "Changelog"
+    heading itself closes the section -- that new heading is then evaluated
+    on its own merits (it might re-open a changelog scope if it is itself
+    named "Changelog" at a sibling level, though no known document does
+    that).
+    """
+    changelog_level = None
+    for line_no, line in enumerate(text.splitlines(), start=1):
+        heading = HEADING_RE.match(line)
+        if heading:
+            level = len(heading.group(1))
+            title = heading.group(2).strip()
+            if changelog_level is not None and level <= changelog_level:
+                changelog_level = None  # left the changelog section
+            if changelog_level is None and title.lower() == "changelog":
+                changelog_level = level
+        if changelog_level is None:
+            yield line_no, line
+
+
 def find_handbook_file_citations(paths):
     """(path, line_no, matched_text) for every concrete handbook/<file>
-    citation found across the given files."""
+    citation found across the given files, excluding citations inside a
+    historical "## Changelog" section (see
+    _lines_outside_changelog_sections())."""
     findings = []
     for path in paths:
-        for line_no, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        text = path.read_text(encoding="utf-8")
+        for line_no, line in _lines_outside_changelog_sections(text):
             for match in HANDBOOK_FILE_CITATION.finditer(line):
                 findings.append((path, line_no, match.group(0)))
     return findings
@@ -179,6 +243,90 @@ class ShippedDocsScopeCoversAdrTest(unittest.TestCase):
         for stray in (REPO_ROOT / "docs" / "HANDOVER.md",
                       REPO_ROOT / "docs" / "adr-notes.md"):
             self.assertNotIn(stray.resolve(), scope)
+
+
+class HistoricalChangelogSectionIsSkippedTest(unittest.TestCase):
+    """Review follow-up: a citation inside a document's own "## Changelog"
+    section records history (what the document looked like when an earlier
+    entry was written) and must not be flagged -- but the same document's
+    LIVE content outside that section must still be caught. Derived from the
+    heading text ("Changelog", case-insensitive, any level), never a
+    hard-coded exception for docs/CONSTITUTION.md by file name."""
+
+    def _fixture(self, tmp, body):
+        d = Path(tmp)
+        f = d / "some-shipped-doc.md"
+        f.write_text(body, encoding="utf-8")
+        return f
+
+    def test_red_a_citation_inside_a_changelog_section_is_ignored(self):
+        with tempfile.TemporaryDirectory(prefix="ccpr-changelog-skip-") as tmp:
+            f = self._fixture(tmp, (
+                "# Some Document\n\n"
+                "## Changelog\n\n"
+                "- **v1.3**: repointed to `handbook/LEAN_TRACK.md`, as it stood then.\n"
+            ))
+            self.assertEqual(find_handbook_file_citations([f]), [])
+
+    def test_green_a_citation_outside_a_changelog_section_is_still_caught(self):
+        with tempfile.TemporaryDirectory(prefix="ccpr-changelog-skip-") as tmp:
+            f = self._fixture(tmp, (
+                "# Some Document\n\n"
+                "See `handbook/WORKITEMS.md` for the full rationale.\n\n"
+                "## Changelog\n\n"
+                "- **v1.0**: initial version.\n"
+            ))
+            findings = find_handbook_file_citations([f])
+            self.assertEqual(len(findings), 1)
+            self.assertEqual(findings[0][2], "handbook/WORKITEMS.md")
+
+    def test_a_citation_both_inside_and_outside_changelog_only_the_live_one_fires(self):
+        # The exact shape CONSTITUTION.md had before this fix: one live
+        # citation (frontmatter-adjacent prose) plus one historical mention
+        # inside "## Changelog" -- only the first is a real defect.
+        with tempfile.TemporaryDirectory(prefix="ccpr-changelog-skip-") as tmp:
+            f = self._fixture(tmp, (
+                "# Some Document\n\n"
+                "*Measurement:* `handbook/LEAN_TRACK.md` removed.\n\n"
+                "## Changelog\n\n"
+                "- **v1.3**: repointed to `handbook/LEAN_TRACK.md`.\n"
+            ))
+            findings = find_handbook_file_citations([f])
+            self.assertEqual(len(findings), 1)
+            self.assertEqual(findings[0][1], 3)  # the live mention's line, not the changelog one
+
+    def test_a_subsection_nested_under_changelog_stays_excluded(self):
+        # "### v1.3" is a deeper heading than "## Changelog" -- it does not
+        # close the section, it is part of it.
+        with tempfile.TemporaryDirectory(prefix="ccpr-changelog-skip-") as tmp:
+            f = self._fixture(tmp, (
+                "## Changelog\n\n"
+                "### v1.3\n\n"
+                "- repointed to `handbook/LEAN_TRACK.md`.\n"
+            ))
+            self.assertEqual(find_handbook_file_citations([f]), [])
+
+    def test_a_sibling_heading_after_changelog_closes_the_section(self):
+        # "## See Also" is the SAME level as "## Changelog" -- it ends the
+        # changelog scope, so a citation under it is live content again.
+        with tempfile.TemporaryDirectory(prefix="ccpr-changelog-skip-") as tmp:
+            f = self._fixture(tmp, (
+                "## Changelog\n\n"
+                "- v1.0 initial version.\n\n"
+                "## See Also\n\n"
+                "See `handbook/WORKITEMS.md` for more.\n"
+            ))
+            findings = find_handbook_file_citations([f])
+            self.assertEqual(len(findings), 1)
+            self.assertEqual(findings[0][2], "handbook/WORKITEMS.md")
+
+    def test_matching_is_case_insensitive_on_the_heading_text(self):
+        with tempfile.TemporaryDirectory(prefix="ccpr-changelog-skip-") as tmp:
+            f = self._fixture(tmp, (
+                "## CHANGELOG\n\n"
+                "- repointed to `handbook/LEAN_TRACK.md`.\n"
+            ))
+            self.assertEqual(find_handbook_file_citations([f]), [])
 
 
 class DocsPathsMutationProofTest(unittest.TestCase):
