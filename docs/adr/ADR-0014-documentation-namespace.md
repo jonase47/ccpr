@@ -73,7 +73,7 @@ rule, all listed in `.gitignore:34-36,65-66,73,106`.
 > rules and their line numbers no longer exist. `.gitignore` is now default-deny under `docs/`
 > — `docs/*` plus one `!docs/` re-inclusion per entry in
 > `scripts/lib/docs-framework-allowlist.txt` — because the enumeration above only ever covered
-> what someone remembered to add, and had fallen 23 top-level entries behind. This ADR's
+> what someone remembered to add, and had fallen 24 top-level entries behind. This ADR's
 > finding is *strengthened*, not weakened: the ignored bulk is no longer a list that can go
 > stale but the default, and the five installed entries are the explicit exceptions.
 
