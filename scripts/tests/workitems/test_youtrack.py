@@ -133,6 +133,74 @@ class YouTrackTagLookupPaginationTest(unittest.TestCase):
         self.assertIn("late-tag", fetched["tags"])
 
 
+class YouTrackGroupResolutionPaginationTest(unittest.TestCase):
+    """CCP-1161 follow-up: GET /api/groups is the identical unpaginated-collection
+    shape as GET /api/tags above -- _resolve_tag_visibility_group_id() must not
+    conclude the configured tagVisibilityGroup doesn't exist just because it fell
+    past the first page. Code-review finding: the top=-1 fix for this call shipped
+    without a RED-first proof of its own (unlike the tags fix above), so this test
+    closes that gap."""
+
+    def test_add_tag_resolves_the_configured_group_past_the_first_page(self):
+        transport = FakeYouTrackTransport(
+            project_short_name="TEST",
+            # Registration order matters, same as seed_existing_tags above: the
+            # fake's page cap returns the first 2 groups, so "All Users" -- the
+            # configured tagVisibilityGroup -- is the one that falls off.
+            known_groups=[
+                {"id": "102-1", "name": "Decoy Team A"},
+                {"id": "102-2", "name": "Decoy Team B"},
+                {"id": "102-0", "name": "All Users"},
+            ],
+            groups_page_size_cap=2,
+        )
+        backend = youtrack.YouTrackBackend(
+            base_url="https://faketrack.example.org", project="TEST",
+            token="fake-token", transport=transport,
+            tag_visibility_group="All Users",
+        )
+        item = backend.create(title="New feature")
+
+        captured_stderr = io.StringIO()
+        with contextlib.redirect_stderr(captured_stderr):
+            backend.add_tag(item["id"], "security")
+
+        # A truncated page would make this resolve to TAG_VISIBILITY_GROUP_NOT_FOUND
+        # (a stderr warning naming "All Users" as unresolvable, tag left private) --
+        # the group must resolve as found instead.
+        self.assertEqual(captured_stderr.getvalue(), "")
+        tag = transport._tags["security"]
+        self.assertEqual(tag["visibleFor"], {"id": "102-0", "name": "All Users"})
+
+
+class YouTrackAdminProjectsPaginationTest(unittest.TestCase):
+    """CCP-1161 follow-up: GET /api/admin/projects is the same unpaginated-collection
+    shape as GET /api/tags above -- _resolve_project_id() must not conclude the
+    configured project doesn't exist just because it fell past the first page.
+    Same gap as YouTrackGroupResolutionPaginationTest above: shipped without its
+    own RED-first proof."""
+
+    def test_create_resolves_the_project_past_the_first_page(self):
+        transport = FakeYouTrackTransport(
+            project_short_name="TEST",
+            # Registration order matters, same as the two tests above: the fake
+            # lists extra_admin_projects before this instance's own project, so
+            # "TEST" is the one that falls off a 2-entry page.
+            extra_admin_projects=["DECOY-A", "DECOY-B"],
+            admin_projects_page_size_cap=2,
+        )
+        backend = youtrack.YouTrackBackend(
+            base_url="https://faketrack.example.org", project="TEST",
+            token="fake-token", transport=transport,
+        )
+
+        item = backend.create(title="New feature")
+
+        # A truncated page would raise "YouTrack project not found: 'TEST'" out of
+        # _resolve_project_id() before create() gets this far.
+        self.assertEqual(item["status"], "Backlog")
+
+
 class YouTrackInvalidCommandTest(unittest.TestCase):
     """Verified against a real instance: an unresolvable Command API query (an
     unknown State/user name) returns HTTP 400 and leaves the issue UNCHANGED

@@ -44,7 +44,8 @@ class FakeYouTrackTransport:
                  symmetric_type_names=None, known_groups=None,
                  corrupt_tag_visibility_readback=False,
                  corrupt_tag_creation_response=False,
-                 tags_page_size_cap=None):
+                 tags_page_size_cap=None, groups_page_size_cap=None,
+                 admin_projects_page_size_cap=None, extra_admin_projects=None):
         self.project_short_name = project_short_name
         self.project_internal_id = "0-0"
         self.commands_received = []  # for tests asserting on the exact command string
@@ -164,6 +165,18 @@ class FakeYouTrackTransport:
         # real YouTrack instance silently caps an unpaginated collection GET. Lets
         # a test prove _known_tag_names() sees every tag, not just the first page.
         self.tags_page_size_cap = tags_page_size_cap
+        # CCP-1161 follow-up (code-review finding: the ticket's own two OTHER
+        # unpaginated-collection fixes -- GET /api/groups and GET /api/admin/projects
+        # -- shipped with no RED-first proof of their own, unlike GET /api/tags
+        # above). Same shape as tags_page_size_cap: without an explicit "$top=-1",
+        # the fake truncates to the first N entries (registration order).
+        self.groups_page_size_cap = groups_page_size_cap
+        self.admin_projects_page_size_cap = admin_projects_page_size_cap
+        # Extra decoy projects (short names only -- ids are assigned here) listed
+        # BEFORE this instance's own project in GET /api/admin/projects, so a test
+        # can push the configured project past admin_projects_page_size_cap --
+        # mirrors seed_existing_tags' role for tags_page_size_cap.
+        self._extra_admin_projects = list(extra_admin_projects) if extra_admin_projects else []
 
     def request(self, method, url, token, body=None):
         parsed = urllib.parse.urlparse(url)
@@ -171,7 +184,16 @@ class FakeYouTrackTransport:
         query_params = dict(urllib.parse.parse_qsl(parsed.query))
 
         if method == "GET" and path == "/api/admin/projects":
-            return [{"id": self.project_internal_id, "shortName": self.project_short_name}]
+            all_projects = [
+                {"id": f"0-{index + 1}", "shortName": name}
+                for index, name in enumerate(self._extra_admin_projects)
+            ] + [{"id": self.project_internal_id, "shortName": self.project_short_name}]
+            if (
+                self.admin_projects_page_size_cap is not None
+                and query_params.get("$top") != "-1"
+            ):
+                return all_projects[:self.admin_projects_page_size_cap]
+            return all_projects
 
         if method == "POST" and path == "/api/issues":
             return self._create_issue(body)
@@ -226,6 +248,8 @@ class FakeYouTrackTransport:
             return None
 
         if method == "GET" and path == "/api/groups":
+            if self.groups_page_size_cap is not None and query_params.get("$top") != "-1":
+                return list(self._groups)[:self.groups_page_size_cap]
             return list(self._groups)
 
         if method == "GET" and path == "/api/tags":
