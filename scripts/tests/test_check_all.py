@@ -626,6 +626,38 @@ class CouldNotRunIsNeverCountedAsPassTest(CheckAllTestBase):
             r.stdout, self.output(r),
         )
 
+    def test_memory_lints_reported_cause_is_surfaced_not_re_derived(self):
+        # CCP-1179 gave memory-lint.sh a SECOND could-not-run cause (an awk
+        # that cannot run its block-structure patterns) alongside the original
+        # empty-scope one. check-all.sh used to answer the "why" with a
+        # hardcoded "no targets present", which on a Debian/mawk host WITH
+        # docs/memory/ present is a cause it never verified -- it would send
+        # the operator looking for a missing directory that is right there.
+        #
+        # The stub deliberately pairs the marker with "4 of 4 present", so a
+        # detector that re-derived the cause instead of reading it cannot pass
+        # by coincidence, and puts PARENTHESES inside the cause text (as the
+        # real awk reason does, naming the interpreter version) so a naive
+        # first-closing-paren parse truncates visibly.
+        self.write_stub(
+            "memory-lint.sh", 0,
+            stdout_text="# Memory Lint Report\n\n"
+                        "**Targets:** 4 of 4 present"
+                        " — the memory-lint check DID NOT RUN"
+                        " (/usr/bin/awk (mawk 1.3.4) cannot compile the"
+                        " CommonMark block-structure patterns (CCP-1179))\n"
+                        "**Files scanned:** 0\n\n"
+                        "**Exit:** 0\n",
+        )
+        mapping = {name: 0 for name in CATALOGUE_NAMES}
+        mapping["memory-lint"] = 1
+        self.write_baseline(mapping)
+        r = self.run_check_all()
+        self.assertIn("memory-lint: could-not-run", r.stdout, self.output(r))
+        self.assertIn("mawk 1.3.4", r.stdout, self.output(r))
+        self.assertIn("CCP-1179", r.stdout, self.output(r))
+        self.assertNotIn("no targets present", r.stdout, self.output(r))
+
     def test_install_verifys_own_nothing_compared_shape_is_could_not_run(self):
         # install.sh --verify differs from the three checks above in one way
         # that makes this branch look unnecessary and is not: its

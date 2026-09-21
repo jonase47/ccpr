@@ -95,6 +95,19 @@ and it never lands in the matched count.
 also means you will not see a finding it would have caught until CI does. It is
 the only non-stdlib dependency anywhere in the checks.
 
+**Any POSIX-shaped `awk` is expected to work; the block-structure scanners
+verify that rather than assume it.** `memory-lint.sh` and
+`migrate-review-headers.sh` parse CommonMark fences, headings and list
+markers with `awk`. `mawk 1.3.4` — the default `/usr/bin/awk` on
+Debian-family systems — used to panic mid-parse on that pattern shape
+(CCP-1179); the patterns are now rewritten so every awk dialect CCPR has
+tested compiles and applies them correctly. A capability probe
+(`scripts/lib/awk_capability.sh`) still checks the actual runtime `awk`
+before either script trusts it, so an awk dialect CCPR has never seen does
+not fail silently: `memory-lint.sh` reports `could-not-run` instead of a
+false clean pass, and `migrate-review-headers.sh` refuses to write anything
+rather than migrate with a fence scanner that cannot see fences.
+
 When you change what a check legitimately returns, update the baseline in the
 same commit and say why in the commit body. The sections below stay useful for
 running one check on its own while you work.
@@ -110,9 +123,9 @@ python3 -m unittest discover -s scripts/tests -t .
 
 - **`-t .` is not optional**, and the failure mode is worth knowing because it is
   partly silent. It sets the top-level directory imports resolve against. Measured
-  on the current tree (11.09.2026, CCP-1178 merged with CCP-1177): **with**
-  it, discovery collects **2923 tests, 0 import errors**, exit 0; **without** it,
-  **2152 tests and 19 modules that fail to
+  on the current tree (16.09.2026, CCP-1179): **with**
+  it, discovery collects **2951 tests, 0 import errors**, exit 0; **without** it,
+  **2180 tests and 19 modules that fail to
   import**, exit 1 — the eight that use a relative import
   (`from .test_phase_docs_lint import …` in four modules,
   `from .test_artifact_gate import …` in two,
@@ -342,6 +355,22 @@ python3 -m unittest discover -s scripts/tests -t .
   agreement test uses — cross-checked against the base commit (790039e) in
   a throwaway worktree, which measured 2899 there, confirming the +7 delta
   independently of the subprocess CLI route.
+
+  16.09.2026, CCP-1179 (the mawk block-structure regex defects): **2923 ->
+  2951** with `-t .` and **2152 -> 2180** without, 19 modules-fail and 771
+  never-execute both unchanged. The net +28 is two cuts, not one, and the
+  second is a DELETION — worth stating plainly, because a shrinking suite is
+  otherwise exactly what the README floor check exists to make someone
+  investigate. The first cut added 30: the new `test_awk_capability.py` (29)
+  plus one review-driven addition to `test_check_all.py`. The second removed 2
+  from `test_awk_capability.py` when the PO cut the gawk workaround out of the
+  could-not-run message — one test existed only to police the sentence that
+  went away, and one asserted the ticket id, a literal already guarded six
+  times over through the real scripts. Neither removed a failure mode. The new
+  module has no relative import, so every one of these lands on both sides of
+  the flag and cancels out of the never-execute figure. Re-measured with
+  `TestLoader().discover(...).countTestCases()` under each flag rather than
+  added.
 
   11.09.2026, merge round: `ticket/CCP-1178` (**2906 / 2150 / 19 / 756**)
   integrated `main`/CCP-1177 (**2916 / 2145 / 19 / 771**) via `git merge`, the

@@ -605,7 +605,12 @@ class RealWorkflowStructureTest(unittest.TestCase):
     def test_step_counts_per_job(self):
         lines = CI_YML.read_text(encoding="utf-8").split("\n")
         jobs = _find_jobs(lines)
-        self.assertEqual(3, len(_find_steps(lines, *jobs["python-tests"])))
+        # 5, not 3: CCP-1179 added two steps -- "Install mawk and make it
+        # resolve as awk on PATH" and "Assert the resolved awk is mawk,
+        # then run the awk-dependent tests under it" -- so this job's own
+        # suite run is followed by real coverage of the mawk dialect that
+        # is not otherwise exercised anywhere in this file.
+        self.assertEqual(5, len(_find_steps(lines, *jobs["python-tests"])))
         self.assertEqual(5, len(_find_steps(lines, *jobs["check-all-macos"])))
 
     def test_agent_frontmatter_test_file_the_comments_reference_actually_exists(self):
@@ -694,7 +699,18 @@ class BashVersionAssertMutationTest(unittest.TestCase):
         # A behavioural mutation, not a presence/absence one: the step
         # still exists, still mentions 3.2 and BASH_VERSION, but no longer
         # actually fails the job on a mismatch.
-        mutated = _mutate_once(self.text, r"\n\s*exit 1\n", "\n              exit 0\n")
+        #
+        # Anchored on "The shebang does not carry this floor", wording
+        # unique to THIS step's own error message, rather than on a bare
+        # "exit 1" line: CCP-1179 added the mawk-resolution assert step in
+        # the OTHER job, which fails the same way on its own mismatch and
+        # would otherwise be the first (wrong) match a job-agnostic pattern
+        # finds in the file.
+        mutated = _mutate_once(
+            self.text,
+            r"(The shebang does not carry this floor.*\n\s*)exit 1\n",
+            r"\g<1>exit 0\n",
+        )
         scratch = _write_scratch(self, mutated)
         violations = lint_ci_workflow(scratch)
         self.assertTrue(

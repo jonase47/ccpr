@@ -5217,14 +5217,14 @@ class IndentedCodeAndHtmlBlockMutationTest(unittest.TestCase):
         "            }\n"
     )
     _HTML_BLOCK1_OPENER = (
-        "            if (match(tolower($0), /^[ ]{0,3}<(script|pre|style)([ \\t>]|$)/)) {\n"
+        "            if (match(tolower($0), /^[ ]?[ ]?[ ]?<(script|pre|style)([ \\t>]|$)/)) {\n"
         "                flush_paragraph()\n"
         "                in_html_block1 = 1\n"
         "                next\n"
         "            }\n"
     )
     _HTML_BLOCK6_OPENER = (
-        "            if (match(tolower($0), /^[ ]{0,3}<[\\/]?(address|article|aside|base|"
+        "            if (match(tolower($0), /^[ ]?[ ]?[ ]?<[\\/]?(address|article|aside|base|"
         "basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|"
         "dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h1|head|header|hr|"
         "html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|"
@@ -5327,30 +5327,30 @@ class ParagraphBoundaryMutationTest(unittest.TestCase):
 
     _CR_STRIP = '            sub(/\\r$/, "")\n'
     _THEMATIC_BREAK_BRANCH = (
-        "            if ($0 ~ /^[ ]{0,3}((\\*[ \\t]*){3,}|(-[ \\t]*){3,}|(_[ \\t]*){3,})$/) {\n"
+        "            if ($0 ~ /^[ ]?[ ]?[ ]?(\\*[ \\t]*\\*[ \\t]*\\*[ \\t]*(\\*[ \\t]*)*|-[ \\t]*-[ \\t]*-[ \\t]*(-[ \\t]*)*|_[ \\t]*_[ \\t]*_[ \\t]*(_[ \\t]*)*)$/) {\n"
         "                flush_paragraph()\n"
         "                next\n"
         "            }\n"
     )
     _LIST_MARKER_BRANCH = (
-        "            if ($0 ~ /^[ ]{0,3}([-+*]|[0-9]{1,9}[.)])[ \\t]/) {\n"
+        "            if ($0 ~ /^[ ]?[ ]?[ ]?([-+*]|[0-9][0-9]?[0-9]?[0-9]?[0-9]?[0-9]?[0-9]?[0-9]?[0-9]?[.)])[ \\t]/) {\n"
         "                flush_paragraph()\n"
         "                append_paragraph($0)\n"
         "                next\n"
         "            }\n"
     )
     _GUARDED_SETEXT = (
-        "            if (pbuf_n > 0 && pbuf_para && $0 ~ /^[ ]{0,3}(=+|-+)[ \\t]*$/) {\n"
+        "            if (pbuf_n > 0 && pbuf_para && $0 ~ /^[ ]?[ ]?[ ]?(=+|-+)[ \\t]*$/) {\n"
     )
     _NAIVE_SETEXT = (
-        "            if (pbuf_n > 0 && $0 ~ /^[ ]{0,3}(=+|-+)[ \\t]*$/) {\n"
+        "            if (pbuf_n > 0 && $0 ~ /^[ ]?[ ]?[ ]?(=+|-+)[ \\t]*$/) {\n"
     )
     # Current shape: pbuf_quote (WI-0089 follow-up) answers "is the buffer
     # currently an open quote", which pbuf_para alone could not — a list
     # item's paragraph also reads pbuf_para == 0, the same value as "already
     # continuing a quote", so the flush guard could not tell them apart.
     _CONTAINER_GUARD = (
-        "            if ($0 ~ /^[ ]{0,3}>/) {\n"
+        "            if ($0 ~ /^[ ]?[ ]?[ ]?>/) {\n"
         "                if (pbuf_n > 0 && !pbuf_quote) flush_paragraph()\n"
         "                pbuf_para = 0\n"
         "                pbuf_quote = 1\n"
@@ -5359,7 +5359,7 @@ class ParagraphBoundaryMutationTest(unittest.TestCase):
     )
     _CONTAINER_GUARD_PRE_FIX = (
         "            if (pbuf_n == 0) {\n"
-        "                if ($0 ~ /^[ ]{0,3}>/) pbuf_para = 0\n"
+        "                if ($0 ~ /^[ ]?[ ]?[ ]?>/) pbuf_para = 0\n"
         "                else pbuf_para = 1\n"
         "            }\n"
     )
@@ -5368,7 +5368,7 @@ class ParagraphBoundaryMutationTest(unittest.TestCase):
     # setext branch stayed correctly gated), but never flushed the
     # paragraph buffer at the interrupt itself.
     _CONTAINER_GUARD_PRE_WI_0089 = (
-        "            if ($0 ~ /^[ ]{0,3}>/) pbuf_para = 0\n"
+        "            if ($0 ~ /^[ ]?[ ]?[ ]?>/) pbuf_para = 0\n"
         "            else if (pbuf_n == 0) pbuf_para = 1\n"
     )
     # The shape WI-0089 shipped and this round follows: the interrupt guard
@@ -5377,14 +5377,14 @@ class ParagraphBoundaryMutationTest(unittest.TestCase):
     # read pbuf_para == 0. A `>` line following an open list item never
     # flushed, and a code span straddling that join hid a real link.
     _CONTAINER_GUARD_PRE_PBUF_QUOTE = (
-        "            if ($0 ~ /^[ ]{0,3}>/) {\n"
+        "            if ($0 ~ /^[ ]?[ ]?[ ]?>/) {\n"
         "                if (pbuf_n > 0 && pbuf_para) flush_paragraph()\n"
         "                pbuf_para = 0\n"
         "            }\n"
         "            else if (pbuf_n == 0) pbuf_para = 1\n"
     )
     _GATED_THEMATIC_BREAK = (
-        "            if (pbuf_para && $0 ~ /^[ ]{0,3}((\\*[ \\t]*){3,}|(-[ \\t]*){3,}|(_[ \\t]*){3,})$/) {\n"
+        "            if (pbuf_para && $0 ~ /^[ ]?[ ]?[ ]?(\\*[ \\t]*\\*[ \\t]*\\*[ \\t]*(\\*[ \\t]*)*|-[ \\t]*-[ \\t]*-[ \\t]*(-[ \\t]*)*|_[ \\t]*_[ \\t]*_[ \\t]*(_[ \\t]*)*)$/) {\n"
     )
 
     def _run_mutant(self, mutate, markdown):

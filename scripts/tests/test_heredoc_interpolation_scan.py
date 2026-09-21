@@ -443,7 +443,13 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
         install time against the installer's own environment. Zero new
         findings -- confirmed by ScopeMatchesKnownFindingsTest passing
         unmodified, the same set-equality check that would have caught an
-        unquoted-delimiter finding."""
+        unquoted-delimiter finding.
+
+        Bumped 29 -> 30, 16.09.2026 (CCP-1179): added
+        scripts/lib/awk_capability.sh, the awk-capability probe. It carries
+        no heredoc at all, so ClassificationCountsTest's opener count does
+        NOT move -- only the enumeration does. Zero new findings, confirmed
+        the same way."""
         files = (
             sorted(SCRIPTS_DIR.glob("*.sh"))
             + sorted((SCRIPTS_DIR / "lib").glob("*.sh"))
@@ -451,7 +457,7 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
             + [REPO_ROOT / "install.sh"]
         )
         files = [f for f in files if f.is_file()]
-        self.assertEqual(29, len(files))
+        self.assertEqual(30, len(files))
         names = {f.relative_to(REPO_ROOT).as_posix() for f in files}
         self.assertIn("scripts/run-tests.sh", names)
         self.assertIn("scripts/baseline.sh", names)

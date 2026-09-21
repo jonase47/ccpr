@@ -8,6 +8,54 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Added
 
+- **`scripts/lib/awk_capability.sh` — an awk-dialect probe, and a could-not-run outcome where
+  two shipped scripts used to report a false green (CCP-1179).** `mawk 1.3.4 20240123`, the
+  default `/usr/bin/awk` on Debian-family systems, aborts its regex compiler on an interval
+  quantifier `{n,m}` followed later in the same ERE by a parenthesised group
+  (`REcompile() - panic: values still on machine stack`, exit 100). `scripts/memory-lint.sh`'s
+  CommonMark block-structure scanner carried that shape, and the abort was invisible on both
+  channels automation reads: the awk child ran inside a process substitution, so its exit code
+  was unobservable by construction, and the script's own report said `**Summary:** 0 errors,
+  0 warnings, 0 info.` / `**Exit:** 0` — a check that parsed nothing reporting clean. It also
+  inverted `scripts/check-all.baseline.tsv`, which expects exit **1** from memory-lint: on a
+  mawk host the check diverged by being FALSELY GREEN. The new library probes the awk that will
+  actually run the scanners with a canary ERE carrying the failing shape, and requires three
+  things of it, not one — a zero exit, empty stderr, and the right match count. The third is not
+  redundant: an awk with no interval support at all (the original one-true-awk) compiles
+  `[ ]{0,3}` as four literal characters, exits 0, and silently matches nothing. `memory-lint.sh`
+  now reports `the memory-lint check DID NOT RUN (…)` with `_not evaluated_` findings sections
+  and exit 0 — the report-text contract `scripts/check-all.sh` already reads for this check, and
+  the same shape `scripts/shellcheck-run.sh` ships, with its causes accumulated in an array so
+  an empty scope AND an incapable awk are both named rather than the first hiding the second.
+  `scripts/migrate-review-headers.sh` instead REFUSES with exit 2, because it writes: its fence
+  tracking is what keeps an illustrative `reviewed_head:` line inside a fenced example from being
+  hoisted into the frontmatter field `/gate-p5` trusts as ground truth, so a blind scanner there
+  does not migrate less, it fabricates. **This is not a dependency declaration.** CCPR runs on
+  what the system ships — the same posture ADR-0011's bash-3.2 floor takes one tool over — and the
+  could-not-run message asks for a **bug report, not a package** (PO decision, 16.09.2026). It
+  first read "install gawk, then run `update-alternatives --set awk /usr/bin/gawk`", which the
+  rewrites above made wrong: once no shipped awk program uses a construct any known awk chokes on,
+  the only way to reach that message is a dialect CCPR has never seen — a gap in CCPR, not a
+  misconfigured machine. Telling the operator to reconfigure their system-wide awk fixed the wrong
+  layer and guaranteed the project never heard about the dialect. It now names the awk, what the
+  canary answered, and asks for the line to be reported as a CCPR issue referencing this ticket,
+  keeping only a recipe-free note that another awk on PATH may get past it meanwhile.
+  `scripts/tests/test_awk_capability.py`
+  covers both sides: stub awks for the seam itself (no single machine can exercise a capable and
+  an incapable awk with a real binary), plus a stub-free agreement test that cross-asserts the
+  probe's verdict about the machine's real awk against an independently spelled instance of the
+  same ERE shape. A code-review follow-up in the same ticket closes two remaining gaps.
+  `.github/workflows/ci.yml`'s `python-tests` job now installs mawk and PATH-prepends a
+  directory holding only an `awk` -> mawk symlink before running `test_memory_lint`,
+  `test_memory_lint_commonmark_corpus`, `test_migrate_review_headers` and `test_awk_capability`
+  under it, asserting `awk -W version` actually answers `mawk` first — before this, CI had zero
+  real-mawk coverage (ubuntu-latest's own `awk` resolves to gawk, the macOS job's to BSD awk), so
+  a rewrite that happened to be wrong the same way mawk's regex compiler was could have gone
+  green here undetected. `CONTRIBUTING.md` now states the awk expectation next to its existing
+  shellcheck paragraph, per this ticket's own acceptance criterion. Separately,
+  `awkcap_canary_answer`'s stderr readback is now guarded the same way its neighbours already
+  were, so an unreadable stderr temp file cannot abort a `set -e` caller.
+
 - **`.github/workflows/ci.yml`'s `check-all-macos` job now forwards a deny-list into CI via a
   GitHub Actions secret (CCP-1148 / F2).** Before this, the only path enforcing the deny-list
   (tenant/project names that must never land in the public CCPR repo on GitHub — PO precision
@@ -1736,6 +1784,34 @@ All notable changes to this project are documented in this file. The format is b
   day one; the answer belongs to whoever runs the command).
 
 ### Fixed
+
+- **`scripts/memory-lint.sh` and `scripts/migrate-review-headers.sh` produced wrong results on
+  Debian-family systems, where `/usr/bin/awk` is mawk (CCP-1179).** `mawk 1.3.4 20240123` carries
+  two independent regex defects, and the block-structure scanner both scripts share hit both. The
+  LOUD one: an interval quantifier `{n,m}` followed later in the same ERE by a parenthesised group
+  aborts the program (`REcompile() - panic: values still on machine stack`, exit 100) — six shipped
+  EREs matched that shape, so the CommonMark fence opener, thematic break, setext underline, ATX
+  heading and list marker all died. The QUIET one, found while verifying the fix against the
+  conformance corpus and **not** part of the original report: `X{3,}` compiles without complaint
+  and is then applied as `X{3}`, so a fenced block closed by a run LONGER than its opener stops
+  closing and the remainder of the file is silently swallowed as fence content. Every affected ERE
+  is now written without an interval quantifier: `[ ]{0,3}` → `[ ]?[ ]?[ ]?` (exact for a
+  single-character class), `#{1,6}` → `##?#?#?#?#?` (**not** `#?#?#?#?#?#?`, which would also match
+  zero `#` and change the semantics), `[0-9]{1,9}` → one mandatory digit plus eight optional ones,
+  `(\*[ \t]*){3,}` → three explicit repetitions followed by `(\*[ \t]*)*`. The fence CLOSER is the
+  one site whose count is dynamic and therefore cannot be written out: it now builds the required
+  run by repetition and appends `[<char>]*`, which is what `{fence_len,}` meant. Each rewrite was
+  differential-tested against its predecessor for both language AND match-span equivalence
+  (`RSTART`/`RLENGTH` are consumed at the fence opener) before the CommonMark corpus was consulted
+  as the behavioural oracle. All 373 tests in `test_memory_lint.py`,
+  `test_memory_lint_commonmark_corpus.py` and `test_migrate_review_headers.py` now pass under mawk,
+  where 109 of them failed before. `scripts/check-all.sh`'s memory-lint branch now SURFACES the
+  cause memory-lint reported instead of re-deriving a hardcoded "no targets present" — correct
+  while an empty scope was the only cause, and a claim it never verified once CCP-1179 added a
+  second one (on a mawk host with `docs/memory/` present it would have sent the operator looking
+  for a directory that is right there). The mutation tests that embed literal script source were
+  respelled along with the source they mutate — including the ones reproducing HISTORICAL shapes,
+  since a mutant carrying the old spelling would itself have been unrunnable on the awk under test.
 
 - **12 domain agents plus `code-reviewer` instructed the agent to rewrite `docs/HANDOVER.md`
   at the end of every run, contradicting the framework's own orchestrator-owned HANDOVER model

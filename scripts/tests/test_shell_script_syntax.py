@@ -168,6 +168,7 @@ class ShellScriptSyntaxTest(unittest.TestCase):
                 "freeze-phase-docs.sh",
                 "install-push-gate-hook.sh",
                 "instinct-check.sh",
+                "lib/awk_capability.sh",
                 "lib/discipline_gate.sh",
                 "lib/frontmatter.sh",
                 "log-cleanup.sh",

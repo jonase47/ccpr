@@ -1873,6 +1873,7 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
                 "scripts/freeze-phase-docs.sh",
                 "scripts/install-push-gate-hook.sh",
                 "scripts/instinct-check.sh",
+                "scripts/lib/awk_capability.sh",
                 "scripts/lib/discipline_gate.sh",
                 "scripts/lib/frontmatter.sh",
                 "scripts/local-llm/commit-msg.sh",
@@ -1908,7 +1909,7 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
             "the portability scan enumerated ZERO files -- that is a broken "
             "scope, not a clean tree",
         )
-        self.assertEqual(31, len(files))
+        self.assertEqual(32, len(files))
 
 
 class KnownFindingsMatchTheCurrentScanTest(unittest.TestCase):
@@ -1949,10 +1950,16 @@ class ClassificationCountsTest(unittest.TestCase):
         Bumped 30 -> 31, 03.09.2026 (CCP-1137R3, Auflage 2): added
         scripts/install-push-gate-hook.sh. Findings/exempted counts
         unchanged -- confirmed the same way, by
-        KnownFindingsMatchTheCurrentScanTest passing unmodified."""
+        KnownFindingsMatchTheCurrentScanTest passing unmodified.
+
+        Bumped 31 -> 32, 16.09.2026 (CCP-1179): added
+        scripts/lib/awk_capability.sh. Findings/exempted counts unchanged --
+        confirmed the same way. The new file uses no date/stat/sed flag this
+        scanner tracks; its only externals are `command -v`, `mktemp`, `cat`,
+        `rm` and `head`, all flagless."""
         findings = scan_tree()
         exempted = exemptions_tree()
-        self.assertEqual(31, len(scanned_files()))
+        self.assertEqual(32, len(scanned_files()))
         self.assertEqual(11, len(FLAG_RULES) + 1)
         self.assertEqual(0, len(findings))
         self.assertEqual(9, len(exempted))

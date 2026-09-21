@@ -98,6 +98,48 @@ jobs:
           # to run.
           python3 -m unittest discover -s scripts/tests -t .
 
+      - name: Install mawk and make it resolve as "awk" on PATH
+        # CCP-1179: the step above runs under whatever `awk` this runner
+        # already resolves as -- not mawk, so it never exercises the dialect
+        # that panicked on the block-structure EREs scripts/lib/
+        # awk_capability.sh's own header describes. Installing the mawk
+        # package does not by itself change what the unqualified `awk`
+        # resolves to (this image's own alternatives choice wins), so a
+        # directory holding only an `awk` -> mawk symlink, prepended to
+        # PATH, is what actually redirects it -- the same PATH-prepend
+        # technique the macOS job below uses for bash via "$GITHUB_PATH".
+        # $GITHUB_PATH takes effect starting with the NEXT step, which is
+        # why the assertion and the mawk-dependent test run live there
+        # rather than in this one.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mawk
+          mkdir -p "$RUNNER_TEMP/mawk-as-awk"
+          ln -sf "$(command -v mawk)" "$RUNNER_TEMP/mawk-as-awk/awk"
+          echo "$RUNNER_TEMP/mawk-as-awk" >> "$GITHUB_PATH"
+
+      - name: Assert the resolved awk is mawk, then run the awk-dependent tests under it
+        # Mirrors the macOS job's "force PATH, then assert" shape below: a
+        # step that only prepended PATH and trusted it would let a future
+        # runner image -- or a PATH reordering upstream of this step --
+        # go silently green on whatever awk was already there, proving
+        # nothing about mawk at all.
+        run: |
+          RESOLVED="$(command -v awk)"
+          VERSION="$(awk -W version 2>&1 | head -n 1)"
+          echo "resolved awk binary:  $RESOLVED"
+          echo "resolved awk version: $VERSION"
+          case "$VERSION" in
+            *mawk*)
+              echo "OK: mawk confirmed -- CCP-1179's target dialect is actually running"
+              ;;
+            *)
+              echo "::error::expected mawk per CCP-1179, got '$VERSION' at '$RESOLVED'. The previous step's PATH prepend did not take effect on this runner image." >&2
+              exit 1
+              ;;
+          esac
+          python3 -m unittest scripts.tests.test_memory_lint scripts.tests.test_memory_lint_commonmark_corpus scripts.tests.test_migrate_review_headers scripts.tests.test_awk_capability
+
   check-all-macos:
     name: check-all.sh (macOS)
     runs-on: macos-latest

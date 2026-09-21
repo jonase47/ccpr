@@ -891,7 +891,7 @@ class NoStaleKnownFindingsTest(unittest.TestCase):
 
 class ClassificationCountsTest(unittest.TestCase):
     def test_classification_counts(self):
-        """Regression pin on the measured baseline: 1433 `test_*` methods
+        """Regression pin on the measured baseline: 1450 `test_*` methods
         across the corpus call something shaped like a subprocess invocation
         and are therefore in scope for this check; 0 of those are currently
         absence-only-needs-exemption -- `KNOWN_FINDINGS` above is empty for
@@ -905,6 +905,34 @@ class ClassificationCountsTest(unittest.TestCase):
         growing paragraph:
 
           in-scope / flagged   when
+          1450 / 0             16.09.2026 (CCP-1179: the awk-dialect probe):
+                               +17. Thirteen in the new test_awk_capability.py,
+                               and measured by running this scanner rather
+                               than counted by eye -- the 7 + 5
+                               `self.run_script(...)` methods of
+                               MemoryLintCouldNotRunTest and
+                               MigrateReviewHeadersCouldNotRunTest (the
+                               helper matches RUN_HELPER_RE), plus
+                               RealAwkAgreementTest's per-ERE compile sweep,
+                               which calls `subprocess.run` inline. None
+                               flagged: each asserts an exact `returncode`,
+                               a literal the run must PRINT, or an empty
+                               list of broken EREs alongside a non-blindness
+                               guard. The module's other 13 methods call
+                               `self.call(...)`, whose name does NOT match
+                               RUN_HELPER_RE, so they never enter this
+                               scanner's scope at all -- the
+                               `_calls_a_subprocess` boundary the paragraph
+                               below already describes, not a gap this entry
+                               introduces. The remaining four came out of the
+                               code review: three more `run_script(...)`
+                               methods covering BOTH could-not-run causes
+                               firing at once (the accumulate-do-not-short-
+                               circuit branch, previously untested), and one
+                               `run_check_all(...)` method in
+                               test_check_all.py pinning that check-all.sh
+                               surfaces memory-lint's REPORTED cause instead
+                               of re-deriving a hardcoded one.
           1433 / 0             11.09.2026 (CCP-1177: the link lint stops
                                reading the recorded dedup-evidence line as
                                claimed relations): +2, both in
@@ -2025,7 +2053,7 @@ class ClassificationCountsTest(unittest.TestCase):
         count."""
         recs = scan_tree()
         flagged = [r for r in recs if r.disposition in NEEDS_EXEMPTION]
-        self.assertEqual(1433, len(recs))
+        self.assertEqual(1450, len(recs))
         self.assertEqual(0, len(flagged))
 
 
@@ -2268,7 +2296,15 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
         test_agent_handover_write_boundary.py, the HANDOVER write-boundary
         guard. Proven an addition, not a swap: `git status --porcelain
         scripts/tests` showed one `??` line for the new file plus this
-        module's own ` M`, nothing deleted, nothing renamed."""
+        module's own ` M`, nothing deleted, nothing renamed.
+
+        Bumped 76 -> 77, 16.09.2026 (CCP-1179): added
+        test_awk_capability.py, the awk-dialect probe and the two shipped
+        scripts' could-not-run responses to it. Proven an addition, not a
+        swap, the same way: one `??` line for the new file plus a ` M` on
+        test_external_tool_exit_status.py (whose own shipped-scope pin the
+        new scripts/lib/awk_capability.sh moves), nothing deleted, nothing
+        renamed."""
         files = sorted(TESTS_DIR.glob("*.py")) + sorted((TESTS_DIR / "workitems").glob("*.py"))
         names = sorted(f.relative_to(TESTS_DIR).as_posix() for f in files if f.name != "__init__.py")
         # The floor first, and it does exactly one job: it catches this glob
@@ -2280,9 +2316,9 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
         # floor; it is why the set pin below stands beside it. Keeping both is
         # the decision (WI-0133 T1), not redundancy left in by accident.
         self.assertGreaterEqual(  # pin: floor tests-corpus-files
-            len(names), 76,
-            "the scripts/tests corpus glob reached {} file(s); it reached 76 "
-            "when this floor was measured (11.09.2026). A SHRINKING scope is "
+            len(names), 77,
+            "the scripts/tests corpus glob reached {} file(s); it reached 77 "
+            "when this floor was measured (16.09.2026). A SHRINKING scope is "
             "a blind scanner, not a clean tree.".format(len(names)),
         )
         # The set pin, replacing a bare count (WI-0133 T1). A count cannot
@@ -2311,6 +2347,7 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
             "test_anchor.py",
             "test_anchor_ci_template.py",
             "test_artifact_gate.py",
+            "test_awk_capability.py",
             "test_baseline_archive_directory.py",
             "test_bash_exit_status_pipe_hook.py",
             "test_bootstrap_instincts_section.py",
