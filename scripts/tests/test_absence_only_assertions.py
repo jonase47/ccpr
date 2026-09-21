@@ -2326,8 +2326,15 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
         wording guard (reads SPRINT.md's `gate:` field rather than document
         prose). Proven an addition, not a swap: `git status --porcelain
         scripts/tests` showed one `??` line for the new file, nothing
-        deleted, nothing renamed. Verified against this test's own glob
-        (80 names, matching the set pin below)."""
+        deleted, nothing renamed. Verified against this test's own glob,
+        was 80.
+
+        Bumped 80 -> 81, 16.09.2026 (CCP-1211, integrated 21.09.2026): added
+        test_qa_skeleton_single_parent.py, the QA_SKELETON AUTHZ.md
+        double-parent guard. Proven an addition, not a swap: `git status
+        --porcelain scripts/tests` showed one `??` line for the new file,
+        nothing deleted, nothing renamed. Verified against this test's own
+        glob (81 names, matching the set pin below)."""
         files = sorted(TESTS_DIR.glob("*.py")) + sorted((TESTS_DIR / "workitems").glob("*.py"))
         names = sorted(f.relative_to(TESTS_DIR).as_posix() for f in files if f.name != "__init__.py")
         # The floor first, and it does exactly one job: it catches this glob
@@ -2339,11 +2346,11 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
         # floor; it is why the set pin below stands beside it. Keeping both is
         # the decision (WI-0133 T1), not redundancy left in by accident.
         self.assertGreaterEqual(  # pin: floor tests-corpus-files
-            len(names), 80,
-            "the scripts/tests corpus glob reached {} file(s); it reached 80 "
+            len(names), 81,
+            "the scripts/tests corpus glob reached {} file(s); it reached 81 "
             "when this floor was measured (21.09.2026, integrating CCP-1179, "
-            "CCP-1214, CCP-1181 and CCP-1187). A SHRINKING scope is a blind "
-            "scanner, not a clean tree.".format(len(names)),
+            "CCP-1214, CCP-1181, CCP-1187 and CCP-1211). A SHRINKING scope "
+            "is a blind scanner, not a clean tree.".format(len(names)),
         )
         # The set pin, replacing a bare count (WI-0133 T1). A count cannot
         # tell "one added" from "one added, one gone" (ADR-0012 obligation 2),
@@ -2420,6 +2427,7 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
             "test_platform_conditional_skip_budget.py",
             "test_precondition_shows_says_guard.py",
             "test_push_gate.py",
+            "test_qa_skeleton_single_parent.py",
             "test_quality_scan.py",
             "test_quality_scan_sast_patterns.py",
             "test_run_tests_argument_quoting.py",
@@ -2444,19 +2452,16 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
             "workitems/test_youtrack.py",
             ],
             names,
-            "the scripts/tests corpus (76 -> 80, integrated 21.09.2026: "
+            "the scripts/tests corpus (76 -> 81, integrated 21.09.2026: "
             "test_awk_capability.py (CCP-1179), "
             "test_docs_boundary_default_deny.py (CCP-1214), "
-            "test_p4_sprint_gate_frontmatter.py (CCP-1181) and "
-            "test_precondition_shows_says_guard.py (CCP-1187) added -- the "
-            "first two independent additions from the same base 76, the "
-            "other two each layered on top in turn; each branch's own "
-            "`git status --porcelain scripts/tests` showed one `??` line "
-            "for its new file plus its own ` M` where applicable "
-            "(test_external_tool_exit_status.py for CCP-1179, "
-            "test_docs_dotfile_gitignore_coverage.py for CCP-1214, none for "
-            "CCP-1181 or CCP-1187); nothing deleted, nothing renamed "
-            "anywhere. Earlier trajectory: 75 -> 76, 11.09.2026, CCP-1178, "
+            "test_p4_sprint_gate_frontmatter.py (CCP-1181), "
+            "test_precondition_shows_says_guard.py (CCP-1187) and "
+            "test_qa_skeleton_single_parent.py (CCP-1211) added -- see this "
+            "method's own docstring above for the per-ticket addition proof "
+            "(each a `??` line for its new file plus a named ` M`, if any, "
+            "nothing deleted, nothing renamed). Earlier trajectory: "
+            "75 -> 76, 11.09.2026, CCP-1178, "
             "test_agent_handover_write_boundary.py; "
             "73 -> 75, 10.09.2026, CCP-1172, "
             "workitems/test_workitem_similar.py and "

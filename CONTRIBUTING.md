@@ -123,10 +123,10 @@ python3 -m unittest discover -s scripts/tests -t .
 
 - **`-t .` is not optional**, and the failure mode is worth knowing because it is
   partly silent. It sets the top-level directory imports resolve against. Measured
-  on the current tree (21.09.2026, integrating CCP-1179, CCP-1214, CCP-1181
-  and CCP-1187): **with**
-  it, discovery collects **2968 tests, 0 import errors**, exit 0; **without** it,
-  **2195 tests and 20 modules that fail to
+  on the current tree (21.09.2026, integrating CCP-1179, CCP-1214, CCP-1181,
+  CCP-1187 and CCP-1211): **with**
+  it, discovery collects **2970 tests, 0 import errors**, exit 0; **without** it,
+  **2197 tests and 20 modules that fail to
   import**, exit 1 — the nine that use a relative import
   (`from .test_phase_docs_lint import …` in five modules,
   `from .test_artifact_gate import …` in two,
@@ -424,6 +424,15 @@ python3 -m unittest discover -s scripts/tests -t .
   **+4** on both sides of the flag, all in the new module (no relative
   import, so it lands on both sides and cancels out of the never-execute
   figure); modules-fail unchanged at 20. Re-measured with
+  `TestLoader().discover(...).countTestCases()` under each flag rather than
+  added.
+
+  21.09.2026, `ticket/CCP-1211` merged on top (AUTHZ.md's QA_SKELETON
+  scenarios genericized and its double-parent conflict fixed,
+  `test_qa_skeleton_single_parent.py`): **2970 / 2197 / 20 / 773** — **+2**
+  on both sides of the flag, all in the new module (no relative import, so
+  it lands on both sides and cancels out of the never-execute figure);
+  modules-fail unchanged at 20. Re-measured with
   `TestLoader().discover(...).countTestCases()` under each flag rather than
   added.
 - The full run takes **a couple of minutes**. If you drive it from an agent whose
