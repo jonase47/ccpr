@@ -1769,6 +1769,22 @@ All notable changes to this project are documented in this file. The format is b
   testing (manual by this project's QA methodology) and "how to run tests" as documentation
   content an agent writes rather than executes.
 
+  **Review follow-up:** `scripts/run-tests.sh`'s `npm test` path (`run_npm_test()`, ~:393) returns
+  `{"framework":"npm-test","raw_output":…}` — no `summary`, no `failures[]` — and an undetected
+  framework returns `{"framework":"unknown","error":…}`. The four rewritten commands all told the
+  agent to transcribe pass/fail counts from `summary`, with nothing covering its absence — a plain
+  `npm test` project would have silently reintroduced invented numbers one level deeper than the
+  original fix reached. Added one shared "No-summary fallback" paragraph to each of the four
+  commands: when `summary` is absent, the agent produces no pass/fail count and marks every row
+  "Manually Verified" / "No parseable automated result" instead. `p7-deploy.md` was not touched —
+  its `qa-tester` delegation analyzes `devops`'s own log directly and never invokes
+  `scripts/run-tests.sh`, confirmed by grep. Did not change `run-tests.sh`'s output shape (out of
+  scope for this fix). `test_no_bash_agent_runs_tests.py` gains
+  `TranscribeFromSummaryRequiresNoSummaryFallbackTest`: derives which commands rely on the
+  `summary` field (mentions `run-tests.sh` AND a `summary.total`/`passed`/`failed` or `` `summary` ``
+  reference — measured to be exactly the four commands, `p7-deploy.md` correctly excluded by
+  construction) and fails if any lacks the fallback marker.
+
 - **15 installed commands plus `CLAUDE.md` cited `handbook/WORKITEMS.md §N`, a path
   `install.sh` never ships (CCP-1193).** `install.sh:45`'s `FRAMEWORK` array
   (`agents commands docs hooks scripts templates`) never lists `handbook` — deliberate per
