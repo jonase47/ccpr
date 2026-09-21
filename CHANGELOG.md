@@ -1766,6 +1766,19 @@ All notable changes to this project are documented in this file. The format is b
   `handbook/<file>` citation, deriving the "handbook is unshipped" fact from `install.sh`'s own
   arrays rather than asserting it from memory.
 
+  **Review follow-up:** the guard's scope left out `docs/` entirely, even though `docs/adr/*.md`
+  (the allowlist's own first entry) is itself shipped. Twelve more citations of the identical
+  shape were hiding there: five ADRs' own `related:` frontmatter (`ADR-0001`, `ADR-0003`,
+  `ADR-0004`, `ADR-0008`, `ADR-0013`) and seven in `docs/CONSTITUTION.md`/`docs/PROJECT_PHASES.md`
+  (frontmatter `related:`, an Aspirational measurement, a historical Changelog entry, and a "Full
+  spec" pointer). `shipped_citation_scope()` now derives the shipped `docs/` file set from
+  `scripts/lib/docs-framework-allowlist.txt` (the same source `test_install_docs_boundary.py`
+  already reads) instead of a hard-coded glob, so a future shipped `docs/` document is covered
+  automatically. Fixed each by dropping a now-redundant `related:` entry where `ADR-0002` was
+  already listed, removing it where no shipped equivalent exists, or rewording a prose mention to
+  name the handbook chapter without the unresolvable path shape — none of it rewrites what
+  `CONSTITUTION.md`'s historical Changelog entries record, only how they cite a filename.
+
 - **12 domain agents plus `code-reviewer` instructed the agent to rewrite `docs/HANDOVER.md`
   at the end of every run, contradicting the framework's own orchestrator-owned HANDOVER model
   (CCP-1178).** All 13 `agents/*.md` files carried the identical line "read it at the start for
