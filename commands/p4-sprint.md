@@ -148,8 +148,11 @@ status: living   # current sprint plan, replaced each call
 last_updated: <DD.MM.YYYY>
 base_commit: <sha>   # HEAD at sprint start — anchors the /p5-review-sprint diff
 sprint: <N>   # current sprint number (step 1c) — the source /guide and /gate-p5 read for sprint scoping
+gate: pending
 ---
 ```
+
+`gate:` starts at `pending` — `/gate-p5` overwrites it with the sprint verdict (`done` / `conditionally_done` / `not_done`, PHASE_DOC_SCHEMA.md "Gate verdict"). No inline comment on this line: `scripts/phase-docs-lint.sh`'s `fm_field` does not strip trailing `#` comments, so one there would break the exact-match enum check.
 
 Body sections: `## Sprint Goal`, `## Selected Stories` (the Sprint Table from step 2C, including each
 story's Work-Item id, in order), `## Definition of Done`, `## Risks Identified This Sprint`.
@@ -165,8 +168,11 @@ subskill: sprint
 kind: sub-index
 status: living
 last_updated: <DD.MM.YYYY>
+gate: pending
 ---
 ```
+
+`gate:` starts at `pending` — `/gate-p5` overwrites it with the sprint verdict (`done` / `conditionally_done` / `not_done`, PHASE_DOC_SCHEMA.md "Gate verdict"). No inline comment on this line: `scripts/phase-docs-lint.sh`'s `fm_field` does not strip trailing `#` comments, so one there would break the exact-match enum check.
 
 Body sections (lean — keep under ~6 KB):
 - `## Current Sprint` — name, goal (1 line), link to `sprint/SPRINT-NN.md`
