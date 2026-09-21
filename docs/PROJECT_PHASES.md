@@ -58,7 +58,8 @@ For prototypes, PoCs, tech-spikes, and validation projects, the full P0–P8 pip
 - **Soft-Pivot:** New hypothesis, same tech base. Code stays; FRAME moves to `lean-archive/FRAME_v{N}.md`, new FRAME with `pivot_version: N+1`.
 - **Hard-Pivot:** Wrong core assumption, tech reset. Code + FRAME move to `lean-archive/v{N}/` or branch `lean-archive/v{N}`.
 
-Full spec: `handbook/LEAN_TRACK.md`.
+Full spec: the Lean-Track handbook chapter (CCPR source repository only — not installed;
+Lean-Track is transient, sunset at v1.0, see `CLAUDE.md`'s Track Decision section).
 
 ### Cross-Cutting Mechanisms
 

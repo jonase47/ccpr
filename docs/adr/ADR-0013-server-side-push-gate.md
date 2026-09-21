@@ -7,7 +7,6 @@ last_updated: 03.09.2026
 related:
   - ADR-0007-shared-vault-storage.md
   - ../CONSTITUTION.md
-  - ../../handbook/system/discipline-gate.md
 ---
 
 # ADR-0013: A server-side push gate for the org-tier vault repo
