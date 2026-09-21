@@ -1737,6 +1737,35 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Fixed
 
+- **15 installed commands plus `CLAUDE.md` cited `handbook/WORKITEMS.md §N`, a path
+  `install.sh` never ships (CCP-1193).** `install.sh:45`'s `FRAMEWORK` array
+  (`agents commands docs hooks scripts templates`) never lists `handbook` — deliberate per
+  ADR-0014 (`docs/`  is the framework namespace, `handbook/` is the human handbook, not
+  installed at all). `commands/p5-implement.md:30`, `p5-review.md:34`, `p5-acceptance.md:31,99`,
+  `p5-bugfix.md:39,97`, `p4-backlog.md:73,114,218`, `gate-p4.md:33`, `gate-p5.md:44,107,125`,
+  `anchor.md:107-112` and nine more, plus `CLAUDE.md:37`, pointed a reader at that unshippable
+  path for the work-item adoption guard's rationale, the claiming protocol, and the status
+  vocabulary. The operative guard logic was already restated inline in every command, so no
+  instruction was actually broken — only the "see X for more" pointer led nowhere on an
+  installed machine. `commands/cleanup.md:174` carried the identical shape for a different
+  handbook file (`handbook/README.md`), found while building this fix's guard test.
+
+  **Fix:** repointed each citation to the ADR that actually carries the cited rule instead of
+  blindly aiming everything at ADR-0002 — claiming (§6) to
+  `docs/adr/ADR-0005-claiming-runner-protocol.md` (a dedicated ADR), the adoption guard /
+  write-loop / status vocabulary / contract shape to
+  `docs/adr/ADR-0002-workitem-backend-contract.md` (which documents the underlying decisions
+  even where the handbook's own worked-example detail — the exact directory-check algorithm, the
+  status-verb table — stays handbook-only elaboration not duplicated in the ADR), and
+  `commands/cleanup.md`'s citation to `docs/adr/ADR-0014-documentation-namespace.md`. Adding
+  `WORKITEMS.md` to `scripts/lib/docs-framework-allowlist.txt` (the ticket's alternative) would
+  not have worked: that allowlist only governs `docs/` subpaths, and `handbook/` is a different
+  top-level tree entirely absent from `FRAMEWORK` by design. Adds
+  `scripts/tests/test_handbook_citations_resolve.py`, a RED-first guard scanning
+  `commands/*.md`, `agents/*.md`, `templates/*.md` and `CLAUDE.md` for a concrete
+  `handbook/<file>` citation, deriving the "handbook is unshipped" fact from `install.sh`'s own
+  arrays rather than asserting it from memory.
+
 - **12 domain agents plus `code-reviewer` instructed the agent to rewrite `docs/HANDOVER.md`
   at the end of every run, contradicting the framework's own orchestrator-owned HANDOVER model
   (CCP-1178).** All 13 `agents/*.md` files carried the identical line "read it at the start for
