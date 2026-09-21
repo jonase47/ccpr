@@ -123,17 +123,18 @@ python3 -m unittest discover -s scripts/tests -t .
 
 - **`-t .` is not optional**, and the failure mode is worth knowing because it is
   partly silent. It sets the top-level directory imports resolve against. Measured
-  on the current tree (21.09.2026, integrating CCP-1179 and CCP-1214): **with**
-  it, discovery collects **2961 tests, 0 import errors**, exit 0; **without** it,
-  **2190 tests and 19 modules that fail to
-  import**, exit 1 — the eight that use a relative import
-  (`from .test_phase_docs_lint import …` in four modules,
+  on the current tree (21.09.2026, integrating CCP-1179, CCP-1214 and
+  CCP-1181): **with**
+  it, discovery collects **2964 tests, 0 import errors**, exit 0; **without** it,
+  **2191 tests and 20 modules that fail to
+  import**, exit 1 — the nine that use a relative import
+  (`from .test_phase_docs_lint import …` in five modules,
   `from .test_artifact_gate import …` in two,
   `from .test_gitattributes_crlf_guard import …` in one, and
   `from . import …` of five sibling modules in the skip budget), plus the eleven
   modules of the `scripts/tests/workitems/` subpackage (CCP-1172 added
   `test_workitem_similar.py` as the eleventh). The run does go red on those
-  19, so you will notice something — but **771 tests simply never execute**, and
+  20, so you will notice something — but **773 tests simply never execute**, and
   nothing in the output says so.
 
   That skipped count moves whenever a module gains a relative import:
@@ -400,6 +401,22 @@ python3 -m unittest discover -s scripts/tests -t .
   land on both sides of the flag on top of the shared base (neither new
   module carries a relative import), so 771 never-execute and 19
   modules-fail stand unchanged.
+
+  21.09.2026, `ticket/CCP-1181` merged on top (SPRINT.md `gate:` field
+  templates, `test_p4_sprint_gate_frontmatter.py`): **2964 / 2191 / 20 /
+  773** — **+3** with the flag, but only **+1** without it, because the new
+  module itself imports `test_phase_docs_lint.PhaseDocsLintTestBase` with
+  `from .test_phase_docs_lint import …`, the same relative-import shape as
+  four existing modules. Without `-t .` it fails to import rather than
+  contributing its 3 real tests, and a module that fails to import still
+  registers as one placeholder test case in
+  `TestLoader().discover(...).countTestCases()` — hence +1, not +0.
+  Modules-fail moves 19 → 20 (a ninth relative-import module outside the
+  `workitems/` subpackage) and never-execute moves 771 → 773 (its 3 tests
+  minus the 1 placeholder). Re-measured with
+  `TestLoader().discover(...).countTestCases()` under each flag, and the
+  failing-module set independently enumerated via
+  `unittest.loader._FailedTest` entries, rather than assumed from the delta.
 - The full run takes **a couple of minutes**. If you drive it from an agent whose
   tool calls time out, start it in the background and wait for it once rather than
   polling.

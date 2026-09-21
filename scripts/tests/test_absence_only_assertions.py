@@ -2312,8 +2312,14 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
         gap-1 class was folded into the new module), nothing deleted,
         nothing renamed. Neither branch saw the other's addition, so
         76 -> 77 was claimed twice; the true post-merge count, verified
-        against this test's own glob (78 names, matching the set pin
-        below), is 78."""
+        against this test's own glob, was 78.
+
+        Bumped 78 -> 79, 16.09.2026 (CCP-1181, integrated 21.09.2026): added
+        test_p4_sprint_gate_frontmatter.py, the p4-sprint.md SPRINT.md
+        template `gate:` field guard. Proven an addition, not a swap: `git
+        status --porcelain scripts/tests` showed one `??` line for the new
+        file, nothing deleted, nothing renamed. Verified against this
+        test's own glob (79 names, matching the set pin below)."""
         files = sorted(TESTS_DIR.glob("*.py")) + sorted((TESTS_DIR / "workitems").glob("*.py"))
         names = sorted(f.relative_to(TESTS_DIR).as_posix() for f in files if f.name != "__init__.py")
         # The floor first, and it does exactly one job: it catches this glob
@@ -2325,11 +2331,11 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
         # floor; it is why the set pin below stands beside it. Keeping both is
         # the decision (WI-0133 T1), not redundancy left in by accident.
         self.assertGreaterEqual(  # pin: floor tests-corpus-files
-            len(names), 78,
-            "the scripts/tests corpus glob reached {} file(s); it reached 78 "
-            "when this floor was measured (21.09.2026, integrating CCP-1179 "
-            "and CCP-1214). A SHRINKING scope is a blind scanner, not a "
-            "clean tree.".format(len(names)),
+            len(names), 79,
+            "the scripts/tests corpus glob reached {} file(s); it reached 79 "
+            "when this floor was measured (21.09.2026, integrating CCP-1179, "
+            "CCP-1214 and CCP-1181). A SHRINKING scope is a blind scanner, "
+            "not a clean tree.".format(len(names)),
         )
         # The set pin, replacing a bare count (WI-0133 T1). A count cannot
         # tell "one added" from "one added, one gone" (ADR-0012 obligation 2),
@@ -2400,6 +2406,7 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
             "test_migrate_review_headers.py",
             "test_next_steps_lists.py",
             "test_next_steps_placement.py",
+            "test_p4_sprint_gate_frontmatter.py",
             "test_phase_docs_lint.py",
             "test_pin_inventory.py",
             "test_platform_conditional_skip_budget.py",
@@ -2428,16 +2435,18 @@ class ScannedFilesCoverTheShippedScopeTest(unittest.TestCase):
             "workitems/test_youtrack.py",
             ],
             names,
-            "the scripts/tests corpus (76 -> 78, 16.09.2026 (CCP-1179, "
-            "CCP-1214), integrated 21.09.2026: test_awk_capability.py and "
-            "test_docs_boundary_default_deny.py added, two independent "
-            "additions from the same base 76 -- each branch's own "
+            "the scripts/tests corpus (76 -> 79, integrated 21.09.2026: "
+            "test_awk_capability.py (CCP-1179), "
+            "test_docs_boundary_default_deny.py (CCP-1214) and "
+            "test_p4_sprint_gate_frontmatter.py (CCP-1181) added -- the "
+            "first two independent additions from the same base 76, the "
+            "third layered on top; each branch's own "
             "`git status --porcelain scripts/tests` showed one `??` line "
             "for its new file plus its own ` M` "
             "(test_external_tool_exit_status.py for CCP-1179, "
-            "test_docs_dotfile_gitignore_coverage.py for CCP-1214); nothing "
-            "deleted, nothing renamed on either side. Earlier trajectory: "
-            "75 -> 76, 11.09.2026, CCP-1178, "
+            "test_docs_dotfile_gitignore_coverage.py for CCP-1214, none for "
+            "CCP-1181); nothing deleted, nothing renamed anywhere. Earlier "
+            "trajectory: 75 -> 76, 11.09.2026, CCP-1178, "
             "test_agent_handover_write_boundary.py; "
             "73 -> 75, 10.09.2026, CCP-1172, "
             "workitems/test_workitem_similar.py and "
