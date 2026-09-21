@@ -34,7 +34,6 @@ related:
 | Audit (SAST/Deps/DSGVO/Config/Auth) | [AUDIT.md](AUDIT.md) | `/p6-audit` | skeleton |
 | Functional (Integration/E2E/Regression) | [FUNCTIONAL.md](FUNCTIONAL.md) | `/p6-functional` | skeleton |
 | Pentest | [PENTEST.md](PENTEST.md) | `/p6-pentest` | skeleton |
-| Authorization Tests | [AUTHZ.md](AUTHZ.md) | `/p6-pentest-authz` | skeleton |
 
 ## Gate Notes
 

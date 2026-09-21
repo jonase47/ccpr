@@ -11,8 +11,9 @@ parent_index: PENTEST.md
 **Status:** Skeleton — populated by `/p6-pentest-authz`.
 
 > Note: For a single-user, local-only app this sub-index is often minimal —
-> the authorization boundary is Device-Auth + App-Sandbox. The slot is kept because a cloud-AI
-> path (Phase 2) introduces Service-Auth via Keychain and must therefore be tested.
+> the authorization boundary reduces to device/OS-level access control. The slot is kept because
+> most projects add a multi-user, networked, or multi-tenant mode later, at which point
+> role/permission boundaries, session handling, and cross-tenant isolation must be tested.
 
 ## Findings
 
@@ -22,9 +23,10 @@ parent_index: PENTEST.md
 
 | Scenario | Status |
 |---|---|
-| LocalAuth gate for F-41 delete sequence | pending |
-| Keychain service-identifier isolation (Phase 2) | pending |
-| App-Group container access (Widget vs. App) | pending |
+| Unauthenticated request to a protected resource is denied | pending |
+| Authenticated user cannot access another user's/tenant's resources (IDOR/BOLA) | pending |
+| Role/permission boundary is enforced — no horizontal or vertical privilege escalation | pending |
+| Session/token expiry and revocation take effect immediately, not just on next login | pending |
 
 ## Open Risks
 
