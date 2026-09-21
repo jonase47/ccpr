@@ -13,9 +13,13 @@
 # list -- two hand-kept copies is the defect shape WI-0059 already produced
 # once (an archive path held in a variable and again as a literal).
 #
-# Adding a framework document is one new line here, paid once, at the moment
-# someone adds the document. Everything else tracked under docs/ is working
-# state and belongs in .gitignore instead.
+# Adding a framework document costs two lines, paid once, at the moment
+# someone adds the document: one new line here, plus a matching `!docs/<entry>`
+# re-inclusion line in .gitignore (.gitignore is default-deny for docs/ since
+# CCP-1214; test_docs_boundary_default_deny.py's
+# TheGitignoreReinclusionsAreExactlyTheAllowlistTest enforces the two stay in
+# sync). Everything else tracked under docs/ is working state and belongs in
+# .gitignore's own default-deny instead.
 adr/
 logo/
 CONSTITUTION.md
