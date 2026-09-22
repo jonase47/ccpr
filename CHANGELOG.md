@@ -3178,6 +3178,20 @@ All notable changes to this project are documented in this file. The format is b
   The other twelve countable numbers in `README.md` and `GETTING_STARTED.md` were re-derived from
   the repository in the same pass and are correct.
 
+- **CCP-1179's own awk-dialect probe made `test_migrate_review_headers.py`'s
+  `WriteFailureIsReportedTest` fail on macOS (CCP-1216).** That test forces a graceful write
+  failure by putting a stub `mktemp` ahead of the real one on `PATH`, always answering with one
+  fixed, `chflags(uchg)`'d path, then asserts `migrate-review-headers.sh` reports `failed to
+  write` and leaves the original file untouched. CCP-1179 gave `scripts/lib/awk_capability.sh` a
+  SECOND `mktemp` caller (`awkcap_canary_answer`'s own `stderr_file="$(mktemp)"`), sourced and run
+  before the migration ever reaches the write step the test targets — the stub answered that call
+  with the locked path too, so the capability probe's own `2>"$stderr_file"` redirect failed
+  first, and the test saw an "awk cannot compile and correctly apply…" refusal instead of the
+  write-failure one it asserts. Narrowed the stub to answer only the exact
+  `mktemp "${file}.XXXXXX"` template `_ensure_frontmatter_block` calls, delegating every other
+  invocation — including the capability probe's bare `mktemp` — to the real binary, with a
+  hit-marker assertion proving the narrowing did not turn the stub into a no-op.
+
 ## [v0.3.0-beta] – 26.08.2026
 
 ### Changed
