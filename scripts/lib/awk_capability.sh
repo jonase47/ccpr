@@ -158,6 +158,21 @@ awkcap_canary_answer() {
     # A failing mktemp is not an awk problem, and must not be dressed up as
     # one — the answer text is what the caller's message quotes verbatim.
     stderr_file="$(mktemp)" || { printf 'not probed: no usable temp file'; return 0; }
+    # CCP-1216: mktemp can also SUCCEED and hand back a path it cannot
+    # itself write into (permissions race, an immutable flag set between
+    # creation and here). Left unguarded, the `2>"$stderr_file"` redirect
+    # below is the thing that then fails — the awk program never runs, and
+    # the failure used to fall through to `exit <rc>`, reported downstream
+    # as an awk-dialect gap. That is the same "not an awk problem" category
+    # as the failing-mktemp case just above, not a different one, so it
+    # gets the same "not probed" answer rather than a verdict about awk.
+    # `-w` (access(2), W_OK) is what actually observes the immutable flag
+    # on this file's target platforms, not the mode bits alone.
+    if [ ! -w "$stderr_file" ]; then
+        rm -f "$stderr_file" 2>/dev/null || true
+        printf 'not probed: temp file not writable'
+        return 0
+    fi
     rc=0
     stdout_text="$(LC_ALL=C "$awk_bin" "$AWKCAP_CANARY_PROG" </dev/null 2>"$stderr_file")" || rc=$?
     # Guarded the same way as $rc above and the cleanup below: a stderr file

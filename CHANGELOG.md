@@ -3192,6 +3192,21 @@ All notable changes to this project are documented in this file. The format is b
   invocation — including the capability probe's bare `mktemp` — to the real binary, with a
   hit-marker assertion proving the narrowing did not turn the stub into a no-op.
 
+- **`awk_capability.sh`'s own capability probe could misreport a temp-file problem as a false
+  awk-dialect gap (CCP-1216 follow-up, found while diagnosing the fix above).**
+  `awkcap_canary_answer` only guarded a FAILING `mktemp` ("not probed: no usable temp file") —
+  its own comment says "a failing mktemp is not an awk problem, and must not be dressed up as
+  one" — but a `mktemp` that succeeds and hands back a path it cannot itself write into (the
+  exact shape `WriteFailureIsReportedTest` above forces) made the `2>"$stderr_file"` redirect the
+  thing that failed, reported downstream as an awk-dialect gap ("please report this line as a
+  CCPR issue") rather than the environment problem it actually is. Fixed by testing the returned
+  path's writability (`[ -w "$stderr_file" ]`, which observes an immutable flag on this
+  repository's target platforms) before running the canary, answering "not probed: temp file not
+  writable" instead. Covered by a new `UnwritableTempFileTest` in
+  `scripts/tests/test_awk_capability.py` (Darwin-only, `chflags(uchg)`), proving both the
+  corrected answer text and that `awkcap_canary_ok`/`awkcap_could_not_run_reason` still refuse
+  safely rather than reading it as a pass.
+
 ## [v0.3.0-beta] – 26.08.2026
 
 ### Changed

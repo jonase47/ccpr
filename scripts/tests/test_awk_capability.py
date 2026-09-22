@@ -58,8 +58,10 @@ scanner cannot use, or rejecting one it can, breaks it.
 """
 
 import os
+import platform
 import re
 import shutil
+import stat
 import subprocess
 import tempfile
 import unittest
@@ -242,6 +244,77 @@ class IdentityTest(AwkCapabilityLibTestBase):
         )
         self.assertEqual(0, r.returncode, r.stdout + r.stderr)
         self.assertIn("/awk", r.stdout.strip())
+
+
+class UnwritableTempFileTest(unittest.TestCase):
+    """CCP-1216: `awkcap_canary_answer`'s own comment (~line 158) says "A
+    failing mktemp is not an awk problem, and must not be dressed up as
+    one" -- but that guard (`stderr_file="$(mktemp)" || ...`) only catches
+    `mktemp` itself returning non-zero. A `mktemp` that SUCCEEDS and hands
+    back a path it cannot itself write into (permissions race, an
+    immutable flag set between creation and use -- the exact shape
+    test_migrate_review_headers.py's WriteFailureIsReportedTest forces at
+    migrate-review-headers.sh's own write step) makes the canary's
+    `2>"$stderr_file"` redirect the thing that fails. The awk program never
+    runs, yet the answer used to fall through to `exit <rc>` -- reported
+    downstream as an awk-dialect gap ("please report a CCPR issue"),
+    exactly the category the comment says this must not become.
+
+    Real awk stays on PATH throughout (delegated via SANDBOX_PATH) -- only
+    `mktemp` is stubbed, so a wrongly-reported dialect gap here can only
+    come from the redirect failure, never from the awk binary itself."""
+
+    def setUp(self):
+        if platform.system() != "Darwin":
+            self.skipTest("chflags(uchg) is a macOS/BSD mechanism")
+
+    def _call_with_locked_mktemp(self, snippet):
+        """Sources the shipped lib with a real awk (from SANDBOX_PATH) but
+        a stub `mktemp` ahead of it that always answers with one fixed,
+        chflags(uchg)'d path -- the same fixed-unwritable-path technique
+        test_migrate_review_headers.py's WriteFailureIsReportedTest uses
+        against migrate-review-headers.sh's own mktemp caller, applied here
+        to this library's `awkcap_canary_answer` instead."""
+        tmp = tempfile.mkdtemp(prefix="ccpr-awkcap-locked-")
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        locked = Path(tmp) / "locked-stderr"
+        locked.touch()
+        os.chflags(locked, stat.UF_IMMUTABLE)
+        self.addCleanup(os.chflags, locked, 0)
+        stub_dir = Path(tmp) / "stub_bin"
+        stub_dir.mkdir()
+        stub = stub_dir / "mktemp"
+        stub.write_text(f'#!/bin/sh\necho "{locked}"\n')
+        stub.chmod(0o755)
+        path = f"{stub_dir}{os.pathsep}{SANDBOX_PATH}"
+        return subprocess.run(
+            ["bash", "-c", f'set -euo pipefail; . "$1"; {snippet}', "_", str(LIB)],
+            capture_output=True, text=True,
+            env={"PATH": path, "HOME": os.environ.get("HOME", "/")},
+        )
+
+    def test_the_canary_answer_is_not_probed_not_an_awk_verdict(self):
+        r = self._call_with_locked_mktemp("awkcap_canary_answer")
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        answer = r.stdout.strip()
+        self.assertTrue(
+            answer.startswith("not probed"),
+            f"an unwritable-but-returned temp file must answer 'not probed: ...', "
+            f"not an awk verdict -- got {answer!r}",
+        )
+        self.assertNotRegex(answer, r"^exit \d+$")
+
+    def test_canary_ok_still_reports_incapable(self):
+        # The unwritable temp file must not silently pass the probe.
+        r = self._call_with_locked_mktemp("awkcap_canary_ok")
+        self.assertNotEqual(0, r.returncode, r.stdout + r.stderr)
+
+    def test_could_not_run_reason_still_refuses_with_one_line(self):
+        r = self._call_with_locked_mktemp("awkcap_could_not_run_reason")
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        reason = r.stdout.strip()
+        self.assertNotEqual("", reason, "must still name a reason, not go quiet")
+        self.assertEqual(1, len(reason.splitlines()), reason)
 
 
 class RealAwkAgreementTest(unittest.TestCase):
