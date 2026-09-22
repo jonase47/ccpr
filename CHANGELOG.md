@@ -3242,7 +3242,7 @@ All notable changes to this project are documented in this file. The format is b
   `FAIL:`/`ERROR:` header lines (never the traceback bodies beneath them, which can run to
   hundreds of lines) plus its summary lines, indented as a sub-list under the finding — capped
   at 20 header lines with a "... and K more" note (matching `scripts/bootstrap.sh`'s own
-  truncation-notice wording) when a suite-wide failure would otherwise flood the report. Covered
+  truncation-notice phrasing) when a suite-wide failure would otherwise flood the report. Covered
   by three new `scripts/tests/test_check_all.py` methods: a positive/negative pair naming a
   failing test and a broken import module, a cap-and-truncation test, and a control proving a
   matching run adds no such lines.

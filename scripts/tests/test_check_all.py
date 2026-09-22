@@ -621,7 +621,7 @@ class PythonTestsDivergenceNamesFailingTestsTest(CheckAllTestBase):
 class PythonTestsDivergenceDetailIsCappedTest(CheckAllTestBase):
     """A suite-wide failure must not flood the report -- capped at
     PYTHON_TESTS_DETAIL_CAP header lines, with a "... and K more" note
-    (scripts/bootstrap.sh's own truncation-notice wording, ~:51) when
+    (scripts/bootstrap.sh's own truncation-notice phrasing, ~:51) when
     truncated."""
 
     def setUp(self):

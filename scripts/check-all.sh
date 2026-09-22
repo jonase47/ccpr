@@ -393,9 +393,15 @@ _baseline_index_of() {
 # hundreds of lines and would flood the report) plus its "Ran N
 # tests"/"FAILED (...)" summary lines, from python-tests' stderr. Capped
 # at _PYTHON_TESTS_DETAIL_CAP header lines with a "... and K more" note
-# (scripts/bootstrap.sh's own truncation-notice wording) when truncated —
+# (scripts/bootstrap.sh's own truncation-notice phrasing) when truncated —
 # the summary lines are always included, uncapped, since there is at most
-# one "Ran ..." and one "FAILED (...)" line per run.
+# one "Ran ..." and one "FAILED (...)" line per run. The capped branch below
+# reads the whole $headers stream with a single `sed -n '1,N ... p'` instead
+# of `head -n N | sed ...`: under `set -o pipefail`, `head` closing its
+# stdin early while `printf` is still writing the remaining (discarded)
+# lines makes that pipeline exit 141 (SIGPIPE) — measured, not theoretical,
+# at 20,000-line input. A single consumer that reads to EOF has no early
+# close to race, so it never triggers SIGPIPE.
 _PYTHON_TESTS_DETAIL_CAP=20
 
 _python_tests_failure_detail() {
@@ -414,7 +420,7 @@ _python_tests_failure_detail() {
     total="$(printf '%s\n' "$headers" | grep -c '^')"  # exit-status: exempt best-effort-status-display
     if [ "$total" -gt "$_PYTHON_TESTS_DETAIL_CAP" ]; then
       shown="$_PYTHON_TESTS_DETAIL_CAP"
-      detail="$(printf '%s\n' "$headers" | head -n "$shown" | sed 's/^/  /')
+      detail="$(printf '%s\n' "$headers" | sed -n "1,${shown}s/^/  /p")
 "  # exit-status: exempt best-effort-status-display
       detail="${detail}  ... and $((total - shown)) more
 "
