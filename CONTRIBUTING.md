@@ -125,8 +125,8 @@ python3 -m unittest discover -s scripts/tests -t .
   partly silent. It sets the top-level directory imports resolve against. Measured
   on the current tree (22.09.2026, integrating CCP-1179, CCP-1214, CCP-1181,
   CCP-1187, CCP-1211, CCP-1161, CCP-1146, CCP-1193, CCP-1182 and CCP-1216): **with**
-  it, discovery collects **3019 tests, 0 import errors**, exit 0; **without** it,
-  **2243 tests and 20 modules that fail to
+  it, discovery collects **3023 tests, 0 import errors**, exit 0; **without** it,
+  **2247 tests and 20 modules that fail to
   import**, exit 1 — the nine that use a relative import
   (`from .test_phase_docs_lint import …` in five modules,
   `from .test_artifact_gate import …` in two,
@@ -518,6 +518,21 @@ python3 -m unittest discover -s scripts/tests -t .
   control proving the dialect wording still survives for the one answer it
   is actually meant for): **3015 / 2239 / 20 / 776** against a tree at
   **3019 / 2243 / 20 / 776** — **+4** on both sides of the flag, all four
+  new methods in the (pre-existing) test_awk_capability.py module, which
+  has no relative import, so the addition lands on both sides and cancels
+  out of the never-execute figure; modules-fail unchanged at 20.
+  Re-measured with `TestLoader().discover(...).countTestCases()` under
+  each flag; the full `-t .`/no-`-t .` `unittest discover` CLI cross-check
+  was left to the orchestrator's own full-suite run rather than duplicated
+  here.
+
+  22.09.2026, CCP-1216 2nd follow-up (regression coverage for
+  `awkcap_canary_answer`'s FIRST "not probed" branch — `mktemp` itself
+  returning non-zero, the failure mode the entry above's `UnwritableTempFileTest`
+  comment names but does not cover, distinct from that class's
+  mktemp-succeeds-but-hands-back-an-unwritable-path case; `MktempFailureTest`,
+  portable, no chflags needed): **3019 / 2243 / 20 / 776** against a tree at
+  **3023 / 2247 / 20 / 776** — **+4** on both sides of the flag, all four
   new methods in the (pre-existing) test_awk_capability.py module, which
   has no relative import, so the addition lands on both sides and cancels
   out of the never-execute figure; modules-fail unchanged at 20.

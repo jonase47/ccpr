@@ -3224,6 +3224,14 @@ All notable changes to this project are documented in this file. The format is b
   wording) and `CouldNotRunReasonTest` (a positive control proving the dialect wording still
   survives for the one answer it is actually meant for).
 
+- **Test-only follow-up: `UnwritableTempFileTest`'s own comment named a branch of
+  `awkcap_canary_answer`'s "not probed" guard it did not cover — `mktemp` itself returning
+  non-zero, as opposed to that class's mktemp-succeeds-but-unwritable-result case (CCP-1216,
+  third follow-up, found by code review).** The code was already correct; no production change.
+  Added `MktempFailureTest` to `scripts/tests/test_awk_capability.py`, driven with a plain
+  non-zero-exit `mktemp` stub rather than `chflags(uchg)`, so — unlike `UnwritableTempFileTest` —
+  it runs on every platform, not just Darwin.
+
 ## [v0.3.0-beta] – 26.08.2026
 
 ### Changed
