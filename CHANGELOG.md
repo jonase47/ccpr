@@ -3232,6 +3232,21 @@ All notable changes to this project are documented in this file. The format is b
   non-zero-exit `mktemp` stub rather than `chflags(uchg)`, so — unlike `UnwritableTempFileTest` —
   it runs on every platform, not just Darwin.
 
+- **A `python-tests` DIVERGENCE in `check-all.sh`'s report named nothing beyond its exit code
+  (CCP-1217).** `unittest`'s `TextTestRunner` writes its own report — which test(s) `FAIL`ed or
+  `ERROR`ed, plus the `Ran N tests`/`FAILED (...)` summary — to STDERR by default, but
+  `check-all.sh`'s python-tests runner only ever read back `stdout_file`; a DIVERGENCE said only
+  "expected exit 0, got exit 1". CCP-1216 could only be diagnosed by reproducing the exact
+  failure on a machine that had it, because the CI log never named the failing test. Fixed by
+  also capturing `stderr_text` and, for python-tests specifically, extracting `unittest`'s own
+  `FAIL:`/`ERROR:` header lines (never the traceback bodies beneath them, which can run to
+  hundreds of lines) plus its summary lines, indented as a sub-list under the finding — capped
+  at 20 header lines with a "... and K more" note (matching `scripts/bootstrap.sh`'s own
+  truncation-notice phrasing) when a suite-wide failure would otherwise flood the report. Covered
+  by three new `scripts/tests/test_check_all.py` methods: a positive/negative pair naming a
+  failing test and a broken import module, a cap-and-truncation test, and a control proving a
+  matching run adds no such lines.
+
 ## [v0.3.0-beta] – 26.08.2026
 
 ### Changed

@@ -143,6 +143,18 @@ def parse_bash_array(source, varname):
     return [tok.strip('"').strip("'") for tok in m.group(1).split()]
 
 
+def parse_bash_scalar(source, varname):
+    """Extracts a single-line bash scalar assignment (`VARNAME=value`,
+    unquoted), e.g. `_PYTHON_TESTS_DETAIL_CAP=20` -- the same "derive from
+    the script's own source, never retype" discipline parse_bash_array
+    already applies to check-all.sh's catalogue arrays, one shape down."""
+    m = re.search(r"^%s=(\S+)$" % re.escape(varname), source, re.MULTILINE)
+    assert m is not None, (
+        "could not find %s=... literal in check-all.sh -- its shape changed, update this test" % varname
+    )
+    return m.group(1).strip('"').strip("'")
+
+
 def parse_baseline_entries(text):
     """(name, note) for every non-comment, non-blank line of a check-all.sh
     baseline TSV. `note` is the third tab-separated column, or "" when the
@@ -252,6 +264,11 @@ CATALOGUE_CCPR_ONLY = parse_bash_array(_SCRIPT_SOURCE, "CHECK_CCPR_ONLY")
 CATALOGUE_COUNT = len(CATALOGUE_NAMES)
 CCPR_ONLY_COUNT = CATALOGUE_CCPR_ONLY.count("1")
 GENERIC_COUNT = CATALOGUE_CCPR_ONLY.count("0")
+
+# CCP-1217: how many unittest FAIL:/ERROR: header lines a python-tests
+# DIVERGENCE's report detail shows before truncating -- derived, not
+# retyped, same reasoning as the counts above.
+PYTHON_TESTS_DETAIL_CAP = int(parse_bash_scalar(_SCRIPT_SOURCE, "_PYTHON_TESTS_DETAIL_CAP"))
 
 
 def checks_line(ran, could_not_run, mismatched=0):
@@ -554,6 +571,104 @@ class OneCheckDivergesTest(CheckAllTestBase):
             r.stdout, self.output(r),
         )
         self.assertIn("**Exit:** 1", r.stdout, self.output(r))
+
+
+# ---------------------------------------------------------------------------
+# python-tests DIVERGENCE names the failing test(s), not only the exit code
+# (CCP-1217)
+# ---------------------------------------------------------------------------
+class PythonTestsDivergenceNamesFailingTestsTest(CheckAllTestBase):
+    """unittest's TextTestRunner writes its FAIL:/ERROR: header lines and
+    its "Ran N tests"/"FAILED (...)" summary to STDERR (verified directly:
+    TextTestRunner defaults to stream=sys.stderr) -- check-all.sh used to
+    read only stdout_file, so a python-tests DIVERGENCE reported nothing
+    beyond "python-tests: expected exit 0, got exit 1" (CCP-1216 could
+    only be diagnosed by reproducing the exact failure on a machine that
+    had it, because the CI log never named which test broke). Traceback
+    BODIES stay out of the report on purpose -- they can run to hundreds
+    of lines, and the point is naming WHICH test, not reproducing the
+    whole stack."""
+
+    def setUp(self):
+        super().setUp()
+        tests_dir = self.project_dir / "scripts" / "tests"
+        (tests_dir / "test_trivial.py").write_text(
+            "import unittest\n\n\n"
+            "class TrivialTest(unittest.TestCase):\n"
+            "    def test_deliberately_fails(self):\n"
+            "        self.assertEqual(1, 2)\n",
+            encoding="utf-8",
+        )
+        (tests_dir / "test_broken_import.py").write_text(
+            "import this_module_does_not_exist_anywhere\n",
+            encoding="utf-8",
+        )
+
+    def test_report_names_the_failing_test_and_the_broken_import_module(self):
+        r = self.run_check_all()
+        self.assertIn("python-tests: exit 1 (expected 0) — DIVERGENT", r.stdout, self.output(r))
+        self.assertIn("python-tests: expected exit 0, got exit 1", r.stdout, self.output(r))
+        self.assertIn("FAIL: test_deliberately_fails", r.stdout, self.output(r))
+        self.assertIn("ERROR: scripts.tests.test_broken_import", r.stdout, self.output(r))
+        self.assertIn("Ran 2 tests in", r.stdout, self.output(r))
+        self.assertIn("FAILED (failures=1, errors=1)", r.stdout, self.output(r))
+        # Never the traceback body -- only the header/summary lines above.
+        self.assertNotIn("Traceback (most recent call last)", r.stdout, self.output(r))
+        self.assertNotIn("AssertionError", r.stdout, self.output(r))
+        self.assertNotIn("ModuleNotFoundError", r.stdout, self.output(r))
+
+
+class PythonTestsDivergenceDetailIsCappedTest(CheckAllTestBase):
+    """A suite-wide failure must not flood the report -- capped at
+    PYTHON_TESTS_DETAIL_CAP header lines, with a "... and K more" note
+    (scripts/bootstrap.sh's own truncation-notice phrasing, ~:51) when
+    truncated."""
+
+    def setUp(self):
+        super().setUp()
+        tests_dir = self.project_dir / "scripts" / "tests"
+        total = PYTHON_TESTS_DETAIL_CAP + 5
+        body = ["import unittest", "", "", "class ManyFailuresTest(unittest.TestCase):"]
+        for i in range(total):
+            body.append("    def test_fail_%02d(self):" % i)
+            body.append("        self.fail('deliberate failure %02d')" % i)
+        (tests_dir / "test_many_failures.py").write_text("\n".join(body) + "\n", encoding="utf-8")
+        # Remove the base's own trivial passing test so the failure count
+        # (and therefore the "... and K more" arithmetic) is exact.
+        (tests_dir / "test_trivial.py").unlink()
+
+    def test_detail_is_capped_with_an_and_more_note(self):
+        r = self.run_check_all()
+        self.assertIn("python-tests: exit 1 (expected 0) — DIVERGENT", r.stdout, self.output(r))
+        shown = ["FAIL: test_fail_%02d" % i for i in range(PYTHON_TESTS_DETAIL_CAP)]
+        for line in shown:
+            self.assertIn(line, r.stdout, self.output(r))
+        omitted = "FAIL: test_fail_%02d" % PYTHON_TESTS_DETAIL_CAP
+        self.assertNotIn(omitted, r.stdout, self.output(r))
+        more = (PYTHON_TESTS_DETAIL_CAP + 5) - PYTHON_TESTS_DETAIL_CAP
+        self.assertIn("... and %d more" % more, r.stdout, self.output(r))
+        # The summary itself is never capped -- it always names the true total.
+        self.assertIn(
+            "Ran %d tests in" % (PYTHON_TESTS_DETAIL_CAP + 5), r.stdout, self.output(r),
+        )
+        self.assertIn(
+            "FAILED (failures=%d)" % (PYTHON_TESTS_DETAIL_CAP + 5), r.stdout, self.output(r),
+        )
+
+
+class PythonTestsMatchingRunHasNoFailureDetailTest(CheckAllTestBase):
+    """Control for PythonTestsDivergenceNamesFailingTestsTest: a MATCHING
+    python-tests run (the base fixture's own trivial passing test, exit 0
+    as the baseline expects) must add nothing new to the report -- no
+    FAIL:/ERROR: lines, since check-all.sh only reads stderr for a
+    python-tests DIVERGENCE, never for a match."""
+
+    def test_no_failure_detail_lines_appear(self):
+        r = self.run_check_all()
+        self.assertEqual(0, r.returncode, self.output(r))
+        self.assertNotIn("FAIL: ", r.stdout, self.output(r))
+        self.assertNotIn("ERROR: ", r.stdout, self.output(r))
+        self.assertNotIn("python-tests: expected exit", r.stdout, self.output(r))
 
 
 # ---------------------------------------------------------------------------

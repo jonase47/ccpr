@@ -1242,12 +1242,28 @@ class ExternalToolExitStatusTest(unittest.TestCase):
         assignment itself. The real `||` in the SAME statement as the
         invocation lands it in `checked-chain`, no exemption marker
         needed for something that is genuinely checked. `checked-chain`
-        +1 (18 total)."""
+        +1 (18 total).
+        22.09.2026 (CCP-1217, check-all.sh's new
+        `_python_tests_failure_detail`, extracting unittest's own
+        FAIL:/ERROR: header lines plus its summary from python-tests'
+        stderr): +6 total. Two `grep -E` calls extracting `headers`/
+        `summary` from stderr_text are each `VAR="$(... | grep ...)" ||
+        VAR=""` -- the real `||` in the same statement lands both
+        `checked-chain` (+2, the identical shape the entry immediately
+        above already names), no exemption marker needed. The remaining
+        four -- a `grep -c '^'` counting header lines, and three `sed
+        's/^/  /'` indent calls (one behind a `head -n` pipe, which this
+        scanner does not track) -- are genuinely bare: each formats a
+        cosmetic report sub-section, and a failure would only shorten or
+        omit that section, never corrupt state, so all four are marked
+        `best-effort-status-display` (`bare-needs-exemption` +4). Net:
+        `checked-chain` +2 (20 total), `bare-needs-exemption` +4 (79
+        total), 180 invocations total."""
         invocations = scan_tree()
         by_disposition = {}
         for inv in invocations:
             by_disposition[inv.disposition] = by_disposition.get(inv.disposition, 0) + 1
-        self.assertEqual(174, len(invocations))
+        self.assertEqual(180, len(invocations))
         self.assertEqual(
             {
                 # 28.08.2026, open-findings wave 1a: one invocation moved
@@ -1326,9 +1342,9 @@ class ExternalToolExitStatusTest(unittest.TestCase):
                 # (17 total).
                 "checked-condition": 34,
                 "checked-captured": 6,
-                "checked-chain": 18,
+                "checked-chain": 20,
                 "discard-needs-exemption": 41,
-                "bare-needs-exemption": 75,
+                "bare-needs-exemption": 79,
             },
             by_disposition,
         )
