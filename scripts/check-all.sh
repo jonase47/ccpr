@@ -377,6 +377,69 @@ _baseline_index_of() {
   return 1
 }
 
+# CCP-1217: python-tests's own runner (below) redirects
+# `python3 -m unittest discover`'s stdout AND stderr to two temp files, but
+# used to read back only stdout — and unittest's TextTestRunner writes its
+# own report (which test(s) FAIL/ERROR, plus the "Ran N tests"/"FAILED
+# (...)" summary) to STDERR by default (verified:
+# unittest.runner.TextTestRunner(stream=sys.stderr)). A python-tests
+# DIVERGENCE therefore used to say only "expected exit 0, got exit 1",
+# naming nothing — CCP-1216 could only be diagnosed by reproducing the
+# exact failure on a machine that had it, because the CI log never named
+# the failing test.
+#
+# _python_tests_failure_detail extracts unittest's own FAIL:/ERROR: header
+# lines (never the traceback BODY beneath each one, which can run to
+# hundreds of lines and would flood the report) plus its "Ran N
+# tests"/"FAILED (...)" summary lines, from python-tests' stderr. Capped
+# at _PYTHON_TESTS_DETAIL_CAP header lines with a "... and K more" note
+# (scripts/bootstrap.sh's own truncation-notice wording) when truncated —
+# the summary lines are always included, uncapped, since there is at most
+# one "Ran ..." and one "FAILED (...)" line per run.
+_PYTHON_TESTS_DETAIL_CAP=20
+
+_python_tests_failure_detail() {
+  local text="$1"
+  local headers="" summary="" total=0 shown detail=""
+
+  # `$(... | grep ...)` under `set -o pipefail`: a genuine "no match" makes
+  # the whole pipeline (and so the substitution) exit non-zero, which would
+  # trip `set -e` on a bare assignment — the `|| headers=""` fallback is
+  # the same "checked assignment" shape used throughout this script (see
+  # GATE_DENY_STATE above) for exactly that reason, never a bare `|| true`.
+  headers="$(printf '%s\n' "$text" | grep -E '^(FAIL|ERROR): ')" || headers=""
+  summary="$(printf '%s\n' "$text" | grep -E '^(Ran [0-9]+ test|FAILED \()')" || summary=""
+
+  if [ -n "$headers" ]; then
+    total="$(printf '%s\n' "$headers" | grep -c '^')"  # exit-status: exempt best-effort-status-display
+    if [ "$total" -gt "$_PYTHON_TESTS_DETAIL_CAP" ]; then
+      shown="$_PYTHON_TESTS_DETAIL_CAP"
+      detail="$(printf '%s\n' "$headers" | head -n "$shown" | sed 's/^/  /')
+"  # exit-status: exempt best-effort-status-display
+      detail="${detail}  ... and $((total - shown)) more
+"
+    else
+      detail="$(printf '%s\n' "$headers" | sed 's/^/  /')
+"  # exit-status: exempt best-effort-status-display
+    fi
+  fi
+
+  if [ -n "$summary" ]; then
+    detail="${detail}$(printf '%s\n' "$summary" | sed 's/^/  /')
+"  # exit-status: exempt best-effort-status-display
+  fi
+
+  # `[ ] && printf` as a standalone statement would trip `set -e` on the
+  # empty-$detail case (its own exit status is the `[ ]` test's nonzero
+  # one, unguarded) -- an `if` block's exit status is always 0 when its
+  # condition is false, so this shape is safe under `set -e` without a
+  # bare `|| true`.
+  if [ -n "$detail" ]; then
+    printf '\n%s' "${detail%$'\n'}"
+  fi
+  return 0
+}
+
 line_no=0
 while IFS= read -r raw_line || [ -n "$raw_line" ]; do
   line_no=$((line_no + 1))
@@ -694,6 +757,13 @@ while [ "$ci" -lt "$CHECK_COUNT" ]; do
     esac
 
     stdout_text="$(cat "$stdout_file")"
+    # CCP-1217: read back stderr too -- python-tests' own unittest report
+    # (which test(s) failed) is written there, not to stdout (see
+    # _python_tests_failure_detail above). Capturing it here, alongside
+    # stdout_text, costs nothing for every OTHER check (an unread
+    # variable), and keeps this the single place both temp files are read
+    # before being deleted.
+    stderr_text="$(cat "$stderr_file")"
     rm -f "$stdout_file" "$stderr_file"
 
     # conformance-run.sh's own "not configured" state is exit-code-invisible
@@ -809,6 +879,12 @@ while [ "$ci" -lt "$CHECK_COUNT" ]; do
       else
         state="divergent"
         reason="expected exit ${expected}, got exit ${rc_str}"
+        # CCP-1217: name which test(s) failed, not only the exit code --
+        # scoped to python-tests alone (see _python_tests_failure_detail's
+        # own header comment). A no-op call for every other check.
+        if [ "$name" = "python-tests" ]; then
+          reason="${reason}$(_python_tests_failure_detail "$stderr_text")"
+        fi
       fi
     fi
   fi

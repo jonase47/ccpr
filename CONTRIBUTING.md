@@ -124,9 +124,10 @@ python3 -m unittest discover -s scripts/tests -t .
 - **`-t .` is not optional**, and the failure mode is worth knowing because it is
   partly silent. It sets the top-level directory imports resolve against. Measured
   on the current tree (22.09.2026, integrating CCP-1179, CCP-1214, CCP-1181,
-  CCP-1187, CCP-1211, CCP-1161, CCP-1146, CCP-1193, CCP-1182 and CCP-1216): **with**
-  it, discovery collects **3023 tests, 0 import errors**, exit 0; **without** it,
-  **2247 tests and 20 modules that fail to
+  CCP-1187, CCP-1211, CCP-1161, CCP-1146, CCP-1193, CCP-1182, CCP-1216 and
+  CCP-1217): **with**
+  it, discovery collects **3026 tests, 0 import errors**, exit 0; **without** it,
+  **2250 tests and 20 modules that fail to
   import**, exit 1 — the nine that use a relative import
   (`from .test_phase_docs_lint import …` in five modules,
   `from .test_artifact_gate import …` in two,
@@ -534,6 +535,25 @@ python3 -m unittest discover -s scripts/tests -t .
   portable, no chflags needed): **3019 / 2243 / 20 / 776** against a tree at
   **3023 / 2247 / 20 / 776** — **+4** on both sides of the flag, all four
   new methods in the (pre-existing) test_awk_capability.py module, which
+  has no relative import, so the addition lands on both sides and cancels
+  out of the never-execute figure; modules-fail unchanged at 20.
+  Re-measured with `TestLoader().discover(...).countTestCases()` under
+  each flag; the full `-t .`/no-`-t .` `unittest discover` CLI cross-check
+  was left to the orchestrator's own full-suite run rather than duplicated
+  here.
+
+  22.09.2026, CCP-1217 (`check-all.sh`'s python-tests check used to read
+  back only `stdout_file`, but `unittest`'s `TextTestRunner` writes its
+  own FAIL:/ERROR: report and "Ran N tests"/"FAILED (...)" summary to
+  STDERR — a DIVERGENCE said only "expected exit 0, got exit 1", naming
+  nothing; `_python_tests_failure_detail` now extracts those lines,
+  capped, from `stderr_text`; three new methods on
+  `PythonTestsDivergenceNamesFailingTestsTest`,
+  `PythonTestsDivergenceDetailIsCappedTest` and
+  `PythonTestsMatchingRunHasNoFailureDetailTest` in the (pre-existing)
+  test_check_all.py module): **3023 / 2247 / 20 / 776** against a tree at
+  **3026 / 2250 / 20 / 776** — **+3** on both sides of the flag, all three
+  new test methods in the (pre-existing) test_check_all.py module, which
   has no relative import, so the addition lands on both sides and cancels
   out of the never-execute figure; modules-fail unchanged at 20.
   Re-measured with `TestLoader().discover(...).countTestCases()` under

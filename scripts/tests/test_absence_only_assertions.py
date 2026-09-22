@@ -891,7 +891,7 @@ class NoStaleKnownFindingsTest(unittest.TestCase):
 
 class ClassificationCountsTest(unittest.TestCase):
     def test_classification_counts(self):
-        """Regression pin on the measured baseline: 1450 `test_*` methods
+        """Regression pin on the measured baseline: 1453 `test_*` methods
         across the corpus call something shaped like a subprocess invocation
         and are therefore in scope for this check; 0 of those are currently
         absence-only-needs-exemption -- `KNOWN_FINDINGS` above is empty for
@@ -905,6 +905,25 @@ class ClassificationCountsTest(unittest.TestCase):
         growing paragraph:
 
           in-scope / flagged   when
+          1453 / 0             22.09.2026 (CCP-1217: check-all.sh's
+                               python-tests check now names which test(s)
+                               failed): +3, all three new methods in the
+                               (pre-existing) test_check_all.py --
+                               PythonTestsDivergenceNamesFailingTestsTest's
+                               test_report_names_the_failing_test_and_the_
+                               broken_import_module,
+                               PythonTestsDivergenceDetailIsCappedTest's
+                               test_detail_is_capped_with_an_and_more_note,
+                               and PythonTestsMatchingRunHasNoFailureDetail
+                               Test's test_no_failure_detail_lines_appear --
+                               all three via the pre-existing
+                               `self.run_check_all(...)` helper (matches
+                               RUN_HELPER_RE). None flagged: each asserts at
+                               least one positive fact about the run (an
+                               exact `FAIL:`/`ERROR:`/`Ran N tests`/`FAILED
+                               (...)` substring the report must contain, or
+                               an exact `returncode`) alongside any
+                               `assertNotIn`.
           1450 / 0             16.09.2026 (CCP-1179: the awk-dialect probe):
                                +17. Thirteen in the new test_awk_capability.py,
                                and measured by running this scanner rather
@@ -2053,7 +2072,7 @@ class ClassificationCountsTest(unittest.TestCase):
         count."""
         recs = scan_tree()
         flagged = [r for r in recs if r.disposition in NEEDS_EXEMPTION]
-        self.assertEqual(1450, len(recs))
+        self.assertEqual(1453, len(recs))
         self.assertEqual(0, len(flagged))
 
 
