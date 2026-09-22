@@ -3207,6 +3207,23 @@ All notable changes to this project are documented in this file. The format is b
   corrected answer text and that `awkcap_canary_ok`/`awkcap_could_not_run_reason` still refuse
   safely rather than reading it as a pass.
 
+- **The fix above corrected the ANSWER but not the MESSAGE — `awkcap_could_not_run_reason` still
+  sent an operator to file a CCPR issue about an unwritable temp file, or a missing awk, as if
+  either were a dialect gap (CCP-1216, second follow-up).** `awkcap_canary_answer` now correctly
+  distinguishes "not probed: temp file not writable" (and its sibling "not probed: no usable temp
+  file") and "not on PATH" from a genuine dialect failure, but `awkcap_could_not_run_reason`
+  routed every one of them, unchanged, through the "…this is a gap in CCPR rather than a
+  misconfiguration on this machine: please report this line as a CCPR issue…" sentence quoted in
+  the entry above — the same misattribution the entry describes, still present one layer up, in
+  the text a human actually reads. Fixed by branching the message on the answer: the two
+  non-dialect causes now get a one-line environment sentence (names the answer verbatim, points at
+  TMPDIR/PATH, no mention of CCPR or this ticket) while every other answer — the canary genuinely
+  ran and got it wrong — keeps the original dialect wording unchanged. `scripts/tests/
+  test_awk_capability.py` gains a new `NotOnPathReasonTest` (driven with a plain nonexistent
+  binary name, no stub needed) plus one method each on `UnwritableTempFileTest` (the local-cause
+  wording) and `CouldNotRunReasonTest` (a positive control proving the dialect wording still
+  survives for the one answer it is actually meant for).
+
 ## [v0.3.0-beta] – 26.08.2026
 
 ### Changed

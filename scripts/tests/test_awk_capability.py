@@ -227,6 +227,16 @@ class CouldNotRunReasonTest(AwkCapabilityLibTestBase):
         r = self.call("awkcap_could_not_run_reason", WRONG_ANSWER_STUB)
         self.assertIn("[3]", r.stdout)
 
+    def test_a_genuine_dialect_gap_still_points_at_a_ccpr_issue(self):
+        # CCP-1216 positive control: the environment-cause split added below
+        # (UnwritableTempFileTest, NotOnPathReasonTest) must not blunt the
+        # wording for the case it is actually meant for -- an awk that runs
+        # but gets the canary wrong. That is the one case where filing a
+        # CCPR issue IS the right next step, so both phrases must survive.
+        r = self.call("awkcap_could_not_run_reason", _aborting_stub())
+        self.assertIn("gap in CCPR", r.stdout)
+        self.assertIn("report this line as a CCPR issue", r.stdout)
+
 
 class IdentityTest(AwkCapabilityLibTestBase):
     def test_identity_names_the_resolved_path(self):
@@ -315,6 +325,53 @@ class UnwritableTempFileTest(unittest.TestCase):
         reason = r.stdout.strip()
         self.assertNotEqual("", reason, "must still name a reason, not go quiet")
         self.assertEqual(1, len(reason.splitlines()), reason)
+
+    def test_the_reason_names_the_local_cause_not_a_ccpr_gap(self):
+        # CCP-1216 follow-up: the "not probed: temp file not writable"
+        # answer this class exists to force is, by this file's own
+        # comments, NOT an awk-dialect question -- but
+        # awkcap_could_not_run_reason used to route every non-"4" answer
+        # through the same "gap in CCPR ... report this line as a CCPR
+        # issue" sentence, sending an operator to file a bug report about
+        # an awk the canary never even reached.
+        r = self._call_with_locked_mktemp("awkcap_could_not_run_reason")
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        reason = r.stdout.strip()
+        self.assertIn(
+            "temp", reason.lower(),
+            f"an unwritable temp file must be named as the actual cause -- got {reason!r}",
+        )
+        self.assertNotIn("gap in CCPR", reason)
+        self.assertNotIn("report this line as a CCPR issue", reason)
+
+
+class NotOnPathReasonTest(AwkCapabilityLibTestBase):
+    """CCP-1216: an awk binary that simply is not on PATH is a third
+    non-dialect cause -- see awkcap_canary_answer's own `not on PATH`
+    branch, checked before any awk is invoked at all. Routing it through
+    the dialect sentence has the same misdiagnosis shape UnwritableTempFileTest
+    covers for a locked temp file, so it gets the same environment wording
+    rather than a call to file a CCPR issue about a binary that was never
+    reached.
+
+    Driven with a plain nonexistent binary NAME (no stub needed): real awk
+    stays fully untouched, so a wrongly-reported dialect gap here can only
+    come from awkcap_could_not_run_reason's own message choice."""
+
+    NONEXISTENT_AWK = "ccpr-awk-capability-test-no-such-binary"
+
+    def test_the_reason_names_the_environment_cause_not_a_ccpr_gap(self):
+        r = self.call(f"awkcap_could_not_run_reason {self.NONEXISTENT_AWK}")
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        reason = r.stdout.strip()
+        self.assertNotEqual("", reason, "must still name a reason, not go quiet")
+        self.assertIn("not on PATH", reason)
+        self.assertNotIn("gap in CCPR", reason)
+        self.assertNotIn("report this line as a CCPR issue", reason)
+
+    def test_the_reason_is_still_a_single_line(self):
+        r = self.call(f"awkcap_could_not_run_reason {self.NONEXISTENT_AWK}")
+        self.assertEqual(1, len(r.stdout.strip().splitlines()), r.stdout)
 
 
 class RealAwkAgreementTest(unittest.TestCase):
