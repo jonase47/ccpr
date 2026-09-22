@@ -58,8 +58,10 @@ scanner cannot use, or rejecting one it can, breaks it.
 """
 
 import os
+import platform
 import re
 import shutil
+import stat
 import subprocess
 import tempfile
 import unittest
@@ -225,6 +227,16 @@ class CouldNotRunReasonTest(AwkCapabilityLibTestBase):
         r = self.call("awkcap_could_not_run_reason", WRONG_ANSWER_STUB)
         self.assertIn("[3]", r.stdout)
 
+    def test_a_genuine_dialect_gap_still_points_at_a_ccpr_issue(self):
+        # CCP-1216 positive control: the environment-cause split added below
+        # (UnwritableTempFileTest, NotOnPathReasonTest) must not blunt the
+        # wording for the case it is actually meant for -- an awk that runs
+        # but gets the canary wrong. That is the one case where filing a
+        # CCPR issue IS the right next step, so both phrases must survive.
+        r = self.call("awkcap_could_not_run_reason", _aborting_stub())
+        self.assertIn("gap in CCPR", r.stdout)
+        self.assertIn("report this line as a CCPR issue", r.stdout)
+
 
 class IdentityTest(AwkCapabilityLibTestBase):
     def test_identity_names_the_resolved_path(self):
@@ -242,6 +254,191 @@ class IdentityTest(AwkCapabilityLibTestBase):
         )
         self.assertEqual(0, r.returncode, r.stdout + r.stderr)
         self.assertIn("/awk", r.stdout.strip())
+
+
+class UnwritableTempFileTest(unittest.TestCase):
+    """CCP-1216: `awkcap_canary_answer`'s own comment (~line 158) says "A
+    failing mktemp is not an awk problem, and must not be dressed up as
+    one" -- but that guard (`stderr_file="$(mktemp)" || ...`) only catches
+    `mktemp` itself returning non-zero. A `mktemp` that SUCCEEDS and hands
+    back a path it cannot itself write into (permissions race, an
+    immutable flag set between creation and use -- the exact shape
+    test_migrate_review_headers.py's WriteFailureIsReportedTest forces at
+    migrate-review-headers.sh's own write step) makes the canary's
+    `2>"$stderr_file"` redirect the thing that fails. The awk program never
+    runs, yet the answer used to fall through to `exit <rc>` -- reported
+    downstream as an awk-dialect gap ("please report a CCPR issue"),
+    exactly the category the comment says this must not become.
+
+    Real awk stays on PATH throughout (delegated via SANDBOX_PATH) -- only
+    `mktemp` is stubbed, so a wrongly-reported dialect gap here can only
+    come from the redirect failure, never from the awk binary itself."""
+
+    def setUp(self):
+        if platform.system() != "Darwin":
+            self.skipTest("chflags(uchg) is a macOS/BSD mechanism")
+
+    def _call_with_locked_mktemp(self, snippet):
+        """Sources the shipped lib with a real awk (from SANDBOX_PATH) but
+        a stub `mktemp` ahead of it that always answers with one fixed,
+        chflags(uchg)'d path -- the same fixed-unwritable-path technique
+        test_migrate_review_headers.py's WriteFailureIsReportedTest uses
+        against migrate-review-headers.sh's own mktemp caller, applied here
+        to this library's `awkcap_canary_answer` instead."""
+        tmp = tempfile.mkdtemp(prefix="ccpr-awkcap-locked-")
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        locked = Path(tmp) / "locked-stderr"
+        locked.touch()
+        os.chflags(locked, stat.UF_IMMUTABLE)
+        self.addCleanup(os.chflags, locked, 0)
+        stub_dir = Path(tmp) / "stub_bin"
+        stub_dir.mkdir()
+        stub = stub_dir / "mktemp"
+        stub.write_text(f'#!/bin/sh\necho "{locked}"\n')
+        stub.chmod(0o755)
+        path = f"{stub_dir}{os.pathsep}{SANDBOX_PATH}"
+        return subprocess.run(
+            ["bash", "-c", f'set -euo pipefail; . "$1"; {snippet}', "_", str(LIB)],
+            capture_output=True, text=True,
+            env={"PATH": path, "HOME": os.environ.get("HOME", "/")},
+        )
+
+    def test_the_canary_answer_is_not_probed_not_an_awk_verdict(self):
+        r = self._call_with_locked_mktemp("awkcap_canary_answer")
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        answer = r.stdout.strip()
+        self.assertTrue(
+            answer.startswith("not probed"),
+            f"an unwritable-but-returned temp file must answer 'not probed: ...', "
+            f"not an awk verdict -- got {answer!r}",
+        )
+        self.assertNotRegex(answer, r"^exit \d+$")
+
+    def test_canary_ok_still_reports_incapable(self):
+        # The unwritable temp file must not silently pass the probe.
+        r = self._call_with_locked_mktemp("awkcap_canary_ok")
+        self.assertNotEqual(0, r.returncode, r.stdout + r.stderr)
+
+    def test_could_not_run_reason_still_refuses_with_one_line(self):
+        r = self._call_with_locked_mktemp("awkcap_could_not_run_reason")
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        reason = r.stdout.strip()
+        self.assertNotEqual("", reason, "must still name a reason, not go quiet")
+        self.assertEqual(1, len(reason.splitlines()), reason)
+
+    def test_the_reason_names_the_local_cause_not_a_ccpr_gap(self):
+        # CCP-1216 follow-up: the "not probed: temp file not writable"
+        # answer this class exists to force is, by this file's own
+        # comments, NOT an awk-dialect question -- but
+        # awkcap_could_not_run_reason used to route every non-"4" answer
+        # through the same "gap in CCPR ... report this line as a CCPR
+        # issue" sentence, sending an operator to file a bug report about
+        # an awk the canary never even reached.
+        r = self._call_with_locked_mktemp("awkcap_could_not_run_reason")
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        reason = r.stdout.strip()
+        self.assertIn(
+            "temp", reason.lower(),
+            f"an unwritable temp file must be named as the actual cause -- got {reason!r}",
+        )
+        self.assertNotIn("gap in CCPR", reason)
+        self.assertNotIn("report this line as a CCPR issue", reason)
+
+
+class MktempFailureTest(unittest.TestCase):
+    """CCP-1216: `awkcap_canary_answer`'s FIRST "not probed" branch --
+    `stderr_file="$(mktemp)" || { printf 'not probed: no usable temp file';
+    return 0; }` (~line 160) -- catches `mktemp` ITSELF returning non-zero,
+    the failure UnwritableTempFileTest's sibling comment describes as "only
+    catches mktemp itself returning non-zero" while going on to cover the
+    other branch (mktemp succeeds but hands back an unwritable path). This
+    class is the branch that comment left uncovered.
+
+    Unlike UnwritableTempFileTest, no chflags(uchg) is needed -- a stub
+    `mktemp` that simply `exit 1`s reaches the same guard -- so this class
+    is PORTABLE and runs on every platform, not gated to Darwin.
+
+    Real awk stays fully reachable throughout: only a `mktemp` shim is
+    placed ahead of SANDBOX_PATH, so a wrongly-reported dialect gap here can
+    only come from this guard, never from the awk binary itself."""
+
+    def _call_with_failing_mktemp(self, snippet):
+        """Sources the shipped lib with a real awk (from SANDBOX_PATH) but a
+        stub `mktemp` ahead of it that always exits non-zero -- the failure
+        mode `awkcap_canary_answer`'s own `mktemp` guard is meant to catch,
+        as opposed to UnwritableTempFileTest's mktemp-succeeds-but-
+        unwritable-result case."""
+        tmp = tempfile.mkdtemp(prefix="ccpr-awkcap-failmktemp-")
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        stub_dir = Path(tmp) / "stub_bin"
+        stub_dir.mkdir()
+        stub = stub_dir / "mktemp"
+        stub.write_text("#!/bin/sh\nexit 1\n")
+        stub.chmod(0o755)
+        path = f"{stub_dir}{os.pathsep}{SANDBOX_PATH}"
+        return subprocess.run(
+            ["bash", "-c", f'set -euo pipefail; . "$1"; {snippet}', "_", str(LIB)],
+            capture_output=True, text=True,
+            env={"PATH": path, "HOME": os.environ.get("HOME", "/")},
+        )
+
+    def test_awk_itself_is_untouched_by_the_stub(self):
+        # Fixture sanity: the stub dir holds only `mktemp`, so `awk` must
+        # still resolve to the real binary further down PATH -- otherwise a
+        # green result here would not distinguish "the mktemp guard fired"
+        # from "there was no awk left to run at all".
+        r = self._call_with_failing_mktemp("command -v awk")
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertNotIn("stub_bin", r.stdout)
+
+    def test_the_canary_answer_is_no_usable_temp_file(self):
+        r = self._call_with_failing_mktemp("awkcap_canary_answer")
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertEqual("not probed: no usable temp file", r.stdout.strip())
+
+    def test_canary_ok_still_reports_incapable(self):
+        # A failing mktemp must not silently pass the probe.
+        r = self._call_with_failing_mktemp("awkcap_canary_ok")
+        self.assertNotEqual(0, r.returncode, r.stdout + r.stderr)
+
+    def test_the_reason_is_one_line_naming_the_cause_not_a_ccpr_gap(self):
+        r = self._call_with_failing_mktemp("awkcap_could_not_run_reason")
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        reason = r.stdout.strip()
+        self.assertNotEqual("", reason, "must still name a reason, not go quiet")
+        self.assertEqual(1, len(reason.splitlines()), reason)
+        self.assertIn("not probed: no usable temp file", reason)
+        self.assertNotIn("gap in CCPR", reason)
+        self.assertNotIn("report this line as a CCPR issue", reason)
+
+
+class NotOnPathReasonTest(AwkCapabilityLibTestBase):
+    """CCP-1216: an awk binary that simply is not on PATH is a third
+    non-dialect cause -- see awkcap_canary_answer's own `not on PATH`
+    branch, checked before any awk is invoked at all. Routing it through
+    the dialect sentence has the same misdiagnosis shape UnwritableTempFileTest
+    covers for a locked temp file, so it gets the same environment wording
+    rather than a call to file a CCPR issue about a binary that was never
+    reached.
+
+    Driven with a plain nonexistent binary NAME (no stub needed): real awk
+    stays fully untouched, so a wrongly-reported dialect gap here can only
+    come from awkcap_could_not_run_reason's own message choice."""
+
+    NONEXISTENT_AWK = "ccpr-awk-capability-test-no-such-binary"
+
+    def test_the_reason_names_the_environment_cause_not_a_ccpr_gap(self):
+        r = self.call(f"awkcap_could_not_run_reason {self.NONEXISTENT_AWK}")
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        reason = r.stdout.strip()
+        self.assertNotEqual("", reason, "must still name a reason, not go quiet")
+        self.assertIn("not on PATH", reason)
+        self.assertNotIn("gap in CCPR", reason)
+        self.assertNotIn("report this line as a CCPR issue", reason)
+
+    def test_the_reason_is_still_a_single_line(self):
+        r = self.call(f"awkcap_could_not_run_reason {self.NONEXISTENT_AWK}")
+        self.assertEqual(1, len(r.stdout.strip().splitlines()), r.stdout)
 
 
 class RealAwkAgreementTest(unittest.TestCase):

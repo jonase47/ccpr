@@ -3178,6 +3178,60 @@ All notable changes to this project are documented in this file. The format is b
   The other twelve countable numbers in `README.md` and `GETTING_STARTED.md` were re-derived from
   the repository in the same pass and are correct.
 
+- **CCP-1179's own awk-dialect probe made `test_migrate_review_headers.py`'s
+  `WriteFailureIsReportedTest` fail on macOS (CCP-1216).** That test forces a graceful write
+  failure by putting a stub `mktemp` ahead of the real one on `PATH`, always answering with one
+  fixed, `chflags(uchg)`'d path, then asserts `migrate-review-headers.sh` reports `failed to
+  write` and leaves the original file untouched. CCP-1179 gave `scripts/lib/awk_capability.sh` a
+  SECOND `mktemp` caller (`awkcap_canary_answer`'s own `stderr_file="$(mktemp)"`), sourced and run
+  before the migration ever reaches the write step the test targets — the stub answered that call
+  with the locked path too, so the capability probe's own `2>"$stderr_file"` redirect failed
+  first, and the test saw an "awk cannot compile and correctly apply…" refusal instead of the
+  write-failure one it asserts. Narrowed the stub to answer only the exact
+  `mktemp "${file}.XXXXXX"` template `_ensure_frontmatter_block` calls, delegating every other
+  invocation — including the capability probe's bare `mktemp` — to the real binary, with a
+  hit-marker assertion proving the narrowing did not turn the stub into a no-op.
+
+- **`awk_capability.sh`'s own capability probe could misreport a temp-file problem as a false
+  awk-dialect gap (CCP-1216 follow-up, found while diagnosing the fix above).**
+  `awkcap_canary_answer` only guarded a FAILING `mktemp` ("not probed: no usable temp file") —
+  its own comment says "a failing mktemp is not an awk problem, and must not be dressed up as
+  one" — but a `mktemp` that succeeds and hands back a path it cannot itself write into (the
+  exact shape `WriteFailureIsReportedTest` above forces) made the `2>"$stderr_file"` redirect the
+  thing that failed, reported downstream as an awk-dialect gap ("please report this line as a
+  CCPR issue") rather than the environment problem it actually is. Fixed by testing the returned
+  path's writability (`[ -w "$stderr_file" ]`, which observes an immutable flag on this
+  repository's target platforms) before running the canary, answering "not probed: temp file not
+  writable" instead. Covered by a new `UnwritableTempFileTest` in
+  `scripts/tests/test_awk_capability.py` (Darwin-only, `chflags(uchg)`), proving both the
+  corrected answer text and that `awkcap_canary_ok`/`awkcap_could_not_run_reason` still refuse
+  safely rather than reading it as a pass.
+
+- **The fix above corrected the ANSWER but not the MESSAGE — `awkcap_could_not_run_reason` still
+  sent an operator to file a CCPR issue about an unwritable temp file, or a missing awk, as if
+  either were a dialect gap (CCP-1216, second follow-up).** `awkcap_canary_answer` now correctly
+  distinguishes "not probed: temp file not writable" (and its sibling "not probed: no usable temp
+  file") and "not on PATH" from a genuine dialect failure, but `awkcap_could_not_run_reason`
+  routed every one of them, unchanged, through the "…this is a gap in CCPR rather than a
+  misconfiguration on this machine: please report this line as a CCPR issue…" sentence quoted in
+  the entry above — the same misattribution the entry describes, still present one layer up, in
+  the text a human actually reads. Fixed by branching the message on the answer: the two
+  non-dialect causes now get a one-line environment sentence (names the answer verbatim, points at
+  TMPDIR/PATH, no mention of CCPR or this ticket) while every other answer — the canary genuinely
+  ran and got it wrong — keeps the original dialect wording unchanged. `scripts/tests/
+  test_awk_capability.py` gains a new `NotOnPathReasonTest` (driven with a plain nonexistent
+  binary name, no stub needed) plus one method each on `UnwritableTempFileTest` (the local-cause
+  wording) and `CouldNotRunReasonTest` (a positive control proving the dialect wording still
+  survives for the one answer it is actually meant for).
+
+- **Test-only follow-up: `UnwritableTempFileTest`'s own comment named a branch of
+  `awkcap_canary_answer`'s "not probed" guard it did not cover — `mktemp` itself returning
+  non-zero, as opposed to that class's mktemp-succeeds-but-unwritable-result case (CCP-1216,
+  third follow-up, found by code review).** The code was already correct; no production change.
+  Added `MktempFailureTest` to `scripts/tests/test_awk_capability.py`, driven with a plain
+  non-zero-exit `mktemp` stub rather than `chflags(uchg)`, so — unlike `UnwritableTempFileTest` —
+  it runs on every platform, not just Darwin.
+
 ## [v0.3.0-beta] – 26.08.2026
 
 ### Changed

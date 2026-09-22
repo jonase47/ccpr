@@ -158,6 +158,21 @@ awkcap_canary_answer() {
     # A failing mktemp is not an awk problem, and must not be dressed up as
     # one — the answer text is what the caller's message quotes verbatim.
     stderr_file="$(mktemp)" || { printf 'not probed: no usable temp file'; return 0; }
+    # CCP-1216: mktemp can also SUCCEED and hand back a path it cannot
+    # itself write into (permissions race, an immutable flag set between
+    # creation and here). Left unguarded, the `2>"$stderr_file"` redirect
+    # below is the thing that then fails — the awk program never runs, and
+    # the failure used to fall through to `exit <rc>`, reported downstream
+    # as an awk-dialect gap. That is the same "not an awk problem" category
+    # as the failing-mktemp case just above, not a different one, so it
+    # gets the same "not probed" answer rather than a verdict about awk.
+    # `-w` (access(2), W_OK) is what actually observes the immutable flag
+    # on this file's target platforms, not the mode bits alone.
+    if [ ! -w "$stderr_file" ]; then
+        rm -f "$stderr_file" 2>/dev/null || true
+        printf 'not probed: temp file not writable'
+        return 0
+    fi
     rc=0
     stdout_text="$(LC_ALL=C "$awk_bin" "$AWKCAP_CANARY_PROG" </dev/null 2>"$stderr_file")" || rc=$?
     # Guarded the same way as $rc above and the cleanup below: a stderr file
@@ -196,12 +211,34 @@ awkcap_canary_ok() {
 # Single line by contract: both call sites interpolate it into one report line
 # and one stderr warning, mirroring shellcheck-run.sh's own could-not-run
 # reasons.
+#
+# Two different sentences, chosen by what the canary actually answered
+# (CCP-1216): "not probed: ..." and "not on PATH" name a local environment
+# cause and never mention CCPR or this ticket; every other answer — the
+# canary ran and got it wrong — keeps the original "file a CCPR issue"
+# wording, because that is the one case it is actually the right ask.
 awkcap_could_not_run_reason() {
     local awk_bin="${1:-awk}" answer
     answer="$(awkcap_canary_answer "$awk_bin")"
     if [ "$answer" = "$AWKCAP_CANARY_EXPECTED" ]; then
         return 0
     fi
+    # CCP-1216: three of awkcap_canary_answer's non-"4" answers -- both
+    # "not probed: ..." branches (a temp file mktemp handed back could not
+    # itself be created or written into) and "not on PATH" (no such binary
+    # to probe in the first place) -- are, by that function's own comments,
+    # never questions about awk's dialect: the canary program did not run
+    # at all. Falling through to the dialect sentence below for these sent
+    # an operator to file a CCPR issue about an awk that was never reached,
+    # misdiagnosing a local environment problem as a repository defect.
+    # Same apostrophe/backtick-free constraint as the dialect message below.
+    case "$answer" in
+        "not probed:"* | "not on PATH")
+            printf '%s could not be probed: the capability canary answered %s -- this is a local environment problem, not an awk-dialect gap: check that a temp directory is writable (TMPDIR) and that the named awk is really on PATH, then try again.\n' \
+                "$(awkcap_identity "$awk_bin")" "[$answer]"
+            return 0
+            ;;
+    esac
     # THE REMEDY IS A BUG REPORT, NOT A PACKAGE (PO decision, 16.09.2026).
     # This used to end in "install gawk, then run update-alternatives --set
     # awk /usr/bin/gawk". After the CCP-1179 rewrites, no awk program this

@@ -852,7 +852,20 @@ class WriteFailureIsReportedTest(MigrateTestBase):
     (full disk, quota) the guard exists for. A stub `mktemp` placed ahead
     of the real one on PATH, always returning one fixed, chflags(uchg)'d
     path, sidesteps that: the write attempt then fails with a normal
-    EPERM."""
+    EPERM.
+
+    CCP-1216 correction: the stub above answered EVERY `mktemp` call with
+    the locked path, not just the one `_ensure_frontmatter_block` makes.
+    CCP-1179 gave `awk_capability.sh` its own `mktemp` caller
+    (`awkcap_canary_answer`'s `stderr_file="$(mktemp)"`), sourced and run
+    BEFORE the migration ever reaches this test's target write step. A
+    stub answering every call the same way hands the capability probe the
+    locked path too, so ITS `2>"$stderr_file"` redirect is the one that
+    fails with EPERM -- reported as an awk-dialect gap, not the write
+    failure this test exists to prove. The stub must be narrow: match only
+    the exact template `_ensure_frontmatter_block`'s own
+    `mktemp "${file}.XXXXXX"` call uses, and delegate every other
+    invocation -- args and all -- to the real `mktemp`."""
 
     def setUp(self):
         super().setUp()
@@ -864,14 +877,23 @@ class WriteFailureIsReportedTest(MigrateTestBase):
         f = self.write("docs/reviews/SPRINT-9-review.md", body)
 
         fixed_tmp = self.project_dir / "docs/reviews/SPRINT-9-review.md.locked"
+        template = f"{f}.XXXXXX"
+        hit_marker = self.project_dir / "stub_mktemp_hit"
+        real_mktemp = shutil.which("mktemp")
+        self.assertIsNotNone(real_mktemp, "the real mktemp must be on PATH to delegate to")
         stub_dir = self.project_dir / "stub_bin"
         stub_dir.mkdir()
         stub = stub_dir / "mktemp"
         stub.write_text(
             "#!/bin/sh\n"
-            f'touch "{fixed_tmp}"\n'
-            f'chflags uchg "{fixed_tmp}"\n'
-            f'echo "{fixed_tmp}"\n'
+            f'if [ "$1" = "{template}" ]; then\n'
+            f'    touch "{fixed_tmp}"\n'
+            f'    chflags uchg "{fixed_tmp}"\n'
+            f'    touch "{hit_marker}"\n'
+            f'    echo "{fixed_tmp}"\n'
+            "else\n"
+            f'    exec "{real_mktemp}" "$@"\n'
+            "fi\n"
         )
         stub.chmod(0o755)
         self.addCleanup(os.chflags, fixed_tmp, 0)
@@ -884,6 +906,12 @@ class WriteFailureIsReportedTest(MigrateTestBase):
         )
 
         output = result.stdout + result.stderr
+        self.assertTrue(
+            hit_marker.exists(),
+            "the stub's template-matching branch was never hit for the "
+            "targeted mktemp call -- the narrowing may have turned the stub "
+            "into a no-op that only ever delegates",
+        )
         self.assertIn("failed to write", output.lower())
         self.assertIn(str(fixed_tmp), output)
         self.assertNotEqual(result.returncode, 0, output)
